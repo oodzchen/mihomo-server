@@ -1,4 +1,5 @@
 pub mod core_manager;
+pub mod core_release;
 pub mod management;
 mod proxy_access;
 pub mod remote;

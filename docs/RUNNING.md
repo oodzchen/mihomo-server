@@ -1718,3 +1718,44 @@ The scheduler uses the saved proxy, TLS, user-agent and timeout options unchange
 Its bounded `scheduler` log stream reports starts, completions and failures without
 provider bodies, URLs, names or credentials. Shutdown cancels and drains all owned
 workers before returning; no independent timer process or service is needed.
+
+
+## Stable core release query and compressed preparation
+
+Use the existing authenticated POST /api/commands endpoint:
+
+```json
+{"command":"core_release"}
+{"command":"core_release","version":"v1.19.31"}
+{"command":"prepare_core_upgrade","version":"v1.19.31"}
+{"command":"prepared_core_upgrade","id":"v1.19.31-<64 lowercase SHA-256 digits>"}
+```
+
+An omitted version queries the latest published stable release. Only Linux x86_64
+amd64-v2 packages are supported. The response includes version, target, asset,
+compressed bytes, SHA-256 and the fixed public download URL. Preparation returns
+an immutable ID plus that release object; use the actual returned ID for readback.
+These commands reject extra fields, arbitrary URLs/checksums/filesystem paths,
+Alpha versions, duplicate assets and missing digests. The public GitHub API needs
+no management token; rate-limit/status failures are reported without relaxing
+validation. Discovery and preparation share one slot; concurrent requests fail
+immediately. The management listener remains available during network work.
+
+Preparation requires --resource-dir (the bundle launcher supplies it). It saves
+a verified compressed package under the private persistent managed-core directory's
+.upgrade-staging, with 0700 directories, 0600 package/manifest files, fsync and an
+atomic publication. Readback rechecks the manifest and package hash, including
+after restart; cache reuse still resolves and checks official metadata. Errors,
+timeouts and shutdown cancel preparation and remove pending files. Startup removes
+only recognized real pending directories, preserving completed candidates and
+unknown files. Returned responses do not expose local staging paths.
+
+Core release downloads currently use direct HTTPS with the platform trust store,
+TLS 1.2/1.3 and restricted GitHub redirects. Subscription proxy settings, service
+proxy environment, static-root retry and subscription certificate bypass do not
+apply to these commands. Metadata is limited to 1 MiB/20 seconds; compressed
+packages to 64 MiB/300 seconds. Declared length, official SHA-256 and gzip magic
+are checked. This prepares compressed bytes only: decompression, executable and
+configuration validation, installation, managed switching and rollback are pending.
+The current core stays in place and its running/stopped state is preserved. No
+automatic core upgrade is scheduled; completed-candidate cleanup is also pending.

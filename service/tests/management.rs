@@ -25,6 +25,55 @@ use tower::ServiceExt as _;
 struct Directory(PathBuf);
 
 #[tokio::test]
+async fn core_release_commands_authenticate_reject_source_overrides_and_require_managed_resources() -> Result<()> {
+    let directory = Directory::new()?;
+    let manager = directory.manager()?;
+    let app = router(HttpState::new(Management::new(
+        manager.clone(),
+        directory.authentication()?,
+    )));
+    let token = directory.token()?;
+    let result = async {
+        let prior = serde_json::to_value(manager.profiles())?;
+        let revision = manager.status().config_revision;
+        for command in [
+            json!({"command":"core_release"}),
+            json!({"command":"prepare_core_upgrade"}),
+            json!({"command":"prepared_core_upgrade","id":"v1.2.3-invalid"}),
+        ] {
+            assert_eq!(
+                response(&app, request("wrong", "/api/commands", Some(command))?)
+                    .await?
+                    .0,
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        for command in [
+            json!({"command":"core_release","version":"../private"}),
+            json!({"command":"core_release","url":"https://untrusted.invalid"}),
+            json!({"command":"prepare_core_upgrade","sha256":"arbitrary"}),
+            json!({"command":"prepare_core_upgrade","version":"v1.2.3"}),
+            json!({"command":"prepared_core_upgrade","id":"v1.2.3-invalid"}),
+            json!({"command":"prepared_core_upgrade","id":"v1.2.3-invalid","directory":"/tmp"}),
+        ] {
+            assert_eq!(
+                response(&app, request(&token, "/api/commands", Some(command))?)
+                    .await?
+                    .0,
+                StatusCode::UNPROCESSABLE_ENTITY
+            );
+        }
+        assert_eq!(serde_json::to_value(manager.profiles())?, prior);
+        assert_eq!(manager.status().config_revision, revision);
+        assert!(!directory.0.join(".upgrade-staging").exists());
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
 async fn proxy_access_authenticates_and_distinguishes_saved_settings_from_stopped_config() -> Result<()> {
     let directory = Directory::new()?;
     let manager = directory.manager()?;

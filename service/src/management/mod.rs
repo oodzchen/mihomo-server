@@ -15,6 +15,15 @@ use serde_json::Value;
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ManagementCommand {
     Status {},
+    CoreRelease {
+        version: Option<String>,
+    },
+    PrepareCoreUpgrade {
+        version: Option<String>,
+    },
+    PreparedCoreUpgrade {
+        id: String,
+    },
     Logs {},
     Profiles {},
     Config {},
@@ -171,6 +180,15 @@ impl Management {
                 enabled,
                 confirmation,
             } => serde_json::to_value(self.manager.set_profile_dns(uid, enabled, confirmation).await?)?,
+            ManagementCommand::CoreRelease { version } => {
+                serde_json::to_value(self.manager.core_release(version).await?)?
+            }
+            ManagementCommand::PrepareCoreUpgrade { version } => {
+                serde_json::to_value(self.manager.prepare_core_upgrade(version).await?)?
+            }
+            ManagementCommand::PreparedCoreUpgrade { id } => {
+                serde_json::to_value(self.manager.prepared_core_upgrade(&id)?)?
+            }
             ManagementCommand::Status {} => serde_json::to_value(self.manager.status())?,
             ManagementCommand::Logs {} => serde_json::to_value(self.manager.logs())?,
             ManagementCommand::Profiles {} => serde_json::to_value(self.manager.profiles())?,

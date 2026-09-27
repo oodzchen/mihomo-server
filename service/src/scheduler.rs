@@ -135,6 +135,8 @@ fn unix_now() -> u64 {
 // Holding a strong command sender in an idle background scheduler would prevent
 // the actor from stopping when its last external manager is dropped.
 pub(super) struct Access {
+    core_release_admission: Arc<tokio::sync::Semaphore>,
+    core_downloads: Option<Arc<crate::core_release::CoreDownloads>>,
     commands: mpsc::WeakSender<CommandMessage>,
     remote_admission: Arc<tokio::sync::Semaphore>,
     state: watch::Receiver<CoreStatus>,
@@ -148,6 +150,8 @@ pub(super) struct Access {
 impl Access {
     pub(super) fn new(manager: &CoreManager) -> Self {
         Self {
+            core_release_admission: Arc::clone(&manager.core_release_admission),
+            core_downloads: manager.core_downloads.clone(),
             commands: manager.commands.downgrade(),
             remote_admission: Arc::clone(&manager.remote_admission),
             state: manager.state.clone(),
@@ -161,6 +165,8 @@ impl Access {
     }
     fn upgrade(&self) -> Option<CoreManager> {
         Some(CoreManager {
+            core_release_admission: Arc::clone(&self.core_release_admission),
+            core_downloads: self.core_downloads.clone(),
             commands: self.commands.upgrade()?,
             remote_admission: Arc::clone(&self.remote_admission),
             state: self.state.clone(),

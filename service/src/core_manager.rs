@@ -374,6 +374,8 @@ enum CommandMessage {
 
 #[derive(Clone)]
 pub struct CoreManager {
+    core_release_admission: Arc<tokio::sync::Semaphore>,
+    core_downloads: Option<Arc<crate::core_release::CoreDownloads>>,
     remote_admission: Arc<tokio::sync::Semaphore>,
     commands: mpsc::Sender<CommandMessage>,
     state: watch::Receiver<CoreStatus>,
@@ -388,6 +390,13 @@ pub struct CoreManager {
 impl CoreManager {
     pub fn spawn(mut options: CoreOptions) -> Result<Self> {
         let (lock, socket) = options.prepare()?;
+        let core_downloads = if options.resources.is_some() {
+            Some(Arc::new(crate::core_release::CoreDownloads::new(
+                options.binary.parent().context("managed core directory missing")?,
+            )?))
+        } else {
+            None
+        };
         let store = RuntimeStore::open(&options.data_dir)?;
         let mut settings_store = SettingsStore::open(&options.data_dir)?;
         settings_store.recover(store.state().current.as_ref())?;
@@ -451,6 +460,8 @@ impl CoreManager {
         });
         let (scheduler_finished, scheduler_completion) = watch::channel(false);
         let manager = Self {
+            core_release_admission: Arc::new(tokio::sync::Semaphore::new(1)),
+            core_downloads,
             scheduler_completion,
             remote_admission: Arc::new(tokio::sync::Semaphore::new(4)),
             commands,
@@ -467,6 +478,46 @@ impl CoreManager {
             scheduler_finished.send_replace(true);
         });
         Ok(manager)
+    }
+
+    /// Core release network work is independent of the lifecycle actor and subscriptions.
+    pub async fn core_release(&self, version: Option<String>) -> Result<crate::core_release::CoreRelease> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let _permit = Arc::clone(&self.core_release_admission)
+            .try_acquire_owned()
+            .context("core release request already in progress")?;
+        let mut shutdown = self.shutdown.subscribe();
+        tokio::select! {
+            biased;
+            _ = closing(&mut shutdown) => bail!("core release check cancelled during shutdown"),
+            result = crate::core_release::discover(version.as_deref()) => result,
+        }
+    }
+
+    pub async fn prepare_core_upgrade(&self, version: Option<String>) -> Result<crate::core_release::PreparedCore> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let downloads = self
+            .core_downloads
+            .as_ref()
+            .context("core preparation requires bundle-managed resources")?;
+        let _permit = Arc::clone(&self.core_release_admission)
+            .try_acquire_owned()
+            .context("core release request already in progress")?;
+        let mut shutdown = self.shutdown.subscribe();
+        let cancellation = self.shutdown.subscribe();
+        tokio::select! {
+            biased;
+            _ = closing(&mut shutdown) => bail!("core preparation cancelled during shutdown"),
+            result = downloads.prepare(version.as_deref(), &cancellation) => result,
+        }
+    }
+
+    pub fn prepared_core_upgrade(&self, id: &str) -> Result<crate::core_release::PreparedCore> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        self.core_downloads
+            .as_ref()
+            .context("core preparation requires bundle-managed resources")?
+            .inspect(id)
     }
 
     pub fn status(&self) -> CoreStatus {

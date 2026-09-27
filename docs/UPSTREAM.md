@@ -1145,3 +1145,35 @@ shared admission and shutdown/drop ownership. A paused Tokio test drives the act
 workflow verifies scheduled managed-route semantics, hot application, node
 record restoration and invalid-candidate rollback. Development-only Tokio test-util
 reuses the existing locked dependency; production requires no timer process.
+
+
+## Stable core metadata and compressed-package preparation
+
+Source: src-tauri/src/feat/core_upgrade.rs at pinned commit
+b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b: resolve_latest_version,
+asset_base_name, package_url, download_package and stage_core. Destination:
+service/src/core_release.rs and CoreManager/management command adapters.
+Retained behavior includes fixing the version before downloading, Linux amd64-v2
+asset naming, stable version-specific GitHub URLs, 20-second metadata and
+300-second/64-MiB package bounds. Desktop progress/notifications and globals are
+not copied. This increment covers compressed preparation only, superseding earlier
+blanket core-upgrade pending status without claiming switching is implemented.
+
+The service uses the official public release API to require exactly one uploaded
+asset and its size/digest/browser_download_url; see the
+[GitHub release assets API](https://docs.github.com/en/rest/releases/assets?apiVersion=2022-11-28).
+SHA-256 verification and strict tag/target/URL checks precede private atomic cache
+publication. No caller-provided source/checksum/path is accepted. Typed readback
+revalidates cached files; temporary cleanup handles failed/cancelled downloads and
+interrupted preparation. Authenticated commands add one immediate network admission
+slot and shutdown cancellation outside the lifecycle actor. No new dependency is
+introduced; existing Reqwest/ring provide transport/digest primitives.
+
+Loopback fixtures exercise metadata/status/bounds, invalid stable tags, missing/
+duplicate assets, integrity failures, forbidden and allowed redirects, private
+cache reuse/restart/tampering, symlinks, paused-clock timeout and cancellation.
+A real-Mihomo gzip fixture independently decompresses the downloaded package for
+byte comparison and verifies the installed core remains unchanged. This is test
+verification, not a production decompressor. Managed/system proxy routes and TLS
+static-root retry, upstream gzip decoding/executable probes, actor replacement/
+rollback, Alpha and other-platform resource runtime validation remain pending.

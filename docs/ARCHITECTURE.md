@@ -77,7 +77,7 @@ mihomo-server/
 │       ├── Geo/provider resources and proxy views   [Pending]
 │       ├── Immutable revision / orphan file garbage collection [Pending]
 │       ├── Timed update metadata / saved refresh source [Migrated + service scheduler]
-│       └── Core upgrades and backups                  [Pending]
+│       └── Backup models / full upgrade resource settings [Pending]
 ├── service/                                         [Partially implemented]
 │   ├── Persistent foreground entry point            [Implemented]
 │   ├── Binary/data/config/import args, directory lock [Implemented]
@@ -112,6 +112,12 @@ mihomo-server/
 │   │   ├── TLS platform/static roots / explicit certificate option [Migrated + adaptation; Linux verified]
 │   │   ├── Scheduled refresh / retirement / bounded workers / drain [Migrated + adaptation; Linux verified]
 │   │   └── SOCKS/PAC                               [Pending]
+│   ├── Stable core release preparation                 [Partially implemented; Linux x86_64]
+│   │   ├── Official latest/pinned metadata and platform asset [Implemented]
+│   │   ├── Bounded compressed download / SHA-256 / private atomic cache [Implemented]
+│   │   ├── Authenticated preparation/readback / cancellation [Implemented]
+│   │   ├── Decompression / executable probes / actor switch / rollback [Pending]
+│   │   └── Proxy routing / static-root fallback / Alpha / other targets [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
@@ -127,6 +133,7 @@ mihomo-server/
 │   ├── Axum management API / command adapters       [Implemented; MVP allowlist]
 │   │   ├── State, logs, profiles, config, proxies queries [Implemented]
 │   │   ├── Lifecycle, YAML import/edit/overlay, profile edit/delete/import/refresh, linked read/set/clear, global read/set/reset, settings read/replace, profile DNS read/set, raw profile read/edit and node selection [Implemented]
+│   │   ├── Stable core release query / compressed preparation / readback [Implemented; Linux x86_64]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -1729,7 +1736,7 @@ DNS/hosts/native TUN settings, resources, upgrades, backups/WebDAV, advanced pag
 immutable-file garbage collection and additional platform/deployment validation
 remain pending.
 
-## Latest increment: bounded scheduled subscription updates
+## Previous increment: bounded scheduled subscription updates
 
 Delivery step 7 now starts a subscription scheduler from the recovered catalog.
 Remote rows with UID/URL, positive minute intervals and allow_auto_update other
@@ -1785,6 +1792,65 @@ Next Delivery step 7 subtask: stable core upgrade resource metadata/download int
 followed by managed switching with rollback. SOCKS/PAC, full DNS/hosts/native TUN,
 resources, Alpha upgrades, backups/WebDAV, advanced pages, immutable-file garbage
 collection and additional platform/deployment validation remain pending.
+
+## Latest increment: stable core release metadata and compressed preparation
+
+Delivery step 7 now exposes authenticated core_release, prepare_core_upgrade and
+prepared_core_upgrade commands. The official GitHub release API resolves latest
+or a strict stable tag; exactly one published Linux x86_64 amd64-v2 asset must
+match its fixed version URL, positive bounded size and SHA-256 digest. Missing
+or conflicting metadata fails without downloading or accepting caller overrides.
+Discovery is available before configuration; preparation/readback require the
+existing bundle-managed persistent core. Query/preparation share one immediate
+admission slot and run outside the lifecycle actor.
+
+Direct HTTPS uses platform certificate verification, TLS 1.2/1.3, no implicit
+proxy, no management credentials and a restricted five-redirect policy. Metadata
+has a 20-second/1-MiB bound; package download has a 300-second/64-MiB bound.
+Streaming checks declared length, SHA-256 and gzip magic before private atomic
+publication. This establishes compressed-package integrity, not decompression,
+executable validity, code signing or successful installation. The live core is
+never replaced or executed by these commands.
+
+Private .upgrade-staging directories and files use 0700/0600. Cancellation and
+failed downloads remove temporary directories; startup cleans only owned pending
+names without following links. Immutable version/digest IDs support cache reuse
+and restart readback, which checks schema, target, URL, permissions, size and hash
+again. Returned objects contain public release metadata and IDs, not local paths.
+Cached candidates are retained; garbage collection remains pending.
+
+All 231 regular Rust tests and all 60 real-Mihomo integration tests pass.
+Seven new preparation tests and one authenticated command test exercise unique
+metadata/assets, declared bounds, hash/magic/status failures, redirects/redaction,
+private cache reuse/restart/tampering, symlink rejection, owned crash cleanup,
+paused-clock timeout, cancellation, strict decoding and resource requirements.
+The real-Mihomo gzip fixture independently decompresses for byte equality and
+checks that the existing executable remains unchanged. Cargo check --workspace,
+Rust formatting, warning-free all-target Clippy, TypeScript/Vite and changed-file
+Prettier pass. The final target/mihomo-server-linux-x86_64-core-release-verified
+bundle passes checksums and bundled provenance/deployment document comparisons.
+
+A release-binary smoke against the actual official public API resolves v1.19.31,
+downloads its 22,805,792-byte compressed amd64-v2 package, verifies SHA-256, reads
+it back after service restart and confirms the existing core hash/stopped state
+remain unchanged. This network check uses an isolated temporary bundle-managed
+data directory and removes it afterward. A separate saved-node smoke uses an
+isolated copy with automatic updates disabled only in that copy. The first of
+56 traffic candidates returns HTTPS 204 after node readback; the existing
+subscription static-root/system-proxy HTTPS path still reaches YAML validation
+with an unrelated platform CA and rejects the empty body without catalog changes.
+Original data file hashes remain unchanged; secrets are not printed.
+All 22 Chromium workflows pass against the final release bundle. Fixture service,
+core and script-worker process counts are zero after cleanup.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The Linux MVP remains runnable; the complete project is not done.
+Next Delivery step 7 subtask: bounded gzip decompression and staged executable/version/
+configuration validation, followed by actor-owned core replacement, rollback and
+interrupted-switch recovery. Core-download managed/system proxy routing, static-root
+fallback, Alpha/other targets, upgrade UI, SOCKS/PAC, full DNS/hosts/native TUN,
+resources, backups/WebDAV, advanced pages, garbage collection and additional
+platform/deployment checks remain pending.
 
 ## MVP completion boundary
 
