@@ -1892,10 +1892,9 @@ and rereads it after reconnection/navigation. Upgrade failure remains visible;
 refresh installation information and retry after addressing the reported error.
 An unmanaged `--mihomo` service shows that online upgrading requires a bundle.
 
-This increment supports stable Linux x86_64 ordinary managed executables. An
-unreadable/empty installed core fails the bounded version probe; upstream's repair
-of a previously truncated binary remains pending. Alpha and other platforms remain
-pending. The browser does not accept package URLs, paths, hashes or version
+This increment supports stable Linux x86_64 ordinary managed executables, including
+repair of unreadable/empty/nonexecutable existing files. Alpha and other platforms
+remain pending. The browser does not accept package URLs, paths, hashes or version
 overrides for the latest-stable wrapper.
 
 ## Core download routing and TLS verification
@@ -1920,3 +1919,31 @@ or caller proxy/URL option is accepted for core upgrades. Owned partial files ar
 cleaned before retry; completed candidates remain pending garbage collection.
 Cached records contain metadata/hashes, not proxy credentials or policy choices.
 The core-upgrade log records only managed/system/direct for successful discovery.
+
+## Repair an unreadable or empty managed core
+
+The management service and `/core` page remain available when an existing safe
+managed core is empty or lacks owner read/execute permissions. The file is kept;
+startup does not silently reseed it. The installed-version query returns `unknown`
+when permissions/size or a bounded executable probe prevent version readback.
+The page shows `未知（需要修复）`; choose `升级至最新稳定版` to repair. An old
+installation receipt may fail verification against the broken file; that error
+remains visible and does not disable repair when the file itself is admitted.
+Default upgrades never skip an unknown version. Success reports `from: "unknown"`
+and writes a verified receipt. Refresh/reconnect rereads the actual installed file.
+
+A repair retains the old inode through a hard link in the private switch directory,
+without reading or changing its permissions. Failed readiness/version/port checks,
+shutdown or an uncommitted process crash restore that inode and its previous receipt.
+An interrupted rollback can be resumed. A committed switch retains the verified
+replacement. Existing schema-1 normal-upgrade journals remain compatible; repair
+journals use schema 2 with file identity checks. Files remain limited to 128 MiB;
+links, shared files, foreign ownership, group/other-write or privilege permissions,
+capability-bearing upgrades and unsafe/malformed receipts are rejected. Unexpected
+live/backup changes preserve the transaction for recovery instead of overwriting.
+
+A stopped/failed core stays stopped after successful repair: explicitly start it
+and verify proxy traffic. The existing profiles, runtime YAML and saved node
+selections remain authoritative. Failed repair leaves a broken original broken;
+management remains available to retry with a valid candidate. Alpha, other targets
+and native privilege integration remain pending.

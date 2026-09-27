@@ -208,3 +208,121 @@ async fn real_force_replaces_running_pid_and_stopped_force_preserves_stop_and_re
     let cleanup = manager.shutdown().await;
     result.and(cleanup)
 }
+
+#[tokio::test]
+async fn broken_version_bypasses_noop_and_failed_repair_preserves_inode_permissions_and_restart_access() -> Result<()> {
+    for (bytes, mode) in [
+        (b"".as_slice(), 0o700),
+        (b"unreadable bytes".as_slice(), 0),
+        (b"broken executable".as_slice(), 0o700),
+    ] {
+        let dir = Directory::new()?;
+        let binary = dir.fixture()?;
+        let manager = dir.manager(&binary, "v1.2.3")?;
+        manager.shutdown().await?;
+        drop(manager);
+        fs::write(dir.live(), bytes)?;
+        fs::set_permissions(dir.live(), fs::Permissions::from_mode(mode))?;
+        let inode = fs::metadata(dir.live())?.ino();
+        // Management must still initialize while preserving the broken managed file.
+        let manager = dir.manager(&binary, "v1.2.3")?;
+        let result = async {
+            assert_eq!(fs::metadata(dir.live())?.ino(), inode);
+            assert_eq!(manager.installed_core_version().await?, "unknown");
+            assert!(check(&manager, "v1.2.3", false).await?.is_none());
+            let prepared = dir.seed(&binary, "v1.2.3", manager.core_downloads.as_ref().unwrap())?;
+            let before = manager.status();
+            let error = upgrade(&manager, prepared, false).await.unwrap_err();
+            assert!(format!("{error:#}").contains("previous core restored"));
+            assert_eq!(fs::metadata(dir.live())?.ino(), inode);
+            assert_eq!(fs::metadata(dir.live())?.permissions().mode() & 0o777, mode);
+            assert_eq!(manager.status().phase, CorePhase::Stopped);
+            assert_eq!(manager.status().config_revision, before.config_revision);
+            assert_eq!(manager.installed_core_version().await?, "unknown");
+            assert!(!dir.0.join("data/core/.core-upgrade").exists());
+            assert!(manager.core_release_admission.clone().try_acquire_owned().is_ok());
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        let cleanup = manager.shutdown().await;
+        result.and(cleanup)?;
+    }
+    Ok(())
+}
+#[tokio::test]
+#[ignore = "requires real MIHOMO_TEST_BINARY; broken managed core repair and persistent receipt replacement"]
+async fn real_broken_core_repair_replaces_unverified_receipt_and_restores_saved_nodes_after_restart() -> Result<()> {
+    let binary = PathBuf::from(std::env::var_os("MIHOMO_TEST_BINARY").context("set MIHOMO_TEST_BINARY")?);
+    let output = std::process::Command::new(&binary).arg("-v").output()?;
+    ensure!(output.status.success(), "core version fixture");
+    let version = String::from_utf8(output.stdout)?
+        .split_whitespace()
+        .nth(2)
+        .context("version missing")?
+        .to_string();
+    for (empty, mode) in [(true, 0), (false, 0), (false, 0o100)] {
+        let dir = Directory::new()?;
+        let manager = dir.manager(&binary, &version)?;
+        let setup = async {
+            let profile = manager.import_profile_yaml("mode: rule\nproxies: []\nproxy-groups: [{name: Main, type: select, proxies: [DIRECT, REJECT]}]\nrules: ['MATCH,Main']\n".into(), "repair fixture".into()).await?;
+            let uid = profile.uid.unwrap().to_string();
+            manager.select_profile(uid.clone()).await?;
+            manager.start().await?;
+            manager.select_node("Main".into(), "REJECT".into()).await?;
+            manager.stop().await?;
+            let prepared = dir.seed(&binary, &version, manager.core_downloads.as_ref().unwrap())?;
+            upgrade(&manager, prepared.clone(), true).await?;
+            Ok::<_, anyhow::Error>((uid, prepared, manager.runtime_config().await?, serde_json::to_value(manager.profiles())?))
+        }.await;
+        let cleanup = manager.shutdown().await;
+        let (uid, prepared, config, profiles) = setup?;
+        cleanup?;
+        drop(manager);
+        if empty {
+            fs::write(dir.live(), [])?;
+        }
+        fs::set_permissions(dir.live(), fs::Permissions::from_mode(mode))?;
+        let inode = fs::metadata(dir.live())?.ino();
+        let manager = dir.manager(&binary, &version)?;
+        let result = async {
+            assert_eq!(manager.installed_core_version().await?, "unknown");
+            assert!(manager.core_installation().await.is_err());
+            let report = upgrade(&manager, prepared, false).await?;
+            assert!(report.upgraded);
+            assert_eq!(report.from, "unknown");
+            assert_eq!(report.to, version);
+            assert_eq!(manager.status().phase, CorePhase::Stopped);
+            assert_ne!(fs::metadata(dir.live())?.ino(), inode);
+            assert_eq!(manager.installed_core_version().await?, version);
+            let receipt = manager.core_installation().await?.context("repaired receipt")?;
+            assert_eq!(manager.runtime_config().await?, config);
+            assert_eq!(serde_json::to_value(manager.profiles())?, profiles);
+            manager.start().await?;
+            assert_eq!(manager.status().active_profile.as_deref(), Some(uid.as_str()));
+            assert_eq!(
+                manager.client().get_proxies().await?.proxies["Main"].now.as_deref(),
+                Some("REJECT")
+            );
+            Ok::<_, anyhow::Error>(receipt)
+        }
+        .await;
+        let cleanup = manager.shutdown().await;
+        let receipt = result?;
+        cleanup?;
+        drop(manager);
+        let manager = dir.manager(&binary, &version)?;
+        let result = async {
+            assert_eq!(manager.core_installation().await?, Some(receipt));
+            manager.start().await?;
+            assert_eq!(
+                manager.client().get_proxies().await?.proxies["Main"].now.as_deref(),
+                Some("REJECT")
+            );
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        let cleanup = manager.shutdown().await;
+        result.and(cleanup)?;
+    }
+    Ok(())
+}

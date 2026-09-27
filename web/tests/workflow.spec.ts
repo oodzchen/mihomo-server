@@ -3262,3 +3262,93 @@ test("stable upgrade controls preserve no-op, repair failures and read real acti
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
   expect(errors).toEqual([]);
 });
+
+
+test("broken managed core remains repairable with an unverified receipt and survives failed repair", async ({ page }) => {
+  test.skip(!process.env.MIHOMO_TEST_BUNDLE, "Requires the managed-core bundle");
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await fetch(`${base}/api/commands`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ command, ...fields }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error.message);
+    return result;
+  };
+  await api("stop");
+  const version: string = await api("installed_core_version");
+  const binary = join(directory, "core/verge-mihomo");
+  const workingBytes = await readFile(binary);
+  const seed = async (bytes: Buffer) => {
+    const packageBytes = gzipSync(bytes, { level: 1 });
+    const sha256 = createHash("sha256").update(packageBytes).digest("hex");
+    const id = `${version}-${sha256}`;
+    const cache = join(directory, "core/.upgrade-staging", id);
+    await mkdir(cache, { recursive: true, mode: 0o700 });
+    await chmod(cache, 0o700);
+    await writeFile(join(cache, "package.gz"), packageBytes, { mode: 0o600 });
+    await writeFile(join(cache, "release.json"), JSON.stringify({ schema_version: 1, release: {
+      version, target: "x86_64-unknown-linux-gnu", asset: `mihomo-linux-amd64-v2-${version}.gz`,
+      bytes: packageBytes.length, sha256,
+      download_url: `https://github.com/MetaCubeX/mihomo/releases/download/${version}/mihomo-linux-amd64-v2-${version}.gz`,
+    } }), { mode: 0o600 });
+    return id;
+  };
+  const good = await seed(workingBytes);
+  const source = join(directory, "failed-repair.rs");
+  const bad = join(directory, "failed-repair");
+  await writeFile(source, `fn main(){let a:Vec<_>=std::env::args().collect();if a.get(1).map(String::as_str)==Some("-v"){println!("Mihomo Meta ${version} linux amd64");return;}if a.get(1).map(String::as_str)==Some("-t"){return;}std::process::exit(1);}`);
+  execFileSync("rustc", ["--crate-name", "repair_fixture", source, "-o", bad], { stdio: "ignore" });
+  const failed = await seed(await readFile(bad));
+  await stop();
+  await writeFile(binary, Buffer.alloc(0));
+  await chmod(binary, 0);
+  const inode = (await stat(binary)).ino;
+  await start();
+  let fail = true;
+  await page.route("**/api/commands", async (route) => {
+    const body = route.request().postDataJSON();
+    if (body.command !== "upgrade_clash_core") { await route.continue(); return; }
+    expect(body.force).toBe(false);
+    // Discovery is supplied locally; staging, activation, rollback and readback use the real service.
+    try {
+      const staged = await api("stage_core_upgrade", { id: fail ? failed : good });
+      const activated = await api("activate_core_upgrade", { id: staged.stage_id });
+      await route.fulfill({ json: { upgraded: activated.upgraded, from: activated.from, to: activated.to } });
+    } catch (error) {
+      await route.fulfill({ status: 422, json: { error: { message: (error as Error).message } } });
+    }
+  });
+  await page.goto(`${base}/core`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务", exact: true }).click();
+  const panel = page.getByRole("region", { name: "稳定版内核升级" });
+  const repair = panel.getByRole("button", { name: "升级至最新稳定版", exact: true });
+  await expect(panel.getByText("未知（需要修复）", { exact: true })).toBeVisible();
+  await expect(panel.getByText("记录未验证", { exact: true })).toBeVisible();
+  await expect(repair).toBeEnabled();
+  await repair.click();
+  await expect(page.getByText("core activation failed; previous core restored", { exact: true })).toBeVisible();
+  expect((await stat(binary)).ino).toBe(inode);
+  expect((await stat(binary)).mode & 0o777).toBe(0);
+  expect((await stat(binary)).size).toBe(0);
+  await expect(repair).toBeEnabled();
+  fail = false;
+  await repair.click();
+  await expect(panel.getByText(`修复完成：${version}`, { exact: true })).toBeVisible();
+  await expect(panel.getByText(`已验证安装 ${version}`, { exact: true })).toBeVisible();
+  expect((await stat(binary)).ino).not.toBe(inode);
+  expect((await api("status")).phase).toBe("stopped");
+  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await stop();
+  await start();
+  await page.goto(`${base}/core`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务", exact: true }).click();
+  await expect(panel.getByText(`已验证安装 ${version}`, { exact: true })).toBeVisible();
+  await api("start");
+  expect((await api("status")).phase).toBe("running");
+  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  expect(errors).toEqual([]);
+});

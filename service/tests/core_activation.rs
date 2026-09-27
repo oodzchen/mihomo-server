@@ -315,9 +315,7 @@ async fn api(client: &reqwest::Client, base: &str, token: &str, command: Value) 
     ensure!(response.status().is_success(), "fixture management command rejected");
     Ok(response.json().await?)
 }
-#[tokio::test]
-#[ignore = "requires real MIHOMO_TEST_BINARY; SIGKILL during replacement, orphan termination and startup rollback"]
-async fn interrupted_cli_switch_kills_candidate_and_restores_previous_core_before_next_start() -> Result<()> {
+async fn interrupted_cli_switch(repair: bool) -> Result<()> {
     let _subreaper = Subreaper::new()?;
     let real = PathBuf::from(std::env::var_os("MIHOMO_TEST_BINARY").context("set MIHOMO_TEST_BINARY")?);
     let version = version(&real)?;
@@ -360,7 +358,17 @@ async fn interrupted_cli_switch_kills_candidate_and_restores_previous_core_befor
     })
     .await?;
     api(&client, &base, &token, json!({"command":"start"})).await?;
-    let old = hash(&fs::read(dir.live())?);
+    if repair {
+        api(&client, &base, &token, json!({"command":"stop"})).await?;
+        fs::write(dir.live(), [])?;
+        fs::set_permissions(dir.live(), fs::Permissions::from_mode(0o0))?;
+    }
+    let previous_inode = fs::metadata(dir.live())?.ino();
+    let old = if repair {
+        hash(&[])
+    } else {
+        hash(&fs::read(dir.live())?)
+    };
     let candidate = fixture(&dir, "crash_hangs", &version, true)?;
     let id = dir.seed(&candidate, &version)?;
     let staged = api(&client, &base, &token, json!({"command":"stage_core_upgrade","id":id})).await?;
@@ -400,13 +408,33 @@ async fn interrupted_cli_switch_kills_candidate_and_restores_previous_core_befor
         }
     })
     .await?;
-    assert_eq!(hash(&fs::read(dir.live())?), old);
+    if repair {
+        let metadata = fs::metadata(dir.live())?;
+        assert_eq!(metadata.ino(), previous_inode);
+        assert_eq!(metadata.len(), 0);
+        assert_eq!(metadata.permissions().mode() & 0o777, 0);
+        assert_eq!(
+            api(&client, &base, &token, json!({"command":"installed_core_version"})).await?,
+            "unknown"
+        );
+        // Recovery must leave management available for a subsequent successful repair.
+        let id = dir.seed(&real, &version)?;
+        let staged = api(&client, &base, &token, json!({"command":"stage_core_upgrade","id":id})).await?;
+        let activated = api(
+            &client,
+            &base,
+            &token,
+            json!({"command":"activate_core_upgrade","id":staged["stage_id"]}),
+        )
+        .await?;
+        assert_eq!(activated["from"], "unknown");
+        assert_eq!(activated["status"]["phase"], "stopped");
+    } else {
+        assert_eq!(hash(&fs::read(dir.live())?), old);
+    }
     assert!(!dir.0.join("data/core/.core-upgrade").exists());
-    assert!(
-        api(&client, &base, &token, json!({"command":"core_installation"}))
-            .await?
-            .is_null()
-    );
+    let receipt = api(&client, &base, &token, json!({"command":"core_installation"})).await?;
+    assert_eq!(receipt.is_null(), !repair);
     let status = api(&client, &base, &token, json!({"command":"start"})).await?;
     assert_eq!(status["phase"], "running");
     assert_eq!(status["version"], version);
@@ -427,4 +455,15 @@ async fn interrupted_cli_switch_kills_candidate_and_restores_previous_core_befor
     .context("restarted service shutdown timed out")??;
     ensure!(exit.success(), "restarted service did not shut down cleanly");
     Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires real MIHOMO_TEST_BINARY; SIGKILL during replacement, orphan termination and startup rollback"]
+async fn interrupted_cli_switch_kills_candidate_and_restores_previous_core_before_next_start() -> Result<()> {
+    interrupted_cli_switch(false).await
+}
+#[tokio::test]
+#[ignore = "requires real MIHOMO_TEST_BINARY; SIGKILL during broken-core repair, inode rollback and retry"]
+async fn interrupted_cli_repair_restores_broken_inode_and_keeps_management_available_for_retry() -> Result<()> {
+    interrupted_cli_switch(true).await
 }

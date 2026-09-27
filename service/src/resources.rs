@@ -88,6 +88,9 @@ impl Resources {
         let directory = directory.canonicalize()?;
         let destination = directory.join("verge-mihomo");
         if fs::symlink_metadata(&destination).is_ok() {
+            #[cfg(target_os = "linux")]
+            crate::core_upgrade::repairable(&destination)?;
+            #[cfg(not(target_os = "linux"))]
             check_executable(&destination)?;
             return Ok(destination);
         }

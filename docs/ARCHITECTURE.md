@@ -121,7 +121,7 @@ mihomo-server/
 │   │   ├── Actor activation / live version and port checks / rollback [Implemented; Linux x86_64]
 │   │   ├── Durable switch journal / installation receipt / startup recovery [Implemented; Linux x86_64]
 │   │   ├── Stable upstream force/no-op adapter / upgrade Web workflow [Implemented; Linux x86_64]
-│   │   ├── Repair of unreadable/empty previous core [Pending]
+│   │   ├── Repair of unreadable/empty previous core [Implemented; Linux x86_64]
 │   │   ├── Managed/system/direct routing / verified static-root TLS retry [Implemented; Linux verified]
 │   │   └── Alpha / other targets [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
@@ -174,7 +174,7 @@ mihomo-server/
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── DNS/TUN editor / lossless nested inheritance / readback [Implemented; Linux verified]
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
-│   ├── Stable core upgrade / force confirmation / installation readback / retry [Implemented; Linux x86_64]
+│   ├── Stable core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
 │   └── Full settings, Alpha core upgrade, backup UI [Pending]
 ├── Release and deployment                           [Partially implemented]
 │   ├── Linux x86_64 bundle: Rust + independent Mihomo + Web [Implemented]
@@ -2086,7 +2086,7 @@ Broken/empty-core repair, Alpha/other targets, native TUN/DNS/hosts/resources,
 backups/WebDAV, advanced pages, garbage collection, SOCKS/PAC and additional
 platform/deployment integrations remain pending.
 
-## Latest increment: core-download routing and verified TLS fallback
+## Previous increment: core-download routing and verified TLS fallback
 
 Delivery step 7 now routes stable latest/pinned discovery through managed-core,
 system and direct policies in order. Managed endpoints/authentication come from
@@ -2140,6 +2140,71 @@ repair rollback/recovery and browser repair readback. Alpha/other targets, nativ
 TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage collection,
 SOCKS/PAC and platform/deployment work remain pending. Native Windows/macOS system
 proxy discovery still requires platform runtime checks.
+
+## Latest increment: durable repair of broken managed cores
+
+Delivery step 7 now permits management startup with an empty, unreadable or
+nonexecutable existing managed core, without replacing it with the bundle seed.
+Only bounded, owner-owned, unshared regular files with safe ordinary permissions
+are admitted; links, unsafe ownership/permissions and capability-bearing upgrades
+remain rejected. A missing owner read/execute permission, empty file or failed
+bounded version probe returns the public installed version `unknown`. Shutdown
+and file-safety failures remain errors. Unknown versions never take the same-version
+no-op path, so the stable wrapper and explicit staging/activation can repair them.
+
+Normal upgrades keep schema-1 digest-backed rollback. Repairs use schema-2 journals
+with fixed file identity (device/inode, size, mtime and mode) and a hard link to the
+original inode inside the private transaction directory. Backup does not read or
+chmod the old file. Candidate publication is one atomic rename after fresh version,
+configuration and digest validation. Pending rollback/restart recovery restores the
+exact original inode and permissions; candidate/backup identity conflicts fail
+closed. Interrupted rollback is idempotent. Committed recovery verifies the new
+bytes, writes the new receipt and retires the backup. Existing schema-1 journals
+remain readable. A valid old receipt whose bytes no longer match the broken file
+is preserved during failed repair; malformed/unsafe receipts still require recovery.
+
+The browser reads installed version and receipt independently. Failed receipt
+verification remains visible while an admitted unknown version enables repair.
+It shows `未知（需要修复）`, an unverified-record state and a repair result, then
+rereads the verified version/receipt after completion and reconnect. Failed repair
+retains the previous file and allows retry; a previously stopped/failed core stays
+stopped after a successful repair until explicitly started. Saved profiles, runtime
+configuration and node records are retained.
+
+Verification: `cargo check --workspace --locked --offline`, 253 regular workspace
+Rust tests, the 67-case real-Mihomo opt-in workspace suite and targeted real
+execute-only/SIGKILL repair regressions pass (68 distinct opt-in cases in total).
+Formatting, Clippy with warnings denied, TypeScript/Vite production build and diff
+checks pass. Tests cover empty/unreadable/nonexecutable original files, pending and
+committed boundaries, a crash after rollback rename, old receipt preservation,
+unsafe/shared/privileged files, changed inode/backup/live identity, malformed records
+and dangling receipt links rejected before any switch. Real Mihomo verifies
+unreadable and execute-only files, stopped-state retention, unchanged configuration/
+profiles, restored saved node selections and durable receipt readback. SIGKILL
+terminates/reaps the candidate, and next startup restores the exact broken inode;
+management remains available and a subsequent valid repair succeeds. Existing
+normal-upgrade SIGKILL recovery also remains green.
+
+All 24 browser workflows pass with the final production bundle, including partial
+version/receipt readback, a real failed repair preserving empty-file inode/mode,
+retry with actual staging/activation, verified receipt and restart readback. A
+private copy of the actual 56-node subscription completes the official latest-stable
+repair with `force: false` and `from: "unknown"`, preserves stopped state and the
+configuration/catalog, restores its selected node after starting/restarting, and
+returns HTTPS 204 through the proxy before and after repair. Verified static-root
+TLS retry succeeds with an unrelated platform CA. Original data hashes are unchanged.
+
+The runnable `target/mihomo-server-linux-x86_64-core-repair-final` bundle passes all
+checksums; its service binary matches the fresh release build and its deployment/
+provenance documents match the sources. Temporary services, cores, script workers
+and probe processes are terminated/reaped; the final process audit reports zero.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The Linux MVP remains runnable; the complete project is not done. Next Delivery
+step 7 subtask: Alpha release metadata/preparation with bounded version and asset
+validation, followed by Alpha activation/rollback and browser integration. Other
+targets, native TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage
+collection, SOCKS/PAC and platform/deployment work remain pending.
 
 ## MVP completion boundary
 

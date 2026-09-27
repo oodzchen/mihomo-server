@@ -2470,7 +2470,26 @@ impl Actor {
     }
 
     async fn installed_version(&mut self) -> Result<String> {
-        crate::validation::probe_version(&self.options.binary, &mut self.shutdown, Duration::from_secs(5)).await
+        if self.options.resources.is_some() {
+            crate::core_upgrade::repairable(&self.options.binary)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                let metadata = std::fs::symlink_metadata(&self.options.binary)?;
+                if metadata.len() == 0 || metadata.permissions().mode() & 0o500 != 0o500 {
+                    return Ok("unknown".into());
+                }
+            }
+        }
+        match crate::validation::probe_version(&self.options.binary, &mut self.shutdown, Duration::from_secs(5)).await {
+            Ok(version) => Ok(version),
+            Err(_) if self.options.resources.is_some() && !*self.shutdown.borrow() => {
+                // An unreadable/broken core must not block the operation that repairs it.
+                crate::core_upgrade::repairable(&self.options.binary)?;
+                Ok("unknown".into())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn check_upgrade(&mut self, version: &str, force: bool) -> Result<Option<CoreUpgradeReport>> {
@@ -2529,8 +2548,7 @@ impl Actor {
             .await?;
         ensure!(checked.stage_id == id, "candidate configuration proof changed");
         let source = downloads.staged_binary(id)?;
-        let from =
-            crate::validation::probe_version(&self.options.binary, &mut self.shutdown, Duration::from_secs(5)).await?;
+        let from = self.installed_version().await?;
         let core = self
             .options
             .binary
@@ -2538,6 +2556,7 @@ impl Actor {
             .context("managed core directory missing")?
             .to_path_buf();
         let was_running = self.status.borrow().phase == CorePhase::Running;
+        let repair = from == "unknown";
         self.retry_at = None;
         let mut stopped = false;
         let result = async {
@@ -2546,7 +2565,7 @@ impl Actor {
             let stop = self.shutdown.clone();
             let receipt = tokio::task::spawn_blocking(move || {
                 ensure!(!*stop.borrow(), "core activation cancelled during shutdown");
-                crate::core_upgrade::prepare(&directory, &source, &candidate, was_running)
+                crate::core_upgrade::prepare_with_repair(&directory, &source, &candidate, was_running, repair)
             })
             .await
             .context("core replacement worker failed")??;

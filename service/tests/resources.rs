@@ -128,7 +128,7 @@ fn invalid_manifest_and_external_resource_links_are_rejected() -> Result<()> {
     Ok(())
 }
 #[test]
-fn unsafe_managed_directories_links_and_nonexecutables_are_rejected() -> Result<()> {
+fn unsafe_managed_directories_and_links_are_rejected_but_broken_regular_cores_remain_repairable() -> Result<()> {
     let directory = Directory::new()?;
     let resources = directory.resources()?;
     let core_dir = directory.0.join("core");
@@ -144,7 +144,12 @@ fn unsafe_managed_directories_links_and_nonexecutables_are_rejected() -> Result<
     fs::remove_file(core_dir.join("verge-mihomo"))?;
     fs::write(core_dir.join("verge-mihomo"), "not executable")?;
     fs::set_permissions(core_dir.join("verge-mihomo"), fs::Permissions::from_mode(0o600))?;
-    assert!(resources.initialize_core(&core_dir).is_err());
+    assert_eq!(resources.initialize_core(&core_dir)?, core_dir.join("verge-mihomo"));
+    assert_eq!(fs::read(core_dir.join("verge-mihomo"))?, b"not executable");
+    fs::write(core_dir.join("verge-mihomo"), [])?;
+    fs::set_permissions(core_dir.join("verge-mihomo"), fs::Permissions::from_mode(0o0))?;
+    assert_eq!(resources.initialize_core(&core_dir)?, core_dir.join("verge-mihomo"));
+    assert_eq!(fs::metadata(core_dir.join("verge-mihomo"))?.len(), 0);
     fs::remove_file(core_dir.join("verge-mihomo"))?;
     symlink(&core_dir, directory.0.join("core-link"))?;
     assert!(resources.initialize_core(&directory.0.join("core-link")).is_err());

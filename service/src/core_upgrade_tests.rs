@@ -191,3 +191,133 @@ fn links_unknown_files_and_forged_records_are_not_followed_or_deleted() -> Resul
     assert_eq!(fs::read(&outside)?, b"private unrelated data");
     Ok(())
 }
+
+#[test]
+fn repair_preserves_broken_inode_mode_and_recovers_every_pending_boundary() -> Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+    for (bytes, mode) in [
+        (b"".as_slice(), 0o700),
+        (b"unreadable original".as_slice(), 0),
+        (b"nonexecutable original".as_slice(), 0o600),
+    ] {
+        for boundary in ["prepared", "published", "restored", "committed"] {
+            let dir = Directory::new()?;
+            let live = dir.0.join("verge-mihomo");
+            fs::write(&live, bytes)?;
+            fs::set_permissions(&live, fs::Permissions::from_mode(mode))?;
+            let inode = fs::metadata(&live)?.ino();
+            let (source, staged) = staged(&dir)?;
+            let receipt = prepare_with_repair(&dir.0, &source, &staged, false, true)?;
+            assert_eq!(fs::metadata(&live)?.ino(), inode);
+            assert_eq!(journal(&dir.0.join(TRANSACTION))?.schema_version, 2);
+            if boundary != "prepared" {
+                publish(&dir.0)?;
+            }
+            if boundary == "restored" {
+                // Crash after rollback rename but before receipt/cleanup publication.
+                fs::rename(dir.0.join(TRANSACTION).join("previous"), &live)?;
+            }
+            if boundary == "committed" {
+                commit(&dir.0)?;
+                assert_eq!(recover(&dir.0)?, None);
+                assert_eq!(installation(&dir.0)?, Some(receipt));
+                assert_eq!(fs::read(&live)?, fs::read(source)?);
+            } else {
+                assert_eq!(recover(&dir.0)?, Some(false));
+                assert_eq!(fs::metadata(&live)?.ino(), inode);
+                assert_eq!(fs::metadata(&live)?.permissions().mode() & 0o777, mode);
+                fs::set_permissions(&live, fs::Permissions::from_mode(0o600))?;
+                assert_eq!(fs::read(&live)?, bytes);
+                assert!(installation(&dir.0)?.is_none());
+            }
+            assert!(!dir.0.join(TRANSACTION).exists());
+            assert_eq!(recover(&dir.0)?, None);
+        }
+    }
+    Ok(())
+}
+#[test]
+fn repair_restores_unverified_previous_receipt_and_replaces_it_only_after_commit() -> Result<()> {
+    let dir = Directory::new()?;
+    let (source, staged) = staged(&dir)?;
+    prepare(&dir.0, &source, &staged, false)?;
+    publish(&dir.0)?;
+    commit(&dir.0)?;
+    recover(&dir.0)?;
+    let receipt = fs::read(dir.0.join(RECEIPT))?;
+    fs::write(dir.0.join("verge-mihomo"), [])?;
+    assert!(installation(&dir.0).is_err());
+    prepare_with_repair(&dir.0, &source, &staged, false, true)?;
+    publish(&dir.0)?;
+    recover(&dir.0)?;
+    assert_eq!(fs::metadata(dir.0.join("verge-mihomo"))?.len(), 0);
+    assert_eq!(fs::read(dir.0.join(RECEIPT))?, receipt);
+    assert!(installation(&dir.0).is_err());
+    let repaired = prepare_with_repair(&dir.0, &source, &staged, false, true)?;
+    publish(&dir.0)?;
+    commit(&dir.0)?;
+    recover(&dir.0)?;
+    assert_eq!(installation(&dir.0)?, Some(repaired));
+    Ok(())
+}
+#[test]
+fn repair_identity_conflicts_and_unsafe_files_fail_without_overwriting() -> Result<()> {
+    for case in [
+        "live-inode",
+        "backup",
+        "symlink",
+        "shared",
+        "privileged",
+        "unknown-live",
+        "receipt-link",
+        "receipt-malformed",
+    ] {
+        let dir = Directory::new()?;
+        let live = dir.0.join("verge-mihomo");
+        let (source, staged) = staged(&dir)?;
+        if case == "symlink" {
+            fs::remove_file(&live)?;
+            symlink(&source, &live)?;
+            assert!(prepare_with_repair(&dir.0, &source, &staged, false, true).is_err());
+        } else if case == "shared" {
+            fs::hard_link(&live, dir.0.join("unrelated"))?;
+            assert!(prepare_with_repair(&dir.0, &source, &staged, false, true).is_err());
+        } else if case.starts_with("receipt-") {
+            if case == "receipt-link" {
+                symlink(dir.0.join("missing"), dir.0.join(RECEIPT))?;
+            } else {
+                fs::write(dir.0.join(RECEIPT), b"{broken")?;
+                fs::set_permissions(dir.0.join(RECEIPT), fs::Permissions::from_mode(0o600))?;
+            }
+            assert!(prepare_with_repair(&dir.0, &source, &staged, false, true).is_err());
+            assert!(!dir.0.join(TRANSACTION).exists());
+        } else if case == "privileged" {
+            fs::set_permissions(&live, fs::Permissions::from_mode(0o4700))?;
+            assert!(prepare_with_repair(&dir.0, &source, &staged, false, true).is_err());
+        } else {
+            prepare_with_repair(&dir.0, &source, &staged, false, true)?;
+            if case == "live-inode" {
+                let replacement = dir.0.join("replacement");
+                fs::write(&replacement, b"previous working core")?;
+                fs::set_permissions(&replacement, fs::Permissions::from_mode(0o700))?;
+                fs::rename(replacement, &live)?;
+                assert!(publish(&dir.0).is_err());
+            } else {
+                publish(&dir.0)?;
+                fs::write(
+                    if case == "backup" {
+                        dir.0.join(TRANSACTION).join("previous")
+                    } else {
+                        live.clone()
+                    },
+                    b"operator replacement",
+                )?;
+            }
+            let before = fs::read(&live)?;
+            assert!(recover(&dir.0).is_err());
+            assert_eq!(fs::read(&live)?, before);
+            assert!(dir.0.join(TRANSACTION).exists());
+        }
+    }
+    Ok(())
+}

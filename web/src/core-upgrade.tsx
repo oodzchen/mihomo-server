@@ -43,7 +43,7 @@ export function CoreUpgradePage({
     if (connection !== "已连接") return;
     const controller = new AbortController();
     let active = true;
-    void Promise.all([
+    void Promise.allSettled([
       command<string>(token, "installed_core_version", {}, controller.signal),
       command<Installation | null>(
         token,
@@ -53,16 +53,17 @@ export function CoreUpgradePage({
       ),
     ])
       .then(([version, receipt]) => {
-        if (active) {
-          setVersion(version);
-          setInstallation(receipt);
-        }
-      })
-      .catch((error: unknown) => {
         if (!active) return;
-        if (error instanceof ApiError && error.status === 401)
+        if (version.status === "fulfilled") setVersion(version.value);
+        if (receipt.status === "fulfilled") setInstallation(receipt.value);
+        const failed = [version, receipt].filter(
+          (result) => result.status === "rejected",
+        );
+        if (failed.length === 0) return;
+        if (failed.some((result) => result.reason instanceof ApiError && result.reason.status === 401))
           logout("认证失效，请重新输入令牌。");
         else {
+          const error: unknown = failed[0].reason;
           const message =
             error instanceof Error ? error.message : String(error);
           setError(
@@ -128,11 +129,12 @@ export function CoreUpgradePage({
         </p>
       ) : !version ? (
         <p className="info">正在读取已安装内核…</p>
-      ) : (
+      ) : null}
+      {version && connection === "已连接" && (
         <dl className="proxy-details">
           <div>
             <dt>已安装版本</dt>
-            <dd>{version}</dd>
+            <dd>{version === "unknown" ? "未知（需要修复）" : version}</dd>
           </div>
           <div>
             <dt>最新稳定版</dt>
@@ -141,12 +143,19 @@ export function CoreUpgradePage({
           <div>
             <dt>安装记录</dt>
             <dd>
-              {installation
+              {installation === undefined
+                ? "记录未验证"
+                : installation
                 ? `已验证安装 ${installation.version}`
                 : "随 bundle 初始化"}
             </dd>
           </div>
         </dl>
+      )}
+      {version === "unknown" && (
+        <p className="info">
+          当前内核无法报告版本，可以升级至最新稳定版进行修复。失败时保留原文件，可重试；修复后请启动内核。
+        </p>
       )}
       <div className="actions">
         <button type="button" disabled={disabled} onClick={() => void run()}>
@@ -176,7 +185,9 @@ export function CoreUpgradePage({
       {report && (
         <p className="success" role="status">
           {report.upgraded
-            ? `升级完成：${report.from} → ${report.to}`
+            ? report.from === "unknown"
+              ? `修复完成：${report.to}`
+              : `升级完成：${report.from} → ${report.to}`
             : `已是最新稳定版 ${report.to}，无需重新安装。`}
         </p>
       )}

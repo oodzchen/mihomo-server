@@ -1301,3 +1301,26 @@ watch-close cancellation/cleanup and wrong-host/untrusted TLS rejection in both 
 Process-isolated children exercise system authentication, NO_PROXY global/IP bypass,
 CGI and direct fallback without changing the parent environment. Existing subscription
 routing/TLS and real activation tests remain applicable. No dependency is added.
+
+## Broken managed-core repair and durable rollback
+
+Source: `src-tauri/src/feat/core_upgrade.rs::upgrade_core`, pinned commit
+b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b. Upstream treats failed version readback
+as a repair request and uses atomic replacement to avoid truncating running inodes.
+Destination: resources.rs, core_manager.rs, core_upgrade.rs and web/core-upgrade.tsx.
+The service admits safe broken existing files for management startup and reports
+`unknown`; the force/no-op adapter always prepares unknown versions. Unlike upstream's
+best-effort rollback for readable old cores, repairs preserve even unreadable/empty
+old files with a private hard-link backup and a schema-2 identity journal. Normal
+schema-1 digest transactions remain compatible. Failed/crashed activation restores
+the original inode/mode and a valid previous receipt, even when that receipt no
+longer verifies against the broken file. Commit still requires candidate digest,
+version/configuration probes and live health/port verification.
+
+The page retains separate version/receipt readback so an unverified previous
+receipt does not block an admitted repair. Tests cover pending/committed/rollback
+boundaries, unsafe files and identity conflicts, failed repair/retry, actual
+Mihomo empty/unreadable/execute-only repair, saved node restoration, receipt
+persistence, process SIGKILL recovery and browser repair readback. Paths, package
+and authentication stay actor/private-service owned; no new dependency is added.
+Alpha/native privilege and other-platform repair remain pending.
