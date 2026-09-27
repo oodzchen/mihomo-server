@@ -1,4 +1,4 @@
-//! Bounded ZIP export, inspection and disposable restore rehearsal. No archive is retained.
+//! Bounded ZIP export, inspection and disposable restore rehearsal. Explicit retained storage is separate from export.
 use headless_core::backup::BackupMetadata;
 
 #[path = "backup_inspect.rs"]
@@ -11,6 +11,23 @@ pub(crate) mod candidates;
 #[cfg(unix)]
 #[path = "backup_restore.rs"]
 pub(crate) mod restore;
+
+#[cfg(target_os = "linux")]
+#[path = "backup_storage.rs"]
+pub(crate) mod storage;
+
+pub(crate) enum RetainedOperation {
+    Create,
+    List,
+    Download(String),
+    Delete(String),
+}
+pub(crate) enum RetainedOutcome {
+    Created(headless_core::backup::RetainedBackupReceipt),
+    Listed(headless_core::backup::RetainedBackupList),
+    Downloaded(BackupDownload),
+    Deleted(headless_core::backup::BackupDeletionReceipt),
+}
 
 pub(crate) fn hash(bytes: &[u8]) -> String {
     ring::digest::digest(&ring::digest::SHA256, bytes)

@@ -1575,3 +1575,22 @@ permission recovery and retry after depth-budget failure. Legacy unmarked global
 temporary candidates are retained for manual inspection. This cleanup concerns
 disposable candidates only; immutable revision/source garbage collection and
 retained backup archive management remain separate pending tasks.
+
+
+## Private local retained backup storage
+
+Reference: `create_local_backup_with_namer`, `list_local_backup` and
+`delete_local_backup` in `src-tauri/src/feat/backup.rs`, pinned commit
+b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b. This increment copies no new source and
+changes no dependencies. It retains local snapshot persistence, listing and
+idempotent deletion responsibilities while replacing caller filenames/host paths
+with opaque service IDs and bounded private storage.
+
+Original `service/src/backup_storage.rs` provides no-follow descriptor operations,
+atomic no-replace publication, partial recovery, verified downloads and fixed
+32-archive/256-MiB bounds. `core_manager.rs` reuses serialized export, shared
+admission and joined filesystem workers; `management/http.rs` adds explicit
+authenticated storage routes. `headless-core/src/backup.rs` adds metadata/list/
+create/delete receipt models. Existing inspection and ZIP restore policies apply
+to downloaded archives. Linux is verified. Automatic pruning/settings/schedules,
+WebDAV, backup UI and additional supported storage targets remain pending.

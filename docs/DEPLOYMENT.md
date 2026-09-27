@@ -24,8 +24,14 @@ repository's `docs/RUNNING.md`.
 Authenticated `POST /api/backup` exports a service snapshot. Upload its raw ZIP to
 `POST /api/backup/inspect` with `Content-Type: application/zip` to check structure,
 integrity and configuration references without applying it. Both share one
-bounded operation slot. No archive is retained or blindly extracted; retention,
-automatic schedules and WebDAV remain pending. Full request limits and
+bounded operation slot. Export itself retains no archive and ZIPs are never
+blindly extracted. Explicit Linux local storage uses `POST/GET /api/backups` and
+`GET/DELETE /api/backups/{id}` with empty bodies and opaque IDs. A private
+`<data-dir>/backups/` store permits 32 archives/256 MiB, without automatic pruning.
+Downloads are verified before streaming and can use the normal restore upload
+contract. Atomic create/delete receipts report durability_pending after fsync
+acknowledgement failures. Startup removes only safe abandoned partial files.
+Automatic retention/schedules, WebDAV and backup UI remain pending. Full request limits and
 error codes are documented in the source repository's `docs/RUNNING.md`.
 The same binary upload sent to `/api/backup/validate` additionally rehearses the
 archived runtime and active profile regeneration using isolated Mihomo/script

@@ -335,6 +335,12 @@ enum CommandMessage {
         closing: watch::Receiver<bool>,
         reply: oneshot::Sender<Result<headless_core::backup::BackupRestoreValidation>>,
     },
+    RetainedBackup {
+        operation: crate::backup::RetainedOperation,
+        permit: tokio::sync::OwnedSemaphorePermit,
+        closing: watch::Receiver<bool>,
+        reply: oneshot::Sender<Result<crate::backup::RetainedOutcome>>,
+    },
     ExportBackup {
         permit: tokio::sync::OwnedSemaphorePermit,
         reply: oneshot::Sender<Result<crate::backup::BackupDownload>>,
@@ -462,6 +468,8 @@ impl CoreManager {
         };
         #[cfg(unix)]
         crate::backup::candidates::cleanup(&options.data_dir)?;
+        #[cfg(target_os = "linux")]
+        crate::backup::storage::recover(&options.data_dir)?;
         let store = RuntimeStore::open(&options.data_dir)?;
         let mut settings_store = SettingsStore::open(&options.data_dir)?;
         let mut profile_store = ProfileStore::open(&options.data_dir)?;
@@ -1149,6 +1157,29 @@ impl CoreManager {
         result.await.context("backup export cancelled during shutdown")?
     }
 
+    pub(crate) fn is_shutting_down(&self) -> bool {
+        *self.shutdown.borrow()
+    }
+
+    pub(crate) async fn retained_backup(
+        &self,
+        operation: crate::backup::RetainedOperation,
+        permit: tokio::sync::OwnedSemaphorePermit,
+        closing: watch::Receiver<bool>,
+    ) -> Result<crate::backup::RetainedOutcome> {
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::RetainedBackup {
+                operation,
+                permit,
+                closing,
+                reply,
+            })
+            .await
+            .context("core manager stopped")?;
+        result.await.context("local backup operation cancelled")?
+    }
+
     /// Admit before buffering an upload; shares the export/download memory slot.
     pub(crate) fn admit_backup_upload(&self) -> Result<(tokio::sync::OwnedSemaphorePermit, watch::Receiver<bool>)> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
@@ -1732,6 +1763,7 @@ impl Actor {
                         let message = format!("configuration recovery failed: {error:#}");
                         self.status.send_modify(|state| state.error = Some(message.clone()));
                         match request {
+                            CommandMessage::RetainedBackup {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::ExportBackup {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::ValidateBackupRestore {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::RestoreBackup {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
@@ -1772,6 +1804,12 @@ impl Actor {
                             if !reply.is_closed() {
                                 let result = self.validate_backup_restore(bytes, closing, &mut reply).await;
                                 drop(permit);
+                                let _ = reply.send(result);
+                            }
+                        }
+                        CommandMessage::RetainedBackup {operation,permit,closing,mut reply} => {
+                            if !reply.is_closed() {
+                                let result = self.retained_backup(operation,permit,closing,&mut reply).await;
                                 let _ = reply.send(result);
                             }
                         }
@@ -2933,6 +2971,63 @@ impl Actor {
         _reply: &mut oneshot::Sender<Result<headless_core::backup::BackupRestoreValidation>>,
     ) -> Result<headless_core::backup::BackupRestoreValidation> {
         bail!("restore validation is not yet supported on this platform")
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn retained_backup(
+        &mut self,
+        operation: crate::backup::RetainedOperation,
+        permit: tokio::sync::OwnedSemaphorePermit,
+        mut http_closing: watch::Receiver<bool>,
+        reply: &mut oneshot::Sender<Result<crate::backup::RetainedOutcome>>,
+    ) -> Result<crate::backup::RetainedOutcome> {
+        use crate::backup::{RetainedOperation, RetainedOutcome, storage::Output};
+        ensure!(
+            !*self.shutdown.borrow() && !*http_closing.borrow() && !reply.is_closed(),
+            "local backup cancelled"
+        );
+        let (snapshot, permit) = if matches!(operation, RetainedOperation::Create) {
+            let download = self.export_backup(permit).await?;
+            (Some((download.metadata, download.bytes)), download.permit)
+        } else {
+            (None, permit)
+        };
+        ensure!(
+            !*self.shutdown.borrow() && !*http_closing.borrow() && !reply.is_closed(),
+            "local backup cancelled"
+        );
+        let data = self.options.data_dir.clone();
+        let (cancel, cancellation) = watch::channel(false);
+        let mut worker =
+            tokio::task::spawn_blocking(move || crate::backup::storage::run(&data, operation, snapshot, cancellation));
+        let result = tokio::select! {biased;
+            _=closing(&mut self.shutdown)=>{cancel.send_replace(true);worker.await},
+            _=closing(&mut http_closing)=>{cancel.send_replace(true);worker.await},
+            _=reply.closed()=>{cancel.send_replace(true);worker.await},
+            result=&mut worker=>result,
+        }
+        .context("local backup worker failed")??;
+        // A logical create/delete commit survives cancellation and fsync acknowledgement errors.
+        Ok(match result {
+            Output::Created(receipt) => RetainedOutcome::Created(receipt),
+            Output::Listed(list) => RetainedOutcome::Listed(list),
+            Output::Deleted(receipt) => RetainedOutcome::Deleted(receipt),
+            Output::Downloaded(metadata, bytes) => RetainedOutcome::Downloaded(crate::backup::BackupDownload {
+                metadata,
+                bytes,
+                permit,
+            }),
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    async fn retained_backup(
+        &mut self,
+        _operation: crate::backup::RetainedOperation,
+        _permit: tokio::sync::OwnedSemaphorePermit,
+        _closing: watch::Receiver<bool>,
+        _reply: &mut oneshot::Sender<Result<crate::backup::RetainedOutcome>>,
+    ) -> Result<crate::backup::RetainedOutcome> {
+        bail!("retained backups are not supported on this platform")
     }
 
     #[cfg(unix)]

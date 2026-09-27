@@ -2099,11 +2099,13 @@ keeps the slot; read it to EOF or close it before retrying. Limits are 1,024 ent
 owner-owned regular files without extra hard links or unsafe write/privilege modes;
 symlinks/FIFO/directory sources are rejected. Changes during export are detected.
 The cooperative worker budget is 15 seconds; shutdown checks cancel work and join
-it before releasing the data-directory lock. No archive is retained by the service.
+it before releasing the data-directory lock. Export itself retains no archive;
+explicit local storage is described below.
 
 This is a `mihomo-server` backup format. Explicit restoration for settled running
-or stopped cores is available through `/api/backup/restore`; local retention/list/delete, scheduling,
-WebDAV and backup Web controls remain pending. Desktop backup files are not accepted.
+or stopped cores is available through `/api/backup/restore`; explicit local
+create/list/download/delete is available through `/api/backups`. Automatic
+retention policy, scheduling, WebDAV and backup Web controls remain pending. Desktop backup files are not accepted.
 
 ## Inspect a service backup before restoring
 
@@ -2311,3 +2313,71 @@ state for repair/retry; they do not authorize deleting unrelated entries or
 changing committed runtime/catalog/settings. An unreadable root/candidate may
 require operator permission repair. Linux is verified; other restore targets
 remain pending/deferred with the rest of the service platform work.
+
+
+## Retain and manage local service backups
+
+On Linux, authenticated `/api/backups` provides explicit private local storage:
+
+| Request | Result |
+| --- | --- |
+| `POST /api/backups` with empty body | 201: create a verified current service snapshot |
+| `GET /api/backups` with empty body | 200: bounded metadata list, newest first |
+| `GET /api/backups/{id}` with empty body | 200: verified ZIP download, or 404 if absent |
+| `DELETE /api/backups/{id}` with empty body | 200: deletion receipt; absent IDs return deleted=false |
+
+These routes use the existing bearer authentication, Host/Origin protection,
+no-query policy and no-store/nosniff response headers. IDs are server-generated
+24-character lowercase hexadecimal values; no filename, path, caller-supplied
+archive, destination or policy is accepted. Invalid IDs/nonempty bodies return
+400, unsupported methods 405. Create uses the same actor-owned snapshot export
+while running or stopped; it does not alter the live core or configuration.
+
+The list contains `archives`, `total_bytes`, `max_archives` and `max_total_bytes`.
+Each archive exposes only `id`, `created_at`, `content_length` and `sha256`; no
+host paths, subscription names/URLs, contents or credentials appear in metadata.
+List is a metadata view; download checks file identity/length/SHA-256 and verifies
+ZIP structure, integrity and configuration references afresh before sending any
+bytes. The downloaded ZIP can be inspected, rehearsed and restored through the
+existing raw-upload APIs with explicit archived/regenerated policy. Downloading
+does not apply the backup or skip fresh restore validation.
+
+The service-owned `<data-dir>/backups/` directory is private (0700), with private
+regular single-link archives (0600). The catalog is reconstructed from strictly
+formatted service-generated archive names; no mutable sidecar index is required.
+Duplicate IDs, unsafe recognized files or stores exceeding bounds fail closed.
+Unknown names are retained and excluded from the archive list. Nested backup
+archives, partial files and scratch data are excluded from future snapshots.
+
+At most 32 committed archives and 256 MiB of committed archive bytes are allowed;
+each archive retains the existing 65 MiB limit. Directory enumeration is capped
+at 128 storage entries after a bounded descriptor scan. Capacity exhaustion
+returns 507 `backup_storage_full`; delete a selected backup before creating another.
+Existing archives are never automatically pruned. These are fixed storage bounds,
+not a configurable retention schedule or a quota on administrator-created files.
+Automatic retention/settings/scheduling and backup UI remain pending.
+
+All local operations share the existing single backup admission slot with
+export/inspect/rehearsal/restore. Busy requests return 409 `backup_busy`. A download
+holds admission until its body reaches EOF or disconnects. The actor serializes
+snapshot and storage operations; blocking filesystem workers check a cooperative
+15-second budget/cancellation and are joined before data ownership is released.
+Close/disconnect before create/delete publication cancels work; already committed
+operations finish with truthful receipts. Individual syscalls cannot be preempted.
+
+Create writes a fresh exclusive private `.part` file, fsyncs it and atomically
+renames without replacing an existing destination. Rename is the logical commit.
+Receipt contains `committed: true`, `backup` metadata and `durability_pending`.
+Delete commits at unlink and reports `deleted` plus `durability_pending`. A failed
+subsequent directory fsync sets durability_pending rather than undoing publication.
+A disconnected client can miss a receipt; inspect the list before retrying. No
+exactly-once key or permanent create/deletion receipt is promised.
+
+After data locking, startup removes only strictly named, owned private regular
+single-link partial files left before commit. It preserves committed archives,
+unknown names and unsafe/linked/shared partials. Roots and files are opened
+no-follow and file operations use directory descriptors. Unsafe roots or startup
+I/O/entry-budget failures stop startup for repair; generic 422
+`backup_storage_failed` during requests exposes no private diagnostics. Closing
+before commit reports 503 `backup_interrupted`. Other storage platforms remain
+pending/deferred.

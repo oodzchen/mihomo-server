@@ -83,7 +83,8 @@ mihomo-server/
 │       ├── Timed update metadata / saved refresh source [Migrated + service scheduler]
 │       ├── Backup manifest / bounded entries / inspection, validation, runtime policy and restore receipt models [Implemented; upstream ZIP adaptation]
 │       ├── Opaque restore plan / durable catalog-settings journal / runtime commit recovery [Implemented; Linux verified]
-│       └── Backup retention models / full upgrade resource settings [Pending]
+│       ├── Retained backup metadata / list / create-delete receipt models [Implemented]
+│       └── Automatic retention models / full upgrade resource settings [Pending]
 ├── service/                                         [Partially implemented]
 │   ├── Persistent foreground entry point            [Implemented]
 │   ├── Binary/data/config/import args, directory lock [Implemented]
@@ -138,7 +139,7 @@ mihomo-server/
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
-│   ├── Local backup export, inspection, rehearsal and restoration [Partially implemented; Linux verified]
+│   ├── Local backup export, inspection, restoration and retained storage [Partially implemented; Linux verified]
 │   │   ├── Actor snapshot / bounded ZIP / digest manifest [Implemented]
 │   │   ├── Authenticated binary download / single body-owned admission [Implemented]
 │   │   ├── Strict ZIP structure / CRC / SHA-256 / catalog and settings references [Implemented; Linux verified]
@@ -151,7 +152,8 @@ mihomo-server/
 │   │   ├── Restore preparation/core-I/O cancellation / phase checks / committed cleanup [Implemented; Linux verified]
 │   │   ├── Running-core restore reload/restart/apply rollback / saved-node reconciliation [Implemented; Linux verified]
 │   │   ├── Scoped candidate leases / bounded abrupt-termination orphan cleanup [Implemented; Linux verified]
-│   │   └── Local retention / schedule / WebDAV / UI [Pending]
+│   │   ├── Private retained archives / create-list-download-delete / partial recovery [Implemented; Linux verified]
+│   │   └── Automatic retention policy / schedule / WebDAV / UI [Pending]
 │   ├── Full application context and domain events  [Pending]
 │   ├── Sole Mihomo lifecycle manager                [Implemented; Linux verified]
 │   │   ├── Start, readiness, stop, restart, recovery, reap
@@ -170,6 +172,7 @@ mihomo-server/
 │   │   ├── Authenticated POST /api/backup/inspect validation report [Implemented; Linux verified]
 │   │   ├── Authenticated POST /api/backup/validate restore rehearsal [Implemented; Linux verified]
 │   │   ├── Authenticated POST /api/backup/restore running/stopped restoration [Implemented; Linux verified]
+│   │   ├── Authenticated POST/GET /api/backups and GET/DELETE /api/backups/{id} [Implemented; Linux verified]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -3065,6 +3068,77 @@ Scheduled backup policy, WebDAV and backup UI follow. Immutable revision/source
 garbage collection, full settings/resources, advanced pages, shared components
 and additional release/service targets remain pending; Windows compatibility
 stays deferred. The Linux MVP remains runnable and the full project is not complete.
+
+## Latest increment: private retained-backup storage and management
+
+Delivery step 7 now implements explicit local backup create/list/download/delete
+on Linux. POST/GET `/api/backups` and GET/DELETE `/api/backups/{id}` accept empty
+bodies under existing bearer/Host/Origin/no-query protections. IDs are generated
+24-character lowercase hex values, never paths. Create reuses the serialized
+current snapshot exporter, preserving running PID/configuration and stopped
+semantics. The shared single backup slot spans storage workers and download bodies.
+
+The reserved data-directory `backups` namespace is private (0700), with private
+single-link regular files (0600). Strict generated filenames encode ID/time/SHA,
+so listing reconstructs bounded metadata without a mutable sidecar index. Duplicate
+IDs and unsafe recognized files fail closed; unknown entries remain untouched.
+Lists expose only ID/time/size/digest and fixed count/byte limits, sorted newest
+first. No host paths, profile contents/names/URLs or credentials are returned in
+metadata. Downloads recheck identity/size/digest plus complete existing ZIP
+inspection before streaming, and can use the normal explicit restore upload API.
+Nested archives, partials and scratch files are excluded from snapshots.
+
+Storage permits at most 32 committed archives and 256 MiB, with existing per-ZIP
+65-MiB bounds and a 128-entry directory limit after bounded descriptor enumeration.
+Capacity returns 507; no automatic deletion is introduced. Safe ID deletion is
+idempotent (deleted=false if absent). Download absence returns 404. Invalid IDs/
+bodies return 400, busy admission 409, storage failure generic 422 and interrupted
+precommit work 503. Linux storage is implemented; other targets remain pending.
+
+Create uses an exclusive private partial, fsync and atomic no-replace rename.
+Rename is logical commit; create receipt reports committed=true, archive metadata
+and durability_pending. Delete commits at unlink and reports deleted plus
+durability_pending. Subsequent directory fsync errors never undo committed state.
+Joined blocking workers receive shutdown/HTTP-close/disconnect cancellation and
+a cooperative 15-second budget; syscalls remain non-preemptible. A client may miss
+a commit receipt and must inspect the list before retrying. Startup after data
+locking removes safe strictly named single-link private partials while preserving
+committed files and unsafe/unknown entries. Unsafe roots or startup I/O/budget
+failures fail closed for repair. No new dependencies or upstream source copies.
+
+Verification: `cargo check --workspace --locked --offline`, all 321 regular
+workspace Rust tests (including 23 regular backup API tests), all 4 real-Mihomo
+backup tests, warnings-denied Clippy, formatting and diff checks pass. Three new
+storage unit tests cover total byte capacity and entry bounds without pruning,
+partial recovery preserving committed/unknown/unsafe files, and unsafe roots,
+duplicate IDs and shutdown rejection. Two new API tests cover authenticated
+create/list/download/restore, body-owned admission, private modes, unchanged
+live snapshots, persistence and partial cleanup on restart, idempotent deletion,
+ID/body/auth validation, corrupt ZIP rejection, safe link refusal, 32-archive
+capacity and released admission. The actual 56-node restore test now retains and
+downloads the real snapshot through the new API before running/stopped restoration
+and selected-node HTTPS 204 through service restart. Original source/catalog
+bytes remain unchanged.
+
+The runnable Linux MVP is refreshed at
+`target/mihomo-server-linux-x86_64-retained-backups`. All 12 SHA-256 checksums pass;
+packaged Rust binary and deployment/provenance docs match release/source files.
+Fresh-bundle smoke verifies private retained creation/list/download of the actual
+56-node ZIP (1,110,883 bytes/13 entries), same-PID live restore, stopped restore,
+service-restart persistence, exact retained re-download, idempotent deletion and
+HTTPS 204 traffic. A SIGKILL during private restore preparation and a simulated
+abandoned storage partial are recovered on startup while preserving retained
+archives and committed configuration/catalog/settings. Original data-file hashes
+remain unchanged. Final cleanup leaves no owned service/core processes or private
+test storage/candidates. No sandbox Git writes/commits occur; the host script owns
+the commit.
+
+Next Delivery step 7 subtask: add persisted automatic backup policy and scheduling
+with bounded pruning, explicit enablement and safe shutdown/restart behavior.
+WebDAV, backup UI, immutable revision/source garbage collection, full settings/
+resources, advanced pages, shared components and additional release/service
+targets remain pending; Windows compatibility stays deferred. The Linux MVP
+remains runnable and the full project is not complete.
 
 ## MVP completion boundary
 

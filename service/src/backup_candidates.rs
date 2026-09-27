@@ -37,7 +37,7 @@ fn identity(a: &Metadata, b: &Metadata) -> bool {
 fn name(value: &OsStr) -> Result<CString> {
     Ok(CString::new(value.as_bytes())?)
 }
-fn open_at(parent: &File, child: &OsStr, directory: bool) -> io::Result<File> {
+pub(super) fn open_at(parent: &File, child: &OsStr, directory: bool) -> io::Result<File> {
     let child = CString::new(child.as_bytes()).map_err(io::Error::other)?;
     let flags = libc::O_RDONLY
         | libc::O_NOFOLLOW
@@ -65,7 +65,7 @@ fn unlink_at(parent: &File, child: &OsStr, directory: bool) -> Result<()> {
     );
     Ok(())
 }
-fn names(dir: &File) -> Result<Vec<OsString>> {
+pub(super) fn names(dir: &File) -> Result<Vec<OsString>> {
     // fdopendir owns its descriptor. Reopen '.' so directory offsets are independent.
     let stream = open_at(dir, OsStr::new("."), true)?;
     let fd = std::os::fd::IntoRawFd::into_raw_fd(stream);

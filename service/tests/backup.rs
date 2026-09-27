@@ -974,10 +974,23 @@ async fn real_data_restore_transaction_preserves_sources_and_proxy_traffic_after
             ensure!(!dir.0.join("backup-restore.yaml").exists(), "restore cleanup pending");
             if restart == 0 {
                 let (app, token) = dir.app(&manager)?;
-                let download = manager.export_backup().await?;
-                let bytes = download.bytes.clone();
-                drop(download);
                 let pid = manager.status().pid;
+                let saved: headless_core::backup::RetainedBackupReceipt =
+                    retained_json(&app, &token, "POST", "", StatusCode::CREATED).await?;
+                ensure!(
+                    saved.committed && !saved.durability_pending && manager.status().pid == pid,
+                    "retaining changed the running core"
+                );
+                let response = app
+                    .clone()
+                    .oneshot(retained_request(&token, "GET", &format!("/{}", saved.backup.id)))
+                    .await?;
+                ensure!(
+                    response.status() == StatusCode::OK,
+                    "retained real-node download failed"
+                );
+                let bytes = to_bytes(response.into_body(), MAX_ARCHIVE_BYTES).await?.to_vec();
+                ensure!(hash(&bytes) == saved.backup.sha256, "retained actual archive changed");
                 let response = app
                     .clone()
                     .oneshot(apply_restore_request(&token, bytes.clone(), "regenerated"))
@@ -1581,6 +1594,181 @@ async fn killed_service_restore_candidate_is_cleaned_on_restart_without_changing
         assert!(!dir.0.join("backup-restore.yaml").exists());
         let download = manager.export_backup().await?;
         drop(download);
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    result.and(manager.shutdown().await)
+}
+
+fn retained_request(token: &str, method: &str, suffix: &str) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(format!("/api/backups{suffix}"))
+        .header(header::HOST, "127.0.0.1:9090")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap()
+}
+async fn retained_json<T: serde::de::DeserializeOwned>(
+    app: &Router,
+    token: &str,
+    method: &str,
+    suffix: &str,
+    expected: StatusCode,
+) -> Result<T> {
+    let response = app.clone().oneshot(retained_request(token, method, suffix)).await?;
+    assert_eq!(response.status(), expected);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    assert_eq!(response.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    Ok(serde_json::from_slice(&to_bytes(response.into_body(), 65536).await?)?)
+}
+#[tokio::test]
+async fn retained_backups_create_download_restore_survive_restart_and_delete_without_touching_sources() -> Result<()> {
+    use headless_core::backup::{BackupDeletionReceipt, RetainedBackupList, RetainedBackupReceipt};
+    let dir = Directory::new()?;
+    let manager = dir.manager(false)?;
+    let (app, token) = dir.app(&manager)?;
+    let result = async {
+        let empty: RetainedBackupList = retained_json(&app, &token, "GET", "", StatusCode::OK).await?;
+        assert!(empty.archives.is_empty());
+        assert!(!dir.0.join("backups").exists());
+        let item = manager
+            .import_profile_yaml("mode: rule\nrules: ['MATCH,DIRECT']\n".into(), "original".into())
+            .await?;
+        let uid = item.uid.unwrap().to_string();
+        manager.select_profile(uid.clone()).await?;
+        let config = manager.runtime_config().await?;
+        let catalog = json!(manager.profiles());
+        let settings = manager.settings().await?;
+        let receipt: RetainedBackupReceipt = retained_json(&app, &token, "POST", "", StatusCode::CREATED).await?;
+        assert!(receipt.committed && !receipt.durability_pending);
+        assert_eq!(fs::metadata(dir.0.join("backups"))?.permissions().mode() & 0o777, 0o700);
+        let path = fs::read_dir(dir.0.join("backups"))?.next().unwrap()?.path();
+        assert_eq!(fs::metadata(path)?.permissions().mode() & 0o777, 0o600);
+        let listing: RetainedBackupList = retained_json(&app, &token, "GET", "", StatusCode::OK).await?;
+        assert_eq!(listing.archives, vec![receipt.backup.clone()]);
+        assert_eq!(listing.total_bytes, receipt.backup.content_length);
+        assert_eq!(listing.max_archives, 32);
+        assert_eq!(listing.max_total_bytes, 256 * 1024 * 1024);
+        let response = app
+            .clone()
+            .oneshot(retained_request(&token, "GET", &format!("/{}", receipt.backup.id)))
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/zip");
+        assert_eq!(response.headers()["x-backup-sha256"], receipt.backup.sha256);
+        assert_eq!(
+            app.clone().oneshot(retained_request(&token, "GET", "")).await?.status(),
+            StatusCode::CONFLICT
+        );
+        let bytes = to_bytes(response.into_body(), MAX_ARCHIVE_BYTES).await?.to_vec();
+        assert_eq!(hash(&bytes), receipt.backup.sha256);
+        inspection_report(&app, &token, bytes.clone()).await?;
+        assert_eq!(manager.runtime_config().await?, config);
+        assert_eq!(json!(manager.profiles()), catalog);
+        assert_eq!(manager.settings().await?, settings);
+        let applied = apply_restore_report(&app, &token, bytes, "regenerated").await?;
+        assert!(applied.committed && !applied.core_running);
+        assert_eq!(
+            manager.profile_raw(uid).await?.yaml,
+            "mode: rule\nrules: ['MATCH,DIRECT']\n"
+        );
+        Ok::<_, anyhow::Error>(receipt.backup)
+    }
+    .await;
+    let cleanup = manager.shutdown().await;
+    let backup = result?;
+    cleanup?;
+    // Simulate a process dying before partial-file rename; committed archives survive.
+    let part = dir.0.join("backups").join(format!(".{}.part", "a".repeat(24)));
+    fs::write(&part, b"incomplete")?;
+    fs::set_permissions(&part, fs::Permissions::from_mode(0o600))?;
+    let manager = dir.manager(false)?;
+    let (app, token) = dir.app(&manager)?;
+    let result = async {
+        assert!(!part.exists());
+        let listing: RetainedBackupList = retained_json(&app, &token, "GET", "", StatusCode::OK).await?;
+        assert_eq!(listing.archives, vec![backup.clone()]);
+        let deleted: BackupDeletionReceipt =
+            retained_json(&app, &token, "DELETE", &format!("/{}", backup.id), StatusCode::OK).await?;
+        assert!(deleted.deleted && !deleted.durability_pending);
+        let again: BackupDeletionReceipt =
+            retained_json(&app, &token, "DELETE", &format!("/{}", backup.id), StatusCode::OK).await?;
+        assert!(!again.deleted);
+        assert_eq!(
+            app.clone()
+                .oneshot(retained_request(&token, "GET", &format!("/{}", backup.id)))
+                .await?
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(fs::read_dir(dir.0.join("backups"))?.count(), 0);
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    result.and(manager.shutdown().await)
+}
+#[tokio::test]
+async fn retained_backup_auth_ids_bodies_capacity_corruption_and_unsafe_paths_are_bounded() -> Result<()> {
+    use headless_core::backup::RetainedBackupReceipt;
+    let dir = Directory::new()?;
+    let manager = dir.manager(false)?;
+    let (app, token) = dir.app(&manager)?;
+    let result = async {
+        for (method, suffix) in [("GET", ""), ("POST", ""), ("GET", "/bad"), ("DELETE", "/bad")] {
+            let mut request = retained_request(&token, method, suffix);
+            request.headers_mut().remove(header::AUTHORIZATION);
+            assert_eq!(app.clone().oneshot(request).await?.status(), StatusCode::UNAUTHORIZED);
+        }
+        for suffix in ["/bad", "/..%2fsecret", "/AAAAAAAAAAAAAAAAAAAAAAAA", "?path=private"] {
+            assert_eq!(
+                app.clone()
+                    .oneshot(retained_request(&token, "GET", suffix))
+                    .await?
+                    .status(),
+                StatusCode::BAD_REQUEST
+            );
+        }
+        let mut request = retained_request(&token, "POST", "");
+        *request.body_mut() = Body::from("unexpected");
+        assert_eq!(app.clone().oneshot(request).await?.status(), StatusCode::BAD_REQUEST);
+        let before = manager.status().config_revision;
+        let receipt: RetainedBackupReceipt = retained_json(&app, &token, "POST", "", StatusCode::CREATED).await?;
+        let path = fs::read_dir(dir.0.join("backups"))?.next().unwrap()?.path();
+        let bytes = fs::read(&path)?;
+        fs::write(&path, b"PRIVATE_CORRUPTED_ARCHIVE")?;
+        let response = app
+            .clone()
+            .oneshot(retained_request(&token, "GET", &format!("/{}", receipt.backup.id)))
+            .await?;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let message = to_bytes(response.into_body(), 4096).await?;
+        assert!(!String::from_utf8_lossy(&message).contains("PRIVATE_CORRUPTED_ARCHIVE"));
+        fs::remove_file(&path)?;
+        symlink(dir.0.join("bootstrap.yaml"), &path)?;
+        assert_eq!(
+            app.clone()
+                .oneshot(retained_request(&token, "DELETE", &format!("/{}", receipt.backup.id)))
+                .await?
+                .status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert!(dir.0.join("bootstrap.yaml").exists());
+        fs::remove_file(&path)?;
+        fs::write(&path, bytes)?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+        for _ in 1..32 {
+            let _: RetainedBackupReceipt = retained_json(&app, &token, "POST", "", StatusCode::CREATED).await?;
+        }
+        assert_eq!(
+            app.clone()
+                .oneshot(retained_request(&token, "POST", ""))
+                .await?
+                .status(),
+            StatusCode::INSUFFICIENT_STORAGE
+        );
+        assert_eq!(fs::read_dir(dir.0.join("backups"))?.count(), 32);
+        assert_eq!(manager.status().config_revision, before);
         Ok::<_, anyhow::Error>(())
     }
     .await;

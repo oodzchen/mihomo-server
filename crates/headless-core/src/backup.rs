@@ -95,6 +95,37 @@ pub struct BackupMetadata {
     pub sha256: String,
 }
 
+/// Private local storage metadata; IDs are opaque and never accepted as paths.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetainedBackup {
+    pub id: String,
+    pub created_at: u64,
+    pub content_length: u64,
+    pub sha256: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetainedBackupList {
+    pub archives: Vec<RetainedBackup>,
+    pub total_bytes: u64,
+    pub max_archives: usize,
+    pub max_total_bytes: u64,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetainedBackupReceipt {
+    pub committed: bool,
+    pub durability_pending: bool,
+    pub backup: RetainedBackup,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackupDeletionReceipt {
+    pub deleted: bool,
+    pub durability_pending: bool,
+}
+
 pub fn validate_filename(name: &str) -> Result<()> {
     crate::config::profile_store::validate_profile_file(name)?;
     ensure!(

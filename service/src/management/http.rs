@@ -5,7 +5,7 @@ use super::{Management, ManagementCommand, RequestCredentials};
 use axum::{
     Json, Router,
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Request, State, rejection::JsonRejection},
+    extract::{DefaultBodyLimit, Path, Request, State, rejection::JsonRejection},
     http::{HeaderMap, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -64,6 +64,11 @@ pub fn router(state: HttpState) -> Router {
     Router::new()
         .route("/api/commands", post(command))
         .route("/api/backup", post(backup))
+        .route("/api/backups", get(list_retained_backups).post(create_retained_backup))
+        .route(
+            "/api/backups/{id}",
+            get(download_retained_backup).delete(delete_retained_backup),
+        )
         .route("/api/backup/inspect", post(inspect_backup))
         .route("/api/backup/validate", post(validate_backup_restore))
         .route("/api/backup/restore", post(restore_backup))
@@ -174,6 +179,10 @@ async fn backup(State(state): State<HttpState>, body: Bytes) -> Response {
             );
         }
     };
+    backup_response(download)
+}
+
+fn backup_response(download: crate::backup::BackupDownload) -> Response {
     let metadata = download.metadata;
     let stream = futures_util::stream::unfold(
         (Bytes::from(download.bytes), download.permit),
@@ -200,6 +209,92 @@ async fn backup(State(state): State<HttpState>, body: Bytes) -> Response {
     );
     headers.insert("x-backup-sha256", metadata.sha256.parse().unwrap());
     response
+}
+
+async fn create_retained_backup(State(state): State<HttpState>, body: Bytes) -> Response {
+    retained_backup(state, crate::backup::RetainedOperation::Create, body).await
+}
+async fn list_retained_backups(State(state): State<HttpState>, body: Bytes) -> Response {
+    retained_backup(state, crate::backup::RetainedOperation::List, body).await
+}
+async fn download_retained_backup(State(state): State<HttpState>, Path(id): Path<String>, body: Bytes) -> Response {
+    retained_backup(state, crate::backup::RetainedOperation::Download(id), body).await
+}
+async fn delete_retained_backup(State(state): State<HttpState>, Path(id): Path<String>, body: Bytes) -> Response {
+    retained_backup(state, crate::backup::RetainedOperation::Delete(id), body).await
+}
+async fn retained_backup(state: HttpState, operation: crate::backup::RetainedOperation, body: Bytes) -> Response {
+    use crate::backup::{RetainedOperation, RetainedOutcome};
+    if !body.is_empty() {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid_backup_request",
+            "local backup requests must be empty",
+        );
+    }
+    if let RetainedOperation::Download(id) | RetainedOperation::Delete(id) = &operation
+        && (id.len() != 24 || !id.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)))
+    {
+        return error(StatusCode::BAD_REQUEST, "invalid_backup_id", "invalid local backup ID");
+    }
+    let (permit, shutdown) = match state.management.manager.admit_backup_upload() {
+        Ok(admission) => admission,
+        Err(_) if state.management.manager.is_shutting_down() => {
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "shutting_down",
+                "service is shutting down",
+            );
+        }
+        Err(_) => {
+            return error(
+                StatusCode::CONFLICT,
+                "backup_busy",
+                "finish the current backup operation and retry",
+            );
+        }
+    };
+    let closing = state.closing.subscribe();
+    match state
+        .management
+        .manager
+        .retained_backup(operation, permit, closing.clone())
+        .await
+    {
+        Ok(RetainedOutcome::Created(receipt)) => (StatusCode::CREATED, Json(receipt)).into_response(),
+        Ok(RetainedOutcome::Listed(list)) => Json(list).into_response(),
+        Ok(RetainedOutcome::Deleted(receipt)) => Json(receipt).into_response(),
+        Ok(RetainedOutcome::Downloaded(download)) => backup_response(download),
+        Err(cause) => {
+            #[cfg(not(target_os = "linux"))]
+            let _ = &cause;
+            #[cfg(target_os = "linux")]
+            {
+                if cause.downcast_ref::<crate::backup::storage::StorageFull>().is_some() {
+                    return error(
+                        StatusCode::INSUFFICIENT_STORAGE,
+                        "backup_storage_full",
+                        "local backup capacity reached; delete a retained backup and retry",
+                    );
+                }
+                if cause.downcast_ref::<crate::backup::storage::Missing>().is_some() {
+                    return error(StatusCode::NOT_FOUND, "backup_not_found", "local backup not found");
+                }
+            }
+            if *shutdown.borrow() || *closing.borrow() {
+                return error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "backup_interrupted",
+                    "local backup operation interrupted; inspect retained backups before retrying",
+                );
+            }
+            error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "backup_storage_failed",
+                "local backup operation failed; inspect retained backups before retrying",
+            )
+        }
+    }
 }
 
 async fn inspect_backup(State(state): State<HttpState>, request: Request) -> Response {
