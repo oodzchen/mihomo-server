@@ -21,6 +21,12 @@ pub enum ManagementCommand {
     PrepareCoreUpgrade {
         version: Option<String>,
     },
+    AlphaCoreRelease {
+        version: Option<String>,
+    },
+    PrepareAlphaCoreUpgrade {
+        version: Option<String>,
+    },
     PreparedCoreUpgrade {
         id: String,
     },
@@ -199,6 +205,12 @@ impl Management {
             }
             ManagementCommand::PrepareCoreUpgrade { version } => {
                 serde_json::to_value(self.manager.prepare_core_upgrade(version).await?)?
+            }
+            ManagementCommand::AlphaCoreRelease { version } => {
+                serde_json::to_value(self.manager.alpha_core_release(version).await?)?
+            }
+            ManagementCommand::PrepareAlphaCoreUpgrade { version } => {
+                serde_json::to_value(self.manager.prepare_alpha_core_upgrade(version).await?)?
             }
             ManagementCommand::PreparedCoreUpgrade { id } => {
                 serde_json::to_value(self.manager.prepared_core_upgrade(&id)?)?

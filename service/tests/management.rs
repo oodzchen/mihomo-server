@@ -38,6 +38,8 @@ async fn core_release_commands_authenticate_reject_source_overrides_and_require_
         let revision = manager.status().config_revision;
         for command in [
             json!({"command":"core_release"}),
+            json!({"command":"alpha_core_release"}),
+            json!({"command":"prepare_alpha_core_upgrade"}),
             json!({"command":"prepare_core_upgrade"}),
             json!({"command":"prepared_core_upgrade","id":"v1.2.3-invalid"}),
             json!({"command":"stage_core_upgrade","id":"v1.2.3-invalid"}),
@@ -56,6 +58,11 @@ async fn core_release_commands_authenticate_reject_source_overrides_and_require_
         }
         for command in [
             json!({"command":"core_release","version":"../private"}),
+            json!({"command":"alpha_core_release","version":"v1.2.3"}),
+            json!({"command":"alpha_core_release","version":"alpha-../private"}),
+            json!({"command":"alpha_core_release","url":"https://untrusted.invalid"}),
+            json!({"command":"prepare_alpha_core_upgrade"}),
+            json!({"command":"prepare_alpha_core_upgrade","sha256":"arbitrary"}),
             json!({"command":"core_release","url":"https://untrusted.invalid"}),
             json!({"command":"prepare_core_upgrade","sha256":"arbitrary"}),
             json!({"command":"prepare_core_upgrade","version":"v1.2.3"}),

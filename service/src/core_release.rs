@@ -1,4 +1,4 @@
-//! Stable upstream release discovery and verified compressed-package preparation.
+//! Stable/Alpha upstream release discovery and verified compressed-package preparation.
 //! Actor-owned staging validates executables; activation remains a separate workflow.
 #[path = "core_stage.rs"]
 mod stage;
@@ -77,16 +77,29 @@ fn stable_version(version: &str) -> bool {
             .iter()
             .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
 }
+#[derive(Clone, Copy)]
+pub(crate) enum ReleaseChannel {
+    Stable,
+    Alpha,
+}
+fn alpha_version(version: &str) -> bool {
+    version.strip_prefix("alpha-").is_some_and(|hash| {
+        (7..=40).contains(&hash.len()) && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
+}
+fn release_version(version: &str) -> bool {
+    stable_version(version) || alpha_version(version)
+}
 fn valid_hash(hash: &str) -> bool {
     hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())
 }
 fn asset_name(version: &str) -> Result<String> {
-    ensure!(stable_version(version), "unsupported stable core version");
+    ensure!(release_version(version), "unsupported core version");
     // Retain upstream's bundled amd64-v2 variant. Other targets need their own
     // archive/platform runtime validation before being advertised as upgrades.
     ensure!(
         matches!(TARGET, "x86_64-unknown-linux-gnu" | "x86_64-unknown-linux-musl"),
-        "stable core preparation currently requires Linux x86_64"
+        "core preparation currently requires Linux x86_64"
     );
     Ok(format!("mihomo-linux-amd64-v2-{version}.gz"))
 }
@@ -109,7 +122,15 @@ impl Repository {
     fn package_url(&self, version: &str) -> Result<String> {
         Ok(self
             .packages
-            .join(&format!("{version}/{}", asset_name(version)?))?
+            .join(&format!(
+                "{}/{}",
+                if alpha_version(version) {
+                    "Prerelease-Alpha"
+                } else {
+                    version
+                },
+                asset_name(version)?
+            ))?
             .to_string())
     }
     #[cfg(test)]
@@ -148,8 +169,17 @@ impl Repository {
             .build()
             .context("build verified core release client")
     }
+    #[cfg(test)]
     async fn resolve(&self, version: Option<&str>, routes: Vec<Route>) -> Result<ResolvedRelease> {
-        asset_name(version.unwrap_or("v0.0.0"))?;
+        self.resolve_channel(version, routes, ReleaseChannel::Stable).await
+    }
+    async fn resolve_channel(
+        &self,
+        version: Option<&str>,
+        routes: Vec<Route>,
+        channel: ReleaseChannel,
+    ) -> Result<ResolvedRelease> {
+        check_request(version, channel)?;
         let mut last = None;
         for route in routes {
             let result = tokio::time::timeout(
@@ -157,14 +187,14 @@ impl Repository {
                 route.run(async {
                     let first = async {
                         let client = self.client_for(&route, RootMode::Platform)?;
-                        self.discover(&client, version).await
+                        self.discover_channel(&client, version, channel).await
                     }
                     .await;
                     match first {
                         Ok(release) => Ok(release),
                         Err(error) if tls::should_retry(&error) => {
                             let client = self.client_for(&route, RootMode::Static)?;
-                            self.discover(&client, version)
+                            self.discover_channel(&client, version, channel)
                                 .await
                                 .context("core metadata static roots fallback failed")
                         }
@@ -198,11 +228,21 @@ impl Repository {
         );
         Ok(())
     }
+    #[cfg(test)]
     async fn discover(&self, client: &reqwest::Client, version: Option<&str>) -> Result<CoreRelease> {
-        asset_name(version.unwrap_or("v0.0.0"))?;
-        let endpoint = match version {
-            Some(version) => self.api.join(&format!("tags/{version}"))?,
-            None => self.api.join("latest")?,
+        self.discover_channel(client, version, ReleaseChannel::Stable).await
+    }
+    async fn discover_channel(
+        &self,
+        client: &reqwest::Client,
+        version: Option<&str>,
+        channel: ReleaseChannel,
+    ) -> Result<CoreRelease> {
+        check_request(version, channel)?;
+        let endpoint = match (channel, version) {
+            (ReleaseChannel::Alpha, _) => self.api.join("tags/Prerelease-Alpha")?,
+            (ReleaseChannel::Stable, Some(version)) => self.api.join(&format!("tags/{version}"))?,
+            (ReleaseChannel::Stable, None) => self.api.join("latest")?,
         };
         let mut response = client
             .get(endpoint)
@@ -237,18 +277,44 @@ impl Repository {
         // Do not echo remote response text or parser excerpts.
         let metadata: ReleaseResponse =
             serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("invalid core release metadata"))?;
+        ensure!(!metadata.draft, "draft core release is unsupported");
+        let (resolved_version, asset) = match channel {
+            ReleaseChannel::Stable => {
+                ensure!(
+                    !metadata.prerelease && stable_version(&metadata.tag_name),
+                    "only published stable core releases are supported"
+                );
+                let name = asset_name(&metadata.tag_name)?;
+                let mut assets = metadata.assets.into_iter().filter(|a| a.name == name);
+                let asset = assets.next().context("matching core release asset missing")?;
+                ensure!(assets.next().is_none(), "duplicate core release assets");
+                (metadata.tag_name, asset)
+            }
+            ReleaseChannel::Alpha => {
+                ensure!(
+                    metadata.prerelease && metadata.tag_name == "Prerelease-Alpha",
+                    "invalid Alpha core release tag/status"
+                );
+                let mut assets = metadata
+                    .assets
+                    .into_iter()
+                    .filter(|a| a.name.starts_with("mihomo-linux-amd64-v2-alpha-") && a.name.ends_with(".gz"));
+                let asset = assets.next().context("matching Alpha core release asset missing")?;
+                ensure!(assets.next().is_none(), "duplicate Alpha core release assets");
+                let resolved = asset
+                    .name
+                    .strip_prefix("mihomo-linux-amd64-v2-")
+                    .and_then(|v| v.strip_suffix(".gz"))
+                    .context("invalid Alpha core asset")?
+                    .to_string();
+                ensure!(alpha_version(&resolved), "invalid Alpha core version");
+                (resolved, asset)
+            }
+        };
         ensure!(
-            !metadata.draft && !metadata.prerelease,
-            "only published stable core releases are supported"
-        );
-        ensure!(
-            version.is_none_or(|v| v == metadata.tag_name),
+            version.is_none_or(|v| v == resolved_version),
             "resolved core version differs from requested tag"
         );
-        let name = asset_name(&metadata.tag_name)?;
-        let mut assets = metadata.assets.into_iter().filter(|a| a.name == name);
-        let asset = assets.next().context("matching core release asset missing")?;
-        ensure!(assets.next().is_none(), "duplicate core release assets");
         ensure!(asset.state == "uploaded", "core asset upload is incomplete");
         let hash = asset
             .digest
@@ -256,9 +322,9 @@ impl Repository {
             .and_then(|d| d.strip_prefix("sha256:"))
             .context("core release has no SHA-256 digest")?;
         let release = CoreRelease {
-            version: metadata.tag_name,
+            version: resolved_version,
             target: TARGET.into(),
-            asset: name,
+            asset: asset.name,
             bytes: asset.size,
             sha256: hash.to_ascii_lowercase(),
             download_url: asset.browser_download_url,
@@ -268,8 +334,28 @@ impl Repository {
     }
 }
 pub(crate) async fn discover_via(version: Option<&str>, routes: Vec<Route>) -> Result<ResolvedRelease> {
-    let repository = Repository::official();
-    repository.resolve(version, routes).await
+    discover_channel_via(version, routes, ReleaseChannel::Stable).await
+}
+
+fn check_request(version: Option<&str>, channel: ReleaseChannel) -> Result<()> {
+    if let Some(version) = version {
+        ensure!(
+            match channel {
+                ReleaseChannel::Stable => stable_version(version),
+                ReleaseChannel::Alpha => alpha_version(version),
+            },
+            "unsupported requested core version/channel"
+        );
+    }
+    asset_name(version.unwrap_or("v0.0.0"))?;
+    Ok(())
+}
+pub(crate) async fn discover_channel_via(
+    version: Option<&str>,
+    routes: Vec<Route>,
+    channel: ReleaseChannel,
+) -> Result<ResolvedRelease> {
+    Repository::official().resolve_channel(version, routes, channel).await
 }
 
 pub(crate) struct CoreDownloads {
@@ -455,9 +541,9 @@ impl CoreDownloads {
         Ok(())
     }
     pub(crate) fn inspect(&self, id: &str) -> Result<PreparedCore> {
-        let (version, hash) = id.split_once('-').context("invalid prepared core ID")?;
+        let (version, hash) = id.rsplit_once('-').context("invalid prepared core ID")?;
         ensure!(
-            stable_version(version) && valid_hash(hash) && hash == hash.to_ascii_lowercase(),
+            release_version(version) && valid_hash(hash) && hash == hash.to_ascii_lowercase(),
             "invalid prepared core ID"
         );
         let directory = self.root.join(id);

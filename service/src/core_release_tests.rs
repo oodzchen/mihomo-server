@@ -697,3 +697,210 @@ async fn system_proxy_auth_bypass_cgi_and_direct_fallback_are_process_isolated()
     }
     Ok(())
 }
+
+fn alpha_metadata(fixture: &Fixture, version: &str) -> Result<Value> {
+    Ok(
+        json!({"tag_name":"Prerelease-Alpha","draft":false,"prerelease":true,"assets":[{
+            "name":asset_name(version)?,"state":"uploaded","size":PACKAGE.len(),
+            "digest":format!("sha256:{}",hash(PACKAGE)),"browser_download_url":fixture.repository.package_url(version)?
+        }]}),
+    )
+}
+#[tokio::test]
+async fn alpha_discovery_pins_unique_default_variant_and_rejects_invalid_requested_channels_before_network()
+-> Result<()> {
+    let fixture = Fixture::new().await?;
+    let client = fixture.repository.client()?;
+    let mut metadata = alpha_metadata(&fixture, "alpha-63bd52e")?;
+    let mut other = metadata["assets"][0].clone();
+    other["name"] = json!("mihomo-linux-amd64-v2-go123-alpha-63bd52e.gz");
+    metadata["assets"].as_array_mut().unwrap().push(other);
+    *fixture.state.metadata.lock().unwrap() = metadata;
+    let release = fixture
+        .repository
+        .discover_channel(&client, None, ReleaseChannel::Alpha)
+        .await?;
+    assert_eq!(release.version, "alpha-63bd52e");
+    assert_eq!(release.asset, "mihomo-linux-amd64-v2-alpha-63bd52e.gz");
+    assert!(release.download_url.contains("/Prerelease-Alpha/"));
+    assert_eq!(
+        fixture
+            .repository
+            .discover_channel(&client, Some("alpha-63bd52e"), ReleaseChannel::Alpha)
+            .await?,
+        release
+    );
+    assert_eq!(
+        &*fixture.state.requests.lock().unwrap(),
+        &["/api/tags/Prerelease-Alpha", "/api/tags/Prerelease-Alpha"]
+    );
+    for version in [
+        "v1.2.3",
+        "alpha-123",
+        "alpha-ABCDEF0",
+        "alpha-../secret",
+        "alpha-1234567?token=private",
+        "alpha-1234567\n",
+    ] {
+        assert!(
+            fixture
+                .repository
+                .discover_channel(&client, Some(version), ReleaseChannel::Alpha)
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(fixture.state.requests.lock().unwrap().len(), 2);
+    assert!(alpha_version(&format!("alpha-{}", "a".repeat(40))));
+    assert!(!alpha_version(&format!("alpha-{}", "a".repeat(41))));
+    assert!(fixture.repository.discover(&client, None).await.is_err());
+    Ok(())
+}
+#[tokio::test]
+async fn alpha_metadata_rejects_draft_tag_ambiguity_invalid_version_digest_size_and_unpinned_url() -> Result<()> {
+    let fixture = Fixture::new().await?;
+    let client = fixture.repository.client()?;
+    let original = alpha_metadata(&fixture, "alpha-63bd52e")?;
+    let mut cases = Vec::new();
+    for (key, value) in [
+        ("draft", json!(true)),
+        ("prerelease", json!(false)),
+        ("tag_name", json!("Prerelease-Other")),
+    ] {
+        let mut metadata = original.clone();
+        metadata[key] = value;
+        cases.push(metadata);
+    }
+    for (key, value) in [
+        ("name", json!("mihomo-linux-amd64-v2-alpha-secret.gz")),
+        ("name", json!("mihomo-linux-amd64-v2-alpha-abcdef0/../private.gz")),
+        ("state", json!("new")),
+        ("size", json!(0)),
+        ("size", json!(MAX_PACKAGE + 1)),
+        ("digest", Value::Null),
+        ("digest", json!("sha256:short")),
+        ("browser_download_url", json!("https://evil.invalid/?token=private")),
+        (
+            "browser_download_url",
+            json!(
+                fixture
+                    .repository
+                    .packages
+                    .join("alpha-63bd52e/mihomo-linux-amd64-v2-alpha-63bd52e.gz")?
+                    .to_string()
+            ),
+        ),
+    ] {
+        let mut metadata = original.clone();
+        metadata["assets"][0][key] = value;
+        cases.push(metadata);
+    }
+    let mut duplicate = original.clone();
+    duplicate["assets"]
+        .as_array_mut()
+        .unwrap()
+        .push(original["assets"][0].clone());
+    cases.push(duplicate);
+    for metadata in cases {
+        *fixture.state.metadata.lock().unwrap() = metadata;
+        let error = fixture
+            .repository
+            .discover_channel(&client, None, ReleaseChannel::Alpha)
+            .await
+            .unwrap_err();
+        assert!(!format!("{error:#}").contains("token=private"));
+    }
+    *fixture.state.metadata.lock().unwrap() = original;
+    assert!(
+        fixture
+            .repository
+            .discover_channel(&client, Some("alpha-abcdef0"), ReleaseChannel::Alpha)
+            .await
+            .is_err()
+    );
+    fixture.state.metadata.lock().unwrap()["padding"] = json!("x".repeat(MAX_METADATA));
+    assert!(
+        fixture
+            .repository
+            .discover_channel(&client, None, ReleaseChannel::Alpha)
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+#[tokio::test]
+async fn alpha_preparation_retains_snapshot_readback_and_live_core_while_staging_stays_disabled() -> Result<()> {
+    let dir = Directory::new()?;
+    let fixture = Fixture::new().await?;
+    *fixture.state.metadata.lock().unwrap() = alpha_metadata(&fixture, "alpha-63bd52e")?;
+    let downloads = fixture.downloads(&dir)?;
+    let resolved = fixture
+        .repository
+        .resolve_channel(None, vec![Route::Direct], ReleaseChannel::Alpha)
+        .await?;
+    *fixture.state.metadata.lock().unwrap() = alpha_metadata(&fixture, "alpha-abcdef0")?;
+    let (shutdown, _) = watch::channel(false);
+    let prepared = downloads.prepare_selected(resolved, &shutdown.subscribe()).await?;
+    assert_eq!(prepared.id, format!("alpha-63bd52e-{}", hash(PACKAGE)));
+    assert_eq!(downloads.inspect(&prepared.id)?, prepared);
+    let restarted = fixture.downloads(&dir)?;
+    assert_eq!(restarted.inspect(&prepared.id)?, prepared);
+    let result = restarted
+        .stage(
+            &prepared.id,
+            "mode: direct\nrules: ['MATCH,DIRECT']\n".into(),
+            None,
+            &dir.0,
+            &mut shutdown.subscribe(),
+        )
+        .await
+        .unwrap_err();
+    assert!(format!("{result:#}").contains("Alpha executable staging is not yet supported"));
+    assert_eq!(fs::read(dir.0.join("verge-mihomo"))?, b"unchanged live core");
+    assert!(!fs::read_dir(&downloads.root)?.any(|entry| entry.unwrap().file_name().to_str().is_some_and(pending_name)));
+    assert!(
+        fixture
+            .state
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|path| path.contains("/download/Prerelease-Alpha/mihomo-linux-amd64-v2-alpha-63bd52e.gz"))
+    );
+    Ok(())
+}
+#[tokio::test]
+async fn alpha_mutable_tag_integrity_failure_and_cancellation_never_publish_a_candidate() -> Result<()> {
+    let dir = Directory::new()?;
+    let fixture = Fixture::new().await?;
+    *fixture.state.metadata.lock().unwrap() = alpha_metadata(&fixture, "alpha-63bd52e")?;
+    let downloads = fixture.downloads(&dir)?;
+    let (shutdown, _) = watch::channel(false);
+    let resolved = fixture
+        .repository
+        .resolve_channel(None, vec![Route::Direct], ReleaseChannel::Alpha)
+        .await?;
+    fixture.state.package.lock().unwrap()[10] ^= 1;
+    assert!(
+        downloads
+            .prepare_selected(resolved, &shutdown.subscribe())
+            .await
+            .is_err()
+    );
+    assert_eq!(fs::read_dir(&downloads.root)?.count(), 0);
+    *fixture.state.package.lock().unwrap() = PACKAGE.to_vec();
+    let resolved = fixture
+        .repository
+        .resolve_channel(None, vec![Route::Direct], ReleaseChannel::Alpha)
+        .await?;
+    shutdown.send_replace(true);
+    assert!(
+        downloads
+            .prepare_selected(resolved, &shutdown.subscribe())
+            .await
+            .is_err()
+    );
+    assert_eq!(fs::read_dir(&downloads.root)?.count(), 0);
+    assert_eq!(fs::read(dir.0.join("verge-mihomo"))?, b"unchanged live core");
+    Ok(())
+}

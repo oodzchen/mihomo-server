@@ -527,6 +527,18 @@ impl CoreManager {
 
     /// Core release network work is independent of the lifecycle actor and subscriptions.
     pub async fn core_release(&self, version: Option<String>) -> Result<crate::core_release::CoreRelease> {
+        self.core_release_for(version, crate::core_release::ReleaseChannel::Stable)
+            .await
+    }
+    pub async fn alpha_core_release(&self, version: Option<String>) -> Result<crate::core_release::CoreRelease> {
+        self.core_release_for(version, crate::core_release::ReleaseChannel::Alpha)
+            .await
+    }
+    async fn core_release_for(
+        &self,
+        version: Option<String>,
+        channel: crate::core_release::ReleaseChannel,
+    ) -> Result<crate::core_release::CoreRelease> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let _permit = Arc::clone(&self.core_release_admission)
             .try_acquire_owned()
@@ -535,11 +547,26 @@ impl CoreManager {
         tokio::select! {
             biased;
             _ = closing(&mut shutdown) => bail!("core release check cancelled during shutdown"),
-            result = async { Ok(self.discover_core_release(version.as_deref()).await?.release) } => result,
+            result = async { Ok(self.discover_core_release_for(version.as_deref(), channel).await?.release) } => result,
         }
     }
 
     pub async fn prepare_core_upgrade(&self, version: Option<String>) -> Result<crate::core_release::PreparedCore> {
+        self.prepare_core_upgrade_for(version, crate::core_release::ReleaseChannel::Stable)
+            .await
+    }
+    pub async fn prepare_alpha_core_upgrade(
+        &self,
+        version: Option<String>,
+    ) -> Result<crate::core_release::PreparedCore> {
+        self.prepare_core_upgrade_for(version, crate::core_release::ReleaseChannel::Alpha)
+            .await
+    }
+    async fn prepare_core_upgrade_for(
+        &self,
+        version: Option<String>,
+        channel: crate::core_release::ReleaseChannel,
+    ) -> Result<crate::core_release::PreparedCore> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let downloads = self
             .core_downloads
@@ -553,7 +580,7 @@ impl CoreManager {
         tokio::select! {
             biased;
             _ = closing(&mut shutdown) => bail!("core preparation cancelled during shutdown"),
-            result = async { let resolved=self.discover_core_release(version.as_deref()).await?; downloads.prepare_selected(resolved,&cancellation).await } => result,
+            result = async { let resolved=self.discover_core_release_for(version.as_deref(), channel).await?; downloads.prepare_selected(resolved,&cancellation).await } => result,
         }
     }
 
@@ -1007,7 +1034,21 @@ impl CoreManager {
     }
 
     async fn discover_core_release(&self, version: Option<&str>) -> Result<crate::core_release::ResolvedRelease> {
-        let resolved = crate::core_release::discover_via(version, self.core_download_routes().await).await?;
+        self.discover_core_release_for(version, crate::core_release::ReleaseChannel::Stable)
+            .await
+    }
+    async fn discover_core_release_for(
+        &self,
+        version: Option<&str>,
+        channel: crate::core_release::ReleaseChannel,
+    ) -> Result<crate::core_release::ResolvedRelease> {
+        let routes = self.core_download_routes().await;
+        let resolved = match channel {
+            crate::core_release::ReleaseChannel::Stable => crate::core_release::discover_via(version, routes).await?,
+            crate::core_release::ReleaseChannel::Alpha => {
+                crate::core_release::discover_channel_via(version, routes, channel).await?
+            }
+        };
         self.logs.append(
             "core-upgrade",
             format!("release metadata resolved via {} route", resolved.route.name()),

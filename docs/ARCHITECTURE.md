@@ -112,8 +112,8 @@ mihomo-server/
 │   │   ├── TLS platform/static roots / explicit certificate option [Migrated + adaptation; Linux verified]
 │   │   ├── Scheduled refresh / retirement / bounded workers / drain [Migrated + adaptation; Linux verified]
 │   │   └── SOCKS/PAC                               [Pending]
-│   ├── Stable core release preparation                 [Partially implemented; Linux x86_64]
-│   │   ├── Official latest/pinned metadata and platform asset [Implemented]
+│   ├── Core release preparation / stable activation    [Partially implemented; Linux x86_64]
+│   │   ├── Official stable/Alpha metadata and platform asset [Implemented; Linux x86_64]
 │   │   ├── Bounded compressed download / SHA-256 / private atomic cache [Implemented]
 │   │   ├── Authenticated preparation/readback / cancellation [Implemented]
 │   │   ├── Bounded gzip / ELF / version / configuration probes [Implemented; Linux x86_64]
@@ -123,7 +123,8 @@ mihomo-server/
 │   │   ├── Stable upstream force/no-op adapter / upgrade Web workflow [Implemented; Linux x86_64]
 │   │   ├── Repair of unreadable/empty previous core [Implemented; Linux x86_64]
 │   │   ├── Managed/system/direct routing / verified static-root TLS retry [Implemented; Linux verified]
-│   │   └── Alpha / other targets [Pending]
+│   │   ├── Alpha compressed preparation / authenticated readback [Implemented; Linux x86_64]
+│   │   └── Alpha executable staging / activation / receipts / Web; other targets [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
@@ -140,7 +141,7 @@ mihomo-server/
 │   ├── Axum management API / command adapters       [Implemented; MVP allowlist]
 │   │   ├── State, logs, profiles, config, proxies queries [Implemented]
 │   │   ├── Lifecycle, YAML import/edit/overlay, profile edit/delete/import/refresh, linked read/set/clear, global read/set/reset, settings read/replace, profile DNS read/set, raw profile read/edit and node selection [Implemented]
-│   │   ├── Stable core query / preparation / staging / activation / installation/version readback / force-no-op upgrade [Implemented; Linux x86_64]
+│   │   ├── Stable core query / preparation / staging / activation / installation/version readback / force-no-op; Alpha query / compressed preparation / readback [Implemented; Linux x86_64]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -2141,7 +2142,7 @@ TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage collection,
 SOCKS/PAC and platform/deployment work remain pending. Native Windows/macOS system
 proxy discovery still requires platform runtime checks.
 
-## Latest increment: durable repair of broken managed cores
+## Previous increment: durable repair of broken managed cores
 
 Delivery step 7 now permits management startup with an empty, unreadable or
 nonexecutable existing managed core, without replacing it with the bundle seed.
@@ -2205,6 +2206,63 @@ step 7 subtask: Alpha release metadata/preparation with bounded version and asse
 validation, followed by Alpha activation/rollback and browser integration. Other
 targets, native TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage
 collection, SOCKS/PAC and platform/deployment work remain pending.
+
+## Latest increment: Alpha metadata and compressed candidate preparation
+
+Delivery step 7 adds authenticated `alpha_core_release` and
+`prepare_alpha_core_upgrade`, each with an optional bounded Alpha version.
+Discovery requests the official `Prerelease-Alpha` API release and requires its
+published prerelease status. The unique ordinary Linux amd64-v2 gzip asset supplies
+`alpha-<7..40 lowercase hex>` version, declared size and GitHub SHA-256 from one
+metadata snapshot. Other Go/platform variants are ignored; missing, ambiguous,
+invalid, draft or mismatched assets/URLs/digests are rejected. Requested versions
+must equal the currently published Alpha asset. Arbitrary URLs/hashes/paths remain
+unsupported; stable commands still reject Alpha requests and prerelease metadata.
+
+Alpha package URLs use the fixed `Prerelease-Alpha` tag and exact resolved asset
+name. The selected managed/system/direct route and verified platform/static TLS
+policy remain pinned across download. Existing 1 MiB metadata, 64 MiB package,
+timeout/admission/shutdown, gzip-signature and SHA-256 checks apply. A moving release
+cannot silently replace the resolved version/hash: missing or changed bytes fail
+without publishing a partial candidate. IDs use `alpha-<commit>-<package digest>`;
+readback splits the final digest separator, checks fixed manifest identity and
+rehashes cached bytes after restart. Existing stable IDs/manifests remain compatible.
+
+This increment prepares compressed candidates only. It does not execute or activate
+Alpha files. `stage_core_upgrade` rejects Alpha before unpacking/probing; Alpha
+staged receipts, durable activation/rollback, force/no-op and browser controls remain
+pending. The live core, configuration and profile/node records remain authoritative.
+
+Verification: `cargo check --workspace --locked --offline`, 257 regular workspace
+Rust tests, all 68 opt-in tests using real Mihomo, Clippy with warnings denied,
+formatting and diff checks pass. New fixtures cover default variant selection,
+channel/version rejection before network, published Alpha tag/status, invalid or
+ambiguous assets, digest/size/URL/metadata bounds, a moving metadata snapshot,
+package integrity failure/cancellation, restart readback and the pre-execution
+staging gate. Management tests verify authentication, source-override rejection and
+bundle requirements for the new commands. Existing stable activation/repair,
+crash rollback, subscription routing/TLS and configuration regressions remain green.
+
+All 24 browser regression workflows pass with the fresh Linux bundle. A private
+copy of the actual 56-node subscription discovers/prepares official
+`alpha-63bd52e` (22,849,242 compressed bytes) through its managed proxy, with
+verified static roots under an unrelated platform CA. Package size and SHA-256
+match official metadata; restart cache readback is identical. Alpha executable
+staging returns an explicit error, and preparation preserves live PID/inode,
+installed stable version, runtime YAML, profile catalog and selected node. Proxy
+HTTPS returns 204 before and after preparation. Original data hashes are unchanged.
+
+The runnable `target/mihomo-server-linux-x86_64-alpha-preparation` bundle passes
+checksums; its service binary matches the fresh release build and its deployment/
+provenance documents match the sources. Temporary services, cores, script workers
+and probe processes are terminated/reaped; the final process audit reports zero.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The Linux MVP remains runnable; the complete project is not done. Next Delivery
+step 7 subtask: Alpha executable/version/config staging, then durable activation,
+rollback/installation receipts and channel-aware force/no-op/browser integration.
+Other targets, native TUN/DNS/hosts/resources, backups/WebDAV, advanced pages,
+garbage collection, SOCKS/PAC and platform/deployment work remain pending.
 
 ## MVP completion boundary
 

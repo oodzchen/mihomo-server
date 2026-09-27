@@ -104,6 +104,10 @@ impl CoreDownloads {
         ensure!(yaml.len() <= MAX_CONFIG_BYTES, "configuration exceeds 8 MiB");
         headless_core::config::runtime::parse(&yaml)?;
         let prepared = self.inspect(id)?;
+        ensure!(
+            stable_version(&prepared.release.version),
+            "Alpha executable staging is not yet supported"
+        );
         let package = self.root.join(id).join("package.gz");
         let pending = Pending::new(&self.root)?;
         let binary = pending.0.join("verge-mihomo");

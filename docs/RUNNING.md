@@ -1947,3 +1947,36 @@ and verify proxy traffic. The existing profiles, runtime YAML and saved node
 selections remain authoritative. Failed repair leaves a broken original broken;
 management remains available to retry with a valid candidate. Alpha, other targets
 and native privilege integration remain pending.
+
+## Prepare an Alpha core candidate
+
+For a Linux x86_64 bundle, use the authenticated command endpoint:
+
+```json
+{"command":"alpha_core_release"}
+{"command":"prepare_alpha_core_upgrade"}
+{"command":"prepare_alpha_core_upgrade","version":"alpha-63bd52e"}
+{"command":"prepared_core_upgrade","id":"alpha-<commit>-<sha256>"}
+```
+
+The example version is illustrative; first query the current release. Optional
+versions must be `alpha-` followed by 7–40 lowercase hexadecimal characters and
+must match the currently published ordinary Linux amd64-v2 asset. Alpha uses the
+fixed official `Prerelease-Alpha` tag. The API snapshot supplies exact asset size,
+URL and SHA-256; requests cannot override them. Go-version-specific variants are
+ignored. Both new commands use the shared single upgrade admission slot, existing
+managed/system/direct routing, verified TLS-root fallback and shutdown cancellation.
+Preparation requires bundle-managed resources; discovery can run without a bundle.
+
+The result retains the stable `CoreRelease`/`PreparedCore` JSON shapes. Candidates
+are private compressed caches, named by Alpha version and SHA-256. Readback checks
+the manifest and rehashes package bytes. If the moving tag loses or changes the
+resolved asset, preparation fails and removes partial data; retry discovery rather
+than silently downloading another version. The active file, PID, configuration and
+saved node selections are unchanged by preparation. Metadata remains limited to
+1 MiB, package to 64 MiB; the same deadlines and redirect allowlist apply.
+
+Alpha executable staging, activation, receipts, force/no-op and Web controls are
+pending. `stage_core_upgrade` currently rejects an Alpha candidate before unpacking
+or execution. Stable upgrade/repair remains available through `/core`. Cached
+candidate garbage collection remains pending.

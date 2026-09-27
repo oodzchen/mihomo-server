@@ -1324,3 +1324,24 @@ Mihomo empty/unreadable/execute-only repair, saved node restoration, receipt
 persistence, process SIGKILL recovery and browser repair readback. Paths, package
 and authentication stay actor/private-service owned; no new dependency is added.
 Alpha/native privilege and other-platform repair remain pending.
+
+## Alpha release metadata and compressed preparation
+
+Source: `src-tauri/src/feat/core_upgrade.rs::resolve_latest_version`,
+`package_url`, `asset_base_name` and `download_package`, pinned commit
+b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b. Destinations: core_release.rs,
+core_manager.rs and management/mod.rs. Retained Alpha behavior uses the fixed
+`Prerelease-Alpha` tag, Linux amd64-v2 variant and pinned version/package name.
+The service reads one official API metadata snapshot instead of mutable version.txt,
+requiring published prerelease status, a unique ordinary gzip asset, declared size
+and SHA-256. Supported Alpha versions are `alpha-<7..40 lowercase hex>`; Go-specific
+variants are ignored. Optional pinned requests must match the current Alpha asset.
+
+Route affinity, platform/static trusted roots, bounds, admission and cancellation
+reuse the stable pipeline. Cache IDs split the last digest separator to retain
+hyphenated Alpha versions without changing existing stable manifest schemas.
+Fixtures cover channel rejection, invalid/ambiguous metadata, moving release
+snapshot integrity, cancellation and restart readback. Preparation never touches
+the live core; executable staging deliberately rejects Alpha before unpack/probe.
+Alpha activation/receipts/force-no-op/Web and other targets remain pending.
+No dependency is added.
