@@ -723,7 +723,7 @@ The saved certificate option also applies to refresh. Linked
 sequences/YAML merge/scripts are supported and applied to active updates. Refresh
 uses the same direct, system or managed-proxy transport,
 shared four-download admission, body limits and shutdown cancellation as import.
-No automatic scheduler runs yet.
+The automatic scheduler starts with the recovered catalog; see Scheduled subscription updates below.
 
 A successful update keeps UID/name/description/URL and current node records, and
 replaces usage/home/timestamp metadata. Missing usage/home headers remove those
@@ -752,7 +752,7 @@ source file/URL/options; an older completion is rejected if another refresh alre
 committed. Node records are read from the actor's current catalog at commit, so a
 node choice made while downloading is preserved. Other core operations remain
 available during download. Refresh never starts a stopped core or refetches at
-startup. Metadata editing/deletion is described below; scheduler integration,
+startup. Metadata editing/deletion is described below;
 complete enhancement and resource rollback remain separate pending work.
 
 The tests above additionally verify active/noncurrent/stopped updates, authentication
@@ -796,7 +796,7 @@ Each patch field is optional; omitted/null fields retain their values. An empty
 description clears it. Titles must be nonblank and at most 256 UTF-8 bytes,
 descriptions at most 4 KiB, URLs valid HTTP(S) at most 8 KiB, user agents at most
 1 KiB without control characters and timeouts 1..120 seconds. update_interval is
-an unsigned count of minutes; zero is retained as disabled update metadata.
+an unsigned count of minutes; zero disables automatic scheduling.
 URL/options are remote-only. Supported option fields merge into saved options;
 unsupported enhancement fields and UID/type/file/selected/
 extra/updated changes are rejected. The dedicated raw subscription editor edits
@@ -1580,7 +1580,7 @@ in-flight proxy downloads. Shutdown cancels active and queued requests. Network
 work remains outside the lifecycle actor. A metadata/raw/URL change during refresh
 invalidates the old result through the existing source guard; successful results
 continue through the original transactional import/refresh recovery workflows.
-SOCKS-only ingress and scheduled updates are separate pending
+SOCKS-only ingress remains a separate pending
 increments. System proxy discovery is described below.
 
 
@@ -1638,7 +1638,7 @@ TLS verification defaults, download/redirect/body/concurrency bounds, cancellati
 source guards and import/refresh recovery remain shared across all modes. A system
 proxy download survives unrelated managed-core stop/reload; service shutdown still
 cancels active and queued requests. Socks transport and
-scheduling remain pending.
+core upgrades and backups remain pending.
 
 
 ## Subscription TLS verification and fallback
@@ -1673,3 +1673,48 @@ once; system discovery remains explicitly opt-in. No attempt changes the chosen
 transport mode or falls back to direct access on proxy failure. URLs, URL tokens,
 proxy credentials and the management bearer token are excluded from download
 errors; the management token is never forwarded to origins or proxies.
+
+
+## Scheduled subscription updates
+
+Enable `allow_auto_update: true` and a positive `update_interval` (minutes) on
+remote import or metadata edit. The Web metadata editor exposes both values.
+An absent allow flag defaults to enabled, matching upstream. Missing/zero interval,
+explicit false, non-remote rows and missing UID/URL do not register a timer. A
+provider's profile-update-interval header supplies hours converted to minutes
+when no explicit interval was saved. Manual refresh remains allowed when automatic
+updates are disabled.
+
+The recovered catalog is scheduled automatically on service startup. First update
+is due at `updated + interval`; already overdue subscriptions run immediately,
+whereas absent/zero timestamps or future timestamps wait a full interval. Success
+publishes the refreshed timestamp with the existing transaction. Subsequent runs
+wait a full saved interval after completion, including failed runs, so an unchanged
+old timestamp cannot cause a busy retry loop. Retry deadlines are in memory;
+restarting after a failure recomputes the overdue timestamp and may retry at startup.
+Unrepresentably large intervals stay dormant until metadata changes; they do not
+panic or turn into immediate deadlines.
+
+Metadata/deletion/profile watches reconfigure schedules. A successful manual
+refresh changes updated and resets its pending deadline. Interval changes recompute
+first due time when idle; during a run they take effect for the next full interval.
+Disable/delete removes idle timers but retains an in-flight UID guard until its
+worker finishes, so disable/re-enable cannot launch duplicate automatic work.
+Changing URL/options while downloading uses the existing stale-result guard.
+Queued automatic downloads recheck their saved source and enabled policy after
+admission, before contacting the provider. Automatic commands also check enabled
+policy at actor admission. Manual requests retain their existing concurrency and
+source-version conflict rules.
+
+At most four automatic workers run at once; additional due UIDs remain in the
+scheduler map. Workers share the same four-download semaphore with manual refresh
+and imports. Network work stays outside the lifecycle actor; active updates reuse
+enhancement, YAML/Mihomo validation, application, rollback, node restoration and
+journal recovery. Direct/system mode can update while the core is stopped. Managed
+mode retains its running-core requirement and no direct fallback; timers wait
+through starting/recovering/stopping phases and wake on stable core state.
+
+The scheduler uses the saved proxy, TLS, user-agent and timeout options unchanged.
+Its bounded `scheduler` log stream reports starts, completions and failures without
+provider bodies, URLs, names or credentials. Shutdown cancels and drains all owned
+workers before returning; no independent timer process or service is needed.

@@ -1,3 +1,6 @@
+#[path = "scheduler.rs"]
+mod scheduler;
+
 use std::{
     collections::{HashMap, VecDeque},
     fs::{File, OpenOptions},
@@ -346,6 +349,7 @@ enum CommandMessage {
         reply: oneshot::Sender<Result<IProfiles>>,
     },
     RefreshRemote {
+        automatic: bool,
         source: Box<PrfItem>,
         profile: Box<headless_core::config::remote::RemoteProfile>,
         reply: oneshot::Sender<Result<PrfItem>>,
@@ -375,6 +379,7 @@ pub struct CoreManager {
     state: watch::Receiver<CoreStatus>,
     shutdown: watch::Sender<bool>,
     completion: watch::Receiver<Option<std::result::Result<(), String>>>,
+    scheduler_completion: watch::Receiver<bool>,
     logs: Logs,
     client: Arc<Mihomo>,
     profiles: watch::Receiver<IProfiles>,
@@ -444,7 +449,9 @@ impl CoreManager {
             drop(actor);
             finished.send_replace(Some(result));
         });
-        Ok(Self {
+        let (scheduler_finished, scheduler_completion) = watch::channel(false);
+        let manager = Self {
+            scheduler_completion,
             remote_admission: Arc::new(tokio::sync::Semaphore::new(4)),
             commands,
             state,
@@ -453,7 +460,13 @@ impl CoreManager {
             logs,
             client,
             profiles,
-        })
+        };
+        let access = scheduler::Access::new(&manager);
+        tokio::spawn(async move {
+            scheduler::run(access).await;
+            scheduler_finished.send_replace(true);
+        });
+        Ok(manager)
     }
 
     pub fn status(&self) -> CoreStatus {
@@ -694,6 +707,10 @@ impl CoreManager {
 
     /// The source file guards against a second download overwriting a newer refresh.
     pub async fn refresh_profile(&self, uid: String) -> Result<PrfItem> {
+        self.refresh_profile_mode(uid, false).await
+    }
+
+    async fn refresh_profile_mode(&self, uid: String, automatic: bool) -> Result<PrfItem> {
         ensure!(uid.len() <= 256, "profile UID exceeds 256 bytes");
         let source = self
             .profiles
@@ -708,6 +725,9 @@ impl CoreManager {
             source.itype.as_deref() == Some("remote"),
             "only remote profiles can be refreshed"
         );
+        if automatic {
+            ensure!(scheduler::eligible(&source), "automatic subscription update disabled");
+        }
         let options = crate::remote::RemoteOptions::from_profile(source.option.as_ref())?;
         let url = source.url.as_deref().context("remote URL missing")?;
         let mut shutdown = self.shutdown.subscribe();
@@ -716,6 +736,22 @@ impl CoreManager {
             _ = closing(&mut shutdown) => bail!("service is shutting down"),
             permit = Arc::clone(&self.remote_admission).acquire_owned() => permit?,
         };
+        if automatic {
+            let snapshot = self.profiles();
+            let current = snapshot
+                .items
+                .iter()
+                .flatten()
+                .find(|item| item.uid.as_deref() == Some(uid.as_str()))
+                .context("scheduled profile removed while waiting")?;
+            ensure!(
+                scheduler::eligible(current)
+                    && current.file == source.file
+                    && current.url == source.url
+                    && current.option == source.option,
+                "scheduled profile changed while waiting for admission"
+            );
+        }
         let profile = tokio::select! {
             biased;
             _ = closing(&mut shutdown) => bail!("remote refresh cancelled during shutdown"),
@@ -726,7 +762,7 @@ impl CoreManager {
             biased;
             _ = closing(&mut shutdown) => bail!("remote refresh cancelled during shutdown"),
             sent = self.commands.send(CommandMessage::RefreshRemote {
-                source: Box::new(source), profile: Box::new(profile), reply,
+                automatic, source: Box::new(source), profile: Box::new(profile), reply,
             }) => sent.context("core manager stopped")?,
         }
         result.await.context("remote refresh cancelled during shutdown")?
@@ -889,6 +925,13 @@ impl CoreManager {
 
     pub async fn shutdown(&self) -> Result<()> {
         self.shutdown.send_replace(true);
+        let mut scheduler = self.scheduler_completion.clone();
+        while !*scheduler.borrow_and_update() {
+            scheduler
+                .changed()
+                .await
+                .context("subscription scheduler ended without completion")?;
+        }
         let mut done = self.completion.clone();
         loop {
             if let Some(result) = done.borrow().clone() {
@@ -1370,9 +1413,11 @@ impl Actor {
                                 let _ = reply.send(result.map(|()| self.profile_store.snapshot()));
                             }
                         }
-                        CommandMessage::RefreshRemote { source, profile, reply } => {
+                        CommandMessage::RefreshRemote { automatic, source, profile, reply } => {
                             if !reply.is_closed() {
-                                let result = self.refresh_remote(*source, *profile).await;
+                                let result = if automatic && !self.profile_store.get_item(source.uid.as_deref().unwrap_or_default()).is_ok_and(scheduler::eligible) {
+                                    Err(anyhow::anyhow!("automatic subscription update disabled"))
+                                } else { self.refresh_remote(*source, *profile).await };
                                 if let Err(error) = &result {
                                     self.status.send_modify(|state| state.error = Some(format!("{error:#}")));
                                 }

@@ -1101,3 +1101,47 @@ platform custom CA, authenticated CONNECT routing, persistence, stale refresh an
 shutdown. These fixtures use only loopback addresses and delete their keys; real
 Mihomo integration additionally verifies managed priority and stop cancellation.
 Rustls and tokio-rustls test dependencies reuse already locked versions.
+
+
+## Scheduled subscription updates
+
+Source: `src-tauri/src/core/timer.rs` (`TaskSchedule::new`, `gen_map_from_items`,
+`apply_timer_map`, `mark_task_running`, `finish_task`, `interval_duration`) and
+`src-tauri/src/feat/profile.rs::should_update_profile`, pinned commit
+`b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b`. Destination:
+`service/src/scheduler.rs` (a private core_manager module) and scheduled refresh
+adapters in `service/src/core_manager.rs`. This supersedes previous scheduling
+pending notes above.
+
+Retained rules: positive minute intervals, allow-auto default true, updated-plus-
+interval first deadline, overdue immediate work, missing/future timestamps waiting
+one interval, per-UID running guard, retirement across disable/re-enable, and a full
+interval after completion even on failure. Interval multiplication saturates.
+Only remote rows with UID/URL are registered, matching the actual upstream update
+eligibility rather than scheduling auxiliary/local rows that its update function
+would skip. Manual refresh still overrides disabled automatic policy.
+
+Service adaptations: a recovered profile watch replaces the singleton/unbounded
+command channel and desktop initialization/tray/notification calls. A monotonic
+in-memory map with checked Instant arithmetic replaces DelayQueue; no new runtime
+package is needed. JoinSet owns at most four workers, sharing existing download
+admission with manual work. Watch changes include updated timestamps, so successful
+manual refresh resets the pending first deadline. In-flight interval changes apply
+at completion; failures retain a full in-memory interval without persisting a fake
+successful timestamp. Managed timers wait through transitional core phases.
+
+Automatic refresh reuses the existing transactional/manual path with policy checks
+before and after download admission and at actor admission. File/URL/full-option
+CAS, TLS/proxy priority, bounds, active apply/rollback and recovery remain intact.
+A weak actor command sender avoids an idle scheduler keeping the manager alive;
+shutdown signals cancel/drain owned tasks and completion is awaited alongside the
+actor. Generic bounded log messages omit private provider input.
+
+Tests cover clock boundaries, large intervals, filter rules, retirement and manual
+reset; loopback service workflows cover overdue startup, persisted fresh timestamps,
+failed-run backoff, interval edits, disabled manual updates, stale downloads,
+shared admission and shutdown/drop ownership. A paused Tokio test drives the actual
+60-second timer without external processes or real minute sleeps. A real Mihomo
+workflow verifies scheduled managed-route semantics, hot application, node
+record restoration and invalid-candidate rollback. Development-only Tokio test-util
+reuses the existing locked dependency; production requires no timer process.

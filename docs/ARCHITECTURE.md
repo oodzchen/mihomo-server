@@ -76,7 +76,8 @@ mihomo-server/
 │       ├── Per-profile node selection records       [Implemented; upstream schema]
 │       ├── Geo/provider resources and proxy views   [Pending]
 │       ├── Immutable revision / orphan file garbage collection [Pending]
-│       └── Timed updates, core upgrades, backups     [Pending]
+│       ├── Timed update metadata / saved refresh source [Migrated + service scheduler]
+│       └── Core upgrades and backups                  [Pending]
 ├── service/                                         [Partially implemented]
 │   ├── Persistent foreground entry point            [Implemented]
 │   ├── Binary/data/config/import args, directory lock [Implemented]
@@ -109,7 +110,8 @@ mihomo-server/
 │   │   ├── Service system proxy / environment / bypass / auth [Implemented; Linux verified]
 │   │   ├── Native Windows/macOS proxy discovery runtime validation [Pending; library code retained]
 │   │   ├── TLS platform/static roots / explicit certificate option [Migrated + adaptation; Linux verified]
-│   │   └── SOCKS/PAC and scheduling                 [Pending]
+│   │   ├── Scheduled refresh / retirement / bounded workers / drain [Migrated + adaptation; Linux verified]
+│   │   └── SOCKS/PAC                               [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
@@ -144,6 +146,7 @@ mihomo-server/
 │   │   ├── Manual remote refresh / usage updates  [Implemented]
 │   │   ├── Managed/system proxy import / saved mode editor / failed drafts [Implemented; Linux verified]
 │   │   ├── Explicit subscription TLS option / saved edits / failed drafts [Implemented; Linux verified]
+│   │   ├── Automatic interval/enabled editing / overdue startup workflow [Implemented; Linux verified]
 │   │   ├── Metadata editor / confirmed cascade deletion [Implemented; Linux verified]
 │   │   ├── Linked YAML merge editor / detach       [Implemented]
 │   │   ├── Linked rules/proxies/groups editor / detach [Implemented]
@@ -191,7 +194,7 @@ repair, local profiles, runtime editing, nodes, logs and realtime metrics.
 Direct, managed and system-proxy remote import and manual refresh preserve downloaded YAML, upstream metadata
 and profile identity. Active refresh uses validated application and recoverable
 commit; linked sequence, YAML merge and script editing feed selection and refresh generation.
-Scheduling and the remaining enhancement workflows are incomplete. TLS root fallback and explicit per-subscription bypass are connected. Local profile imports,
+Automatic scheduling, TLS root fallback and explicit per-subscription bypass are connected. The remaining enhancement workflows are incomplete. Local profile imports,
 selection and restoration now feed the runtime validation/application flow. Runtime YAML imports,
 upstream merge overlays, validation, application, persistence, and interrupted
 application recovery work through the manager; `--import-config` exposes the
@@ -1670,7 +1673,7 @@ upgrades, backups/WebDAV, advanced pages, immutable-file garbage collection and
 additional platform runtime/deployment checks remain pending. The Linux MVP remains
 runnable; the complete project is not done.
 
-## Latest increment: subscription TLS roots and explicit certificate options
+## Previous increment: subscription TLS roots and explicit certificate options
 
 Delivery step 7 now follows upstream platform-first TLS verification with one
 static Mozilla/WebPKI root retry for TLS trust/revocation errors. Protocol-version
@@ -1725,6 +1728,63 @@ saved options, transactional refresh and shutdown cancellation. SOCKS/PAC, full
 DNS/hosts/native TUN settings, resources, upgrades, backups/WebDAV, advanced pages,
 immutable-file garbage collection and additional platform/deployment validation
 remain pending.
+
+## Latest increment: bounded scheduled subscription updates
+
+Delivery step 7 now starts a subscription scheduler from the recovered catalog.
+Remote rows with UID/URL, positive minute intervals and allow_auto_update other
+than false are eligible. First run uses updated + interval, overdue rows run now,
+missing/zero/future timestamps wait one interval. Success preserves upstream saved
+options/linked enhancements and publishes the new timestamp through the existing
+refresh transaction. Failure retries after a full interval without rewriting updated.
+Restart recomputes overdue work; enormous unrepresentable delays remain dormant.
+
+Profile watches reconfigure timers on metadata changes/deletion/manual refresh.
+Running/retired UID state survives disable/re-enable until completion, preventing
+duplicate automatic work. In-flight interval changes apply to the next full interval.
+Queued work checks current source and policy before network access; actor admission
+also checks policy, and full-option/file/URL guards reject stale downloads. Manual
+refresh remains available when automatic updates are disabled.
+
+At most four owned JoinSet workers share the existing four-download semaphore with
+manual import/refresh. Due work beyond that limit stays in the schedule map instead
+of spawning an unbounded queue. Network operations remain outside the actor. Active
+refresh reuses settings/enhancement/validation/application/node restoration and
+recoverable commit/rollback; managed downloads retain their saved route and defer
+through transitional core phases. Direct/system updates can run with the core stopped.
+
+A weak command sender preserves last-manager-drop cleanup. Shutdown cancels/drains
+workers and waits for scheduler plus actor completion. Generic bounded scheduler
+logs report starts/completions/failures without private input. Existing Web interval
+and auto-update fields now control real schedules; helper text and the restart/
+overdue workflow are updated.
+
+All 223 regular Rust tests and all 59 real-Mihomo integration tests pass, including
+five scheduling policy tests, seven loopback/paused-clock workflows and one active
+managed automatic update/rollback workflow. Cargo check --workspace, Rust format,
+warning-free all-target Clippy, TypeScript/Vite and changed-file Prettier pass.
+The fresh target/mihomo-server-linux-x86_64-scheduler bundle builds and verifies
+checksums plus bundled provenance/deployment document equality.
+
+The release binary's isolated real-data smoke confirms the first of 56 traffic
+candidates returns HTTPS 204 after node readback, with original data hashes unchanged.
+Only the fixture copy disables existing automatic policies so real-provider URLs
+are not fetched as a side effect of this proxy smoke; controlled loopback tests
+exercise actual scheduled downloads. Verified static-root HTTPS fallback also
+still reaches YAML validation through the system proxy with an unrelated platform
+CA, rejects the empty 204 body and leaves the catalog intact. All 22 Chromium
+workflows pass against the fresh release bundle. The new workflow persists an
+enabled/overdue policy in the stopped fixture, verifies automatic refresh on restart,
+checks refreshed raw content, disables automatic updates in the Web editor and
+confirms manual refresh still works. Existing 21 MVP/TLS/proxy workflows also pass.
+Fixture service/core and script-worker process counts are zero after cleanup.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The Linux MVP remains runnable and full feature completion is still pending.
+Next Delivery step 7 subtask: stable core upgrade resource metadata/download integrity,
+followed by managed switching with rollback. SOCKS/PAC, full DNS/hosts/native TUN,
+resources, Alpha upgrades, backups/WebDAV, advanced pages, immutable-file garbage
+collection and additional platform/deployment validation remain pending.
 
 ## MVP completion boundary
 

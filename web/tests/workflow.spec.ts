@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -2979,5 +2979,101 @@ test("HTTPS certificate option is explicit, keeps failed drafts and persists acr
   });
   await api("refresh_profile", { uid: item.uid });
   expect(tlsSubscriptionRequests).toBe(2);
+  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+});
+
+test("saved automatic update policy runs overdue subscriptions after restart and can be disabled in the editor", async ({
+  page,
+}) => {
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await fetch(`${base}/api/commands`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ command, ...fields }),
+    });
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  await api("stop");
+  subscriptionBody = "proxies: []\nmode: rule\n";
+  const item = await api("import_remote_profile", {
+    url: `${subscriptionUrl}/scheduled`,
+    name: "Scheduled subscription",
+    options: { update_interval: 1, allow_auto_update: false },
+  });
+  const catalog = await api("profiles");
+  // Only this isolated fixture is edited, while its service is stopped. JSON is
+  // valid YAML; the HTTP metadata API deliberately does not accept updated timestamps.
+  for (const row of catalog.items)
+    if (row.type === "remote") row.option.allow_auto_update = false;
+  const scheduled = catalog.items.find(
+    (row: { uid: string }) => row.uid === item.uid,
+  );
+  scheduled.option.allow_auto_update = true;
+  scheduled.updated = 1;
+  await stop();
+  await writeFile(join(directory, "profiles.yaml"), JSON.stringify(catalog));
+  const requests = subscriptionRequests;
+  subscriptionBody = "proxies: []\nmode: direct\n";
+  await start();
+  await expect
+    .poll(
+      async () =>
+        (await api("profiles")).items.find(
+          (row: { uid: string }) => row.uid === item.uid,
+        ).file,
+    )
+    .not.toBe(item.file);
+  expect(subscriptionRequests).toBe(requests + 1);
+  expect(
+    await readFile(
+      join(
+        directory,
+        "profiles",
+        (await api("profiles")).items.find(
+          (row: { uid: string }) => row.uid === item.uid,
+        ).file,
+      ),
+      "utf8",
+    ),
+  ).toContain("mode: direct");
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务", exact: true }).click();
+  const card = page.locator("article.profile").filter({
+    has: page.getByRole("heading", {
+      name: "Scheduled subscription",
+      exact: true,
+    }),
+  });
+  await card
+    .getByRole("button", {
+      name: "编辑订阅 Scheduled subscription",
+      exact: true,
+    })
+    .click();
+  await expect(page.getByLabel("更新间隔（分钟）")).toHaveValue("1");
+  await expect(page.getByLabel("允许自动更新", { exact: true })).toBeChecked();
+  await page.getByLabel("允许自动更新", { exact: true }).uncheck();
+  await page.getByRole("button", { name: "保存订阅信息", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "保存订阅信息", exact: true }),
+  ).toHaveCount(0);
+  expect(
+    (await api("profiles")).items.find(
+      (row: { uid: string }) => row.uid === item.uid,
+    ).option.allow_auto_update,
+  ).toBe(false);
+  await api("refresh_profile", { uid: item.uid });
+  expect(subscriptionRequests).toBe(requests + 2);
+  expect(
+    (await api("logs")).some(
+      (line: { stream: string; message: string }) =>
+        line.stream === "scheduler" && line.message.includes("completed"),
+    ),
+  ).toBe(true);
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
 });
