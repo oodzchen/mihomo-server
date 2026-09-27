@@ -126,7 +126,8 @@ mihomo-server/
 │   │   ├── Alpha compressed preparation / authenticated readback [Implemented; Linux x86_64]
 │   │   ├── Alpha executable/version/config staging / private proof / readback [Implemented; Linux x86_64]
 │   │   ├── Alpha activation / receipts / durable rollback / startup recovery [Implemented; Linux x86_64]
-│   │   └── Alpha force/no-op / Web; other targets [Pending]
+│   │   ├── Alpha upstream force/no-op adapter / channel-aware Web workflow [Implemented; Linux x86_64]
+│   │   └── Other core upgrade targets [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
@@ -143,7 +144,7 @@ mihomo-server/
 │   ├── Axum management API / command adapters       [Implemented; MVP allowlist]
 │   │   ├── State, logs, profiles, config, proxies queries [Implemented]
 │   │   ├── Lifecycle, YAML import/edit/overlay, profile edit/delete/import/refresh, linked read/set/clear, global read/set/reset, settings read/replace, profile DNS read/set, raw profile read/edit and node selection [Implemented]
-│   │   ├── Stable core query / preparation / staging / activation / installation/version readback / force-no-op; Alpha query / compressed preparation / executable staging / activation / installation readback [Implemented; Linux x86_64]
+│   │   ├── Stable core query / preparation / staging / activation / installation/version readback / force-no-op; Alpha query / compressed preparation / executable staging / activation / installation readback / force-no-op [Implemented; Linux x86_64]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -177,8 +178,8 @@ mihomo-server/
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── DNS/TUN editor / lossless nested inheritance / readback [Implemented; Linux verified]
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
-│   ├── Stable core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
-│   └── Full settings, Alpha core upgrade, backup UI [Pending]
+│   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
+│   └── Full settings and backup UI [Pending]
 ├── Release and deployment                           [Partially implemented]
 │   ├── Linux x86_64 bundle: Rust + independent Mihomo + Web [Implemented]
 │   ├── Explicit target/version/SHA-256 resource manifest [Implemented]
@@ -2324,7 +2325,7 @@ then channel-aware force/no-op and browser integration. Other targets, native
 TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage collection,
 SOCKS/PAC and platform/deployment work remain pending.
 
-## Latest increment: durable Alpha activation, rollback and receipt recovery
+## Previous increment: durable Alpha activation, rollback and receipt recovery
 
 Delivery step 7 now admits verified Alpha proofs through authenticated
 `activate_core_upgrade`. Stable and Alpha share the existing actor transaction:
@@ -2389,6 +2390,75 @@ step 7 subtask: channel-aware Alpha force/no-op orchestration and browser contro
 including reconnect/receipt readback and repair. Other targets, native
 TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage collection,
 SOCKS/PAC and platform/deployment work remain pending.
+
+## Latest increment: Alpha force/no-op orchestration and channel-aware Web controls
+
+Delivery step 7 adds authenticated `upgrade_alpha_core` with a required boolean
+`force`. Its stable counterpart, `upgrade_clash_core`, keeps its existing request
+shape and stable behavior. Both dispatch one shared channel-aware pipeline:
+exclusive upgrade admission, official channel metadata discovery, actor-owned
+installed-version no-op check, verified preparation, a second no-op check after
+the download, current configuration staging, durable activation/receipt recovery.
+The request cannot supply a version, URL, digest, path or arbitrary channel.
+Disconnect does not cancel an accepted switch; shutdown cancels/reaps owned work.
+
+Default Alpha upgrades skip the same version before package/stage access and
+preserve live PID/inode/configuration/receipt. Force bypasses both no-op checks
+and revalidates/reinstalls the resolved Alpha. Unknown installed versions never
+skip; the existing inode-preserving repair transaction handles broken cores.
+A different stable/Alpha version is a real switch regardless of the current
+channel. Actor rechecks retain lifecycle/configuration changes made during download.
+No channel flag or journal schema change is introduced.
+
+`/core` now selects stable or Alpha and issues channel-specific discovery/upgrade
+commands. Stable is the default on a new page session; selection is per operation,
+not a persistent core-setting override. Installed version/receipt are always read
+from the actual managed file, including after reconnect and service restart.
+Changing channel clears previous release/report output; in-flight operations lock
+channel controls. Force confirmation names the chosen channel. Alpha pre-release
+status, stable switch-back, unknown-version repair and failure/retry remain visible.
+
+Verification: `cargo check --workspace --locked --offline`, all 265 regular
+workspace Rust tests, all 71 real-Mihomo opt-in tests, warnings-denied Clippy,
+formatting/diff checks and the TypeScript/Vite production build pass. Alpha no-op
+fixtures deliberately remove package data and confirm no stage/state/file/receipt
+changes; force enters validation, fails readiness and restores the original core.
+Authentication, missing/wrong force types and arbitrary version/source/channel
+fields remain rejected before mutation. Existing lifecycle, Alpha crash/repair,
+subscription, settings and receipt regressions remain green.
+
+All 26 browser workflows pass, including both channel variants using a verified
+real Alpha executable. They check channel-specific requests, locked controls,
+cleared stale results, force-confirmation dismissal/acceptance, failed retries,
+running/stopped reinstall, real receipt readback after restart and broken-core
+repair preserving the original inode/mode on failure. Browser metadata/no-op
+results are deterministic fixtures; staging/activation/rollback/readback exercise
+the real service. Official-wrapper discovery/preparation/no-op/force/repair are
+separately exercised with real-node traffic rather than browser interception.
+
+An isolated copy of the actual 56-node subscription resolves official
+`alpha-63bd52e` (22,849,242 compressed bytes) and calls `upgrade_alpha_core`.
+Default equal-version no-op preserves PID/inode/receipt; force reinstalls with a
+new PID/inode. Alpha-to-stable and stopped stable-to-Alpha work; an empty mode-0
+core reports unknown and is repaired to Alpha without force. Failed stable/Alpha
+runtime candidates restore the real Alpha receipt. Restart keeps that receipt,
+configuration/catalog and selected node; HTTPS traffic returns 204 after each
+transition. Managed routing/static trusted roots under an unrelated platform CA
+still work. Wrong versions/tampered proofs are rejected; original data hashes stay
+unchanged. No fixture processes remain after termination/reaping.
+
+The runnable `target/mihomo-server-linux-x86_64-alpha-controls-final` bundle
+passes every checksum. Its service matches the release build, Web assets match
+the tested production bundle and deployment/provenance documents match sources.
+It retains a verified stable bootstrap seed and supports independently installed
+Alpha. The temporary verified Alpha browser fixture is removed after checking.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The Linux MVP remains runnable; the full project is not complete. Next Delivery
+step 7 subtask: extract backup models and implement bounded local backup export
+with an authenticated API, before restore transactions, scheduling and WebDAV/UI.
+Other upgrade targets, native TUN/DNS/hosts/resources, advanced pages, garbage
+collection, SOCKS/PAC and platform/deployment work remain pending.
 
 ## MVP completion boundary
 

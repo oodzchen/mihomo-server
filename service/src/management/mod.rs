@@ -44,6 +44,9 @@ pub enum ManagementCommand {
     UpgradeClashCore {
         force: bool,
     },
+    UpgradeAlphaCore {
+        force: bool,
+    },
     Logs {},
     Profiles {},
     Config {},
@@ -230,6 +233,9 @@ impl Management {
             }
             ManagementCommand::UpgradeClashCore { force } => {
                 serde_json::to_value(self.manager.upgrade_clash_core(force).await?)?
+            }
+            ManagementCommand::UpgradeAlphaCore { force } => {
+                serde_json::to_value(self.manager.upgrade_alpha_core(force).await?)?
             }
             ManagementCommand::Status {} => serde_json::to_value(self.manager.status())?,
             ManagementCommand::Logs {} => serde_json::to_value(self.manager.logs())?,

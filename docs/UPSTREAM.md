@@ -1386,3 +1386,26 @@ failed readiness, shutdown and Alpha candidate SIGKILL recovery are covered.
 Official Alpha activation is exercised with an isolated real-node subscription.
 Channel-aware Alpha force/no-op, Web controls and other targets remain pending.
 No dependency is added.
+
+
+## Alpha force/no-op adapter and channel-aware Web workflow
+
+Source: `src-tauri/src/feat/core_upgrade.rs::upgrade_core` and
+`resolve_latest_version`, pinned commit b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b.
+Destinations: core_manager.rs, management/mod.rs and web/src/core-upgrade.tsx.
+Retained semantics: discover the selected channel, skip an unchanged installed
+version unless forced, repair an unreadable previous core, preserve runtime mode
+and restore the previous core on failure. Explicit `upgrade_alpha_core` and stable
+`upgrade_clash_core` commands replace upstream desktop core-name selection without
+introducing a persistent setting or accepting arbitrary release sources.
+
+Both commands reuse verified route-affine metadata/preparation, single admission,
+shutdown cancellation and durable actor staging/activation. A second actor no-op
+check handles changes while downloading. Browser channel selection clears stale
+results, locks during requests and displays actual installation/repair readback.
+Fixtures cover unavailable-package no-op, forced failure rollback, authenticated
+request bounds, both channel controls and real executable/receipt recovery after
+restart. The official Alpha wrapper is separately exercised with real-node traffic,
+including force, unchanged-version no-op and unknown-core repair. Other platforms,
+Alpha bundle seeds and cached-candidate garbage collection remain pending.
+No dependency is added.

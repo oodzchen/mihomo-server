@@ -21,6 +21,8 @@ export function CoreUpgradePage({
   perform: Perform;
   logout: (reason?: string) => void;
 }) {
+  const [channel, setChannel] = useState<"stable" | "alpha">("stable");
+  const label = channel === "alpha" ? "Alpha" : "稳定版";
   const [version, setVersion] = useState<string>();
   const [installation, setInstallation] = useState<Installation | null>();
   const [latest, setLatest] = useState<Release>();
@@ -83,7 +85,7 @@ export function CoreUpgradePage({
     if (locked.current || busy) return;
     if (
       force === true &&
-      !window.confirm("重新安装最新稳定版内核？运行中的代理连接会短暂中断。")
+      !window.confirm(`重新安装最新${label}内核？运行中的代理连接会短暂中断。`)
     )
       return;
     locked.current = true;
@@ -92,10 +94,10 @@ export function CoreUpgradePage({
     try {
       if (force === undefined) {
         setLatest(undefined);
-        const value = await perform<Release>("core_release");
+        const value = await perform<Release>(channel === "alpha" ? "alpha_core_release" : "core_release");
         if (alive.current && value) setLatest(value);
       } else {
-        const value = await perform<Report>("upgrade_clash_core", { force });
+        const value = await perform<Report>(channel === "alpha" ? "upgrade_alpha_core" : "upgrade_clash_core", { force });
         if (alive.current && value) setReport(value);
         if (alive.current) setRefresh((value) => value + 1);
       }
@@ -106,9 +108,9 @@ export function CoreUpgradePage({
   }
   const disabled = busy || working || connection !== "已连接" || !version;
   return (
-    <section className="panel" aria-label="稳定版内核升级">
+    <section className="panel" aria-label={`${label}内核升级`}>
       <div className="panel-title">
-        <h2>稳定版内核升级</h2>
+        <h2>{label}内核升级</h2>
         <button
           type="button"
           disabled={busy || working || connection !== "已连接"}
@@ -117,10 +119,28 @@ export function CoreUpgradePage({
           刷新安装信息
         </button>
       </div>
+      <label>
+        升级通道
+        <select
+          value={channel}
+          disabled={busy || working || connection !== "已连接"}
+          onChange={(event) => {
+            if (locked.current || busy) return;
+            setChannel(event.target.value === "alpha" ? "alpha" : "stable");
+            setLatest(undefined);
+            setReport(undefined);
+          }}
+        >
+          <option value="stable">稳定版</option>
+          <option value="alpha">Alpha</option>
+        </select>
+      </label>
       <p className="muted">
-        检查并安装 Mihomo
-        最新稳定版。升级时会短暂中断代理连接；失败时恢复上一份内核，停止的内核仍保持停止。
+        检查并安装 Mihomo 最新{label}。升级时会短暂中断代理连接；失败时恢复上一份内核，停止的内核仍保持停止。
       </p>
+      {channel === "alpha" && (
+        <p className="info">Alpha 是预发布版本。可选择稳定版通道切回最新稳定版。</p>
+      )}
       {connection !== "已连接" ? (
         <p className="info">服务连接中断，重新连接后核对安装信息。</p>
       ) : error ? (
@@ -137,7 +157,7 @@ export function CoreUpgradePage({
             <dd>{version === "unknown" ? "未知（需要修复）" : version}</dd>
           </div>
           <div>
-            <dt>最新稳定版</dt>
+            <dt>最新{label}</dt>
             <dd>{latest?.version || "尚未检查"}</dd>
           </div>
           <div>
@@ -154,12 +174,12 @@ export function CoreUpgradePage({
       )}
       {version === "unknown" && (
         <p className="info">
-          当前内核无法报告版本，可以升级至最新稳定版进行修复。失败时保留原文件，可重试；修复后请启动内核。
+          当前内核无法报告版本，可以升级至最新{label}进行修复。失败时保留原文件，可重试；修复后请启动内核。
         </p>
       )}
       <div className="actions">
         <button type="button" disabled={disabled} onClick={() => void run()}>
-          检查稳定版更新
+          检查{label}更新
         </button>
         <button
           type="button"
@@ -167,14 +187,14 @@ export function CoreUpgradePage({
           disabled={disabled}
           onClick={() => void run(false)}
         >
-          升级至最新稳定版
+          升级至最新{label}
         </button>
         <button
           type="button"
           disabled={disabled}
           onClick={() => void run(true)}
         >
-          强制重新安装稳定版
+          强制重新安装{label}
         </button>
       </div>
       {working && (
@@ -188,7 +208,7 @@ export function CoreUpgradePage({
             ? report.from === "unknown"
               ? `修复完成：${report.to}`
               : `升级完成：${report.from} → ${report.to}`
-            : `已是最新稳定版 ${report.to}，无需重新安装。`}
+            : `已是最新${label} ${report.to}，无需重新安装。`}
         </p>
       )}
       {report && version && version !== report.to && (

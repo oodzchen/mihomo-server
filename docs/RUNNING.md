@@ -1977,8 +1977,7 @@ saved node selections are unchanged by preparation. Metadata remains limited to
 1 MiB, package to 64 MiB; the same deadlines and redirect allowlist apply.
 
 Alpha executable staging and readback are available through the existing commands
-below. Alpha activation and receipts are available; channel-aware force/no-op
-and Web controls remain pending.
+below. Alpha activation, receipts, force/no-op and Web controls are available.
 Stable upgrade/repair remains available through `/core`. Cached candidate garbage
 collection remains pending.
 
@@ -2035,7 +2034,39 @@ Broken-core repair preserves the original inode/mode and prior receipt on failur
 Tampered or conflicting files/records fail recovery without overwriting them.
 
 A prepared stable candidate can be staged and activated through the same commands
-to switch back to stable. Alpha force/no-op orchestration and channel controls in
-`/core` remain the next integration step; the page currently offers stable upgrades
-and reads back the actual installed version/receipt. Cached candidate garbage
+to switch back to stable. `/core` offers stable/Alpha channel controls and reads back the actual installed
+version/receipt. Cached candidate garbage
 collection, Alpha bundle seeds and other target runtimes remain pending.
+
+
+## Upgrade or repair the selected channel
+
+```json
+{"command":"upgrade_clash_core","force":false}
+{"command":"upgrade_alpha_core","force":false}
+{"command":"upgrade_alpha_core","force":true}
+```
+
+Both commands require `force` to be a boolean and require bundle-managed resources.
+They discover the current official release, skip an equal installed version unless
+forced, prepare/validate a changed candidate and activate it through the durable
+transaction. Alpha discovery is fixed to `Prerelease-Alpha`; inputs cannot override
+version, source, digest or paths. `upgraded`, `from` and `to` report the outcome.
+An unknown installed version always attempts repair. No-op preserves the existing
+core and receipt; forced reinstall performs fresh validation and replacement.
+Running/stopped semantics, rollback, cancellation and receipt recovery apply to
+both channels. Switching back to stable uses `upgrade_clash_core`.
+
+On `/core`, choose `稳定版` or `Alpha` under `升级通道`, then check, upgrade or
+force reinstall. Force prompts name the chosen channel. Switching channels clears
+old query/results, and a request locks the selector. Readback always reports the
+actual installed core, even when it differs from the selected upgrade channel.
+A new page session defaults to stable; the choice does not rewrite settings.
+Reconnect and `刷新安装信息` recheck installed version/receipt. Failed upgrades
+can be retried; `未知（需要修复）` remains upgradeable in either channel.
+
+Browser regressions accept `MIHOMO_TEST_ALPHA_BINARY` pointing to a verified Alpha
+executable, together with `MIHOMO_TEST_BUNDLE`. Without that explicit local fixture,
+Alpha executable browser cases are skipped; default tests make no mutable network
+downloads. Official-wrapper discovery/force/no-op/repair are verified separately
+with an isolated real-node subscription and original-data hash checks.

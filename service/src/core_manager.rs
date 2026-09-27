@@ -679,6 +679,20 @@ impl CoreManager {
     }
 
     pub async fn upgrade_clash_core(&self, force: bool) -> Result<CoreUpgradeReport> {
+        self.upgrade_core_channel(force, crate::core_release::ReleaseChannel::Stable)
+            .await
+    }
+
+    pub async fn upgrade_alpha_core(&self, force: bool) -> Result<CoreUpgradeReport> {
+        self.upgrade_core_channel(force, crate::core_release::ReleaseChannel::Alpha)
+            .await
+    }
+
+    async fn upgrade_core_channel(
+        &self,
+        force: bool,
+        channel: crate::core_release::ReleaseChannel,
+    ) -> Result<CoreUpgradeReport> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let downloads = self
             .core_downloads
@@ -690,7 +704,7 @@ impl CoreManager {
         let mut shutdown = self.shutdown.subscribe();
         let release = tokio::select! {biased;
             _ = closing(&mut shutdown) => bail!("core upgrade cancelled during shutdown"),
-            result = self.discover_core_release(None) => result?,
+            result = self.discover_core_release_for(None, channel) => result?,
         };
         let (reply, response) = oneshot::channel();
         self.commands
@@ -1033,10 +1047,6 @@ impl CoreManager {
         routes
     }
 
-    async fn discover_core_release(&self, version: Option<&str>) -> Result<crate::core_release::ResolvedRelease> {
-        self.discover_core_release_for(version, crate::core_release::ReleaseChannel::Stable)
-            .await
-    }
     async fn discover_core_release_for(
         &self,
         version: Option<&str>,

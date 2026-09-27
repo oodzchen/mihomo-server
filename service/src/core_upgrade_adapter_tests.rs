@@ -59,7 +59,12 @@ impl Directory {
         let path = self.0.join("data/core/.upgrade-staging").join(&id);
         fs::create_dir(&path)?;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
-        let release = json!({"version":version,"target":TARGET,"asset":format!("mihomo-linux-amd64-v2-{version}.gz"),"bytes":package.len(),"sha256":sha256,"download_url":format!("https://github.com/MetaCubeX/mihomo/releases/download/{version}/mihomo-linux-amd64-v2-{version}.gz")});
+        let tag = if version.starts_with("alpha-") {
+            "Prerelease-Alpha"
+        } else {
+            version
+        };
+        let release = json!({"version":version,"target":TARGET,"asset":format!("mihomo-linux-amd64-v2-{version}.gz"),"bytes":package.len(),"sha256":sha256,"download_url":format!("https://github.com/MetaCubeX/mihomo/releases/download/{tag}/mihomo-linux-amd64-v2-{version}.gz")});
         fs::write(path.join("package.gz"), package)?;
         fs::write(
             path.join("release.json"),
@@ -71,11 +76,14 @@ impl Directory {
         downloads.inspect(&id)
     }
     fn fixture(&self) -> Result<PathBuf> {
+        self.fixture_version("v1.2.3")
+    }
+    fn fixture_version(&self, version: &str) -> Result<PathBuf> {
         let source = self.0.join("fixture.rs");
         let binary = self.0.join("fixture");
         fs::write(
             &source,
-            r#"fn main(){let a:Vec<_>=std::env::args().collect();if a.get(1).map(String::as_str)==Some("-v"){println!("Mihomo Meta v1.2.3 linux amd64");return;}if a.get(1).map(String::as_str)==Some("-t"){return;}std::process::exit(1);}"#,
+            r#"fn main(){let a:Vec<_>=std::env::args().collect();if a.get(1).map(String::as_str)==Some("-v"){println!("Mihomo Meta VERSION linux amd64");return;}if a.get(1).map(String::as_str)==Some("-t"){return;}std::process::exit(1);}"#.replace("VERSION", version),
         )?;
         let status = std::process::Command::new("rustc")
             .arg(&source)
@@ -341,4 +349,52 @@ async fn wait_for_repair_group(manager: &CoreManager, selected: Option<&str>) ->
     })
     .await
     .context("repaired core did not publish its expected proxy group/selection before the deadline")
+}
+
+#[tokio::test]
+async fn alpha_same_version_skips_unavailable_package_and_force_rolls_back_without_skipping() -> Result<()> {
+    let dir = Directory::new()?;
+    let stable = dir.fixture()?;
+    let manager = dir.manager(&stable, "v1.2.3")?;
+    let result = async {
+        let alpha = dir.fixture_version("alpha-63bd52e")?;
+        fs::copy(&alpha, dir.live())?;
+        let before = manager.status();
+        let inode = fs::metadata(dir.live())?.ino();
+        let bytes = fs::read(dir.live())?;
+        let downloads = manager.core_downloads.as_ref().unwrap();
+        let prepared = dir.seed(&alpha, "alpha-63bd52e", downloads)?;
+        // No-op must precede stage/cache access, even when package data is unavailable.
+        let package = dir
+            .0
+            .join("data/core/.upgrade-staging")
+            .join(&prepared.id)
+            .join("package.gz");
+        let compressed = fs::read(&package)?;
+        fs::remove_file(&package)?;
+        let report = upgrade(&manager, prepared.clone(), false).await?;
+        assert!(!report.upgraded);
+        assert_eq!(report.from, "alpha-63bd52e");
+        assert_eq!(report.to, report.from);
+        assert_eq!(manager.status().generation, before.generation);
+        assert_eq!(fs::metadata(dir.live())?.ino(), inode);
+        assert_eq!(fs::read(dir.live())?, bytes);
+        assert!(manager.core_installation().await?.is_none());
+        assert!(check(&manager, "alpha-63bd52e", true).await?.is_none());
+        assert!(check(&manager, "v1.2.3", false).await?.is_none());
+        assert!(check(&manager, "alpha-abcdef0", false).await?.is_none());
+        assert!(upgrade(&manager, prepared.clone(), true).await.is_err());
+        fs::write(&package, compressed)?;
+        fs::set_permissions(&package, fs::Permissions::from_mode(0o600))?;
+        let error = upgrade(&manager, prepared, true).await.unwrap_err();
+        assert!(format!("{error:#}").contains("previous core restored"));
+        assert_eq!(manager.status().phase, CorePhase::Stopped);
+        assert_eq!(fs::read(dir.live())?, bytes);
+        assert!(manager.core_installation().await?.is_none());
+        assert!(manager.core_release_admission.clone().try_acquire_owned().is_ok());
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
 }

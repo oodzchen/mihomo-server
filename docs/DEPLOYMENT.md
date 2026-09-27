@@ -15,7 +15,11 @@ Supply its expected **uncompressed binary** SHA-256 from your trusted build reco
 the packager verifies it before executing `-v`, checks the pinned version and ELF
 architecture, and records target/version/hash in the resource manifest. It never
 queries latest releases or downloads during builds/startup. The initial package
-contains one stable core; Alpha and automated fetching are later work.
+contains one stable bootstrap core; Alpha bundle seeds and automated build-time
+fetching remain pending. Once running, the authenticated `/core` page can upgrade
+or repair the persistent core through stable or Alpha channels. Both support
+force/no-op, durable rollback and installation readback; see the source
+repository's `docs/RUNNING.md`.
 
 ```sh
 python3 scripts/package_bundle.py --build \

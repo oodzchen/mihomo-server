@@ -11,7 +11,7 @@ schemas, and pure configuration field, merge, and sequence operations, exposed
 by `headless-core`, plus a standalone Mihomo API client. The service now runs
 continuously and manages one Mihomo child, including readiness, restart, bounded
 recovery, state/log subscriptions, and Unix shutdown. See
-[running instructions](docs/RUNNING.md) for an executable core-management scaffold.
+[running instructions](docs/RUNNING.md) for the executable core-management workflow.
 Runtime configurations now use immutable revisions and an atomic commit record.
 Imports and overlays pass YAML and `mihomo -t` validation before application;
 hot reload has a restart fallback, failed applications attempt rollback, and
@@ -36,8 +36,10 @@ proxies and groups sequences now use the same transaction and upstream generatio
 order before merge.
 Linked JavaScript main(config, name) now runs after merge in a cancellable Linux
 worker with resource limits, failure diagnostics and transactional persistence.
-Scheduled refresh,
-proxy download modes, the full enhancement pipeline, advanced pages and other
+Scheduled refresh and managed/system/direct proxy download routes are supported.
+The `/core` page now upgrades or repairs the managed core through stable and Alpha
+channels, with force/no-op, durable rollback and installation receipt readback.
+The full settings/resource pipeline, backups/WebDAV, advanced pages and other
 platforms remain pending.
 
 ## Layout
