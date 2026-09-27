@@ -1540,3 +1540,20 @@ reported without undoing publication. Admission, probes/workers, cancellation an
 catalog/settings/source journal machinery are reused. No dependency changes.
 Running-core restoration, orphan cleanup, retention/schedules/WebDAV/UI and other
 platforms remain pending.
+
+
+## Running-core service backup restoration
+
+Reference: the same pinned upstream backup restore functions and existing
+`src-tauri/src/core/core.rs` restart/reload behavior. This increment copies no new
+upstream source and changes no dependencies. The original service adaptation in
+`service/src/core_manager.rs` connects the verified candidate/journal transaction
+to existing reload, live proxy-port readback, restart/readiness and node restoration.
+`headless-core/src/backup.rs` adds live-state/restart receipt fields; the HTTP route
+accepts settled running or stopped actors. Cancellation bridges privately into
+core I/O and joins owned operations before rollback/reaping. Precommit failures
+recover old catalog/settings/runtime and restart the old core unless the manager
+is shutting down. Runtime-manifest commit remains the publication boundary.
+Private probe/script diagnostics are discarded; an applied running core uses
+the normal core log stream. Orphan cleanup, retention/schedules/WebDAV/UI and
+other restore platforms remain pending.

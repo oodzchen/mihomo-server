@@ -30,15 +30,17 @@ error codes are documented in the source repository's `docs/RUNNING.md`.
 The same binary upload sent to `/api/backup/validate` additionally rehearses the
 archived runtime and active profile regeneration using isolated Mihomo/script
 probes, removes its disposable files and returns digests without applying data.
-Stop the core before restoring via `POST /api/backup/restore` with the same binary
+Restore a settled running or stopped core via `POST /api/backup/restore` with the same binary
 body and one `X-Backup-Runtime: archived` or `regenerated` header. Archived policy
 preserves the runtime snapshot's exact bytes; regenerated policy replaces manual
 runtime edits from the active archived profile and settings. Protected provider
 DNS requires regeneration and fresh confirmation before page overrides can be
 enabled. Bootstrap-only archives require archived policy. A successful receipt
-reports committed=true, applied revision/digest and cleanup_pending; inspect status
-before retrying an interrupted request. The core remains stopped until explicitly
-started. Running-core restore currently returns 409. See `docs/RUNNING.md` for the
+reports committed=true, applied revision/digest, cleanup_pending, core_running and
+core_restarted; inspect status before retrying an interrupted request. A running
+core reloads with verified ports or restarts as fallback; precommit failure restores
+the old data/core/node records. A stopped core stays stopped. Unsettled lifecycle
+states return 409; stop before retrying. See `docs/RUNNING.md` for the
 full transaction/error contract.
 
 ```sh
@@ -115,7 +117,7 @@ nonempty regular executable cores are retained, even if their hash differs from
 the bundle pin; this preserves independently upgraded cores. Existing symlinks,
 nonexecutables or unsafe directory/file permissions are rejected. Automatic core
 upgrade and backup schedules remain pending; manual core upgrades already support
-durable rollback; configuration-backup restoration is available while stopped.
+durable rollback; configuration-backup restoration is available while running or stopped.
 
 Keep data outside versioned releases. It contains runtime revisions/journal,
 profiles and node records, credentials, the owned core, and runtime socket files.

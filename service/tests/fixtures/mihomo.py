@@ -55,6 +55,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.respond(404, {"message": "unknown test route"})
 
     def do_PUT(self):
+        global config, mode
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         group = urllib.parse.unquote(self.path.removeprefix("/proxies/"))
         if self.path.startswith("/proxies/") and proxy_api and group in choices:
@@ -67,6 +68,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if "fixture-ignore-selection: true" not in config:
                     choices[group] = node
                 self.respond(200, {})
+            return
+        if self.path.startswith("/configs") and "fixture-reload: true" in config:
+            candidate_path = pathlib.Path(json.loads(body)["path"])
+            candidate = candidate_path.read_text()
+            if "fixture-reload-delay: true" in candidate:
+                (candidate_path.parents[2] / "reload-started").write_text(str(candidate_path))
+                time.sleep(30)
+            if "fixture-fail-start: true" in candidate or "DOMAIN,fail-start.test,DIRECT" in candidate:
+                self.respond(500, {"message": "controlled reload rejection"})
+                return
+            config = candidate
+            mode = re.search(r"^mode:\s*(\w+)", config, re.MULTILINE).group(1)
+            if "fixture-reset-nodes: true" in candidate:
+                choices.update(Main="DIRECT", Manual="DIRECT")
+            self.respond(200, {})
             return
         self.respond(500, {"message": "controlled reload failure"})
 

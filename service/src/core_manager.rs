@@ -2672,9 +2672,14 @@ impl Actor {
         mut http_closing: watch::Receiver<bool>,
         reply: &mut oneshot::Sender<Result<headless_core::backup::BackupRestoreReceipt>>,
     ) -> Result<headless_core::backup::BackupRestoreReceipt> {
-        // Check in the actor after recovery, so a queued start cannot race publication.
-        if self.process.is_some() || self.status.borrow().phase != CorePhase::Stopped || self.retry_at.is_some() {
-            return Err(crate::backup::RestoreNeedsStopped.into());
+        // Check in the actor after recovery, so queued lifecycle commands cannot race.
+        self.observe_exit().await?;
+        let was_running = self.status.borrow().phase == CorePhase::Running;
+        if !matches!(self.status.borrow().phase, CorePhase::Stopped | CorePhase::Running)
+            || self.process.is_some() != was_running
+            || self.retry_at.is_some()
+        {
+            return Err(crate::backup::RestoreNeedsSettled.into());
         }
         ensure!(
             !*self.shutdown.borrow() && !*http_closing.borrow() && !reply.is_closed(),
@@ -2682,7 +2687,8 @@ impl Actor {
         );
         let (cancel, cancellation) = watch::channel(false);
         let prepared = {
-            let operation = crate::backup::restore::publication(bytes, self.options.clone(), policy, cancellation);
+            let operation =
+                crate::backup::restore::publication(bytes, self.options.clone(), policy, cancellation.clone());
             tokio::pin!(operation);
             tokio::select! { biased;
                 _ = closing(&mut self.shutdown) => {cancel.send_replace(true); let _ = operation.await; bail!("restore cancelled during shutdown");},
@@ -2691,19 +2697,17 @@ impl Actor {
                 result = &mut operation => result?,
             }
         };
-        // Publication below is synchronous under actor/data ownership. Cancellation is
-        // checked at each durable phase; after manifest commit cleanup must finish.
+        // Durable publication stays under actor/data ownership. Cancellation is checked
+        // between phases and during core I/O; after manifest commit cleanup must finish.
         let previous = self.store.state();
         let old_path = self.options.config.clone();
-        let check = || -> Result<()> {
+        let mut live_attempted = false;
+        let mut restarted = false;
+        let result = async {
             ensure!(
                 !*self.shutdown.borrow() && !*http_closing.borrow() && !reply.is_closed(),
                 "restore cancelled before commit"
             );
-            Ok(())
-        };
-        let result = (|| -> Result<_> {
-            check()?;
             let revision = self.store.stage_yaml(std::str::from_utf8(&prepared.runtime)?)?;
             let candidate = prepared.profiles()?;
             let plan = self.profile_store.prepare_restore(
@@ -2713,23 +2717,50 @@ impl Actor {
                 &self.store,
                 revision.clone(),
             )?;
-            check()?;
+            ensure!(
+                !*self.shutdown.borrow() && !*http_closing.borrow() && !reply.is_closed(),
+                "restore cancelled before commit"
+            );
             self.store
                 .begin_profile(revision.clone(), plan.active_profile().map(str::to_owned))?;
             self.profile_store
                 .begin_restore(plan, &self.settings_store, &self.store)?;
-            check()?;
+            ensure!(
+                !*self.shutdown.borrow() && !*http_closing.borrow() && !reply.is_closed(),
+                "restore cancelled before commit"
+            );
+            if was_running {
+                self.cancel_restoration();
+                live_attempted = true;
+                restarted = self
+                    .restore_live_runtime(
+                        self.store.path(&revision)?,
+                        &cancel,
+                        cancellation,
+                        http_closing.clone(),
+                        reply,
+                    )
+                    .await?;
+            }
+            // The original manager shutdown receiver has been restored after core I/O.
+            ensure!(
+                !*self.shutdown.borrow() && !*http_closing.borrow() && !reply.is_closed(),
+                "restore cancelled before commit"
+            );
             self.profile_store
                 .publish_restore(&mut self.settings_store, &self.store)?;
-            check()?;
+            ensure!(
+                !*self.shutdown.borrow() && !*http_closing.borrow() && !reply.is_closed(),
+                "restore cancelled before commit"
+            );
             let commit = self.store.commit();
-            // RuntimeStore updates its in-memory state after rename and before fsync.
             if self.store.state().current.as_ref() != Some(&revision) {
                 commit?;
                 bail!("restore did not commit");
             }
-            Ok((revision, commit.is_err()))
-        })();
+            Ok::<_, anyhow::Error>((revision, commit.is_err()))
+        }
+        .await;
         match result {
             Ok((revision, mut cleanup_pending)) => {
                 self.options.config = self.store.path(&revision)?;
@@ -2753,8 +2784,19 @@ impl Actor {
                     state.selection_error = None;
                     state.recovery_attempt = 0;
                 });
+                if was_running {
+                    self.begin_restoration(false).await;
+                }
+                if cleanup_pending {
+                    self.status.send_modify(|state| {
+                        state.error =
+                            Some("backup restore committed; recovery or durability acknowledgement is pending".into())
+                    });
+                }
                 Ok(headless_core::backup::BackupRestoreReceipt {
                     committed: true,
+                    core_running: self.status.borrow().phase == CorePhase::Running,
+                    core_restarted: restarted,
                     archive: prepared.report.archive.clone(),
                     runtime_policy: policy,
                     runtime_revision: revision.file,
@@ -2770,22 +2812,85 @@ impl Actor {
                     self.profile_store
                         .recover_restore(&mut self.settings_store, &self.store)
                 });
+                let core_recovery = if live_attempted {
+                    self.publish(CorePhase::Stopping, None);
+                    match self.stop_process().await {
+                        Ok(()) if rollback.is_ok() && !*self.shutdown.borrow() => self.start_inner().await,
+                        result => result,
+                    }
+                } else {
+                    Ok(())
+                };
+                if live_attempted && (core_recovery.is_err() || rollback.is_err()) {
+                    let _ = self.stop_process().await;
+                    self.publish(
+                        CorePhase::Failed,
+                        Some("backup restore failed; core recovery is pending".into()),
+                    );
+                } else if live_attempted && *self.shutdown.borrow() {
+                    self.publish(CorePhase::Stopped, None);
+                }
                 let cleanup = prepared.cleanup();
                 self.settings = self.settings_store.snapshot();
                 self.profile_state.send_replace(self.profile_store.snapshot());
-                if rollback.is_err() || cleanup.is_err() {
+                if live_attempted && rollback.is_ok() && core_recovery.is_ok() && !*self.shutdown.borrow() {
+                    self.begin_restoration(false).await;
+                }
+                if rollback.is_err() || cleanup.is_err() || core_recovery.is_err() {
                     self.status
                         .send_modify(|state| state.error = Some("backup restore failed; recovery is pending".into()));
                 }
-                // No uploaded diagnostics are included in the HTTP error or live logs.
+                // Uploaded probe diagnostics are excluded from HTTP errors and live logs.
                 Err(error.context(format!(
-                    "restore recovery: {}; candidate cleanup: {}",
+                    "restore recovery: {}; core recovery: {}; candidate cleanup: {}",
                     rollback.is_ok(),
+                    core_recovery.is_ok(),
                     cleanup.is_ok()
                 )))
             }
         }
     }
+    /// Bridge private HTTP/disconnect cancellation into the existing core I/O checks.
+    /// Always join stop/start/reload; never drop a future owning an unreaped child.
+    #[cfg(unix)]
+    async fn restore_live_runtime(
+        &mut self,
+        path: PathBuf,
+        cancel: &watch::Sender<bool>,
+        cancellation: watch::Receiver<bool>,
+        mut http_closing: watch::Receiver<bool>,
+        reply: &mut oneshot::Sender<Result<headless_core::backup::BackupRestoreReceipt>>,
+    ) -> Result<bool> {
+        let original = std::mem::replace(&mut self.shutdown, cancellation);
+        let mut manager_shutdown = original.clone();
+        let result = {
+            let operation = async {
+                let reload = self.reload(&path).await;
+                ensure!(!*self.shutdown.borrow(), "live restore cancelled");
+                if reload.is_ok() {
+                    return Ok(false);
+                }
+                self.publish(CorePhase::Stopping, None);
+                self.stop_process().await?;
+                ensure!(!*self.shutdown.borrow(), "live restore cancelled before restart");
+                self.options.config = path;
+                self.publish(CorePhase::Starting, None);
+                self.start_inner().await?;
+                ensure!(!*self.shutdown.borrow(), "live restore cancelled after restart");
+                Ok(true)
+            };
+            tokio::pin!(operation);
+            tokio::select! { biased;
+                _ = closing(&mut manager_shutdown) => {cancel.send_replace(true); let _ = operation.await; Err(anyhow::anyhow!("live restore cancelled during shutdown"))},
+                _ = closing(&mut http_closing) => {cancel.send_replace(true); let _ = operation.await; Err(anyhow::anyhow!("live restore cancelled during HTTP shutdown"))},
+                _ = reply.closed() => {cancel.send_replace(true); let _ = operation.await; Err(anyhow::anyhow!("live restore client disconnected"))},
+                result = &mut operation => result,
+            }
+        };
+        self.shutdown = original;
+        result
+    }
+
     #[cfg(not(unix))]
     async fn restore_backup(
         &mut self,

@@ -138,7 +138,7 @@ mihomo-server/
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
-│   ├── Local backup export, inspection and restore rehearsal [Partially implemented; Linux verified]
+│   ├── Local backup export, inspection, rehearsal and restoration [Partially implemented; Linux verified]
 │   │   ├── Actor snapshot / bounded ZIP / digest manifest [Implemented]
 │   │   ├── Authenticated binary download / single body-owned admission [Implemented]
 │   │   ├── Strict ZIP structure / CRC / SHA-256 / catalog and settings references [Implemented; Linux verified]
@@ -147,11 +147,11 @@ mihomo-server/
 │   │   ├── Actor-owned core snapshot / isolated Geo data / probe cancellation and cleanup [Implemented; Linux verified]
 │   │   ├── Durable catalog/settings restore journal / runtime-marker recovery [Implemented; Linux verified]
 │   │   ├── Startup + actor recovery before DNS pruning/defaults/current mirror [Implemented; Linux verified]
-│   │   ├── Explicit stopped-core restore upload / DNS policy / durable receipt [Implemented; Linux verified]
-│   │   ├── Restore preparation cancellation / phase checks / committed cleanup [Implemented; bounded synchronous publication]
-│   │   ├── Running-core restore reload/restart/apply rollback [Pending]
+│   │   ├── Explicit running/stopped restore upload / DNS policy / durable receipt [Implemented; Linux verified]
+│   │   ├── Restore preparation/core-I/O cancellation / phase checks / committed cleanup [Implemented; Linux verified]
+│   │   ├── Running-core restore reload/restart/apply rollback / saved-node reconciliation [Implemented; Linux verified]
 │   │   ├── Abrupt-termination candidate orphan cleanup [Pending]
-│   │   └── Local retention / restore / schedule / WebDAV / UI [Pending]
+│   │   └── Local retention / schedule / WebDAV / UI [Pending]
 │   ├── Full application context and domain events  [Pending]
 │   ├── Sole Mihomo lifecycle manager                [Implemented; Linux verified]
 │   │   ├── Start, readiness, stop, restart, recovery, reap
@@ -169,7 +169,7 @@ mihomo-server/
 │   │   ├── Authenticated POST /api/backup ZIP export [Implemented; Linux verified]
 │   │   ├── Authenticated POST /api/backup/inspect validation report [Implemented; Linux verified]
 │   │   ├── Authenticated POST /api/backup/validate restore rehearsal [Implemented; Linux verified]
-│   │   ├── Authenticated POST /api/backup/restore explicit stopped-core restoration [Implemented; Linux verified]
+│   │   ├── Authenticated POST /api/backup/restore running/stopped restoration [Implemented; Linux verified]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -2933,6 +2933,75 @@ candidate cleanup, source/revision garbage collection, retained archive list/del
 scheduled backups, WebDAV, backup UI and the full design's other platform/settings/
 resource/advanced-page/shared-component work remain pending. The full project is
 not complete.
+
+## Latest increment: running-core backup restoration and rollback
+
+Delivery step 7 extends the explicit backup restoration API to settled running
+cores. Stopped behavior remains available. The actor observes child exit and
+rejects failed/recovering or otherwise unsettled phases, child/phase disagreement
+and scheduled recovery with 409 `restore_requires_settled_core`. Lifecycle and
+restore operations remain serialized after journal recovery. The same verified
+upload, explicit archived/regenerated policy, isolated validation, fresh DNS
+protection, shared admission and journal transaction are reused.
+
+After staging runtime and journaling source files, running restoration cancels
+old selection reconciliation and tries reload with existing live proxy-port
+readback. A successful reload preserves the PID. Reload failure or a listener
+mismatch stops/reaps the old child and starts the candidate, with bounded readiness
+and live port verification. Catalog/settings publication and runtime-manifest
+commit follow only after successful core application. Receipt now includes
+`core_running` and `core_restarted` in addition to committed revision/digests,
+policy, DNS confirmation and cleanup state. A stopped restore reports both false.
+
+Core I/O receives a private cancellation watch. Disconnect, HTTP close or manager
+shutdown signals it and joins the operation before rollback; stop/start futures
+owning children are never dropped. The original manager shutdown watch is then
+restored. Precommit failure recovers the previous runtime/catalog/settings/files,
+stops/reaps any attempted candidate and restarts the old core with its previous
+node records. Failed disk/core recovery exposes Failed/pending state and retains
+unresolved intent. Manager shutdown restores disk state and reaps without
+restarting. Failure before live application leaves the original child untouched.
+A failed/cancelled live apply can change the old core's PID during recovery.
+
+Commit remains the runtime-manifest rename. Postcommit cleanup failure reports
+cleanup_pending and does not undo publication. Running success reconciles archived
+node records without pruning them, with existing bounded provider retries. Failed
+apply reconciles the recovered old records. Session DNS confirmations clear on
+commit. Uploaded validation/script diagnostics remain private and discarded; an
+applied core emits its normal logs. Filesystem writes/fsyncs check cancellation
+between bounded phases, but individual syscalls cannot be preempted. An interrupted
+HTTP client must inspect status/revision before retrying because it may miss a
+committed receipt.
+
+Verification: `cargo check --workspace --locked --offline`, all 310 regular
+workspace tests (including 20 regular backup tests), all 4 real-Mihomo backup
+tests, warnings-denied Clippy, formatting and diff checks. New deterministic
+coverage verifies same-PID reload, restart fallback and old-PID reaping, archived
+node reconciliation, candidate startup failure with old data/core/node recovery,
+and disconnect/HTTP-close/manager-shutdown cancellation during reload. Real-core
+coverage switches mixed to HTTP listeners on the same port (verified restart),
+then forces an occupied-port apply failure and verifies old listener/config/
+catalog/settings/revision recovery. The actual 56-node archive test now performs
+running API restoration and checks HTTPS 204 through stopped restore and service
+restart, preserving original source/catalog bytes.
+
+The runnable Linux MVP is refreshed at
+`target/mihomo-server-linux-x86_64-live-restore`, with current Rust binaries,
+unchanged Web assets, pinned independent Mihomo and updated deployment/provenance
+docs. All 12 SHA-256 checksums pass; packaged binary and documentation match the
+release/source files. Fresh-bundle smoke verifies a 1,110,883-byte/13-entry actual
+56-node archive, live restore after a mode change with the same PID and restored
+mode/node, stopped restore and service-restart persistence, and HTTPS 204 traffic
+after each apply/restart. Original data-file hashes remain unchanged. No owned
+service/core processes or disposable restore directories remain after cleanup.
+No sandbox Git writes/commits occur; the host script owns the commit.
+
+Next Delivery step 7 subtask: clean up private restore candidate directories left
+by abrupt service termination using verifiable ownership, before extending local
+archive retention/list/delete. Immutable source/revision garbage collection,
+schedules, WebDAV, backup UI, full settings/resources, advanced pages, shared
+components and additional supported release/service targets remain pending;
+Windows compatibility stays deferred. The full project is not complete.
 
 ## MVP completion boundary
 

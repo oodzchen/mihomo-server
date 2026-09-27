@@ -1,4 +1,4 @@
-//! Private restore validation and explicit stopped-core publication candidates.
+//! Private restore validation and explicit publication candidates.
 use super::hash;
 use anyhow::{Context as _, Result, ensure};
 use headless_core::{

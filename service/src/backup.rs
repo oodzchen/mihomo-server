@@ -23,13 +23,13 @@ pub struct BackupDownload {
 }
 
 #[derive(Debug)]
-pub(crate) struct RestoreNeedsStopped;
-impl std::fmt::Display for RestoreNeedsStopped {
+pub(crate) struct RestoreNeedsSettled;
+impl std::fmt::Display for RestoreNeedsSettled {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("stop the core before restoring a backup")
+        f.write_str("wait for a settled running or stopped core before restoring a backup")
     }
 }
-impl std::error::Error for RestoreNeedsStopped {}
+impl std::error::Error for RestoreNeedsSettled {}
 
 #[cfg(unix)]
 pub(crate) mod export {

@@ -48,11 +48,13 @@ pub enum BackupRuntimePolicy {
     Regenerated,
 }
 
-/// Committed stopped-core restoration. Cleanup failure never changes committed=true.
+/// Committed restoration. Cleanup failure never changes committed=true.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackupRestoreReceipt {
     pub committed: bool,
+    pub core_running: bool,
+    pub core_restarted: bool,
     pub archive: BackupInspection,
     pub runtime_policy: BackupRuntimePolicy,
     pub runtime_revision: String,

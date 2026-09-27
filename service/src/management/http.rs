@@ -322,10 +322,10 @@ async fn backup_upload(state: HttpState, request: Request, operation: BackupUplo
             .await
         {
             Ok(receipt) => Json(receipt).into_response(),
-            Err(cause) if cause.downcast_ref::<crate::backup::RestoreNeedsStopped>().is_some() => error(
+            Err(cause) if cause.downcast_ref::<crate::backup::RestoreNeedsSettled>().is_some() => error(
                 StatusCode::CONFLICT,
-                "restore_requires_stopped_core",
-                "stop the core before restoring a backup",
+                "restore_requires_settled_core",
+                "wait for a settled running or stopped core before restoring a backup",
             ),
             Err(_) if *shutdown.borrow() || *closing.borrow() => error(
                 StatusCode::SERVICE_UNAVAILABLE,

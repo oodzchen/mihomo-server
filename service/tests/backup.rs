@@ -983,8 +983,14 @@ async fn real_data_restore_transaction_preserves_sources_and_proxy_traffic_after
                     .oneshot(apply_restore_request(&token, bytes.clone(), "regenerated"))
                     .await?;
                 ensure!(
-                    response.status() == StatusCode::CONFLICT && manager.status().pid == pid,
-                    "running restore must require stopping the core"
+                    response.status() == StatusCode::OK && manager.status().pid == pid,
+                    "running restore must hot reload the core"
+                );
+                let live: headless_core::backup::BackupRestoreReceipt =
+                    serde_json::from_slice(&to_bytes(response.into_body(), 4096).await?)?;
+                ensure!(
+                    live.committed && live.core_running && !live.core_restarted,
+                    "live restore receipt missing"
                 );
                 manager.stop().await?;
                 let mut settings = manager.settings().await?.runtime;
@@ -1249,4 +1255,217 @@ async fn committed_restore_reports_private_cleanup_failure_without_undoing_publi
         fs::remove_dir_all(path)?;
     }
     result.and(cleanup)
+}
+
+fn controlled_restore_manager(dir: &Directory) -> Result<CoreManager> {
+    let binary = dir.0.join("controlled-mihomo");
+    fs::write(&binary, include_str!("fixtures/mihomo.py"))?;
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))?;
+    let mut options = CoreOptions::new(binary, dir.0.clone(), dir.0.join("bootstrap.yaml"));
+    options.script_worker = Some(PathBuf::from(env!("CARGO_BIN_EXE_mihomo-server")));
+    options.policy.readiness_attempts = 30;
+    options.policy.probe_interval = Duration::from_millis(20);
+    options.policy.probe_timeout = Duration::from_millis(100);
+    options.policy.stop_timeout = Duration::from_millis(300);
+    CoreManager::spawn(options)
+}
+async fn assert_owned_pid_reaped(pid: u32) -> Result<()> {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if unsafe { libc::kill(pid as libc::pid_t, 0) } == -1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await?;
+    Ok(())
+}
+#[tokio::test]
+async fn running_restore_hot_reload_or_restart_fallback_reconciles_archived_nodes() -> Result<()> {
+    for reload in [true, false] {
+        let dir = Directory::new()?;
+        let manager = controlled_restore_manager(&dir)?;
+        let (app, token) = dir.app(&manager)?;
+        let result=async {
+            let yaml=format!("mode: rule\nfixture-proxy-api: true\nfixture-reload: {reload}\nproxy-groups: [{{name: Main, type: select, proxies: [DIRECT, REJECT]}}]\nrules: ['MATCH,Main']\n");
+            let item=manager.import_profile_yaml(yaml,"original".into()).await?;let uid=item.uid.unwrap().to_string();manager.select_profile(uid.clone()).await?;manager.start().await?;
+            manager.select_node("Main".into(),"REJECT".into()).await?;
+            let download=manager.export_backup().await?;let bytes=download.bytes.clone();drop(download);
+            manager.select_node("Main".into(),"DIRECT".into()).await?;
+            let before=manager.status();
+            let receipt=apply_restore_report(&app,&token,bytes,"regenerated").await?;
+            assert!(receipt.committed && receipt.core_running && !receipt.cleanup_pending);
+            assert_eq!(receipt.core_restarted,!reload);
+            assert_eq!(manager.status().phase,CorePhase::Running);
+            assert_eq!(manager.status().active_profile.as_deref(),Some(uid.as_str()));
+            assert_ne!(manager.status().config_revision,before.config_revision);
+            assert_eq!(manager.client().get_proxies().await?.proxies["Main"].now.as_deref(),Some("REJECT"));
+            if reload {assert_eq!(manager.status().pid,before.pid);} else {assert_ne!(manager.status().pid,before.pid);assert_owned_pid_reaped(before.pid.unwrap()).await?;}
+            assert!(!dir.0.join("backup-restore.yaml").exists());
+            Ok::<_,anyhow::Error>(())
+        }.await;
+        result.and(manager.shutdown().await)?;
+    }
+    Ok(())
+}
+#[tokio::test]
+async fn running_restore_failed_restart_recovers_old_core_catalog_settings_and_nodes() -> Result<()> {
+    let dir = Directory::new()?;
+    let manager = controlled_restore_manager(&dir)?;
+    let (app, token) = dir.app(&manager)?;
+    let result=async {
+        let item=manager.import_profile_yaml("mode: rule\nfixture-proxy-api: true\nfixture-reload: true\nproxy-groups: [{name: Main, type: select, proxies: [DIRECT, REJECT]}]\nrules: ['MATCH,Main']\n".into(),"original".into()).await?;
+        let uid=item.uid.unwrap().to_string();manager.select_profile(uid).await?;manager.start().await?;manager.select_node("Main".into(),"REJECT".into()).await?;
+        let download=manager.export_backup().await?;let bytes=download.bytes.clone();drop(download);
+        let bytes=rewrite_archive(&bytes,|files| {files.insert("runtime.yaml".into(),b"mode: direct\nfixture-fail-start: true\nfixture-proxy-api: true\nrules: ['MATCH,DIRECT']\n".to_vec());})?;
+        let before=manager.status();let catalog=json!(manager.profiles());let settings=manager.settings().await?;let config=manager.runtime_config().await?;
+        let response=app.clone().oneshot(apply_restore_request(&token,bytes,"archived")).await?;
+        assert_eq!(response.status(),StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(manager.status().phase,CorePhase::Running);
+        assert_eq!(manager.status().config_revision,before.config_revision);
+        assert_eq!(manager.status().active_profile,before.active_profile);
+        assert_eq!(json!(manager.profiles()),catalog);assert_eq!(manager.settings().await?,settings);assert_eq!(manager.runtime_config().await?,config);
+        assert_eq!(manager.client().get_proxies().await?.proxies["Main"].now.as_deref(),Some("REJECT"));
+        assert_owned_pid_reaped(before.pid.unwrap()).await?;
+        assert!(!dir.0.join("backup-restore.yaml").exists());
+        let download=manager.export_backup().await?;drop(download);
+        Ok::<_,anyhow::Error>(())
+    }.await;
+    result.and(manager.shutdown().await)
+}
+#[tokio::test]
+async fn live_restore_disconnect_http_close_and_shutdown_rollback_and_reap() -> Result<()> {
+    for case in ["disconnect", "http-close", "manager-shutdown"] {
+        let dir = Directory::new()?;
+        let manager = controlled_restore_manager(&dir)?;
+        let auth = Authentication::load_or_create(&dir.0.join("management-token"), "127.0.0.1:9090".parse()?, None)?;
+        let token = fs::read_to_string(dir.0.join("management-token"))?.trim().to_owned();
+        let state = HttpState::new(Management::new(manager.clone(), auth));
+        let app = router(state.clone());
+        let result = async {
+            let item = manager
+                .import_profile_yaml(
+                    "mode: rule\nfixture-proxy-api: true\nfixture-reload: true\nrules: ['MATCH,DIRECT']\n".into(),
+                    "original".into(),
+                )
+                .await?;
+            manager.select_profile(item.uid.unwrap().to_string()).await?;
+            manager.start().await?;
+            let download = manager.export_backup().await?;
+            let bytes = download.bytes.clone();
+            drop(download);
+            let bytes = rewrite_archive(&bytes, |files| {
+                files.insert(
+                    "runtime.yaml".into(),
+                    b"mode: direct\nfixture-reload-delay: true\nfixture-proxy-api: true\nrules: ['MATCH,DIRECT']\n"
+                        .to_vec(),
+                );
+            })?;
+            let before = manager.status();
+            let catalog = json!(manager.profiles());
+            let settings = manager.settings().await?;
+            let upload = tokio::spawn(app.oneshot(apply_restore_request(&token, bytes, "archived")));
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while !dir.0.join("reload-started").exists() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await?;
+            match case {
+                "disconnect" => {
+                    upload.abort();
+                    assert!(upload.await.unwrap_err().is_cancelled());
+                }
+                "http-close" => {
+                    state.close();
+                    assert_eq!(upload.await??.status(), StatusCode::SERVICE_UNAVAILABLE);
+                }
+                "manager-shutdown" => {
+                    tokio::time::timeout(Duration::from_secs(3), manager.shutdown()).await??;
+                    assert_eq!(upload.await??.status(), StatusCode::SERVICE_UNAVAILABLE);
+                }
+                _ => unreachable!(),
+            }
+            if case != "manager-shutdown" {
+                assert_eq!(
+                    tokio::time::timeout(Duration::from_secs(3), manager.settings()).await??,
+                    settings
+                );
+                assert_eq!(manager.status().phase, CorePhase::Running);
+                assert_eq!(manager.status().config_revision, before.config_revision);
+                assert_eq!(json!(manager.profiles()), catalog);
+                assert_eq!(manager.runtime_config().await?["mode"].as_str(), Some("rule"));
+            } else {
+                let store = headless_core::config::runtime::RuntimeStore::open(&dir.0)?;
+                assert_eq!(store.state().current.map(|r| r.file), before.config_revision);
+            }
+            assert_owned_pid_reaped(before.pid.unwrap()).await?;
+            assert!(!dir.0.join("backup-restore.yaml").exists());
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        result.and(manager.shutdown().await)?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires real MIHOMO_TEST_BINARY; listener restart fallback and occupied-port rollback"]
+async fn real_running_restore_restarts_listener_switch_and_rolls_back_occupied_port() -> Result<()> {
+    let dir = Directory::new()?;
+    let reserved = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let port = reserved.local_addr()?.port();
+    drop(reserved);
+    fs::write(
+        dir.0.join("bootstrap.yaml"),
+        format!(
+            "mode: direct\nmixed-port: {port}\nallow-lan: false\ndns: {{enable: false}}\nrules: ['MATCH,DIRECT']\n"
+        ),
+    )?;
+    let manager = dir.manager(true)?;
+    let (app, token) = dir.app(&manager)?;
+    let result = async {
+        manager.start().await?;
+        let before = manager.status();
+        let download = manager.export_backup().await?;
+        let bytes = download.bytes.clone();
+        drop(download);
+        let switched = rewrite_archive(&bytes, |files| {
+            files.insert("runtime.yaml".into(), format!("mode: direct\nport: {port}\nallow-lan: false\ndns: {{enable: false}}\nrules: ['MATCH,DIRECT']\n").into_bytes());
+        })?;
+        let receipt = apply_restore_report(&app, &token, switched, "archived").await?;
+        assert!(receipt.committed && receipt.core_running && receipt.core_restarted && !receipt.cleanup_pending);
+        assert_ne!(manager.status().pid, before.pid);
+        assert_owned_pid_reaped(before.pid.unwrap()).await?;
+        let config = manager.client().get_base_config().await?;
+        assert_eq!(config.port, port);
+        assert_eq!(config.mixed_port, 0);
+        tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
+        let before = manager.status();
+        let catalog = json!(manager.profiles());
+        let settings = manager.settings().await?;
+        let runtime = manager.runtime_config().await?;
+        let blocked = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let occupied = blocked.local_addr()?.port();
+        let download = manager.export_backup().await?;
+        let bytes = download.bytes.clone();
+        drop(download);
+        let conflicting = rewrite_archive(&bytes, |files| {
+            files.insert("runtime.yaml".into(), format!("mode: direct\nport: {occupied}\nallow-lan: false\ndns: {{enable: false}}\nrules: ['MATCH,DIRECT']\n").into_bytes());
+        })?;
+        let response = app.oneshot(apply_restore_request(&token, conflicting, "archived")).await?;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(manager.status().phase, CorePhase::Running);
+        assert_eq!(manager.status().config_revision, before.config_revision);
+        assert_eq!(json!(manager.profiles()), catalog);
+        assert_eq!(manager.settings().await?, settings);
+        assert_eq!(manager.runtime_config().await?, runtime);
+        assert_eq!(manager.client().get_base_config().await?.port, port);
+        assert_owned_pid_reaped(before.pid.unwrap()).await?;
+        tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
+        assert!(!dir.0.join("backup-restore.yaml").exists());
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    result.and(manager.shutdown().await)
 }

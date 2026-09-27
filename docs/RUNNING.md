@@ -2101,8 +2101,8 @@ symlinks/FIFO/directory sources are rejected. Changes during export are detected
 The cooperative worker budget is 15 seconds; shutdown checks cancel work and join
 it before releasing the data-directory lock. No archive is retained by the service.
 
-This is a `mihomo-server` backup format. Explicit stopped-core restoration is
-available through `/api/backup/restore`; local retention/list/delete, scheduling,
+This is a `mihomo-server` backup format. Explicit restoration for settled running
+or stopped cores is available through `/api/backup/restore`; local retention/list/delete, scheduling,
 WebDAV and backup Web controls remain pending. Desktop backup files are not accepted.
 
 ## Inspect a service backup before restoring
@@ -2146,7 +2146,7 @@ until it finishes/cancels. Status/settings/lifecycle commands remain independent
 Limits remain 65 MiB upload, 64 MiB content, 8 MiB per content entry and 1,024 ZIP
 entries, with a 1 MiB manifest and the existing 64 KiB settings limit. Only this
 binary route uses the larger upload allowance; JSON commands retain their 9 MiB
-envelope limit. Explicit stopped-core restore and rollback are described below.
+envelope limit. Explicit restore and rollback are described below.
 
 ## Validate a restore candidate with Mihomo and enhancement workers
 
@@ -2207,18 +2207,21 @@ Invalid archives, source generation, scripts, provider paths, Mihomo rejection,
 probe mutation or cleanup failure return generic 422; no restore state is
 published and no restore journal is created. Success is a disposable rehearsal,
 not a saved restore candidate or permission to skip validation later. Explicit
-stopped-core publication/recovery/rollback is described below. Running-core
-restoration and restore UI remain pending.
+publication/recovery/rollback for running and stopped cores is described below.
+Restore UI remains pending.
 
 
-## Restore a service backup while the core is stopped
+## Restore a service backup with a running or stopped core
 
 `POST /api/backup/restore` accepts the same authenticated, unencoded raw ZIP body
 as `/api/backup/inspect` and `/api/backup/validate`. Set exactly one
 `X-Backup-Runtime` header to `archived` or `regenerated`; there is no implicit
-choice. Stop the core using the existing stop command first. Running, recovering,
-failed or unsettled lifecycle states return 409 `restore_requires_stopped_core`;
-stop settles the lifecycle before retrying. The restored core remains stopped.
+choice. A settled running or stopped core can restore. Recovering, failed or
+unsettled lifecycle states return 409 `restore_requires_settled_core`; stop settles
+the lifecycle before retrying. A stopped core remains stopped. A running core
+first tries validated reload and checks live proxy ports; reload failure or port
+mismatch falls back to stopping/reaping the old child and starting the candidate.
+The manifest commits only after live readiness and port checks succeed.
 
 Archived policy preserves the snapshot's exact runtime bytes after validation.
 Regenerated policy executes active archived source/enhancements with archived
@@ -2232,10 +2235,14 @@ Live session confirmations are cleared on commit, never imported from a backup.
 
 Successful JSON contains `committed: true`, `archive` inspection metadata,
 `runtime_policy`, `runtime_revision`, exact `runtime_bytes`/`runtime_sha256`,
-`dns_override_requires_confirmation` and `cleanup_pending`. It contains no source,
+`dns_override_requires_confirmation`, `cleanup_pending`, `core_running` and
+`core_restarted`. The last two describe the successful live apply: hot reload
+preserves the PID; restart fallback changes it. It contains no source,
 profile names, host paths or credentials. Catalog records/links/node selections and
 settings are restored, with new immutable source filenames; old source files are
-retained for later garbage collection. Starting normally restores saved nodes.
+retained for later garbage collection. Successful running restoration reconciles
+archived node records without pruning them; unloaded provider groups retry within
+the existing bounded reconciliation flow. Starting normally restores saved nodes.
 
 Missing/duplicate/unknown runtime policy is 400 `invalid_restore_policy`. Auth,
 media, length, body bounds, 15-second upload timeout and shared admission use the
@@ -2246,10 +2253,18 @@ The route awaits committed cleanup to preserve a truthful receipt during gracefu
 close, but a disconnected client may miss a commit; query status/revision before
 repeating an upload. Receipt is not a reusable candidate or an exactly-once key.
 
-Preparation is cancelled and joined on disconnect/shutdown. Publication uses
+Preparation and live core I/O are cancelled and joined on disconnect/shutdown,
+including stop/start and child reaping. HTTP cancellation is private to the
+restore; it does not shut down the manager. Publication uses
 bounded synchronous filesystem writes/fsyncs and checks cancellation between
 durable phases; individual syscalls cannot be preempted. Precommit failure rolls
-runtime/catalog/settings/files back through the journal. Unresolved recovery is
+runtime/catalog/settings/files back through the journal. If live application was
+attempted, the candidate is stopped/reaped and the previous core is restarted
+with the previous node records. Its PID may change even when restoration fails.
+Manager shutdown rolls disk state back and reaps the child without restarting.
+If disk or core recovery fails, the service exposes failed/pending recovery state
+and retains any unresolved journal, rather than running the candidate against
+uncommitted data. Unresolved recovery is
 reported in status and retains intent. Manifest rename means logically committed
 regardless of a following directory fsync error; such acknowledgement/cleanup
 errors set cleanup_pending rather than undoing the restoration. Startup rolls back
