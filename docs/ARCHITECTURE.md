@@ -53,12 +53,13 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** authoritative TCP concurrency and process matching
-settings, Web editing and presence-preserving core readback, with script authority,
-rollback and restart verification. **Next implementation task (P1):** TCP keep-alive
-interval/idle/disable settings with Web editing and core readback. DAT validation,
-controlled online and running-core Geo updates, and other remaining full settings
-still belong to P1; finish this priority before starting P2.
+**Latest completed task (P1):** authoritative TCP keep-alive interval/idle/disable
+settings, Web editing and presence-preserving core readback, with signed duration,
+script authority, rollback and restart verification. **Next implementation task
+(P1):** authoritative outbound interface-name and Linux routing-mark settings,
+including Web editing and core readback. DAT validation, controlled online and
+running-core Geo updates, and other remaining full settings still belong to P1;
+finish this priority before starting P2.
 
 ## Complete target architecture
 
@@ -80,7 +81,7 @@ mihomo-server/
 │   ├── mihomo-client/                               [Migrated; Linux verified]
 │   │   ├── Unix socket / explicit loopback HTTP      [Migrated]
 │   │   ├── API methods, response models, errors      [Migrated]
-│   │   ├── Presence-preserving connection-settings GET /configs projection [Implemented; Linux verified]
+│   │   ├── Presence-preserving TCP/process/keep-alive GET /configs projection [Implemented; Linux verified]
 │   │   └── Realtime feeds, cancellation, reconnect   [Migrated]
 <!--│   │   └── Windows Named Pipe runtime validation    [Deferred; code retained; Windows compatibility postponed] -->
 │   └── headless-core/                               [Partially migrated]
@@ -113,11 +114,13 @@ mihomo-server/
 │       ├── Typed DNS/TUN subset / shallow authority  [Implemented; Linux verified]
 │       ├── Typed Geo fields incl. geosite matcher / per-URL authority / bounds / schema-one recovery [Implemented; Linux verified]
 │       ├── TCP concurrency / process mode authority / schema-one recovery [Implemented; Linux verified]
+│       ├── Signed TCP keep-alive durations / disable authority / schema-one recovery [Implemented; Linux verified]
 │       ├── Pure TUN/DNS derivation / IPv6 range repair [Migrated + staged adaptation; Linux validation]
 │       ├── Provider DNS digest / profile preference / session confirmation [Migrated + adaptation; Linux verified]
 │       ├── Deleted-profile DNS preference / confirmation cleanup [Implemented; recoverable]
 │       ├── Hosts / native TUN integration            [Pending]
 │       ├── Final LAN bind / group cleanup / field order [Migrated + staged adaptation; Linux verified]
+│       ├── Outbound interface / Linux routing mark authority [Pending; next P1 task]
 │       ├── Remaining authoritative settings          [Pending; P1]
 │       ├── Source-addressed HTTP provider cache identities / implicit paths [Implemented; Linux verified]
 │       ├── Runtime YAML + overlay generation        [Implemented; upstream merge reused]
@@ -154,7 +157,7 @@ mihomo-server/
 │   │   ├── Read-only MMDB verification / pinned parser / metadata-only compatibility outcome [Implemented; Linux verified]
 │   │   ├── Stopped-core pinned MMDB replacement / digest guards / atomic commit / orphan recovery [Implemented; Linux verified]
 │   │   ├── Geo actor settings/config/core comparison / geosite matcher / bounded readback / URL model aliases [Implemented; Linux verified]
-│   │   ├── Connection settings comparison / field presence / shared snapshot envelope [Implemented; Linux verified]
+│   │   ├── TCP/process/keep-alive comparison / field presence / shared snapshot envelope [Implemented; Linux verified]
 │   │   └── DAT validation / controlled online and running-core Geo updates / remaining full settings [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
@@ -264,7 +267,8 @@ mihomo-server/
 │   ├── Rules/provider/delay views                   [Pending; P2]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
-│   ├── TCP concurrency / process mode editor / shared Geo-connection comparison / retry [Implemented; Linux verified]
+│   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
+│   ├── Outbound interface / Linux routing mark editor / readback [Pending; next P1 task]
 │   ├── DNS/TUN editor / lossless nested inheritance / readback [Implemented; Linux verified]
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
@@ -3843,6 +3847,66 @@ runnable. Next task: P1 TCP keep-alive interval/idle/disable settings and readba
 then other remaining configuration/Geo lifecycle work. P2 rules/provider/delay
 operations/views, P3 i18n/signals, P4 actual Linux systemd installation and previously
 deferred features remain incomplete. No sandbox Git commit is performed.
+
+## P1 increment: TCP keep-alive settings and readback
+
+The TCP concurrency/process matching increment was complete before this task.
+Optional `keep-alive-interval`, `keep-alive-idle` and `disable-keep-alive` now join
+schema-one runtime settings. Durations accept signed 32-bit integer seconds;
+explicit zero/negative values and false are authoritative, while missing/null
+fields inherit. This service integer bound avoids duration multiplication overflow;
+it is not an upstream or OS socket limit. Initial/final enforcement prevents
+scripts, merges and overlays from overriding saved settings without rewriting raw
+subscription YAML. Existing settings/runtime transactions cover recovery and
+failed application; older schema-one files still load without migration.
+
+The authenticated, actor-serialized `connection_settings` response appends the
+three new leaves to TCP concurrency/process mode. Narrow optional 64-bit core
+values preserve zero, negative and missing fields. Saved/configured/actual values,
+mismatch logic, stopped-state unknowns, timeouts and retry reuse the shared
+comparison envelope. The Geo view keeps its existing nine fields and ordering.
+The Web editor provides integer-second inputs, disable/inherit choices, validation,
+saved summaries, confirmed replacement and draft preservation on failures.
+
+Modern Mihomo forwards these fields to Go's KeepAliveConfig: zero uses a default,
+negative preserves the corresponding socket option, and the disable flag disables
+probes. Core versions/platforms may differ. This increment verifies configuration
+and core readback plus usable traffic; it does not claim packet timing or per-socket
+OS application. Upstream/source links and semantics are recorded in UPSTREAM.md.
+
+Validation:
+
+- `cargo check --workspace --locked --offline`, service build, formatting and diff
+  checks passed. Workspace tests passed: 360 regular tests, zero failures and 79
+  opt-in tests skipped by default. The two relevant real-core tests below were
+  explicitly enabled and passed separately.
+- Pure tests cover signed integer boundaries, zero/negative durations, explicit
+  false, missing/null inheritance, invalid types/out-of-range values, initial/final
+  enforcement, preserved unrelated fields and settings round trips. Existing
+  interrupted-publication recovery now includes all three keep-alive fields.
+- Comparison tests cover mixed-version partial/missing fields, preserved zero/false,
+  mismatches and read failure. Authenticated HTTP integration covers saves before
+  configuration, merge/overlay authority, rejected invalid updates with unchanged
+  state/revision, inherited values and unchanged raw YAML.
+- Explicit real-Mihomo connection integration passed: zero/negative and positive
+  duration readback, disable false/true, initial/final script authority, hot updates,
+  failed probe rollback retaining PID/revision/settings/config/actual values,
+  stopped inheritance and persisted settings after service restart.
+- Explicit actual-node resource integration passed with private copies: all five
+  connection settings matched the core, Geo/provider resources remained usable,
+  HTTPS proxy traffic returned 204 before/after core restart, and original node/Geo
+  hashes remained unchanged.
+- TypeScript/Vite build and the full Playwright suite passed: 26 workflows, four
+  optional upgrade/repair checks skipped. Coverage includes numeric rejection,
+  zero/negative/false save and reload, preserved failed drafts, inheritance clearing,
+  readback failure/retry/mismatch handling and existing scalar/DNS/TUN/Geo editors.
+
+The complete architecture tree is updated above. The Linux development MVP remains
+runnable. Next task: P1 outbound interface-name and Linux routing-mark authority,
+Web controls and readback, then remaining configuration/Geo lifecycle work.
+P2 rules/provider/delay workflows, P3 i18n/signals and P4 actual systemd installation
+remain incomplete; all previously deferred work stays deferred. The external host
+handles Git commits; no sandbox Git commit is performed.
 
 ## MVP completion boundary
 

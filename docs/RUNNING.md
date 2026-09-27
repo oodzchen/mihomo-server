@@ -1224,6 +1224,9 @@ runtime:
   unified-delay: true
   tcp-concurrent: true
   find-process-mode: off
+  keep-alive-interval: 15
+  keep-alive-idle: 30
+  disable-keep-alive: false
   log-level: info
 ```
 
@@ -1234,7 +1237,14 @@ Mode accepts `rule`, `global`, `direct`; log-level accepts `silent`, `error`,
 `warning`, `info`, `debug`. Missing/null fields inherit the source configuration.
 TCP concurrency accepts only true/false, with explicit false disabling it. Process
 matching accepts canonical `strict` (core decides), `always` (force matching) and
-`off` (disable). The Web settings form supports these values and inheritance.
+`off` (disable). TCP keep-alive interval/idle accept signed integer seconds
+(-2147483648–2147483647, a service integer bound, not an OS socket limit).
+`disable-keep-alive` is a strict boolean: true disables probes, false enables
+core-managed keep-alive. Zero/negative seconds remain explicit values. In modern
+Mihomo's Go keep-alive configuration, zero selects the Go default and negative
+leaves the corresponding socket option unchanged; old cores/platforms may differ.
+Null/omitted durations inherit configuration, rather than setting zero. The Web
+settings form supports these values and inheritance.
 Explicit fields enter before global/profile enhancements and win in the final
 candidate even if a script changes/removes them. Discarded override warnings appear
 in Logs under `settings`. Imports/runtime edits/overlays obey the same explicit
@@ -2487,10 +2497,11 @@ again after an ambiguous response. External file writers must honor the same dat
 lock. Live/online updates, DAT handling and automatic runtime rollback are pending.
 
 
-## TCP concurrency and process matching readback
+## Connection settings and TCP keep-alive readback
 
-Use `set_settings` to save optional `tcp-concurrent` and `find-process-mode` along
-with any other runtime fields you want to retain; it replaces the entire runtime
+Use `set_settings` to save optional `tcp-concurrent`, `find-process-mode`,
+`keep-alive-interval`, `keep-alive-idle` and `disable-keep-alive` along with any
+other runtime fields you want to retain; it replaces the entire runtime
 settings object. The Web editor preserves existing supported fields automatically.
 Owned values apply before enhancements and again after scripts/merges/overlays.
 Absent/null restores active-subscription inheritance; standalone configurations
@@ -2504,17 +2515,20 @@ Read saved, committed and core-reported values through the authenticated command
 {"command":"connection_settings"}
 ```
 
-The response contains config_revision, running, optional error and two fields:
-tcp-concurrent and find-process-mode. Each includes setting, configured, actual
+The response contains config_revision, running, optional error and five fields
+in this order: tcp-concurrent, find-process-mode, keep-alive-interval,
+keep-alive-idle and disable-keep-alive. Each includes setting, configured, actual
 and mismatch. Null setting means inheritance; null configured means unspecified;
 null actual means unknown. A core default for an unspecified value is not a
 mismatch. Native title-case mode names normalize to lower-case. Older cores that
-omit a field report null rather than fabricated false/off. A stopped core is not
+omit a field report null rather than fabricated zero/false/off. A stopped core is not
 queried; running readback has a three-second timeout and a fixed failure diagnostic.
 
 The Web comparison refreshes on settings/config/lifecycle changes and offers
 refresh/retry, clearing stale rows on failure or disconnect. This reports settings,
-not proof of process identification, process-rule effectiveness or improved latency.
+not proof of process identification, process-rule effectiveness, improved latency
+or OS-level keep-alive application to individual sockets. Durations remain visible
+even when disable-keep-alive is true; turning the switch off restores their use.
 
 ## Authoritative Geo settings and readback
 

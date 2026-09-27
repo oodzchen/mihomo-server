@@ -31,6 +31,9 @@ fn interrupted_settings_update_follows_runtime_commit_at_each_publication_phase(
             let mut candidate = prior.clone();
             candidate.runtime.mode = Some(Mode::Global);
             candidate.runtime.tcp_concurrent = Some(false);
+            candidate.runtime.keep_alive_interval = Some(0);
+            candidate.runtime.keep_alive_idle = Some(-1);
+            candidate.runtime.disable_keep_alive = Some(false);
             candidate.runtime.find_process_mode = Some(headless_core::config::settings::FindProcessMode::Off);
             candidate.profile_dns.insert(
                 "one".into(),
@@ -464,6 +467,50 @@ fn connection_settings_preserve_inheritance_and_enforce_false_and_process_modes(
         "find-process-mode: false",
     ] {
         assert!(serde_yaml_ng::from_str::<RuntimeSettings>(invalid).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn keep_alive_settings_preserve_signed_seconds_false_and_inheritance() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    let source = parse("keep-alive-interval: 15\nkeep-alive-idle: 30\ndisable-keep-alive: true\ncustom: retained")?;
+    assert_eq!(RuntimeSettings::default().enforce(source.clone())?, source);
+    let null: RuntimeSettings =
+        serde_yaml_ng::from_str("keep-alive-interval: null\nkeep-alive-idle: null\ndisable-keep-alive: null")?;
+    assert_eq!(null.enforce(source.clone())?, source);
+    for seconds in [i32::MIN, -1, 0, 15, i32::MAX] {
+        let runtime = RuntimeSettings {
+            keep_alive_interval: Some(seconds),
+            keep_alive_idle: Some(seconds),
+            disable_keep_alive: Some(false),
+            ..Default::default()
+        };
+        let initial = runtime.prepare(source.clone())?;
+        assert_eq!(initial["keep-alive-idle"].as_i64(), Some(i64::from(seconds)));
+        let mut enhanced = initial;
+        enhanced.extend(source.clone());
+        let final_config = runtime.enforce(enhanced)?;
+        assert_eq!(final_config["keep-alive-interval"].as_i64(), Some(i64::from(seconds)));
+        assert_eq!(final_config["keep-alive-idle"].as_i64(), Some(i64::from(seconds)));
+        assert_eq!(final_config["disable-keep-alive"].as_bool(), Some(false));
+        assert_eq!(final_config["custom"], source["custom"]);
+        let serialized = serde_yaml_ng::to_string(&runtime)?;
+        assert_eq!(serde_yaml_ng::from_str::<RuntimeSettings>(&serialized)?, runtime);
+    }
+    for invalid in [
+        "keep-alive-interval: 2147483648",
+        "keep-alive-idle: -2147483649",
+        "keep-alive-idle: 1.5",
+        "keep-alive-interval: '15'",
+        "keep-alive-idle: true",
+        "disable-keep-alive: 0",
+        "disable-keep-alive: 'false'",
+    ] {
+        assert!(
+            serde_yaml_ng::from_str::<RuntimeSettings>(invalid).is_err(),
+            "{invalid}"
+        );
     }
     Ok(())
 }

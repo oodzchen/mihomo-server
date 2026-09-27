@@ -37,6 +37,9 @@ const fields = [
   { key: "unified-delay", label: "统一延迟", kind: "bool" },
   { key: "tcp-concurrent", label: "TCP 并发连接", kind: "bool" },
   { key: "find-process-mode", label: "进程匹配模式", kind: "select", options: [["strict", "strict（按需）"], ["always", "always（始终）"], ["off", "off（关闭）"]] },
+  { key: "keep-alive-interval", label: "TCP 保活间隔（秒）", kind: "seconds" },
+  { key: "keep-alive-idle", label: "TCP 保活空闲时间（秒）", kind: "seconds" },
+  { key: "disable-keep-alive", label: "禁用 TCP 保活", kind: "bool" },
   {
     key: "log-level",
     label: "日志等级",
@@ -84,6 +87,10 @@ function runtime(draft: Draft): Runtime {
       if (!/^\d+$/.test(value) || Number(value) > 65535)
         throw new Error(`${field.label}必须是 0–65535 的整数，或留空继承。`);
       result[field.key] = Number(value);
+    } else if (field.kind === "seconds") {
+      if (!/^-?\d+$/.test(value) || !Number.isInteger(Number(value)) || Number(value) < -2147483648 || Number(value) > 2147483647)
+        throw new Error(`${field.label}必须是 -2147483648–2147483647 的整数，或留空继承。`);
+      result[field.key] = Number(value);
     } else {
       if (!options(field).some(([option]) => value === option))
         throw new Error(`${field.label}值无效。`);
@@ -119,6 +126,8 @@ function decode(value: unknown): Settings {
           !Number.isInteger(value) ||
           value < 0 ||
           value > 65535
+        : field.kind === "seconds"
+          ? typeof value !== "number" || !Number.isInteger(value) || value < -2147483648 || value > 2147483647
         : field.kind === "bool"
           ? typeof value !== "boolean"
           : typeof value !== "string" ||
@@ -350,12 +359,12 @@ export function SettingsPage({
               {fields.map((field) => (
                 <label key={field.key}>
                   {field.label}
-                  {field.kind === "port" ? (
+                  {field.kind === "port" || field.kind === "seconds" ? (
                     <>
                       <input
                         aria-label={field.label}
-                        inputMode="numeric"
-                        placeholder={portPlaceholder(field.key)}
+                        inputMode={field.kind === "port" ? "numeric" : "text"}
+                        placeholder={field.kind === "port" ? portPlaceholder(field.key) : "留空继承"}
                         aria-describedby={`port-hint-${field.key}`}
                         disabled={disabled}
                         value={draft[field.key] ?? ""}
@@ -370,7 +379,7 @@ export function SettingsPage({
                         }}
                       />
                       <span id={`port-hint-${field.key}`} className={`port-field-hint${access.value?.ports.some(port => port.key === field.key && port.actual !== null && port.actual !== port.configured) ? " port-mismatch" : ""}`}>
-                        {portDescription(field.key)}
+                        {field.kind === "port" ? portDescription(field.key) : "整数秒；0 使用核心默认值，负数保留系统参数（取决于核心版本）。留空继承；禁用开关优先。"}
                       </span>
                     </>
                   ) : (
@@ -519,7 +528,7 @@ export function SettingsPage({
                   <dd>
                     {saved.runtime[field.key] == null
                       ? "继承"
-                      : field.kind === "port"
+                      : field.kind === "port" || field.kind === "seconds"
                         ? String(saved.runtime[field.key])
                         : options(field).find(
                             ([value]) =>

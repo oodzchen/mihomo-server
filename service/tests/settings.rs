@@ -812,38 +812,45 @@ async fn connection_settings_authority_switching_rollback_inheritance_and_restar
     use headless_core::config::settings::{FindProcessMode, RuntimeSettings};
     let dir = Directory::new()?;
     let manager = CoreManager::spawn(dir.options()?)?;
-    let runtime: RuntimeSettings =
-        serde_yaml_ng::from_str("tcp-concurrent: false\nfind-process-mode: off\nipv6: false")?;
+    let runtime: RuntimeSettings = serde_yaml_ng::from_str(
+        "tcp-concurrent: false\nfind-process-mode: off\nkeep-alive-interval: 0\nkeep-alive-idle: -1\ndisable-keep-alive: false\nipv6: false",
+    )?;
     let result = async {
         manager.set_settings(runtime.clone()).await?;
-        let source = "mode: direct\nmixed-port: 0\ntcp-concurrent: true\nfind-process-mode: strict\nipv6: false\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']";
+        let source = "mode: direct\nmixed-port: 0\ntcp-concurrent: true\nfind-process-mode: strict\nkeep-alive-interval: 15\nkeep-alive-idle: 30\ndisable-keep-alive: true\nipv6: false\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']";
         let uid = manager.import_profile_yaml(source.into(), "connection settings".into()).await?.uid.unwrap().to_string();
         manager.select_profile(uid.clone()).await?;
-        manager.set_profile_script(uid.clone(), Some("function main(c) { c['tcp-input']=c['tcp-concurrent']; c['process-input']=c['find-process-mode']; c['tcp-concurrent']=true; c['find-process-mode']='always'; if(c.ipv6) c.rules=['INVALID,DIRECT']; return c; }".into())).await?;
+        manager.set_profile_script(uid.clone(), Some("function main(c) { c['tcp-input']=c['tcp-concurrent']; c['process-input']=c['find-process-mode']; c['interval-input']=c['keep-alive-interval']; c['idle-input']=c['keep-alive-idle']; c['disable-input']=c['disable-keep-alive']; c['keep-alive-interval']=15; c['keep-alive-idle']=30; c['disable-keep-alive']=true; c['tcp-concurrent']=true; c['find-process-mode']='always'; if(c.ipv6) c.rules=['INVALID,DIRECT']; return c; }".into())).await?;
         let config = manager.runtime_config().await?;
         assert_eq!(config["tcp-input"].as_bool(), Some(false));
         assert_eq!(config["process-input"].as_str(), Some("off"));
+        assert_eq!(config["interval-input"].as_i64(), Some(0));
+        assert_eq!(config["idle-input"].as_i64(), Some(-1));
+        assert_eq!(config["disable-input"].as_bool(), Some(false));
         manager.start().await?;
         assert!(manager.connection_settings().await?.fields.iter().all(|f| f.actual == f.setting && f.configured == f.setting && !f.mismatch));
         for (mode, text) in [(FindProcessMode::Strict, "strict"), (FindProcessMode::Always, "always"), (FindProcessMode::Off, "off")] {
-            let mut changed = runtime.clone(); changed.tcp_concurrent = Some(true); changed.find_process_mode = Some(mode);
+            let mut changed = runtime.clone(); changed.keep_alive_interval = Some(20); changed.keep_alive_idle = Some(40); changed.disable_keep_alive = Some(true); changed.tcp_concurrent = Some(true); changed.find_process_mode = Some(mode);
             manager.set_settings(changed).await?;
             let actual = manager.connection_settings().await?;
             assert_eq!(actual.fields[0].actual, true); assert_eq!(actual.fields[1].actual, text);
+            assert_eq!(actual.fields[2].actual, 20); assert_eq!(actual.fields[3].actual, 40); assert_eq!(actual.fields[4].actual, true);
             assert!(actual.fields.iter().all(|f| !f.mismatch));
         }
         let saved = manager.set_settings(runtime.clone()).await?;
         let before = manager.status();
-        let mut invalid = runtime.clone(); invalid.ipv6 = Some(true); invalid.tcp_concurrent = Some(true); invalid.find_process_mode = Some(FindProcessMode::Always);
+        let mut invalid = runtime.clone(); invalid.keep_alive_interval = Some(60); invalid.keep_alive_idle = Some(120); invalid.disable_keep_alive = Some(true); invalid.ipv6 = Some(true); invalid.tcp_concurrent = Some(true); invalid.find_process_mode = Some(FindProcessMode::Always);
         assert!(manager.set_settings(invalid).await.is_err());
         assert_eq!(manager.status().pid, before.pid); assert_eq!(manager.status().config_revision, before.config_revision);
         assert_eq!(manager.settings().await?, saved); assert_eq!(manager.runtime_config().await?, config);
         assert_eq!(manager.connection_settings().await?.fields[0].actual, false);
         assert_eq!(manager.connection_settings().await?.fields[1].actual, "off");
+        assert!(manager.connection_settings().await?.fields.iter().all(|f| f.setting == f.actual && !f.mismatch));
         manager.stop().await?;
         manager.set_settings(RuntimeSettings::default()).await?;
         let inherited = manager.connection_settings().await?;
         assert_eq!(inherited.fields[0].configured, true); assert_eq!(inherited.fields[1].configured, "always");
+        assert_eq!(inherited.fields[2].configured, 15); assert_eq!(inherited.fields[3].configured, 30); assert_eq!(inherited.fields[4].configured, true);
         assert!(inherited.fields.iter().all(|f| f.setting.is_null() && f.actual.is_null()));
         manager.set_settings(runtime).await?;
         assert_eq!(manager.profile_raw(uid).await?.yaml, source);

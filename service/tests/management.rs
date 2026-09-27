@@ -1614,7 +1614,7 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
             StatusCode::UNAUTHORIZED
         );
         let (_, initial) = response(&app, request(&token, "/api/commands", Some(read.clone()))?).await?;
-        assert_eq!(initial["fields"].as_array().unwrap().len(), 2);
+        assert_eq!(initial["fields"].as_array().unwrap().len(), 5);
         assert!(
             initial["fields"]
                 .as_array()
@@ -1622,7 +1622,7 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
                 .iter()
                 .all(|f| f["setting"].is_null() && f["configured"].is_null() && f["actual"].is_null())
         );
-        let settings = json!({"command":"set_settings","runtime":{"tcp-concurrent":false,"find-process-mode":"off"}});
+        let settings = json!({"command":"set_settings","runtime":{"tcp-concurrent":false,"find-process-mode":"off","keep-alive-interval":0,"keep-alive-idle":-1,"disable-keep-alive":false}});
         assert!(
             response(&app, request(&token, "/api/commands", Some(settings))?)
                 .await?
@@ -1632,8 +1632,11 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
         let (_, saved) = response(&app, request(&token, "/api/commands", Some(read.clone()))?).await?;
         assert_eq!(saved["fields"][0]["setting"], false);
         assert_eq!(saved["fields"][1]["setting"], "off");
+        assert_eq!(saved["fields"][2]["setting"], 0);
+        assert_eq!(saved["fields"][3]["setting"], -1);
+        assert_eq!(saved["fields"][4]["setting"], false);
         assert!(saved["config_revision"].is_null());
-        let raw = "mode: direct\ntcp-concurrent: true\nfind-process-mode: strict";
+        let raw = "mode: direct\ntcp-concurrent: true\nfind-process-mode: strict\nkeep-alive-interval: 15\nkeep-alive-idle: 30\ndisable-keep-alive: true";
         let uid = manager
             .import_profile_yaml(raw.into(), "connection source".into())
             .await?
@@ -1644,12 +1647,12 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
         manager
             .set_profile_merge(
                 uid.clone(),
-                Some("tcp-concurrent: true\nfind-process-mode: always".into()),
+                Some("tcp-concurrent: true\nfind-process-mode: always\nkeep-alive-interval: 20\nkeep-alive-idle: 40\ndisable-keep-alive: true".into()),
             )
             .await?;
         manager
             .apply_overlay(serde_yaml_ng::from_str(
-                "tcp-concurrent: true\nfind-process-mode: strict",
+                "tcp-concurrent: true\nfind-process-mode: strict\nkeep-alive-interval: 15\nkeep-alive-idle: 30\ndisable-keep-alive: true",
             )?)
             .await?;
         let (_, committed) = response(&app, request(&token, "/api/commands", Some(read))?).await?;
@@ -1662,9 +1665,17 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
                 .iter()
                 .all(|f| f["actual"].is_null())
         );
+        assert_eq!(committed["fields"][2]["configured"], 0);
+        assert_eq!(committed["fields"][3]["configured"], -1);
+        assert_eq!(committed["fields"][4]["configured"], false);
         let before = manager.status();
         let settings = manager.settings().await?;
         for invalid in [
+            json!({"keep-alive-interval":2147483648_i64}),
+            json!({"keep-alive-idle":-2147483649_i64}),
+            json!({"keep-alive-idle":1.5}),
+            json!({"keep-alive-interval":"15"}),
+            json!({"disable-keep-alive":"false"}),
             json!({"tcp-concurrent":"false"}),
             json!({"find-process-mode":false}),
             json!({"find-process-mode":"Strict"}),
@@ -1690,6 +1701,9 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
         let inherited = manager.connection_settings().await?;
         assert_eq!(inherited.fields[0].configured, true);
         assert_eq!(inherited.fields[1].configured, "always");
+        assert_eq!(inherited.fields[2].configured, 20);
+        assert_eq!(inherited.fields[3].configured, 40);
+        assert_eq!(inherited.fields[4].configured, true);
         assert!(inherited.fields.iter().all(|f| f.setting.is_null()));
         assert_eq!(manager.profile_raw(uid).await?.yaml, raw);
         Ok::<_, anyhow::Error>(())

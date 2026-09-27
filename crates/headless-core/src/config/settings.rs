@@ -71,6 +71,13 @@ pub struct RuntimeSettings {
     pub tcp_concurrent: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub find_process_mode: Option<FindProcessMode>,
+    // Signed seconds preserve Mihomo/Go zero and negative duration semantics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_alive_interval: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_alive_idle: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disable_keep_alive: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_level: Option<LogLevel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

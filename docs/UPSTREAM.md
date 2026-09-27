@@ -186,6 +186,28 @@ lower case. `connection_settings` is an authenticated, actor-serialized comparis
 not a mutating upstream command. Shared backend/Web comparison helpers preserve
 existing Geo behavior. This verifies settings readback, not process-rule results.
 
+## TCP keep-alive settings authority
+
+Original service adaptation of the keep-alive fields already present in the
+retained Mihomo `BaseConfig`. Optional signed integer interval/idle and a strict
+boolean disable flag reuse schema-one journals and initial/final authority.
+The service limits saved durations to signed 32-bit seconds (preventing duration
+multiplication overflow); this is not an upstream validation or socket limit.
+Inherited source values are not rewritten. Actual GET /configs values use optional
+64-bit integers so the comparison does not fabricate defaults or constrain core
+readback to the service's saved-settings bound.
+
+Semantics were inspected in official
+[Mihomo general configuration](https://github.com/MetaCubeX/mihomo/blob/Meta/config/config.go),
+[keep-alive implementation](https://github.com/MetaCubeX/mihomo/blob/Meta/component/keepalive/tcp_keepalive_go123.go)
+and [Go KeepAliveConfig](https://pkg.go.dev/net#KeepAliveConfig), on 2026-09-28.
+Modern Mihomo forwards idle/interval to Go's socket options: zero chooses a default,
+negative leaves the corresponding socket option unchanged, while the disable flag
+turns probes off. Older cores/platforms may behave differently. The interface
+preserves signed values instead of pretending negative seconds disable all probes.
+Core-reported configuration does not prove that an OS accepted each socket option.
+No upstream source is copied and no dependency is added.
+
 ## Mihomo plugin
 
 - Repository: https://github.com/clash-verge-rev/tauri-plugin-mihomo

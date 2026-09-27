@@ -320,26 +320,40 @@ test("connection settings save explicit false, preserve failed drafts and retry 
   const panel = page.getByRole("region", { name: "连接设置读回", exact: true });
   const tcp = page.getByRole("combobox", { name: "TCP 并发连接", exact: true });
   const mode = page.getByRole("combobox", { name: "进程匹配模式", exact: true });
+  const interval = page.getByRole("textbox", { name: "TCP 保活间隔（秒）", exact: true });
+  const idle = page.getByRole("textbox", { name: "TCP 保活空闲时间（秒）", exact: true });
+  const disable = page.getByRole("combobox", { name: "禁用 TCP 保活", exact: true });
   const row = panel.locator("li").filter({ has: page.getByText("tcp-concurrent", { exact: true }) });
   try {
     await expect(panel).toContainText("尚无已提交配置");
+    for (const invalid of ["2147483648", "-2147483649", "1.5", "abc"]) {
+      await interval.fill(invalid);
+      await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+      await expect(form.getByRole("alert")).toContainText("必须是 -2147483648–2147483647");
+      expect(await api("settings")).toEqual(original);
+    }
+    await interval.fill("0"); await idle.fill("-1"); await disable.selectOption("false");
     await tcp.selectOption("false"); await mode.selectOption("off");
     await page.getByRole("combobox", { name: "IPv6", exact: true }).selectOption("false");
     await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
     await expect(form.getByRole("status")).toContainText("保存结果已核对");
-    expect((await api("settings")).runtime).toEqual({ ...original.runtime, ipv6: false, "tcp-concurrent": false, "find-process-mode": "off" });
+    expect((await api("settings")).runtime).toEqual({ ...original.runtime, ipv6: false, "tcp-concurrent": false, "find-process-mode": "off", "keep-alive-interval": 0, "keep-alive-idle": -1, "disable-keep-alive": false });
     await expect(row).toContainText("服务设置：false");
     await expect(panel).toContainText("内核未运行，实际值未确认");
     await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
     await expect(tcp).toHaveValue("false"); await expect(mode).toHaveValue("off");
+    await expect(interval).toHaveValue("0"); await expect(idle).toHaveValue("-1"); await expect(disable).toHaveValue("false");
     await page.route("**/api/commands", async route => {
       if (route.request().postDataJSON().command === "set_settings") await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture settings failure" } }) });
       else await route.continue();
     });
+    await interval.fill("20"); await idle.fill("40"); await disable.selectOption("true");
     await tcp.selectOption("true"); await mode.selectOption("always");
     await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
     await expect(form.getByRole("status")).toContainText("草稿已保留");
     await expect(tcp).toHaveValue("true"); await expect(mode).toHaveValue("always");
+    await expect(interval).toHaveValue("20"); await expect(idle).toHaveValue("40"); await expect(disable).toHaveValue("true");
+    expect((await api("settings")).runtime["keep-alive-interval"]).toBe(0);
     expect((await api("settings")).runtime["tcp-concurrent"]).toBe(false);
     await page.unroute("**/api/commands");
     let fail = true;
@@ -359,6 +373,7 @@ test("connection settings save explicit false, preserve failed drafts and retry 
     await panel.getByRole("button", { name: "刷新连接设置读回", exact: true }).click();
     await expect(panel).toContainText("内核未运行，实际值未确认");
     await expect(panel).not.toContainText("配置值与内核实际值不一致");
+    await interval.fill(""); await idle.fill(""); await disable.selectOption("");
     await tcp.selectOption(""); await mode.selectOption("");
     await page.getByRole("combobox", { name: "IPv6", exact: true }).selectOption("");
     await page.getByRole("button", { name: "保存服务设置", exact: true }).click();

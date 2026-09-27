@@ -133,6 +133,9 @@ pub struct BaseConfig {
 pub struct ConnectionConfig {
     pub tcp_concurrent: Option<bool>,
     pub find_process_mode: Option<FindProcessMode>,
+    pub keep_alive_interval: Option<i64>,
+    pub keep_alive_idle: Option<i64>,
+    pub disable_keep_alive: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
