@@ -28,7 +28,11 @@ pub(crate) fn protected_paths(data_dir: &Path, config: &Path, binary: &Path) -> 
 
 pub(crate) async fn resource_paths(data_dir: &Path, config: &Path, binary: &Path) -> Result<()> {
     let contents: serde_yaml_ng::Mapping = serde_yaml_ng::from_slice(&tokio::fs::read(config).await?)?;
-    headless_core::config::resource_paths::validate(&contents, data_dir, &protected_paths(data_dir, config, binary))
+    headless_core::config::resource_paths::validate_owned(
+        &contents,
+        data_dir,
+        &protected_paths(data_dir, config, binary),
+    )
 }
 
 pub(crate) async fn probe_version(

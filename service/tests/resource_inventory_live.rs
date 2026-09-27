@@ -129,7 +129,7 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
         let one = committed["proxy-providers"]["remote_one"]["path"].as_str().unwrap();
         let two = committed["proxy-providers"]["remote_two"]["path"].as_str().unwrap();
         assert_ne!(one, two);
-        assert!(one.starts_with("providers/cvr-") && two.starts_with("providers/cvr-"));
+        assert!(one.starts_with("provider-cache/v1/") && two.starts_with("provider-cache/v1/"));
         assert!(directory.0.join(one).is_file() && directory.0.join(two).is_file());
         assert!(!directory.0.join("providers/shared.yaml").exists());
         assert_eq!(manager.profile_raw(uid.clone()).await?.yaml, config);

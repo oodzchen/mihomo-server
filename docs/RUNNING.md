@@ -2546,15 +2546,20 @@ settings. Absolute paths inside that directory also normalize to relative paths.
 Only the generated candidate changes: original subscription paths, URLs and YAML
 remain available in the raw editor. Inactive imports are not applied or probed.
 
-If multiple HTTP URLs declare the same normalized cache path, all those URLs get
-separate stable `cvr-<sha256>[-n]` filenames in the same directory, retaining the
-extension. The digest uses destination, a NUL separator and URL, matching upstream.
-An allocation avoids other declared paths. The same URL may keep sharing a cache
-(headers are not part of the identity), and file providers may share a local file.
-An HTTP cache may not share a destination with a local file provider. HTTP providers
-with no explicit path continue using Mihomo-managed caches.
-This allocation covers providers declared together; durable cache ownership across
-configuration revisions and implicit cache identities remain future resource work.
+Every HTTP provider receives a service-owned `provider-cache/v1/<sha256>.cache`
+destination, including declarations without an explicit path. Identity includes
+the provider section, URL, header, proxy, format and behavior in deterministic order.
+The same identity reuses its cache across revisions and service restarts. A changed
+URL, request header or parser selects a separate file, even for a single provider.
+Names, interval, health checks, filters, overrides and original path spelling do
+not identify downloaded raw content. Identical sources share; proxy/rule identities
+are separate. Absent and explicitly specified default fields may select separate
+caches. Private URLs and headers do not appear in generated filenames.
+
+Original explicit paths still undergo the existing safety checks and simultaneous
+conflict allocator before source-addressed rewriting. File providers may share a
+local file; HTTP/local original-path collisions are rejected. Local providers cannot
+use the reserved `provider-cache/` namespace. Inline providers remain unchanged.
 
 Provider files belong in a non-service-owned location such as `providers/` below
 the data root. External paths, parent traversal, control characters, backslashes,
@@ -2566,15 +2571,25 @@ The current configuration, core executable and its custom directory inside the
 data root are protected too. No source file is automatically copied from elsewhere;
 place local provider inputs in the managed data directory explicitly.
 
-Paths are rechecked before probes, core starts and reloads. Legacy committed
-configurations with conflicting HTTP sources must be reapplied through selection
-or the configuration editor to create a normalized revision; startup will report
-the conflict instead of rewriting the old revision. Invalid candidates preserve the
-previous committed runtime, settings and profile files. Old caches are retained,
+Paths and HTTP source identities are rechecked before probes, starts and reloads.
+Legacy committed HTTP configurations, including old cvr aliases and implicit core
+paths, must be reapplied through subscription selection or configuration editing
+to create an owned revision. Startup reports the ownership mismatch instead of
+rewriting a commit. The first migration may require downloading from the source;
+old/unclaimed caches are retained and never automatically adopted. Invalid
+candidates preserve the previous committed runtime, settings and profile files.
+Old caches are retained,
 and new deterministic caches may require a fresh download. Mihomo may write caches
 while probing a valid candidate even if its later application fails; provider cache
 updates are not part of the settings/catalog rollback journal. These checks do not
 sandbox Mihomo against subsequent file changes by a local administrator.
+
+Ownership is encoded in filenames and committed YAML without a mutable cache
+ledger. A failed probe for another source cannot overwrite the prior source's
+owned cache. Remote content changes at the same identity still use Mihomo's normal
+refresh behavior. No cache integrity verification, pruning or refresh command is
+added by this policy. Respect the service data lock and reserved namespace when
+performing external maintenance.
 
 All local operations share the existing single backup admission slot with
 export/inspect/rehearsal/restore. Busy requests return 409 `backup_busy`. A download

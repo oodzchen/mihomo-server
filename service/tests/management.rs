@@ -47,7 +47,7 @@ async fn provider_candidate_policy_preserves_sources_and_rejects_unsafe_edits_be
         let one = config["proxy-providers"]["one"]["path"].clone();
         let two = config["proxy-providers"]["two"]["path"].clone();
         assert_ne!(one, two);
-        assert!(one.as_str().unwrap().starts_with("providers/cvr-"));
+        assert!(one.as_str().unwrap().starts_with("provider-cache/v1/"));
         assert_eq!(manager.profile_raw(uid.clone()).await?.yaml, raw);
         manager.set_settings(serde_yaml_ng::from_str("ipv6: false")?).await?;
         assert_eq!(manager.runtime_config().await?["proxy-providers"]["one"]["path"], one);
@@ -85,6 +85,7 @@ async fn provider_candidate_policy_preserves_sources_and_rejects_unsafe_edits_be
         assert_eq!(manager.profile_raw(uid).await?.yaml, raw);
         assert_eq!(serde_json::to_value(manager.profiles())?, catalog);
         std::fs::remove_file(directory.0.join("probe-marker"))?;
+        std::fs::create_dir_all(directory.0.join("provider-cache/v1"))?;
         symlink("/etc/passwd", directory.0.join(one.as_str().unwrap()))?;
         assert!(manager.start().await.is_err());
         assert!(!directory.0.join("probe-marker").exists());
@@ -290,6 +291,12 @@ async fn resource_inventory_authenticates_tracks_committed_config_and_redacts_so
         std::fs::create_dir(directory.0.join("providers"))?;
         std::fs::write(directory.0.join("providers/one.yaml"), "payload: []")?;
         manager.apply_config(serde_yaml_ng::from_str("mode: direct\nrule-providers:\n  local: {type: http, path: ./providers/one.yaml, behavior: classical, url: 'https://secret.invalid/private-token'}\nproxy-providers:\n  remote: {type: http, path: providers/one.yaml, url: 'https://secret.invalid/private-token', header: {Authorization: [private-header]}}\n")?).await?;
+        let generated = manager.runtime_config().await?;
+        std::fs::create_dir_all(directory.0.join("provider-cache/v1"))?;
+        for section in ["proxy-providers", "rule-providers"] {
+            let path = generated[section].as_mapping().unwrap().values().next().unwrap()["path"].as_str().unwrap();
+            std::fs::write(directory.0.join(path), "cache fixture")?;
+        }
         let before = manager.status();
         let (status, value) = response(&app, request(&token, "/api/commands", Some(payload.clone()))?).await?;
         assert!(status.is_success(), "{value}");
@@ -297,9 +304,9 @@ async fn resource_inventory_authenticates_tracks_committed_config_and_redacts_so
         assert_eq!(value["data_dir"], directory.0.to_string_lossy().as_ref());
         assert!(value["bundle_dir"].is_null());
         for provider in value["providers"].as_array().unwrap() {
-            assert_eq!(provider["path"], "providers/one.yaml");
+            assert!(provider["path"].as_str().unwrap().starts_with("provider-cache/v1/"));
             assert_eq!(provider["state"], "available");
-            assert_eq!(provider["conflict"], true);
+            assert_eq!(provider["conflict"], false);
         }
         let encoded = value.to_string();
         for secret in ["secret.invalid", "private-token", "private-header", "payload"] { assert!(!encoded.contains(secret)); }
@@ -307,7 +314,7 @@ async fn resource_inventory_authenticates_tracks_committed_config_and_redacts_so
         assert_eq!(manager.status().generation, before.generation);
         let (status, _) = response(&app, request(&token, "/api/commands", Some(json!({"command":"resources", "path":"/etc/passwd"})))?).await?;
         assert!(!status.is_success());
-        std::fs::remove_file(directory.0.join("providers/one.yaml"))?;
+        std::fs::remove_file(directory.0.join(value["providers"][0]["path"].as_str().unwrap()))?;
         let (_, missing) = response(&app, request(&token, "/api/commands", Some(payload.clone()))?).await?;
         assert_eq!(missing["providers"][0]["state"], "missing");
         manager.apply_config(serde_yaml_ng::from_str("mode: direct")?).await?;

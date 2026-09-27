@@ -77,6 +77,21 @@ revisions. Upstream Tauri logging, IPC bundle asset copying and remote-provider
 transfer are omitted. The actor normalizes generated candidates and raw-edit probe
 copies while preserving source YAML; it does not migrate or prune old cache files.
 
+## Cross-revision HTTP cache ownership
+
+Original service adaptation extending the preceding upstream simultaneous-conflict
+allocator. Upstream `src-tauri/src/core/runtime_bundle.rs::collect_provider_assets`
+records remote URL references for cache reuse; the service now uses a dedicated
+versioned source-addressed namespace rather than relying on requested filenames.
+`resource_paths::prepare_owned` and `validate_owned` include provider section, URL,
+header, proxy, format and behavior in the identity. This deliberately separates
+different request credentials and parsers beyond upstream URL-only grouping.
+
+Generated paths persist ownership through runtime revisions/restart, including
+previously implicit HTTP caches. No upstream source is copied, no dependencies are
+added and no cache files are migrated or pruned. Legacy HTTP revisions require
+explicit reapplication. Provider refresh/reload APIs remain separate P2 work.
+
 ## Geo first-use initialization and integrity-pinned bundle adaptation
 
 The startup responsibility and resource identities reference

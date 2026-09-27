@@ -1,6 +1,6 @@
 #![cfg(target_os = "linux")]
 use anyhow::Result;
-use headless_core::config::resource_paths::{metadata_below, prepare, validate};
+use headless_core::config::resource_paths::{metadata_below, prepare, prepare_owned, validate, validate_owned};
 use serde_yaml_ng::{Mapping, Value};
 use std::{fs, os::unix::fs::symlink, path::PathBuf};
 
@@ -22,6 +22,94 @@ impl Drop for Directory {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+#[test]
+fn owned_caches_isolate_revisions_and_reuse_unchanged_sources_without_claiming_old_files() -> Result<()> {
+    let dir = Directory::new()?;
+    fs::write(dir.0.join("old.yaml"), "unclaimed old source")?;
+    let raw: Mapping =
+        serde_yaml_ng::from_str("proxy-providers: {a: {type: http, path: old.yaml, url: 'https://one.invalid'}}")?;
+    let first = prepare_owned(raw.clone(), &dir.0, &[])?;
+    let path = first["proxy-providers"]["a"]["path"].as_str().unwrap();
+    assert!(path.starts_with("provider-cache/v1/"));
+    assert!(!dir.0.join(path).exists());
+    assert_eq!(fs::read_to_string(dir.0.join("old.yaml"))?, "unclaimed old source");
+    assert_eq!(raw["proxy-providers"]["a"]["path"], "old.yaml");
+    assert_eq!(prepare_owned(first.clone(), &dir.0, &[])?, first);
+    validate_owned(&first, &dir.0, &[])?;
+    let mut changed = first.clone();
+    changed["proxy-providers"]["a"]["url"] = "https://two.invalid".into();
+    assert!(validate_owned(&changed, &dir.0, &[]).is_err());
+    let second = prepare_owned(changed, &dir.0, &[])?;
+    assert_ne!(second["proxy-providers"]["a"]["path"], path);
+    let renamed: Mapping = serde_yaml_ng::from_str(
+        "proxy-providers: {renamed: {type: http, path: different.yaml, url: 'https://one.invalid', interval: 120, filter: example}}",
+    )?;
+    let renamed = prepare_owned(renamed, &dir.0, &[])?;
+    assert_eq!(renamed["proxy-providers"]["renamed"]["path"], path);
+    let remaining = prepare_owned(raw, &dir.0, &[])?;
+    assert_eq!(remaining["proxy-providers"]["a"]["path"], path);
+    Ok(())
+}
+
+#[test]
+fn cache_identity_tracks_headers_transport_and_parser_but_not_mapping_order() -> Result<()> {
+    let dir = Directory::new()?;
+    let raw: Mapping = serde_yaml_ng::from_str(
+        "proxy-providers: {a: {type: http, url: 'https://one.invalid/private-token', header: {Authorization: [secret], Accept: [yaml]}}}",
+    )?;
+    let first = prepare_owned(raw.clone(), &dir.0, &[])?;
+    let path = &first["proxy-providers"]["a"]["path"];
+    assert!(!path.as_str().unwrap().contains("secret"));
+    let reordered: Mapping = serde_yaml_ng::from_str(
+        "proxy-providers: {a: {header: {Accept: [yaml], Authorization: [secret]}, url: 'https://one.invalid/private-token', type: http}}",
+    )?;
+    assert_eq!(
+        prepare_owned(reordered, &dir.0, &[])?["proxy-providers"]["a"]["path"],
+        *path
+    );
+    for (key, value) in [
+        ("header", "{Authorization: [other]}"),
+        ("proxy", "DIRECT"),
+        ("format", "json"),
+        ("behavior", "classical"),
+    ] {
+        let mut changed = raw.clone();
+        changed["proxy-providers"]["a"][key] = serde_yaml_ng::from_str(value)?;
+        assert_ne!(
+            prepare_owned(changed, &dir.0, &[])?["proxy-providers"]["a"]["path"],
+            *path
+        );
+    }
+    let mut rule = Mapping::new();
+    rule.insert("rule-providers".into(), raw["proxy-providers"].clone());
+    assert_ne!(prepare_owned(rule, &dir.0, &[])?["rule-providers"]["a"]["path"], *path);
+    Ok(())
+}
+
+#[test]
+fn owned_namespace_rejects_local_claims_legacy_start_and_later_filesystem_changes() -> Result<()> {
+    let dir = Directory::new()?;
+    let raw: Mapping = serde_yaml_ng::from_str("proxy-providers: {a: {type: http, url: 'https://one.invalid'}}")?;
+    assert!(validate_owned(&raw, &dir.0, &[]).is_err());
+    let prepared = prepare_owned(raw, &dir.0, &[])?;
+    let path = prepared["proxy-providers"]["a"]["path"].as_str().unwrap();
+    let local: Mapping = serde_yaml_ng::from_str(&format!("proxy-providers: {{a: {{type: file, path: {path}}}}}"))?;
+    assert!(prepare_owned(local, &dir.0, &[]).is_err());
+    assert!(prepare_owned(prepared.clone(), &dir.0, &[dir.0.join("provider-cache")]).is_err());
+    fs::create_dir_all(dir.0.join("provider-cache/v1"))?;
+    fs::write(dir.0.join("original"), "cache")?;
+    fs::hard_link(dir.0.join("original"), dir.0.join(path))?;
+    assert!(validate_owned(&prepared, &dir.0, &[]).is_err());
+    fs::remove_file(dir.0.join(path))?;
+    symlink("/etc/passwd", dir.0.join(path))?;
+    assert!(validate_owned(&prepared, &dir.0, &[]).is_err());
+    fs::remove_file(dir.0.join(path))?;
+    fs::remove_dir(dir.0.join("provider-cache/v1"))?;
+    symlink("/etc", dir.0.join("provider-cache/v1"))?;
+    assert!(validate_owned(&prepared, &dir.0, &[]).is_err());
+    Ok(())
 }
 
 #[test]

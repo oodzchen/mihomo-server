@@ -2493,7 +2493,7 @@ impl Actor {
         // Upstream first validates original YAML even for an inactive profile.
         // Normalize only its probe copy; the submitted source is preserved.
         // An immutable validation revision changes no runtime manifest or catalog.
-        let validation_config = headless_core::config::resource_paths::prepare(
+        let validation_config = headless_core::config::resource_paths::prepare_owned(
             raw.clone(),
             &self.options.data_dir,
             &crate::validation::protected_paths(&self.options.data_dir, &self.options.config, &self.options.binary),
@@ -2592,7 +2592,7 @@ impl Actor {
         };
         let config = self.enforce_runtime_settings(config, &runtime)?;
         let config = headless_core::enhance::finalize::finalize(config);
-        let config = headless_core::config::resource_paths::prepare(
+        let config = headless_core::config::resource_paths::prepare_owned(
             config,
             &self.options.data_dir,
             &crate::validation::protected_paths(&self.options.data_dir, &self.options.config, &self.options.binary),

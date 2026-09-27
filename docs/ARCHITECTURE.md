@@ -53,12 +53,13 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** authoritative Geo runtime fields, per-URL
-inheritance, bounded validation and settings transactions, with Web editing and
-saved/configured/actual core readback. **Next implementation task (P1):** provider
-cache ownership across configuration revisions. DAT validation, controlled online
-and running-core Geo update/rollback, and other remaining full settings still
-belong to P1; finish this priority before starting P2.
+**Latest completed task (P1):** HTTP provider cache ownership across configuration
+revisions, including implicit paths, request headers and parser identity, with
+offline restart/reselection verification. **Next implementation task (P1):**
+remaining Geo configuration authority, starting with geosite matcher settings and
+actual readback. DAT validation, controlled online and running-core Geo updates,
+and other remaining full settings still belong to P1; finish this priority before
+starting P2.
 
 ## Complete target architecture
 
@@ -117,6 +118,7 @@ mihomo-server/
 │       ├── Hosts / native TUN integration            [Pending]
 │       ├── Final LAN bind / group cleanup / field order [Migrated + staged adaptation; Linux verified]
 │       ├── Remaining authoritative settings          [Pending; P1]
+│       ├── Source-addressed HTTP provider cache identities / implicit paths [Implemented; Linux verified]
 │       ├── Runtime YAML + overlay generation        [Implemented; upstream merge reused]
 │       ├── Profile enhancement generation          [Partially implemented; sequences/settings/TUN/DNS/global/profile/final stages]
 │       ├── Per-profile node selection records       [Implemented; upstream schema]
@@ -146,6 +148,7 @@ mihomo-server/
 │   │   ├── Committed resource inventory / confined metadata / shared-path diagnostics [Implemented; Linux verified]
 │   │   ├── Final candidate provider normalization / conflict allocation / preserved source YAML [Implemented; Linux verified]
 │   │   ├── Probe/start/reload resource-path checks / service-file protection [Implemented; Linux verified]
+│   │   ├── Cross-revision HTTP cache ownership / header-parser separation / legacy reapply guard [Implemented; Linux verified]
 │   │   ├── Pinned Geo seed schema / bounded staging / no-overwrite bootstrap / orphan recovery [Implemented; Linux verified]
 │   │   ├── Read-only MMDB verification / pinned parser / metadata-only compatibility outcome [Implemented; Linux verified]
 │   │   ├── Stopped-core pinned MMDB replacement / digest guards / atomic commit / orphan recovery [Implemented; Linux verified]
@@ -3650,6 +3653,75 @@ or P2/P3/P4 work are added. Next task: P1 durable provider cache ownership acros
 revisions, preserving working node traffic and source data while preventing stale
 cache reuse across changed provider sources. Remaining P1 Geo formats/controlled
 updates/settings are still pending before advancing to P2.
+
+## P1 increment: HTTP provider cache ownership across revisions
+
+The previous Geo authority increment is complete. Candidate preparation now adds
+source-addressed HTTP cache paths after the existing upstream-compatible conflict
+allocator. Both proxy and rule HTTP providers, including declarations without a
+path, receive `provider-cache/v1/<sha256>.cache`. The reserved namespace is only
+available to HTTP providers; file providers cannot claim it. Local file paths and
+inline declarations retain their behavior. Explicit original paths are still
+checked for unsafe destinations before being rewritten; no source YAML changes.
+
+The versioned SHA-256 identity contains the provider section, URL, header, proxy,
+format and behavior in deterministic JSON order. URL/header/transport/parser
+changes select a different file, even when only one provider exists. Provider
+names, intervals, health checks, filters, overrides and original path spelling do
+not change the identity of the downloaded raw file. Identical identities share a
+cache; differing proxy/rule parser identities do not. Absent fields and explicitly
+specified defaults may conservatively select separate caches. Private URL/header
+values are hashed, not included in filenames or inventory responses.
+
+Ownership is persistent in the versioned source-addressed name and committed
+configuration; it requires no mutable owner ledger, no additional journal and no
+cache-file rename/delete. A probe may download a candidate cache before its runtime
+transaction fails, but a different source cannot overwrite a previously owned
+file. Changing content at the same source remains Mihomo's refresh responsibility;
+this is source ownership, not content integrity or a provider refresh command.
+Old caches and unclaimed original files are retained without being imported.
+Automatic pruning and content verification are not added.
+
+The actor uses this policy for all staged candidates and raw-edit validation copies.
+Probes, start and reload recompute and check ownership without rewriting immutable
+commits. Legacy HTTP revisions (including implicit paths and old cvr aliases) must
+be explicitly reapplied by selecting the subscription or editing/applying the
+configuration. Startup fails safely until this is done. Initial migration may need
+a working source download; old cache presence does not authorize its reuse.
+Existing confined metadata, protected paths, symlink/hard-link checks and provider
+bounds also apply to the generated namespace. These are preflight checks under the
+service data lock; trusted external writers must respect the lock and namespace.
+
+Validation:
+
+- `cargo check --workspace --locked --offline` and the service build passed.
+  Workspace tests passed: 354 regular tests, zero failures and 78 opt-in tests
+  ignored by default. Formatting and diff checks passed.
+- Three new ownership tests cover cross-revision source changes, idempotency,
+  renamed/retimed providers, canonical header ordering, credential/transport/parser
+  separation, implicit HTTP paths, legacy rejection, protected namespaces, local
+  claims and later symlink/hard-link changes. Existing allocation tests remain.
+- Authenticated actor/inventory tests cover stable regeneration, unchanged raw
+  YAML, rejected edits before probes, generated cache metadata, URL/header
+  redaction, missing-file refresh and start-time path rechecks.
+- Explicit real-core `provider_cache_live` passed: a single provider switched from
+  Alpha to Beta using distinct files; a rejected candidate retained PID/revision
+  and both caches. An implicit HTTP rule provider loaded one classical rule.
+  With the download server closed, service restart and subscription reselection
+  reused the correct node/rule caches; raw sources remained unchanged.
+- Explicit actual-node `resource_inventory_live` passed using private data copies:
+  HTTP provider caches loaded, resource/Geo operations remained usable and HTTPS
+  proxy traffic returned 204 before and after restart. Original node and Geo source
+  hashes were preserved.
+- The Playwright resource inventory refresh/retry workflow passed against the newly
+  built service. No Web source changed; unrelated browser workflows were not rerun.
+
+The complete architecture tree is updated above. The development MVP remains
+available; existing HTTP revisions need explicit reapplication as described.
+Next task: P1 geosite matcher settings and readback, followed by remaining settings
+and Geo format/lifecycle work. P2 operations/views, P3 i18n/signals, P4 actual Linux
+systemd installation and previously deferred features remain unfinished. No Git
+commit is performed inside the sandbox.
 
 ## MVP completion boundary
 

@@ -17,6 +17,96 @@ pub const GEO_ASSETS: &[&str] = &[
     "GeoSite.dat",
 ];
 pub const MAX_PROVIDERS: usize = 512;
+/// Reserved for source-addressed HTTP caches; never used by local providers.
+pub const HTTP_CACHE_ROOT: &str = "provider-cache";
+
+/// Service policy beyond upstream's simultaneous path-conflict allocation.
+/// Ownership is encoded in immutable source-addressed names, so no mutable ledger
+/// or cache rollback is needed when a probe downloads before runtime publication.
+pub fn prepare_owned(config: Mapping, root: &Path, protected: &[PathBuf]) -> Result<Mapping> {
+    let mut config = prepare(config, root, protected)?;
+    owned_paths(&mut config, root, protected, true)?;
+    Ok(config)
+}
+
+/// Legacy HTTP revisions must be reapplied explicitly; never rewrite a commit on start.
+pub fn validate_owned(config: &Mapping, root: &Path, protected: &[PathBuf]) -> Result<()> {
+    validate(config, root, protected)?;
+    owned_paths(&mut config.clone(), root, protected, false)
+}
+
+fn owned_paths(config: &mut Mapping, root: &Path, protected: &[PathBuf], rewrite: bool) -> Result<()> {
+    for section in ["proxy-providers", "rule-providers"] {
+        let Some(providers) = config.get_mut(section).and_then(Value::as_mapping_mut) else {
+            continue;
+        };
+        for provider in providers.values_mut() {
+            let remote = provider.get("type").and_then(Value::as_str) == Some("http");
+            let inline = provider.get("type").and_then(Value::as_str) == Some("inline");
+            if !remote {
+                if !inline {
+                    ensure!(
+                        !provider
+                            .get("path")
+                            .and_then(Value::as_str)
+                            .and_then(|raw| relative_path(root, raw))
+                            .is_some_and(|path| path.starts_with(HTTP_CACHE_ROOT)),
+                        "local provider cannot use the service HTTP cache namespace"
+                    );
+                }
+                continue;
+            }
+            let destination = owned_destination(section, provider)?;
+            if !rewrite {
+                ensure!(
+                    provider.get("path").and_then(Value::as_str) == Some(destination.as_str()),
+                    "HTTP provider cache ownership changed or is legacy; reapply the configuration"
+                );
+            }
+            check_destination(root, Path::new(&destination), protected)?;
+            check_file(root, Path::new(&destination), true)?;
+            if rewrite {
+                provider
+                    .as_mapping_mut()
+                    .ok_or_else(|| anyhow::anyhow!("provider must be a mapping"))?
+                    .insert("path".into(), destination.into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn owned_destination(section: &str, provider: &Value) -> Result<String> {
+    let url = provider
+        .get("url")
+        .and_then(Value::as_str)
+        .filter(|url| !url.is_empty() && url.len() <= 8192)
+        .ok_or_else(|| anyhow::anyhow!("HTTP provider requires a URL of at most 8192 bytes"))?;
+    // These affect retrieval/content interpretation. Names, interval, health
+    // checks, filters and overrides do not identify the downloaded raw file.
+    let mut identity = BTreeMap::new();
+    identity.insert("section", serde_json::Value::String(section.into()));
+    identity.insert("url", serde_json::Value::String(url.into()));
+    for key in ["header", "proxy", "format", "behavior"] {
+        let value = provider.get(key).unwrap_or(&Value::Null);
+        identity.insert(
+            key,
+            serde_json::to_value(value).map_err(|_| anyhow::anyhow!("invalid HTTP provider source identity"))?,
+        );
+    }
+    // JSON object keys sort without depending on YAML declaration order.
+    let bytes = serde_json::to_vec(&identity)?;
+    let mut hash = Context::new(&SHA256);
+    hash.update(b"mihomo-server-http-cache-v1\0");
+    hash.update(&bytes);
+    let hash: String = hash
+        .finish()
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(format!("{HTTP_CACHE_ROOT}/v1/{hash}.cache"))
+}
 
 #[derive(Default)]
 struct Owners {
