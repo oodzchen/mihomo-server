@@ -1557,3 +1557,21 @@ is shutting down. Runtime-manifest commit remains the publication boundary.
 Private probe/script diagnostics are discarded; an applied running core uses
 the normal core log stream. Orphan cleanup, retention/schedules/WebDAV/UI and
 other restore platforms remain pending.
+
+
+## Restore candidate ownership and abrupt-termination cleanup
+
+This is original service infrastructure, with no additional upstream source
+copying or dependency changes. `service/src/backup_candidates.rs` owns the
+data-directory scoped private scratch namespace, exclusive per-candidate lease,
+descriptor-anchored enumeration/deletion and bounded startup reclamation.
+`backup_restore.rs` uses that guard for rehearsal/publication; `core_manager.rs`
+cleans it after data locking and before opening configuration stores.
+
+Linux tests cover a service SIGKILL during a probe and subsequent startup cleanup
+with unchanged committed data, live lease preservation, data-directory isolation,
+unsafe ownership/type/link/mode retention, symlink/FIFO targets, private orphan
+permission recovery and retry after depth-budget failure. Legacy unmarked global
+temporary candidates are retained for manual inspection. This cleanup concerns
+disposable candidates only; immutable revision/source garbage collection and
+retained backup archive management remain separate pending tasks.

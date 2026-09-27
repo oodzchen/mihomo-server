@@ -460,6 +460,8 @@ impl CoreManager {
         } else {
             None
         };
+        #[cfg(unix)]
+        crate::backup::candidates::cleanup(&options.data_dir)?;
         let store = RuntimeStore::open(&options.data_dir)?;
         let mut settings_store = SettingsStore::open(&options.data_dir)?;
         let mut profile_store = ProfileStore::open(&options.data_dir)?;

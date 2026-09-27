@@ -1,5 +1,5 @@
 //! Private restore validation and explicit publication candidates.
-use super::hash;
+use super::{candidates::PrivateDirectory, hash};
 use anyhow::{Context as _, Result, ensure};
 use headless_core::{
     backup::{BackupRestoreValidation, BackupRuntimePolicy},
@@ -14,7 +14,7 @@ use std::{
     fs::{self, File, Metadata, OpenOptions},
     io::{Read as _, Write as _},
     os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _},
-    path::{Component, Path, PathBuf},
+    path::{Component, Path},
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
@@ -38,24 +38,6 @@ impl Budget {
             "backup restore preparation exceeded 15 seconds"
         );
         Ok(())
-    }
-}
-struct PrivateDirectory(PathBuf);
-impl PrivateDirectory {
-    fn new() -> Result<Self> {
-        let mut random = [0; 16];
-        getrandom::fill(&mut random).map_err(|_| anyhow::anyhow!("restore candidate ID failed"))?;
-        let path = std::env::temp_dir().join(format!("ms-restore-{}", &hash(&random)[..24]));
-        fs::DirBuilder::new().mode(0o700).create(&path)?;
-        Ok(Self(path))
-    }
-    fn cleanup(&self) -> Result<()> {
-        fs::remove_dir_all(&self.0).context("restore candidate cleanup failed")
-    }
-}
-impl Drop for PrivateDirectory {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
     }
 }
 fn private_file(path: &Path) -> Result<File> {
@@ -197,7 +179,7 @@ fn prepare(bytes: &[u8], data: &Path, stop: watch::Receiver<bool>) -> Result<Can
     let budget = Budget::new(stop.clone());
     let archive = super::inspect::verify(bytes, stop.clone(), stop)?;
     budget.check()?;
-    let directory = PrivateDirectory::new()?;
+    let directory = PrivateDirectory::new(data)?;
     fs::DirBuilder::new().mode(0o700).create(directory.0.join("profiles"))?;
     fs::DirBuilder::new()
         .mode(0o700)

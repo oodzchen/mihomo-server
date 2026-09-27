@@ -41,7 +41,11 @@ core_restarted; inspect status before retrying an interrupted request. A running
 core reloads with verified ports or restarts as fallback; precommit failure restores
 the old data/core/node records. A stopped core stays stopped. Unsettled lifecycle
 states return 409; stop before retrying. See `docs/RUNNING.md` for the
-full transaction/error contract.
+full transaction/error contract. Restore scratch candidates are private under
+`<data-dir>/restore-candidates/`; after exclusive data locking, startup reclaims
+verified unleased orphans without following links. The namespace is service-owned.
+Unsafe roots or cleanup I/O/budget failures stop startup for repair/retry. Legacy
+unmarked `/tmp/ms-restore-*` directories require manual inspection.
 
 ```sh
 python3 scripts/package_bundle.py --build \

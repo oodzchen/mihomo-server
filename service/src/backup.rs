@@ -5,6 +5,10 @@ use headless_core::backup::BackupMetadata;
 pub(crate) mod inspect;
 
 #[cfg(unix)]
+#[path = "backup_candidates.rs"]
+pub(crate) mod candidates;
+
+#[cfg(unix)]
 #[path = "backup_restore.rs"]
 pub(crate) mod restore;
 

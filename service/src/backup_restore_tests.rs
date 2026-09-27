@@ -4,6 +4,21 @@ use std::{
     io::Cursor,
     os::unix::fs::{PermissionsExt as _, symlink},
 };
+struct TestDirectory(std::path::PathBuf);
+impl TestDirectory {
+    fn new() -> Result<Self> {
+        let mut random = [0; 16];
+        getrandom::fill(&mut random).unwrap();
+        let path = std::env::temp_dir().join(format!("ms-restore-tests-{}", hash(&random)));
+        fs::DirBuilder::new().mode(0o700).create(&path)?;
+        Ok(Self(path))
+    }
+}
+impl Drop for TestDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
 fn archive() -> Vec<u8> {
     let contents = [
         (
@@ -56,7 +71,7 @@ fn archive() -> Vec<u8> {
 }
 #[test]
 fn verified_private_candidate_preserves_sources_generates_plan_copies_geo_and_cleans_up() -> Result<()> {
-    let live = PrivateDirectory::new()?;
+    let live = TestDirectory::new()?;
     fs::write(live.0.join("geoip.metadb"), b"resource fixture")?;
     let candidate = prepare(&archive(), &live.0, watch::channel(false).1)?;
     let root = candidate.directory.0.clone();
@@ -71,7 +86,8 @@ fn verified_private_candidate_preserves_sources_generates_plan_copies_geo_and_cl
         b"resource fixture"
     );
     assert_eq!(candidate.generation.as_ref().unwrap().profile_uid, "main");
-    assert_eq!(fs::read_dir(&live.0)?.count(), 1);
+    assert_eq!(fs::read_dir(&live.0)?.count(), 2);
+    assert!(root.starts_with(live.0.join("restore-candidates")));
     assert!(!root.join("management-token").exists() && !root.join("config/state.yaml").exists());
     drop(candidate);
     assert!(!root.exists());
@@ -81,8 +97,8 @@ fn verified_private_candidate_preserves_sources_generates_plan_copies_geo_and_cl
 #[test]
 fn geo_links_nonregular_unsafe_shared_and_oversized_resources_fail_before_validation() -> Result<()> {
     for case in ["link", "hardlink", "directory", "fifo", "mode", "size"] {
-        let live = PrivateDirectory::new()?;
-        let dest = PrivateDirectory::new()?;
+        let live = TestDirectory::new()?;
+        let dest = TestDirectory::new()?;
         let path = live.0.join("geoip.metadb");
         match case {
             "link" => symlink("/missing", &path)?,
@@ -130,7 +146,7 @@ fn provider_paths_and_candidate_identity_checks_do_not_follow_escape_links_or_la
     }
     let config = serde_yaml_ng::from_str("proxy-providers: {test: {path: ./providers/source.yaml}}")?;
     resource_paths(&config)?;
-    let dir = PrivateDirectory::new()?;
+    let dir = TestDirectory::new()?;
     let path = dir.0.join("candidate.yaml");
     let budget = Budget::new(watch::channel(false).1);
     write(&path, b"mode: direct\n", &budget)?;

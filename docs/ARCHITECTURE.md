@@ -150,7 +150,7 @@ mihomo-server/
 │   │   ├── Explicit running/stopped restore upload / DNS policy / durable receipt [Implemented; Linux verified]
 │   │   ├── Restore preparation/core-I/O cancellation / phase checks / committed cleanup [Implemented; Linux verified]
 │   │   ├── Running-core restore reload/restart/apply rollback / saved-node reconciliation [Implemented; Linux verified]
-│   │   ├── Abrupt-termination candidate orphan cleanup [Pending]
+│   │   ├── Scoped candidate leases / bounded abrupt-termination orphan cleanup [Implemented; Linux verified]
 │   │   └── Local retention / schedule / WebDAV / UI [Pending]
 │   ├── Full application context and domain events  [Pending]
 │   ├── Sole Mihomo lifecycle manager                [Implemented; Linux verified]
@@ -3002,6 +3002,69 @@ archive retention/list/delete. Immutable source/revision garbage collection,
 schedules, WebDAV, backup UI, full settings/resources, advanced pages, shared
 components and additional supported release/service targets remain pending;
 Windows compatibility stays deferred. The full project is not complete.
+
+## Latest increment: scoped restore candidate leases and startup cleanup
+
+Delivery step 7 completes abrupt-termination cleanup for new disposable restore
+candidates. Rehearsal and publication now allocate private candidates under the
+locked service data directory's reserved `restore-candidates` namespace instead
+of global temporary storage. Each random `ms-restore-<24 lowercase hex digits>`
+directory has a private, single-link regular `.lease` held under an exclusive
+file lock for its entire lifetime. Startup cleanup runs after data locking and
+before runtime/profile/settings initialization; durable restore-journal recovery
+remains a separate step. Backup archives exclude this scratch namespace.
+
+Cleanup requires an owned private no-follow root, strict candidate name/type/
+ownership/mode and an available safe lease. Empty recognized directories without
+a lease cover interruption between mkdir and lease creation. Live leases,
+unrecognized entries, public/foreign directories, missing nonempty leases,
+symlink/shared/nonregular leases and top-level candidate links are retained.
+No global `/tmp` scan, PID/age heuristic or other service data directory is used.
+Old unmarked temporary candidates cannot prove ownership and remain for manual
+inspection. This is an explicit compatibility boundary, not broad file garbage
+collection.
+
+Enumeration and deletion are anchored to directory descriptors with no-follow
+openat/unlinkat. Nested links/FIFOs are unlinked without traversing their targets;
+owned nested directories must remain on the same filesystem, with identity checks
+before removal. The lease is removed last, making partial deletion retryable.
+Eligible private orphan permissions can be restored through descriptors; leased
+active candidates are untouched. Each pass bounds directory enumeration and total
+visits to 4,096 entries, depth 16 and a cooperative 15-second budget. Individual
+syscalls are not preemptible. Unsafe root state or I/O/budget failure fails startup
+closed for repair/retry while preserving remaining scratch and committed data.
+No dependency changes or new upstream code copies are introduced.
+
+Verification: `cargo check --workspace --locked --offline`, all 316 regular
+workspace tests (21 regular backup API tests), all 4 real-Mihomo backup tests,
+warnings-denied Clippy, formatting and diff checks pass. Five new unit tests cover
+scope/live lease/empty creation gap, unsafe root and unverifiable entry retention,
+anchored symlink/FIFO deletion, private orphan permission recovery and retry after
+depth-budget failure. A new Linux integration test kills the service with SIGKILL
+during a probe, verifies parent-death probe termination and leftover scratch,
+then restarts the manager and verifies candidate cleanup with unchanged committed
+runtime/settings/catalog and usable backup admission. The existing rehearsal and
+restore cancellation/commit/rollback tests continue to pass at the new location.
+An initial parallel library run hit an existing core-upgrade fixture's Text file
+busy error; the complete final workspace run is serial and passes.
+
+The runnable Linux MVP is refreshed at
+`target/mihomo-server-linux-x86_64-candidate-cleanup`. All 12 SHA-256 checksums pass;
+packaged Rust binary and deployment/provenance docs match release/source files.
+Fresh-bundle smoke exports the actual 56-node archive (1,110,883 bytes/13 entries),
+kills the release service during private restore preparation, and verifies startup
+reclaims the candidate without changing committed configuration/catalog/settings.
+It then verifies same-PID running restore, stopped restore and service-restart
+persistence with selected-node HTTPS 204 traffic. Original data-file hashes remain
+unchanged. Final cleanup leaves no owned service/core processes or candidates.
+No sandbox Git writes/commits occur; the host script owns the commit.
+
+Next Delivery step 7 subtask: implement local retained-backup storage and bounded
+list/delete management, reusing verified snapshots and single operation admission.
+Scheduled backup policy, WebDAV and backup UI follow. Immutable revision/source
+garbage collection, full settings/resources, advanced pages, shared components
+and additional release/service targets remain pending; Windows compatibility
+stays deferred. The Linux MVP remains runnable and the full project is not complete.
 
 ## MVP completion boundary
 

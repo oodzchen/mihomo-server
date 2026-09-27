@@ -1469,3 +1469,120 @@ async fn real_running_restore_restarts_listener_switch_and_rolls_back_occupied_p
     }.await;
     result.and(manager.shutdown().await)
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn killed_service_restore_candidate_is_cleaned_on_restart_without_changing_committed_data() -> Result<()> {
+    use tokio::process::Command;
+    let dir = Directory::new()?;
+    let manager = dir.manager(false)?;
+    let download = manager.export_backup().await?;
+    let bytes = download.bytes.clone();
+    drop(download);
+    let revision = manager.status().config_revision;
+    let settings = manager.settings().await?;
+    let catalog = json!(manager.profiles());
+    manager.shutdown().await?;
+    let marker = dir.0.join("killed-probe.json");
+    fs::write(
+        dir.0.join("validator.py"),
+        format!(
+            "#!/usr/bin/python3\nimport sys,time,pathlib,json,os\npathlib.Path({:?}).write_text(json.dumps({{'pid':os.getpid(),'candidate':str(pathlib.Path(sys.argv[sys.argv.index('-f')+1]).parent)}}))\ntime.sleep(60)\n",
+            marker.to_str().unwrap()
+        ),
+    )?;
+    let reserved = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let address = reserved.local_addr()?;
+    drop(reserved);
+    let mut service = Command::new(env!("CARGO_BIN_EXE_mihomo-server"))
+        .arg("--data-dir")
+        .arg(&dir.0)
+        .arg("--config")
+        .arg(dir.0.join("bootstrap.yaml"))
+        .arg("--mihomo")
+        .arg(dir.0.join("validator.py"))
+        .arg("--listen")
+        .arg(address.to_string())
+        .arg("--no-start")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()?;
+    let client = reqwest::Client::builder().no_proxy().build()?;
+    let token = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(token) = fs::read_to_string(dir.0.join("management-token")) {
+                let token = token.trim().to_owned();
+                if client
+                    .post(format!("http://{address}/api/commands"))
+                    .bearer_auth(&token)
+                    .json(&json!({"command":"status"}))
+                    .send()
+                    .await
+                    .is_ok_and(|r| r.status().is_success())
+                {
+                    break token;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await?;
+    let upload = tokio::spawn(async move {
+        client
+            .post(format!("http://{address}/api/backup/restore"))
+            .bearer_auth(token)
+            .header("Content-Type", "application/zip")
+            .header("X-Backup-Runtime", "archived")
+            .body(bytes)
+            .send()
+            .await
+    });
+    let probe: serde_json::Value = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(data) = fs::read(&marker)
+                && let Ok(probe) = serde_json::from_slice(&data)
+            {
+                break probe;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await?;
+    let candidate = PathBuf::from(probe["candidate"].as_str().unwrap());
+    assert!(candidate.starts_with(dir.0.join("restore-candidates")) && candidate.join(".lease").exists());
+    service.kill().await?;
+    assert!(tokio::time::timeout(Duration::from_secs(3), upload).await??.is_err());
+    let probe_pid = probe["pid"].as_u64().unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            // A killed grandchild may briefly be an init-owned zombie; it is no longer using the candidate.
+            let status = fs::read_to_string(format!("/proc/{probe_pid}/status"));
+            if status.is_err()
+                || status.is_ok_and(|s| s.lines().any(|l| l.starts_with("State:") && l.contains("Z (zombie)")))
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await?;
+    assert!(
+        candidate.exists(),
+        "SIGKILL must leave a candidate for startup recovery"
+    );
+    let manager = dir.manager(false)?;
+    let result = async {
+        assert!(!candidate.exists());
+        assert_eq!(fs::read_dir(dir.0.join("restore-candidates"))?.count(), 0);
+        assert_eq!(manager.status().config_revision, revision);
+        assert_eq!(manager.settings().await?, settings);
+        assert_eq!(json!(manager.profiles()), catalog);
+        assert!(!dir.0.join("backup-restore.yaml").exists());
+        let download = manager.export_backup().await?;
+        drop(download);
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    result.and(manager.shutdown().await)
+}

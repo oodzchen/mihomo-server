@@ -2164,7 +2164,8 @@ and `dns_override_requires_confirmation`. It returns no configuration contents,
 profile names/URLs, logs, token, temporary paths, retained stage ID or receipt.
 
 After strict ZIP validation, the lifecycle actor materializes only verified
-configuration/profile entries in a disposable 0700 directory with 0600 files.
+configuration/profile entries in a disposable 0700 directory with 0600 files
+under the service-owned `<data-dir>/restore-candidates/` namespace.
 It validates the archived runtime snapshot against the current core. If an active
 profile is recorded, it separately rebuilds the candidate using the archived raw
 profile, auxiliary/global files and settings, with the existing sequence,
@@ -2200,8 +2201,9 @@ traffic and watched state continue, while queued actor commands wait. Disconnect
 HTTP shutdown and manager shutdown cancel the work, terminate/reap probes/workers,
 join preparation and remove candidates before releasing admission/data ownership.
 Successful, failed and cancelled rehearsals clean their temporary files. Abrupt
-process termination can leave a private temporary directory; automatic orphan
-cleanup remains pending; durable catalog/settings restore recovery is available.
+termination can leave a private candidate; the next startup cleans eligible
+orphans before opening the configuration stores. See the cleanup contract below.
+Durable catalog/settings restore recovery is independent of scratch cleanup.
 
 Invalid archives, source generation, scripts, provider paths, Mihomo rejection,
 probe mutation or cleanup failure return generic 422; no restore state is
@@ -2269,4 +2271,43 @@ reported in status and retains intent. Manifest rename means logically committed
 regardless of a following directory fsync error; such acknowledgement/cleanup
 errors set cleanup_pending rather than undoing the restoration. Startup rolls back
 uncommitted intent or finishes committed publication before normal catalog/DNS
-initialization. Abrupt-termination disposable directory cleanup remains pending.
+initialization. Disposable directory cleanup follows the contract below.
+
+
+## Restore candidate cleanup after abrupt termination
+
+New rehearsal and restore candidates live only in
+`<data-dir>/restore-candidates/ms-restore-<24 lowercase hex digits>`. This is a
+reserved service scratch namespace; keep administrator files elsewhere. Its root
+and candidate directories are owned by the service user and private (0700).
+A private, single-link regular `.lease` file is exclusively locked for the full
+candidate lifetime. Normal success, failure and cancellation remove the candidate
+before releasing its lease. No backup ZIP entry can supply the lease or scratch
+destination. Candidates and leases are excluded from exported backups.
+
+After obtaining exclusive data-directory ownership, startup checks this root
+before configuration/journal initialization. It cleans recognized, owned private
+candidates only when their valid lease can be locked. An empty recognized
+directory without a lease is removed to cover termination between mkdir and
+lease creation. Live leases, unrecognized names, public/foreign-owned directories,
+nonempty candidates without a lease, and linked/shared/nonregular leases are
+retained. Cleanup does not scan global temporary storage or another data directory.
+Legacy unmarked `/tmp/ms-restore-*` directories from older releases require manual
+inspection/removal; a filename alone does not identify the service that created it.
+
+Enumeration and recursive deletion use directory descriptors and no-follow
+`openat`/`unlinkat`. Nested symlinks and FIFOs are unlinked themselves, without
+reading or traversing their targets. Owned nested directories remain on the same
+filesystem, and identities are rechecked before directory removal. Startup can
+restore owner-write permission on eligible private orphan directories; active
+candidates and unsafe root permissions are not repaired. Cleanup preserves the
+lease until other contents are gone, so interrupted/partial cleanup can retry.
+
+A cleanup pass permits at most 4,096 enumerated entries per directory, 4,096
+visited entries in total, depth 16 and a cooperative 15-second budget. Individual
+filesystem syscalls cannot be preempted. Unsafe root ownership/type/permissions,
+I/O failures or budget exhaustion fail startup closed and leave remaining scratch
+state for repair/retry; they do not authorize deleting unrelated entries or
+changing committed runtime/catalog/settings. An unreadable root/candidate may
+require operator permission repair. Linux is verified; other restore targets
+remain pending/deferred with the rest of the service platform work.
