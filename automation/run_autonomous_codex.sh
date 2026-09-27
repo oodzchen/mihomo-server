@@ -21,7 +21,7 @@ set -uo pipefail
 # 1. 基础配置与环境变量
 # ------------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$SCRIPT_DIR"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$PROJECT_ROOT" || exit 1
 
 # Codex 可执行文件路径探测
@@ -39,10 +39,10 @@ SANDBOX_MODE="${SANDBOX_MODE:-workspace-write}"          # 沙箱模式: workspa
 APPROVAL_POLICY="${APPROVAL_POLICY:-never}"              # 审批模式: never (完全无人值守自动执行)
 COMPLETION_FLAG="${COMPLETION_FLAG:-===ALL_TASKS_COMPLETED_SUCCESSFULLY===}" # 全部任务完成标志
 
-# 运行日志与状态持久化
-LOG_DIR="${SCRIPT_DIR}/.codex_autonomous_logs"
+# 运行日志与状态持久化 (集中在 automation 目录下，不污染项目源码根目录)
+LOG_DIR="${SCRIPT_DIR}/logs"
 mkdir -p "$LOG_DIR"
-SESSION_FILE="${SCRIPT_DIR}/.codex_autonomous_session_id"
+SESSION_FILE="${SCRIPT_DIR}/.session_id"
 
 # 文档与上游代码路径
 DOC_HEADLESS="${PROJECT_ROOT}/headless.md"
@@ -184,7 +184,7 @@ handle_manual_interrupt() {
         echo -e "${CLR_DIM}--------------------------------------------------------------------------------${CLR_RESET}"
         echo -e "若需接着此会话继续工作，请执行以下命令："
         echo -e "  ${CLR_GREEN}▶ 1. 继续无人值守自动运行:${CLR_RESET}"
-        echo -e "     ${CLR_BOLD}./run_autonomous_codex.sh --session ${sid}${CLR_RESET}"
+        echo -e "     ${CLR_BOLD}./automation/run_autonomous_codex.sh --session ${sid}${CLR_RESET}"
         echo ""
         echo -e "  ${CLR_BLUE}▶ 2. 进入交互式 Codex 终端手动调试:${CLR_RESET}"
         echo -e "     ${CLR_BOLD}codex resume ${sid}${CLR_RESET}"
@@ -606,9 +606,9 @@ auto_commit_subtask_changes() {
         return 0
     fi
 
-    # 检查除 runner 脚本与格式化工具之外是否有待提交的代码改动
+    # 检查除 automation 目录之外是否有待提交的项目代码改动
     local status_output
-    status_output=$(git -C "$PROJECT_ROOT" status --porcelain -- ':!run_autonomous_codex.sh' ':!format_codex_stream.py' 2>/dev/null || true)
+    status_output=$(git -C "$PROJECT_ROOT" status --porcelain -- ':!automation' 2>/dev/null || true)
 
     if [ -z "$status_output" ]; then
         log_info "工作区无新增待提交代码改动，跳过自动 Git 提交。"
@@ -669,8 +669,8 @@ PYEOF
         commit_msg="feat(turn-${turn_num}): complete autonomous subtask"
     fi
 
-    # 暂存所有项目改动 (保持 runner 脚本本身不被混入子任务业务 commit)
-    git -C "$PROJECT_ROOT" add -A -- ':!run_autonomous_codex.sh' ':!format_codex_stream.py'
+    # 暂存所有项目改动 (保持 automation 目录不被混入子任务业务 commit)
+    git -C "$PROJECT_ROOT" add -A -- ':!automation'
 
     # 执行 commit
     if git -C "$PROJECT_ROOT" commit -m "$commit_msg" >/dev/null 2>&1; then
@@ -708,7 +708,7 @@ generate_initial_prompt() {
 5. 【重要 - 关于 Git 自动提交】：
    - Linux Codex 沙箱环境按安全设计将 .git 目录挂载为只读，因此在沙箱内部执行 git add / git commit 会报错 "Read-only file system" 或无法创建 index.lock。
    - 请【绝对不要】在沙箱内尝试执行 git 提交命令。
-   - 外部自动化宿主运行脚本 (run_autonomous_codex.sh) 会在每轮子任务完成并验证通过后，自动代你在宿主机上将代码改动原子提交到 Git 并记录提交信息。你只需专注于编写代码、跑通测试验证、并同步更新 ./docs/ARCHITECTURE.md 即可！
+   - 外部自动化宿主运行脚本 (automation/run_autonomous_codex.sh) 会在每轮子任务完成并验证通过后，自动代你在宿主机上将代码改动原子提交到 Git 并记录提交信息。你只需专注于编写代码、跑通测试验证、并同步更新 ./docs/ARCHITECTURE.md 即可！
 6. 【重要 - 完成判定与标志输出】：
    当且仅当 ./headless.md 和 ./docs/ARCHITECTURE.md 中所要求的所有架构组件（核心库、Axum API、WebSocket、Web UI 适配、生命周期管理、配置增强与事务、单服务打包部署与测试验证）全部完整实现并通过验证时，在本次最终回答的最末尾单独输出一行特定标记字符串：
    $COMPLETION_FLAG

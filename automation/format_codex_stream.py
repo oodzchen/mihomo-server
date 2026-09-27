@@ -377,7 +377,7 @@ def main():
                     f"{CLR_YELLOW}│{CLR_RESET} 原生退出状态: {CLR_BOLD}turn interrupted{CLR_RESET}\n"
                     f"{CLR_YELLOW}│{CLR_RESET}\n"
                     f"{CLR_YELLOW}│{CLR_RESET} 后续接着会话继续运行命令：\n"
-                    f"{CLR_YELLOW}│{CLR_RESET}   ▶ 自动化续跑:   {CLR_GREEN}{CLR_BOLD}./run_autonomous_codex.sh --session {captured_session_id}{CLR_RESET}\n"
+                    f"{CLR_YELLOW}│{CLR_RESET}   ▶ 自动化续跑:   {CLR_GREEN}{CLR_BOLD}./automation/run_autonomous_codex.sh --session {captured_session_id}{CLR_RESET}\n"
                     f"{CLR_YELLOW}│{CLR_RESET}   ▶ 交互式恢复:   {CLR_BLUE}{CLR_BOLD}codex resume {captured_session_id}{CLR_RESET}\n"
                     f"{CLR_YELLOW}╰───────────────────────────────────────────────────────────────────────────{CLR_RESET}\n"
                 )
