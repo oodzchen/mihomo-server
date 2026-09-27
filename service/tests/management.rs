@@ -40,6 +40,8 @@ async fn core_release_commands_authenticate_reject_source_overrides_and_require_
             json!({"command":"core_release"}),
             json!({"command":"prepare_core_upgrade"}),
             json!({"command":"prepared_core_upgrade","id":"v1.2.3-invalid"}),
+            json!({"command":"stage_core_upgrade","id":"v1.2.3-invalid"}),
+            json!({"command":"staged_core_upgrade","id":"v1.2.3-invalid"}),
         ] {
             assert_eq!(
                 response(&app, request("wrong", "/api/commands", Some(command))?)
@@ -54,7 +56,11 @@ async fn core_release_commands_authenticate_reject_source_overrides_and_require_
             json!({"command":"prepare_core_upgrade","sha256":"arbitrary"}),
             json!({"command":"prepare_core_upgrade","version":"v1.2.3"}),
             json!({"command":"prepared_core_upgrade","id":"v1.2.3-invalid"}),
+            json!({"command":"stage_core_upgrade","id":"v1.2.3-invalid"}),
+            json!({"command":"staged_core_upgrade","id":"v1.2.3-invalid"}),
             json!({"command":"prepared_core_upgrade","id":"v1.2.3-invalid","directory":"/tmp"}),
+            json!({"command":"stage_core_upgrade","id":"v1.2.3-invalid","binary":"/tmp/core"}),
+            json!({"command":"staged_core_upgrade","id":"v1.2.3-invalid","sha256":"arbitrary"}),
         ] {
             assert_eq!(
                 response(&app, request(&token, "/api/commands", Some(command))?)

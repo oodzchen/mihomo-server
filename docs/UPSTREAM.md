@@ -1177,3 +1177,33 @@ byte comparison and verifies the installed core remains unchanged. This is test
 verification, not a production decompressor. Managed/system proxy routes and TLS
 static-root retry, upstream gzip decoding/executable probes, actor replacement/
 rollback, Alpha and other-platform resource runtime validation remain pending.
+
+
+## Bounded staged core extraction and compatibility probes
+
+Source: src-tauri/src/feat/core_upgrade.rs::stage_core, unpack and read_core_version,
+pinned commit b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b. Destination:
+service/src/core_stage.rs (private core_release module), version probe in validation.rs,
+and actor/management adapters. Retained behavior includes gzip extraction, private
+staging, executable permission/fsync and requiring the exact reported version before
+publication. Live-core replacement/rollback remains a separate pending increment.
+
+The service pins flate2 1.1.10 with default features disabled and rust_backend;
+Cargo.lock pins its pure Rust miniz_oxide/CRC/Adler dependencies. No system gzip or
+new native compression package is required in production. The
+[flate2 single-member decoder](https://docs.rs/flate2/1.1.10/flate2/bufread/struct.GzDecoder.html)
+allows checking unread input after EOF; the adaptation rejects concatenated members
+and trailing bytes, checks CRC/truncation, caps uncompressed output at 128 MiB and
+checks a cooperative 15-second clock plus shutdown between bounded chunks.
+
+Additional service checks require Linux x86_64 ELF headers, bounded async -v and
+-t processes with cancellation/kill/reap, and actor-serialized configuration snapshots.
+Configuration testing uses a disposable data directory and bounded copies of known
+Geo files. It does not claim full provider/resource staging or successful activation.
+Probe diagnostics are suppressed in management errors. Executable/config hashes
+are rechecked after probing, recorded with the compressed source identity, atomically
+published and revalidated by restart readback. Admission remains actor-owned after
+a caller disconnects. Existing status, runtime, selections and live executable stay
+unchanged. Tests cover malformed archives/CRC/members/limits/ELF, output/time/cancel
+bounds, cache permissions/links/tampering, actual Mihomo compatibility failures and
+successful actor staging with a running core and restart proof readback.

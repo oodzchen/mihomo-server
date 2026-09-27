@@ -116,7 +116,9 @@ mihomo-server/
 │   │   ├── Official latest/pinned metadata and platform asset [Implemented]
 │   │   ├── Bounded compressed download / SHA-256 / private atomic cache [Implemented]
 │   │   ├── Authenticated preparation/readback / cancellation [Implemented]
-│   │   ├── Decompression / executable probes / actor switch / rollback [Pending]
+│   │   ├── Bounded gzip / ELF / version / configuration probes [Implemented; Linux x86_64]
+│   │   ├── Actor snapshot / staged manifest / verified restart readback [Implemented]
+│   │   ├── Actor switch / rollback / interrupted-switch recovery [Pending]
 │   │   └── Proxy routing / static-root fallback / Alpha / other targets [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
@@ -133,7 +135,7 @@ mihomo-server/
 │   ├── Axum management API / command adapters       [Implemented; MVP allowlist]
 │   │   ├── State, logs, profiles, config, proxies queries [Implemented]
 │   │   ├── Lifecycle, YAML import/edit/overlay, profile edit/delete/import/refresh, linked read/set/clear, global read/set/reset, settings read/replace, profile DNS read/set, raw profile read/edit and node selection [Implemented]
-│   │   ├── Stable core release query / compressed preparation / readback [Implemented; Linux x86_64]
+│   │   ├── Stable core release query / preparation / executable staging / readback [Implemented; Linux x86_64]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -1793,7 +1795,7 @@ followed by managed switching with rollback. SOCKS/PAC, full DNS/hosts/native TU
 resources, Alpha upgrades, backups/WebDAV, advanced pages, immutable-file garbage
 collection and additional platform/deployment validation remain pending.
 
-## Latest increment: stable core release metadata and compressed preparation
+## Previous increment: stable core release metadata and compressed preparation
 
 Delivery step 7 now exposes authenticated core_release, prepare_core_upgrade and
 prepared_core_upgrade commands. The official GitHub release API resolves latest
@@ -1851,6 +1853,76 @@ interrupted-switch recovery. Core-download managed/system proxy routing, static-
 fallback, Alpha/other targets, upgrade UI, SOCKS/PAC, full DNS/hosts/native TUN,
 resources, backups/WebDAV, advanced pages, garbage collection and additional
 platform/deployment checks remain pending.
+
+## Latest increment: bounded core extraction and actor-owned candidate validation
+
+Delivery step 7 now adds stage_core_upgrade (prepared ID) and staged_core_upgrade
+(stage ID). Admission covers query/download/staging/readback; the staging command
+transfers its permit to the actor, retaining ownership if the HTTP caller leaves.
+The actor captures its current normalized YAML and committed revision and serializes
+validation with configuration/lifecycle changes. The existing core continues running;
+this command neither replaces it nor changes runtime/profile/node records or status.
+
+The package hash is checked again on the same compressed bytes used for extraction.
+A blocking worker uses the Rust-backed flate2 decoder, with a 15-second cooperative
+clock, shutdown checks, 64-KiB chunks and a 128-MiB uncompressed cap. CRC/truncation,
+empty output, trailing bytes, concatenated members, scripts and non-x86_64 ELF
+headers are rejected. Executables receive private 0700 permissions and fsync.
+Version -v must report the exact published stable tag. Mihomo -t validates the
+actor's YAML snapshot in a disposable data directory with private snapshots of
+available known Geo files (256 MiB combined cap). Existing live Geo files are not
+passed as its data directory. Missing/other provider resources may still fail
+validation; the full resource pipeline remains pending.
+
+Both executable probes have five-second deadlines and 64-KiB per-stream output
+bounds, with cancellation, kill and reap. Failure messages exclude candidate
+stdout/config diagnostics. After successful execution, executable/configuration
+hashes are checked again. A private manifest is atomically published under an
+immutable package-ID/config-hash stage ID; same-snapshot reuse still reruns probes
+and verifies the old artifact. Its original revision proof is retained even if
+identical YAML is subsequently committed under another revision. Readback checks
+source-package integrity, manifest/schema/IDs, exact 0700 executable mode, ELF,
+length/digest and the private configuration hash. Candidate records are historical
+validation proofs; activation must recheck the then-current configuration/resources.
+Shutdown/failure removes pending artifacts; startup's existing owned-pending cleanup
+handles interrupted extraction. Completed candidate garbage collection is pending.
+
+All 236 regular Rust tests and all 62 real-Mihomo integration tests pass. Four
+new staging/probe unit tests cover CRC/truncation/extra members/trailing bytes,
+size bounds, architecture/scripts, private cache/config/permission/link integrity,
+version failure, bounded stdout/stderr, timeout, cancellation and process reaping.
+A queued actor test aborts the caller and verifies admission remains held until
+shutdown drains the actor and reaps its validator. Two new real-Mihomo workflows
+exercise extraction/version/config validation, wrong-version/invalid-config rejection,
+cache/restart/tampering, and preserved running PID/generation/config/core hash.
+Existing management tests also verify authentication, strict staging schemas and
+managed-resource requirements. Cargo check --workspace, Rust formatting,
+warning-free all-target Clippy, TypeScript/Vite and changed-file Prettier pass.
+
+The fresh target/mihomo-server-linux-x86_64-core-stage release bundle builds and
+passes checksums plus bundled provenance/deployment document comparisons. An
+isolated release-binary smoke downloads the actual official v1.19.31 package,
+validates its compressed hash, extracts and probes the executable against the
+bootstrap configuration, verifies candidate readback after restart and preserves
+the installed core hash/stopped state. A separate isolated copy of saved data
+validates a locally compressed real core against the actual generated subscription
+configuration without changing PID/generation/runtime/executable. The first of
+56 traffic candidates returns HTTPS 204 before and after candidate validation.
+The subscription static-root/system-proxy HTTPS path still reaches YAML validation
+under an unrelated platform CA and rejects the empty body without catalog changes.
+Automatic policy is disabled only in the smoke's copied catalog; original data
+hashes remain unchanged and no credentials or endpoints are printed.
+All 22 Chromium workflows pass against the new release bundle. Fixture services,
+cores, script workers and stage-probe Python processes are zero after cleanup.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The Linux MVP remains runnable; the complete project is not done.
+Next Delivery step 7 subtask: actor-owned managed-core replacement, health/readiness
+verification, rollback and interrupted-switch recovery, using these verified staged
+candidates and revalidating current configuration/resources before activation.
+Core-download proxy routing/static roots, Alpha/other targets, upgrade UI, full
+DNS/hosts/native TUN, resources, backups/WebDAV, advanced pages, garbage collection,
+SOCKS/PAC and additional platform/deployment checks remain pending.
 
 ## MVP completion boundary
 

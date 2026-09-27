@@ -1759,3 +1759,44 @@ are checked. This prepares compressed bytes only: decompression, executable and
 configuration validation, installation, managed switching and rollback are pending.
 The current core stays in place and its running/stopped state is preserved. No
 automatic core upgrade is scheduled; completed-candidate cleanup is also pending.
+
+
+## Validate a staged core executable
+
+After prepare_core_upgrade, pass its returned compressed-package ID:
+
+```json
+{"command":"stage_core_upgrade","id":"<prepared package ID>"}
+{"command":"staged_core_upgrade","id":"<returned stage_id>"}
+```
+
+Both commands require authenticated management access and bundle-managed resources.
+There is no binary/path/config/checksum override. The service actor snapshots its
+current configuration (at most 8 MiB), serializes staging with configuration and
+lifecycle operations, and leaves the existing core running or stopped as it was.
+Without a readable valid current configuration, staging fails. Additional upgrade
+queries/preparations/staging/readbacks are rejected while staging owns admission,
+including when its original HTTP caller disconnects. State/WS transport remains
+available; other actor operations wait until staging finishes.
+
+The service rechecks the compressed digest, decodes a single gzip stream, validates
+CRC and EOF, rejects trailing data or extra members and bounds the executable to
+128 MiB. Extraction checks shutdown and a 15-second clock between chunks. Linux
+x86_64 ELF format is required; scripts/other architectures are rejected. The private
+candidate runs -v and must report exactly the pinned release version, then runs -t
+against the captured YAML. Each process has a five-second deadline, bounded stdout/
+stderr capture, and kill/reap on timeout or shutdown. Raw probe output is not
+returned in errors. It uses a disposable resource directory with copies of known
+Geo files, capped at 256 MiB combined. Other provider/resource workflows are still
+pending, so resource-dependent configurations can fail this isolated validation.
+Production extraction is in process and does not require a system gzip program.
+
+Success returns stage_id, prepared release metadata, executable size/SHA-256 and
+configuration SHA-256/revision. Artifacts remain private (0700 executable/directory,
+0600 manifest/config); readback verifies their integrity after restart. Each ID
+identifies the package and YAML hashes. Repeating staging revalidates with probes,
+then reuses an intact existing artifact; its original revision is historical even
+if identical YAML has since been committed again. The stored proof does not imply
+the current configuration/resources are still identical, and no core is installed
+or activated. The next activation workflow must check them again. Failed/shutdown
+work removes temporary files; completed candidates remain until future cleanup.

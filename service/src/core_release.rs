@@ -1,9 +1,12 @@
 //! Stable upstream release discovery and verified compressed-package preparation.
-//! Activation, unpacking and executable probes are separate actor-owned workflows.
+//! Actor-owned staging validates executables; activation remains a separate workflow.
+#[path = "core_stage.rs"]
+mod stage;
 use crate::resources::TARGET;
 use anyhow::{Context as _, Result, ensure};
 use ring::digest::{Context, SHA256};
 use serde::{Deserialize, Serialize};
+pub use stage::StagedCore;
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read as _, Write as _},
@@ -25,7 +28,8 @@ pub struct CoreRelease {
     pub sha256: String,
     pub download_url: String,
 }
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct PreparedCore {
     pub id: String,
     pub release: CoreRelease,

@@ -24,6 +24,12 @@ pub enum ManagementCommand {
     PreparedCoreUpgrade {
         id: String,
     },
+    StageCoreUpgrade {
+        id: String,
+    },
+    StagedCoreUpgrade {
+        id: String,
+    },
     Logs {},
     Profiles {},
     Config {},
@@ -188,6 +194,12 @@ impl Management {
             }
             ManagementCommand::PreparedCoreUpgrade { id } => {
                 serde_json::to_value(self.manager.prepared_core_upgrade(&id)?)?
+            }
+            ManagementCommand::StageCoreUpgrade { id } => {
+                serde_json::to_value(self.manager.stage_core_upgrade(id).await?)?
+            }
+            ManagementCommand::StagedCoreUpgrade { id } => {
+                serde_json::to_value(self.manager.staged_core_upgrade(&id)?)?
             }
             ManagementCommand::Status {} => serde_json::to_value(self.manager.status())?,
             ManagementCommand::Logs {} => serde_json::to_value(self.manager.logs())?,

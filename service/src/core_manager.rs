@@ -303,6 +303,12 @@ enum ProfileEnhancement {
 }
 
 enum CommandMessage {
+    StageCoreUpgrade {
+        _permit: tokio::sync::OwnedSemaphorePermit,
+        id: String,
+        downloads: Arc<crate::core_release::CoreDownloads>,
+        reply: oneshot::Sender<Result<crate::core_release::StagedCore>>,
+    },
     ReadProfileRaw {
         uid: String,
         reply: oneshot::Sender<Result<RawContent>>,
@@ -514,10 +520,46 @@ impl CoreManager {
 
     pub fn prepared_core_upgrade(&self, id: &str) -> Result<crate::core_release::PreparedCore> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let _permit = Arc::clone(&self.core_release_admission)
+            .try_acquire_owned()
+            .context("core release request already in progress")?;
         self.core_downloads
             .as_ref()
             .context("core preparation requires bundle-managed resources")?
             .inspect(id)
+    }
+
+    pub async fn stage_core_upgrade(&self, id: String) -> Result<crate::core_release::StagedCore> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let downloads = self
+            .core_downloads
+            .clone()
+            .context("core staging requires bundle-managed resources")?;
+        let _permit = Arc::clone(&self.core_release_admission)
+            .try_acquire_owned()
+            .context("core release request already in progress")?;
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::StageCoreUpgrade {
+                id,
+                downloads,
+                reply,
+                _permit,
+            })
+            .await
+            .context("core manager stopped")?;
+        response.await.context("core manager stopped")?
+    }
+
+    pub fn staged_core_upgrade(&self, id: &str) -> Result<crate::core_release::StagedCore> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let _permit = Arc::clone(&self.core_release_admission)
+            .try_acquire_owned()
+            .context("core release request already in progress")?;
+        self.core_downloads
+            .as_ref()
+            .context("core staging requires bundle-managed resources")?
+            .inspect_stage(id)
     }
 
     pub fn status(&self) -> CoreStatus {
@@ -1384,6 +1426,7 @@ impl Actor {
                         let message = format!("configuration recovery failed: {error:#}");
                         self.status.send_modify(|state| state.error = Some(message.clone()));
                         match request {
+                            CommandMessage::StageCoreUpgrade { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadProfileRaw { reply, .. } | CommandMessage::SetProfileRaw { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadProfileDns { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::SetProfileDns { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
@@ -1404,6 +1447,16 @@ impl Actor {
                     self.settings = self.settings_store.snapshot();
                     self.dns_confirmations.retain(|uid, _| self.profile_store.get_item(uid).is_ok());
                     match request {
+                        CommandMessage::StageCoreUpgrade {id, downloads, reply, _permit} => {
+                            if !reply.is_closed() {
+                                let result = async {
+                                    let yaml = serde_yaml_ng::to_string(&read_config(&self.options.config).await?)?;
+                                    let revision = self.store.state().current.map(|revision| revision.file);
+                                    downloads.stage(&id, yaml, revision, &self.options.data_dir, &mut self.shutdown).await
+                                }.await;
+                                let _ = reply.send(result);
+                            }
+                        }
                         CommandMessage::ReadProfileRaw { uid, reply } => { let _ = reply.send(self.profile_store.read_raw(&uid)); }
                         CommandMessage::SetProfileRaw { uid, revision, yaml, reply } => {
                             if !reply.is_closed() {

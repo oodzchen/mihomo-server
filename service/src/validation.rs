@@ -11,6 +11,47 @@ use tokio::{
 
 const OUTPUT_LIMIT: usize = 64 * 1024;
 
+pub(crate) async fn probe_version(
+    binary: &Path,
+    shutdown: &mut watch::Receiver<bool>,
+    deadline: Duration,
+) -> Result<String> {
+    ensure!(!*shutdown.borrow(), "core version probe cancelled during shutdown");
+    let mut child = Command::new(binary)
+        .arg("-v")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .context("candidate core version probe could not start")?;
+    let mut stdout = capture(child.stdout.take().context("candidate stdout unavailable")?);
+    let mut stderr = capture(child.stderr.take().context("candidate stderr unavailable")?);
+    let result = tokio::select! { biased;
+        _ = shutdown.changed() => Err(anyhow::anyhow!("core version probe cancelled during shutdown")),
+        exit = timeout(deadline, child.wait()) => exit.context("core version probe timed out").and_then(|exit|exit.map_err(Into::into)),
+    };
+    let result = match result {
+        Ok(exit) => Ok(exit),
+        Err(error) => match timeout(Duration::from_secs(5), child.kill()).await {
+            Ok(Ok(())) => Err(error),
+            Ok(Err(cleanup)) => Err(error.context(format!("candidate probe cleanup failed: {cleanup}"))),
+            Err(cleanup) => Err(error.context(format!("candidate probe reap timed out: {cleanup}"))),
+        },
+    };
+    let output = collect(&mut stdout).await;
+    let errors = collect(&mut stderr).await;
+    ensure!(result?.success(), "candidate core version probe failed");
+    errors?;
+    let output = String::from_utf8(output?).context("invalid candidate version encoding")?;
+    let mut words = output.split_whitespace();
+    ensure!(
+        words.next() == Some("Mihomo") && words.next() == Some("Meta"),
+        "unexpected candidate version format"
+    );
+    Ok(words.next().context("candidate core version missing")?.to_owned())
+}
+
 pub(crate) async fn validate(
     binary: &Path,
     data_dir: &Path,
