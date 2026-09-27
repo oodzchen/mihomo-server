@@ -159,8 +159,17 @@ using retained GET /configs. Client model changes accept native geoip/geosite ke
 retain older geo-ip/geo-site aliases and keep existing camelCase serialization.
 Web editing/readback and aggregate pre-journal size validation are service code.
 No new dependencies or upstream source copying occur. Native automatic updating
-is configurable; service-controlled online update transactions, DAT validation and
-geosite matcher settings remain pending.
+is configurable; service-controlled online update transactions and DAT validation
+remain pending.
+
+The geosite matcher extension is original service code using retained
+`BaseConfig.geosite_matcher`. Canonical names and inherited legacy alias behavior
+are checked against [Mihomo's matcher implementation](https://github.com/MetaCubeX/mihomo/blob/Meta/component/geodata/utils.go)
+and [configuration/response fields](https://github.com/MetaCubeX/mihomo/blob/Meta/config/config.go).
+The explicit service enum accepts succinct/mph, while hybrid remains a source
+alias. Matcher readback adds a ninth field without reordering existing fields;
+missing older-core values are unknown. No upstream source or new dependencies
+are introduced; DAT validity and rule matching are not claimed by settings reads.
 
 ## Mihomo plugin
 

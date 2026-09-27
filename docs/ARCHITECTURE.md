@@ -53,13 +53,12 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** HTTP provider cache ownership across configuration
-revisions, including implicit paths, request headers and parser identity, with
-offline restart/reselection verification. **Next implementation task (P1):**
-remaining Geo configuration authority, starting with geosite matcher settings and
-actual readback. DAT validation, controlled online and running-core Geo updates,
-and other remaining full settings still belong to P1; finish this priority before
-starting P2.
+**Latest completed task (P1):** typed geosite matcher settings, Web editing and
+saved/configured/actual readback, with script authority, rollback and restart
+verification. **Next implementation task (P1):** authoritative TCP concurrency and
+process matching settings with Web editing and core readback. DAT validation,
+controlled online and running-core Geo updates, and other remaining full settings
+still belong to P1; finish this priority before starting P2.
 
 ## Complete target architecture
 
@@ -111,7 +110,7 @@ mihomo-server/
 │       ├── Transactional global editing / pointer recovery [Implemented]
 │       ├── Explicit runtime settings authority       [Implemented; Linux verified]
 │       ├── Typed DNS/TUN subset / shallow authority  [Implemented; Linux verified]
-│       ├── Typed Geo fields / per-URL authority / bounds / schema-one recovery [Implemented; Linux verified]
+│       ├── Typed Geo fields incl. geosite matcher / per-URL authority / bounds / schema-one recovery [Implemented; Linux verified]
 │       ├── Pure TUN/DNS derivation / IPv6 range repair [Migrated + staged adaptation; Linux validation]
 │       ├── Provider DNS digest / profile preference / session confirmation [Migrated + adaptation; Linux verified]
 │       ├── Deleted-profile DNS preference / confirmation cleanup [Implemented; recoverable]
@@ -152,7 +151,7 @@ mihomo-server/
 │   │   ├── Pinned Geo seed schema / bounded staging / no-overwrite bootstrap / orphan recovery [Implemented; Linux verified]
 │   │   ├── Read-only MMDB verification / pinned parser / metadata-only compatibility outcome [Implemented; Linux verified]
 │   │   ├── Stopped-core pinned MMDB replacement / digest guards / atomic commit / orphan recovery [Implemented; Linux verified]
-│   │   ├── Geo actor settings/config/core comparison / bounded readback / URL model aliases [Implemented; Linux verified]
+│   │   ├── Geo actor settings/config/core comparison / geosite matcher / bounded readback / URL model aliases [Implemented; Linux verified]
 │   │   └── DAT validation / controlled online and running-core Geo updates / remaining full settings [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
@@ -268,7 +267,7 @@ mihomo-server/
 │   ├── Geo/Provider inventory / metadata states / refresh and retry [Implemented; Linux verified]
 │   ├── Explicit MMDB checks / errors and compatibility warnings / stale-result clearing [Implemented; Linux verified]
 │   ├── Pinned MMDB update inspection / stopped-state install / explicit metadata-only acceptance [Implemented; Linux verified]
-│   ├── Geo field editor / per-URL inheritance / saved-configured-actual readback / retry [Implemented; Linux verified]
+│   ├── Geo field editor incl. geosite matcher / per-URL inheritance / saved-configured-actual readback / retry [Implemented; Linux verified]
 │   ├── Remaining full settings/resource lifecycle UI [Pending; P1]
 │   └── Backup UI [Deferred; outside active scope]
 ├── Release and deployment                           [Partially implemented]
@@ -3722,6 +3721,63 @@ Next task: P1 geosite matcher settings and readback, followed by remaining setti
 and Geo format/lifecycle work. P2 operations/views, P3 i18n/signals, P4 actual Linux
 systemd installation and previously deferred features remain unfinished. No Git
 commit is performed inside the sandbox.
+
+## P1 increment: geosite matcher authority and core readback
+
+The provider cache ownership increment is complete. Optional `geosite-matcher`
+joins schema-one runtime settings with typed canonical `succinct` and `mph` values.
+Missing/null values inherit subscription/enhancement values; older settings files
+continue to deserialize without a schema change. Service-owned matcher values enter
+before scripts and are enforced again after scripts, merges and overlays. The
+existing settings/runtime transaction and recovery protect failed applications.
+Invalid variants and wrong types fail before a settings transaction. Original
+subscription YAML is preserved.
+
+The authenticated `geo_settings` comparison adds a ninth named field at the end,
+preserving the order of the eight existing fields. Saved, committed and actual
+matcher values use the retained Mihomo BaseConfig model and bounded actor-owned
+GET /configs. Missing/empty matcher responses from older cores appear as unknown,
+not an invented default or mismatch. Inherited core defaults are distinct from
+configured mismatches. The Web editor provides inherit/succinct/mph choices,
+confirmed saving and readback, with existing refresh/retry and stale-state clearing.
+Both string enums remain distinct from Geo boolean fields.
+
+Mihomo also accepts a legacy `hybrid` alias in source YAML; the service's explicit
+settings accept only the two canonical names. Inherited source values are not
+rewritten. This increment configures the matcher and verifies reported settings;
+it does not validate geosite.dat, exercise GEOSITE rule matching or install/update
+DAT files. Those resource-lifecycle responsibilities remain pending.
+
+Validation:
+
+- `cargo check --workspace --locked --offline`, the service build and formatting
+  checks passed. Workspace tests passed: 356 regular tests, zero failures and 78
+  opt-in tests skipped by default. The two relevant real-core tests below were
+  explicitly enabled and passed separately.
+- Matcher authority tests cover both canonical variants, absent/null inheritance,
+  unmodified legacy source values, override diagnostics and invalid/wrong-type
+  rejection. Existing schema-one transaction/recovery coverage now includes mph.
+  Snapshot tests distinguish mismatch, inherited defaults and missing core fields.
+- Authenticated HTTP tests verify preconfiguration saves, merge authority, invalid
+  input rejection without state changes, committed matcher readback, inheritance
+  restoration and unchanged original YAML.
+- Real Mihomo settings integration passed: initial/final script authority, running
+  succinct/mph switches with actual readback, failed probe rollback retaining
+  PID/revision/actual values, stopped saves and service restart persistence.
+- Actual-node integration passed using private data copies: all nine Geo values
+  matched the core, HTTPS proxy traffic returned 204 before/after restart, and
+  original node/Geo source hashes remained unchanged. This verifies configuration
+  readback and usable proxy traffic, not DAT/GEOSITE matching.
+- TypeScript/Vite production build and three resource/Geo Playwright workflows
+  passed. The matcher editor saves a string enum and confirms its value on reload,
+  restores inheritance, renders mismatch fixtures and clears stale rows on read
+  failures. Unrelated browser workflows were not rerun.
+
+The complete architecture tree is updated above; the Linux development MVP remains
+runnable. Next task: P1 TCP concurrency and process matching settings, followed by
+other remaining configuration and Geo lifecycle work. P2 rules/provider/delay
+operations/views, P3 i18n/signals, P4 actual Linux systemd installation and deferred
+features remain incomplete. No sandbox Git commit is performed.
 
 ## MVP completion boundary
 

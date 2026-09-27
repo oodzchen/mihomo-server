@@ -738,17 +738,19 @@ async fn geo_settings_enforce_scripts_rollback_failed_probe_and_survive_service_
     let dir = Directory::new()?;
     let manager = CoreManager::spawn(dir.options()?)?;
     let runtime: RuntimeSettings = serde_yaml_ng::from_str(
-        "geodata-mode: false\ngeodata-loader: standard\ngeo-auto-update: false\ngeo-update-interval: 48\ngeox-url: {geoip: 'http://127.0.0.1:1/ip', geosite: 'http://127.0.0.1:1/site', mmdb: 'http://127.0.0.1:1/db', asn: 'http://127.0.0.1:1/asn'}",
+        "geodata-mode: false\ngeodata-loader: standard\ngeosite-matcher: mph\ngeo-auto-update: false\ngeo-update-interval: 48\ngeox-url: {geoip: 'http://127.0.0.1:1/ip', geosite: 'http://127.0.0.1:1/site', mmdb: 'http://127.0.0.1:1/db', asn: 'http://127.0.0.1:1/asn'}",
     )?;
     let result = async {
         manager.set_settings(runtime.clone()).await?;
-        let source = "mode: direct\nmixed-port: 0\ngeodata-mode: false\ngeo-auto-update: false\ngeo-update-interval: 24\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']";
+        let source = "mode: direct\ngeosite-matcher: succinct\nmixed-port: 0\ngeodata-mode: false\ngeo-auto-update: false\ngeo-update-interval: 24\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']";
         let profile = manager.import_profile_yaml(source.into(), "geo".into()).await?;
         let uid = profile.uid.unwrap().to_string();
         manager.select_profile(uid.clone()).await?;
-        manager.set_profile_script(uid.clone(), Some("function main(c) { c['geo-input']=c['geodata-mode']; if(c['geo-update-interval']===49) c.rules=['INVALID,DIRECT']; c['geodata-mode']=true; c['geo-auto-update']=true; c['geox-url']=c['geox-url']||{}; c['geox-url'].mmdb='http://127.0.0.1:1/script'; return c; }".into())).await?;
+        manager.set_profile_script(uid.clone(), Some("function main(c) { c['geo-input']=c['geodata-mode']; c['matcher-input']=c['geosite-matcher']; c['geosite-matcher']='succinct'; if(c['geo-update-interval']===49) c.rules=['INVALID,DIRECT']; c['geodata-mode']=true; c['geo-auto-update']=true; c['geox-url']=c['geox-url']||{}; c['geox-url'].mmdb='http://127.0.0.1:1/script'; return c; }".into())).await?;
         let config = manager.runtime_config().await?;
         assert_eq!(config["geo-input"].as_bool(), Some(false));
+        assert_eq!(config["matcher-input"].as_str(), Some("mph"));
+        assert_eq!(config["geosite-matcher"].as_str(), Some("mph"));
         assert_eq!(config["geodata-mode"].as_bool(), Some(false));
         assert_eq!(config["geo-auto-update"].as_bool(), Some(false));
         assert_eq!(config["geox-url"]["mmdb"].as_str(), Some("http://127.0.0.1:1/db"));
@@ -756,17 +758,25 @@ async fn geo_settings_enforce_scripts_rollback_failed_probe_and_survive_service_
         let readback = manager.geo_settings().await?;
         assert!(readback.running && readback.error.is_none());
         assert!(readback.fields.iter().all(|f| !f.mismatch && f.setting == f.configured && f.configured == f.actual));
+        let mut succinct = runtime.clone();
+        succinct.geosite_matcher = Some(headless_core::config::settings::GeositeMatcher::Succinct);
+        manager.set_settings(succinct).await?;
+        assert_eq!(manager.geo_settings().await?.fields[8].actual, "succinct");
+        manager.set_settings(runtime.clone()).await?;
+        assert_eq!(manager.geo_settings().await?.fields[8].actual, "mph");
         let before = manager.status(); let saved = manager.settings().await?;
-        let mut invalid = runtime.clone(); invalid.geo_update_interval = Some(49);
+        let mut invalid = runtime.clone(); invalid.geo_update_interval = Some(49); invalid.geosite_matcher = Some(headless_core::config::settings::GeositeMatcher::Succinct);
         assert!(manager.set_settings(invalid).await.is_err());
         assert_eq!(manager.settings().await?, saved);
         assert_eq!(manager.status().config_revision, before.config_revision);
         assert_eq!(manager.status().pid, before.pid);
         assert_eq!(manager.runtime_config().await?, config);
+        assert_eq!(manager.geo_settings().await?.fields[8].actual, "mph");
         assert_eq!(manager.profile_raw(uid.clone()).await?.yaml, source);
         manager.stop().await?;
         manager.set_settings(RuntimeSettings::default()).await?;
         assert_eq!(manager.runtime_config().await?["geodata-mode"].as_bool(), Some(true));
+        assert_eq!(manager.runtime_config().await?["geosite-matcher"].as_str(), Some("succinct"));
         assert_eq!(manager.runtime_config().await?["geox-url"]["mmdb"].as_str(), Some("http://127.0.0.1:1/script"));
         let saved = manager.set_settings(runtime.clone()).await?;
         assert_eq!(manager.status().phase, CorePhase::Stopped);

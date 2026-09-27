@@ -308,6 +308,10 @@ fn geo_settings_validate_intervals_urls_and_enums_without_echoing_secrets() -> R
     use headless_core::config::settings::RuntimeSettings;
     for yaml in [
         "geodata-loader: invalid",
+        "geosite-matcher: invalid",
+        "geosite-matcher: hybrid",
+        "geosite-matcher: MPH",
+        "geosite-matcher: true",
         "geodata-mode: string",
         "geo-auto-update: string",
         "geo-update-interval: -1",
@@ -342,6 +346,30 @@ fn geo_settings_validate_intervals_urls_and_enums_without_echoing_secrets() -> R
 }
 
 #[test]
+fn geosite_matcher_authority_uses_canonical_values_and_absence_preserves_source() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    let source: serde_yaml_ng::Mapping = serde_yaml_ng::from_str("geosite-matcher: hybrid\ncustom: unchanged")?;
+    assert_eq!(RuntimeSettings::default().prepare(source.clone())?, source);
+    for matcher in ["succinct", "mph"] {
+        let runtime: RuntimeSettings = serde_yaml_ng::from_str(&format!("geosite-matcher: {matcher}"))?;
+        let initial = runtime.prepare(source.clone())?;
+        assert_eq!(initial["geosite-matcher"].as_str(), Some(matcher));
+        let enhanced: serde_yaml_ng::Mapping = serde_yaml_ng::from_str("geosite-matcher: invalid\ncustom: unchanged")?;
+        let final_config = runtime.enforce(enhanced.clone())?;
+        assert_eq!(final_config["geosite-matcher"].as_str(), Some(matcher));
+        assert_eq!(
+            runtime.overridden_fields(&enhanced, &final_config)?,
+            ["geosite-matcher"]
+        );
+        assert_eq!(final_config["custom"], source["custom"]);
+    }
+    let inherited: RuntimeSettings = serde_yaml_ng::from_str("geosite-matcher: null")?;
+    assert_eq!(inherited.prepare(source.clone())?, source);
+    assert!(serde_yaml_ng::to_string(&inherited)?.trim() == "{}");
+    Ok(())
+}
+
+#[test]
 fn geo_fields_persist_in_schema_one_and_follow_settings_transaction_recovery() -> Result<()> {
     for committed in [false, true] {
         let dir = Directory::new()?;
@@ -353,7 +381,7 @@ fn geo_fields_persist_in_schema_one_and_follow_settings_transaction_recovery() -
         let original = store.snapshot();
         let mut candidate = original.clone();
         candidate.runtime = serde_yaml_ng::from_str(
-            "geodata-mode: false\ngeo-auto-update: false\ngeo-update-interval: 48\ngeodata-loader: standard\ngeox-url: {geoip: 'http://127.0.0.1/ip', geosite: 'https://example.org/site', mmdb: 'https://example.org/db', asn: 'https://example.org/asn'}",
+            "geodata-mode: false\ngeo-auto-update: false\ngeo-update-interval: 48\ngeodata-loader: standard\ngeosite-matcher: mph\ngeox-url: {geoip: 'http://127.0.0.1/ip', geosite: 'https://example.org/site', mmdb: 'https://example.org/db', asn: 'https://example.org/asn'}",
         )?;
         let next = runtime.stage(candidate.runtime.enforce(parse("mode: direct")?)?)?;
         runtime.begin(next.clone())?;

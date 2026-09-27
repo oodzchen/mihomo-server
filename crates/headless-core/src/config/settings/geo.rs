@@ -9,6 +9,14 @@ pub enum GeodataLoader {
     MemConservative,
 }
 
+/// Canonical matcher names; Mihomo's legacy `hybrid` alias is left to source YAML.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GeositeMatcher {
+    Succinct,
+    Mph,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeoUrls {

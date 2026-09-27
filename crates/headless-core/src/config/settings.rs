@@ -14,7 +14,7 @@ use serde_yaml_ng::Mapping;
 use super::runtime::{Revision, sync_directory, unique_id, write_new};
 
 mod geo;
-pub use geo::{GeoUrls, GeodataLoader};
+pub use geo::{GeoUrls, GeodataLoader, GeositeMatcher};
 mod network;
 pub use network::{DnsMode, DnsSettings, TunSettings, TunStack};
 
@@ -69,6 +69,8 @@ pub struct RuntimeSettings {
     pub geodata_mode: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geodata_loader: Option<GeodataLoader>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geosite_matcher: Option<GeositeMatcher>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geo_auto_update: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

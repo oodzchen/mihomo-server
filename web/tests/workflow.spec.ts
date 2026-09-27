@@ -322,6 +322,7 @@ test("Geo settings editor saves inherited URL leaves and reads core values with 
   try {
     await page.getByRole("combobox", { name: "Geo 数据模式", exact: true }).selectOption("false");
     await page.getByRole("combobox", { name: "Geo 加载器", exact: true }).selectOption("standard");
+    await page.getByRole("combobox", { name: "GeoSite 匹配器", exact: true }).selectOption("mph");
     await page.getByRole("combobox", { name: "Geo 自动更新", exact: true }).selectOption("false");
     await page.getByRole("textbox", { name: "Geo 更新间隔（小时）", exact: true }).fill("0");
     await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
@@ -340,6 +341,10 @@ test("Geo settings editor saves inherited URL leaves and reads core values with 
     expect(saved.runtime["geodata-mode"]).toBe(false);
     expect(saved.runtime["geo-auto-update"]).toBe(false);
     expect(saved.runtime["geodata-loader"]).toBe("standard");
+    expect(saved.runtime["geosite-matcher"]).toBe("mph");
+    const matcher = readback.locator("li").filter({ has: page.getByText("geosite-matcher", { exact: true }) });
+    await expect(matcher).toContainText("服务设置：mph");
+    await expect(matcher).toContainText("内核实际值：未确认");
     expect(saved.runtime["geo-update-interval"]).toBe(48);
     expect(saved.runtime["geox-url"]).toEqual({ mmdb: "http://127.0.0.1:1/browser-mmdb" });
     const mmdb = readback.locator("li").filter({ has: page.getByText("geox-url.mmdb", { exact: true }) });
@@ -347,19 +352,22 @@ test("Geo settings editor saves inherited URL leaves and reads core values with 
     await expect(readback).toContainText("内核未运行，实际值未确认");
     await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "MMDB 下载地址", exact: true })).toHaveValue("http://127.0.0.1:1/browser-mmdb");
+    await expect(page.getByRole("combobox", { name: "GeoSite 匹配器", exact: true })).toHaveValue("mph");
     let fail = true;
     await page.route("**/api/commands", async route => {
       if (route.request().postDataJSON().command === "geo_settings") {
         if (fail) await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture Geo read failed" } }) });
-        else await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ config_revision: "fixture.yaml", running: true, error: null, fields: [{ key: "geox-url.mmdb", setting: "http://127.0.0.1:1/browser-mmdb", configured: "http://127.0.0.1:1/browser-mmdb", actual: "http://127.0.0.1:1/old", mismatch: true }] }) });
+        else await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ config_revision: "fixture.yaml", running: true, error: null, fields: [{ key: "geox-url.mmdb", setting: "http://127.0.0.1:1/browser-mmdb", configured: "http://127.0.0.1:1/browser-mmdb", actual: "http://127.0.0.1:1/old", mismatch: true }, { key: "geosite-matcher", setting: "mph", configured: "mph", actual: "succinct", mismatch: true }] }) });
       } else await route.continue();
     });
     await readback.getByRole("button", { name: "刷新 Geo 设置读回" }).click();
     await expect(readback.getByRole("alert")).toContainText("fixture Geo read failed");
     await expect(mmdb).toHaveCount(0);
+    await expect(matcher).toHaveCount(0);
     fail = false;
     await readback.getByRole("button", { name: "刷新 Geo 设置读回" }).click();
-    await expect(readback).toContainText("配置值与内核实际值不一致");
+    await expect(matcher).toContainText("配置值与内核实际值不一致");
+    await expect(matcher).toContainText("内核实际值：succinct");
     await expect(mmdb).toContainText("内核实际值：http://127.0.0.1:1/old");
     await page.unroute("**/api/commands");
     await readback.getByRole("button", { name: "刷新 Geo 设置读回" }).click();
@@ -368,6 +376,7 @@ test("Geo settings editor saves inherited URL leaves and reads core values with 
     await page.getByRole("combobox", { name: "Geo 数据模式", exact: true }).selectOption("");
     await page.getByRole("combobox", { name: "Geo 自动更新", exact: true }).selectOption("");
     await page.getByRole("combobox", { name: "Geo 加载器", exact: true }).selectOption("");
+    await page.getByRole("combobox", { name: "GeoSite 匹配器", exact: true }).selectOption("");
     await page.getByRole("textbox", { name: "Geo 更新间隔（小时）", exact: true }).fill("");
     await page.getByRole("checkbox", { name: "管理 Geo 下载地址", exact: true }).uncheck();
     await page.getByRole("button", { name: "保存服务设置", exact: true }).click();

@@ -6,10 +6,11 @@ import type { Runtime, Draft } from "./network-settings";
 const scalars = [
   { key: "geodata-mode", label: "Geo 数据模式", values: [["true", "DAT"], ["false", "MMDB"]] },
   { key: "geodata-loader", label: "Geo 加载器", values: [["standard", "standard"], ["memconservative", "memconservative"]] },
+  { key: "geosite-matcher", label: "GeoSite 匹配器", values: [["succinct", "succinct"], ["mph", "mph"]] },
   { key: "geo-auto-update", label: "Geo 自动更新", values: [["true", "启用"], ["false", "禁用"]] },
 ] as const;
 const urls = [["geoip", "GeoIP 下载地址"], ["geosite", "GeoSite 下载地址"], ["mmdb", "MMDB 下载地址"], ["asn", "ASN 下载地址"]] as const;
-export const GEO_KEYS = new Set(["geodata-mode", "geodata-loader", "geo-auto-update", "geo-update-interval", "geox-url"]);
+export const GEO_KEYS = new Set(["geodata-mode", "geodata-loader", "geosite-matcher", "geo-auto-update", "geo-update-interval", "geox-url"]);
 function validUrl(value: string) {
   if (!value || new TextEncoder().encode(value).length > 8192 || /\s|[\x00-\x1f\x7f-\x9f]/.test(value) || value.includes("#")) return false;
   try {
@@ -21,7 +22,8 @@ export function validateGeo(runtime: Runtime) {
   for (const f of scalars) {
     const value = runtime[f.key];
     if (value == null) continue;
-    if (f.key === "geodata-loader" ? typeof value !== "string" || !f.values.some(([v]) => v === value) : typeof value !== "boolean") throw new Error(`${f.label}值无效。`);
+    const boolean = f.key === "geodata-mode" || f.key === "geo-auto-update";
+    if (boolean ? typeof value !== "boolean" : typeof value !== "string" || !f.values.some(([v]) => v === value)) throw new Error(`${f.label}值无效。`);
   }
   const interval = runtime["geo-update-interval"];
   if (interval != null && (typeof interval !== "number" || !Number.isInteger(interval) || interval < 1 || interval > 8760)) throw new Error("Geo 更新间隔必须是 1–8760 小时的整数，或留空继承。");
@@ -47,7 +49,7 @@ export function geoRuntime(draft: Draft): Runtime {
     const value = draft[f.key] ?? "";
     if (value === "") continue;
     if (!f.values.some(([option]) => option === value)) throw new Error(`${f.label}值无效。`);
-    result[f.key] = f.key === "geodata-loader" ? value : value === "true";
+    result[f.key] = f.key === "geodata-mode" || f.key === "geo-auto-update" ? value === "true" : value;
   }
   const interval = draft["geo-update-interval"] ?? "";
   if (interval !== "") {

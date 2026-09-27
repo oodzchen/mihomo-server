@@ -2493,6 +2493,7 @@ Geo fields alongside the delivered ports, mode, DNS and TUN fields:
   "runtime": {
     "geodata-mode": false,
     "geodata-loader": "memconservative",
+    "geosite-matcher": "succinct",
     "geo-auto-update": false,
     "geo-update-interval": 24,
     "geox-url": {"mmdb": "https://example.org/country.mmdb"}
@@ -2505,6 +2506,11 @@ other settings you want to retain: this command replaces the full runtime settin
 object. The Web editor does so automatically. Schema version remains 1.
 
 Mode false uses MMDB; true selects DAT. Loaders are standard/memconservative.
+Matcher settings accept `succinct` or `mph`; absent/null inherits the source.
+The core's legacy `hybrid` source alias remains usable through inheritance, but
+explicit service settings require canonical names. The Web editor offers both
+canonical choices and inheritance. Selecting a matcher does not validate or load
+geosite.dat and does not prove a GEOSITE rule matches correctly.
 Interval is 1–8760 hours; false boolean settings are explicit. Each of geoip,
 geosite, mmdb and asn download URLs inherits independently if absent/null. An empty
 geox-url object has no authority. URLs must be HTTP(S), nonempty and at most 8192
@@ -2525,12 +2531,14 @@ Read the comparison through the authenticated command:
 {"command":"geo_settings"}
 ```
 
-It returns config_revision, running, optional error and eight fields. Each has key,
+It returns config_revision, running, optional error and nine fields. Each has key,
 setting, configured, actual and mismatch. Null setting means inheritance, null
 configured means not specified in the committed YAML, and null actual means unknown.
 A known core default for an unspecified field is not a mismatch. Stopped cores do
-not attempt core readback. Running readback is bounded to three seconds; failure
-keeps committed values and reports actual values as unknown. The settings page
+not attempt core readback. The ninth field is `geosite-matcher`; the existing eight
+retain their order. An older core that omits this field reports actual as null.
+Running readback is bounded to three seconds; failure keeps committed values and
+reports actual values as unknown. The settings page
 provides editing and refresh/retry for this same comparison.
 
 Enabling geo-auto-update configures Mihomo's native downloading and filesystem

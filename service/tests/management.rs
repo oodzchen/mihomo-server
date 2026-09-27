@@ -203,27 +203,28 @@ async fn geo_settings_authenticate_apply_leaf_authority_and_reject_invalid_input
         let (_, initial) = response(&app, request(&token, "/api/commands", Some(payload.clone()))?).await?;
         assert_eq!(initial["running"], false);
         assert!(initial["fields"].as_array().unwrap().iter().all(|f| f["setting"].is_null() && f["configured"].is_null() && f["actual"].is_null()));
-        let runtime = json!({"geodata-mode":false,"geodata-loader":"standard","geo-auto-update":false,"geo-update-interval":48,"geox-url":{"mmdb":"http://127.0.0.1/mmdb"}});
+        let runtime = json!({"geodata-mode":false,"geodata-loader":"standard","geosite-matcher":"mph","geo-auto-update":false,"geo-update-interval":48,"geox-url":{"mmdb":"http://127.0.0.1/mmdb"}});
         let (status, _) = response(&app, request(&token, "/api/commands", Some(json!({"command":"set_settings","runtime":runtime})))?).await?;
         assert!(status.is_success());
         let (_, saved) = response(&app, request(&token, "/api/commands", Some(payload.clone()))?).await?;
         assert_eq!(saved["fields"][0]["setting"], false);
         assert!(saved["config_revision"].is_null());
         assert!(saved["fields"].as_array().unwrap().iter().all(|f| f["configured"].is_null()));
-        let source = "mode: direct\ngeodata-mode: true\ngeo-auto-update: true\ngeox-url: {geoip: 'https://source.invalid/ip', mmdb: 'https://source.invalid/db'}";
+        let source = "mode: direct\ngeosite-matcher: succinct\ngeodata-mode: true\ngeo-auto-update: true\ngeox-url: {geoip: 'https://source.invalid/ip', mmdb: 'https://source.invalid/db'}";
         let profile = manager.import_profile_yaml(source.into(), "geo settings".into()).await?;
         let uid = profile.uid.unwrap().to_string();
         manager.select_profile(uid.clone()).await?;
-        manager.set_profile_merge(uid.clone(), Some("geodata-mode: true\ngeo-auto-update: true\ngeox-url: {geosite: 'https://enhance.invalid/site', mmdb: 'https://enhance.invalid/db'}".into())).await?;
+        manager.set_profile_merge(uid.clone(), Some("geosite-matcher: succinct\ngeodata-mode: true\ngeo-auto-update: true\ngeox-url: {geosite: 'https://enhance.invalid/site', mmdb: 'https://enhance.invalid/db'}".into())).await?;
         let config = manager.runtime_config().await?;
         assert_eq!(config["geodata-mode"].as_bool(), Some(false));
         assert_eq!(config["geo-auto-update"].as_bool(), Some(false));
+        assert_eq!(config["geosite-matcher"].as_str(), Some("mph"));
         assert_eq!(config["geox-url"]["mmdb"].as_str(), Some("http://127.0.0.1/mmdb"));
         assert_eq!(config["geox-url"]["geosite"].as_str(), Some("https://enhance.invalid/site"));
         assert_eq!(config["geox-url"]["geoip"].as_str(), Some("https://source.invalid/ip"));
         assert_eq!(manager.profile_raw(uid.clone()).await?.yaml, source);
         let before = manager.status(); let previous = manager.settings().await?;
-        for invalid in [json!({"geo-update-interval":0}), json!({"geodata-loader":"invalid"}), json!({"geox-url":{"mmdb":"https://secret:private@example.org/db"}})] {
+        for invalid in [json!({"geo-update-interval":0}), json!({"geodata-loader":"invalid"}), json!({"geosite-matcher":"invalid"}), json!({"geosite-matcher":true}), json!({"geox-url":{"mmdb":"https://secret:private@example.org/db"}})] {
             let (status, failure) = response(&app, request(&token, "/api/commands", Some(json!({"command":"set_settings","runtime":invalid})))?).await?;
             assert!(!status.is_success());
             assert!(!failure.to_string().contains("secret:private"));
@@ -231,10 +232,13 @@ async fn geo_settings_authenticate_apply_leaf_authority_and_reject_invalid_input
             assert_eq!(manager.status().config_revision, before.config_revision);
         }
         let (_, committed) = response(&app, request(&token, "/api/commands", Some(payload))?).await?;
+        assert_eq!(committed["fields"][8]["setting"], "mph");
+        assert_eq!(committed["fields"][8]["configured"], "mph");
         assert_eq!(committed["fields"][6]["configured"], "http://127.0.0.1/mmdb");
         assert!(committed["fields"].as_array().unwrap().iter().all(|f| f["actual"].is_null()));
         manager.set_settings(Default::default()).await?;
         assert_eq!(manager.runtime_config().await?["geodata-mode"].as_bool(), Some(true));
+        assert_eq!(manager.runtime_config().await?["geosite-matcher"].as_str(), Some("succinct"));
         assert_eq!(manager.profile_raw(uid).await?.yaml, source);
         Ok::<_, anyhow::Error>(())
     }.await;
