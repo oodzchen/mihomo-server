@@ -118,7 +118,9 @@ mihomo-server/
 │   │   ├── Authenticated preparation/readback / cancellation [Implemented]
 │   │   ├── Bounded gzip / ELF / version / configuration probes [Implemented; Linux x86_64]
 │   │   ├── Actor snapshot / staged manifest / verified restart readback [Implemented]
-│   │   ├── Actor switch / rollback / interrupted-switch recovery [Pending]
+│   │   ├── Actor activation / live version and port checks / rollback [Implemented; Linux x86_64]
+│   │   ├── Durable switch journal / installation receipt / startup recovery [Implemented; Linux x86_64]
+│   │   ├── Upstream force/no-op adapter / upgrade Web workflow [Pending]
 │   │   └── Proxy routing / static-root fallback / Alpha / other targets [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
@@ -126,6 +128,7 @@ mihomo-server/
 │   ├── Full application context and domain events  [Pending]
 │   ├── Sole Mihomo lifecycle manager                [Implemented; Linux verified]
 │   │   ├── Start, readiness, stop, restart, recovery, reap
+│   │   ├── Linux core/validator parent-death termination [Implemented; Linux verified]
 │   │   ├── YAML / Mihomo -t validation and cancellation [Implemented]
 │   │   ├── Serialized reload, restart fallback, rollback [Implemented]
 │   │   ├── Runtime commit and interrupted-apply recovery [Implemented]
@@ -135,7 +138,7 @@ mihomo-server/
 │   ├── Axum management API / command adapters       [Implemented; MVP allowlist]
 │   │   ├── State, logs, profiles, config, proxies queries [Implemented]
 │   │   ├── Lifecycle, YAML import/edit/overlay, profile edit/delete/import/refresh, linked read/set/clear, global read/set/reset, settings read/replace, profile DNS read/set, raw profile read/edit and node selection [Implemented]
-│   │   ├── Stable core release query / preparation / executable staging / readback [Implemented; Linux x86_64]
+│   │   ├── Stable core query / preparation / staging / activation / installation readback [Implemented; Linux x86_64]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -176,6 +179,7 @@ mihomo-server/
 │   ├── Writable persistent core initialization      [Implemented; Linux verified]
 │   ├── One foreground exec launcher                 [Implemented; Linux verified]
 │   ├── Preserve data and existing upgraded core      [Implemented; Linux verified]
+│   ├── Managed core installation receipt / interrupted-switch recovery [Implemented; Linux x86_64]
 │   ├── User systemd template deployment              [Scaffold; runtime pending]
 │   ├── Other platforms, containers, Alpha/Geo resources [Pending]
 │   └── External publication/license resolution      [Pending]
@@ -1854,7 +1858,7 @@ fallback, Alpha/other targets, upgrade UI, SOCKS/PAC, full DNS/hosts/native TUN,
 resources, backups/WebDAV, advanced pages, garbage collection and additional
 platform/deployment checks remain pending.
 
-## Latest increment: bounded core extraction and actor-owned candidate validation
+## Previous increment: bounded core extraction and actor-owned candidate validation
 
 Delivery step 7 now adds stage_core_upgrade (prepared ID) and staged_core_upgrade
 (stage ID). Admission covers query/download/staging/readback; the staging command
@@ -1923,6 +1927,86 @@ candidates and revalidating current configuration/resources before activation.
 Core-download proxy routing/static roots, Alpha/other targets, upgrade UI, full
 DNS/hosts/native TUN, resources, backups/WebDAV, advanced pages, garbage collection,
 SOCKS/PAC and additional platform/deployment checks remain pending.
+
+## Latest increment: managed core activation, health checks and durable rollback
+
+Delivery step 7 now exposes activate_core_upgrade (staged ID) and core_installation.
+The actor retains upgrade admission through replacement, including caller disconnect,
+and serializes activation with lifecycle/configuration work. Current normalized YAML
+must match the staged configuration hash; stale candidates fail before stopping the
+core. Extraction/version/config probes rerun against current known Geo resources.
+The copied activation executable is hash checked; no caller paths/checksums are accepted.
+
+The private .core-upgrade journal stores bounded previous/candidate copies, hashes,
+previous file mode/installation receipt and running intent. After stopping/reaping the
+old child, one same-filesystem rename replaces the managed core. Startup checks the
+private controller's version and actual proxy ports, then repeats health checks after
+a short settle interval before the durable committed marker. Running cores restart
+and restore saved node choices. Stopped cores temporarily start for live checks and
+stop again before commit; their installation response records the verified version.
+Runtime revisions, active profile, settings and selection records are preserved.
+An explicit activation always performs replacement, including the same version;
+the upstream force/no-op wrapper and Web interaction remain the next increment.
+
+Pending failures stop/reap the candidate, restore the old bytes/file mode/receipt
+and restart the previously running core unless service shutdown is underway. Retry
+state from a failed candidate is cleared. A committed log retains the new core and
+completes receipt/cleanup rather than rolling back after metadata failure. Startup
+recovers before bundle seeding or any new child starts; actor admission and retries
+also recover outstanding work. Interrupted preparation and rollback are idempotent.
+Unexpected files/links, malformed metadata, missing/corrupt required backup, unknown
+live bytes or committed hash/size conflicts retain recovery state and fail closed.
+Copies/manifests use private directories/files, fixed names, size bounds and fsync.
+The persistent receipt is checked against installed bytes on readback; initial bundle
+seeding has no upgrade receipt. Candidate caches remain immutable and retained.
+
+Linux ordinary core and validator children now set a parent-death SIGKILL with a
+parent-PID race check, preventing orphan candidate execution across process-crash
+recovery. Normal SIGTERM still uses existing graceful termination/reaping. This
+workflow supports Linux x86_64 ordinary private executables; set-ID/file-capability
+cores and native privilege/xattr transfer remain outside the migration. It verifies
+bounded startup health, not indefinite stability after the commit point.
+
+Verification for this increment:
+
+- `cargo check --workspace --locked --offline` and workspace Clippy with
+  `--all-targets -- -D warnings` pass; Rust formatting and existing Web formatting
+  checks pass. The regular workspace run passes 242 tests; all 65 opt-in tests
+  pass with the real `/usr/bin/verge-mihomo` and `--test-threads=1`.
+- New storage tests cover pending/committed recovery, interrupted preparation
+  and rollback, previous mode/receipt restoration, installed hash conflicts,
+  corrupt backups, malformed metadata, unknown entries and symlink rejection.
+  Actor tests verify running/stopped activation, new PID/inode, saved selection
+  and configuration preservation, stale-candidate rejection before stopping,
+  failed-candidate rollback and shutdown cancellation. A real service SIGKILL
+  test verifies candidate termination/reaping and old-core recovery on restart.
+- The final-source Linux release bundle is
+  `target/mihomo-server-linux-x86_64-core-activation-verified`. All package
+  checksums pass; bundled deployment/provenance documents match their sources.
+  All 22 Playwright browser workflows pass against this final bundle.
+- An isolated official-release API smoke verifies stable metadata, bounded
+  download, SHA-256, extraction/version/configuration probes and activation of
+  `v1.19.31` (22,805,792 compressed bytes). Its initially stopped state is restored
+  after live health checks; prepared/staged records, installed bytes and receipt
+  survive a service restart.
+- An isolated copy of the actual saved subscription provides 56 traffic-capable
+  nodes. The first tested node returns HTTPS 204 before and after activation;
+  the candidate is staged without interrupting the old proxy, then activation
+  replaces PID/inode and restores the selected node. Active profile/runtime
+  readbacks and original `data` file hashes remain unchanged. The existing
+  system-proxy/static-root subscription fallback also passes after activation.
+  Automatic updates are disabled only in that disposable copy.
+- After test shutdown, the fixture process audit finds zero services, cores,
+  script workers or probe scripts left running. Isolated smoke directories are
+  removed; the original data remains untouched.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The Linux MVP remains runnable; the complete project is not done.
+Next Delivery step 7 subtask: upstream-compatible stable upgrade force/no-op adapter
+and Web upgrade workflow, including version/result readback and failure repair.
+Core-download managed/system routing/static roots, Alpha/other targets, full native
+TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage collection, SOCKS/PAC
+and additional platform/deployment integrations remain pending.
 
 ## MVP completion boundary
 

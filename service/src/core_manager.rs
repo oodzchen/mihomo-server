@@ -90,6 +90,15 @@ fn same_proxy_snapshot(before: &CoreStatus, after: &CoreStatus) -> bool {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct CoreActivation {
+    pub upgraded: bool,
+    pub from: String,
+    pub to: String,
+    pub installation: crate::core_upgrade::CoreInstallation,
+    pub status: CoreStatus,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CoreLog {
     pub stream: &'static str,
     pub message: String,
@@ -211,7 +220,9 @@ impl CoreOptions {
         let lock = open.open(self.data_dir.join(".mihomo-server.lock"))?;
         lock.try_lock().context("another service owns this data directory")?;
         if let Some(resources) = &self.resources {
-            self.binary = resources.initialize_core(self.core_dir.as_deref().unwrap_or(&self.data_dir.join("core")))?;
+            let core_directory = self.core_dir.clone().unwrap_or_else(|| self.data_dir.join("core"));
+            crate::core_upgrade::recover(&core_directory).context("managed core upgrade recovery failed")?;
+            self.binary = resources.initialize_core(&core_directory)?;
         } else {
             ensure!(self.core_dir.is_none(), "core directory requires bundle resources");
         }
@@ -303,6 +314,13 @@ enum ProfileEnhancement {
 }
 
 enum CommandMessage {
+    ActivateCoreUpgrade {
+        _permit: tokio::sync::OwnedSemaphorePermit,
+        id: String,
+        downloads: Arc<crate::core_release::CoreDownloads>,
+        reply: oneshot::Sender<Result<CoreActivation>>,
+    },
+    CoreInstallation(oneshot::Sender<Result<Option<crate::core_upgrade::CoreInstallation>>>),
     StageCoreUpgrade {
         _permit: tokio::sync::OwnedSemaphorePermit,
         id: String,
@@ -560,6 +578,42 @@ impl CoreManager {
             .as_ref()
             .context("core staging requires bundle-managed resources")?
             .inspect_stage(id)
+    }
+
+    pub async fn activate_core_upgrade(&self, id: String) -> Result<CoreActivation> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let downloads = self
+            .core_downloads
+            .clone()
+            .context("core activation requires bundle-managed resources")?;
+        let _permit = Arc::clone(&self.core_release_admission)
+            .try_acquire_owned()
+            .context("core release request already in progress")?;
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::ActivateCoreUpgrade {
+                id,
+                downloads,
+                reply,
+                _permit,
+            })
+            .await
+            .context("core manager stopped")?;
+        response.await.context("core manager stopped")?
+    }
+
+    pub async fn core_installation(&self) -> Result<Option<crate::core_upgrade::CoreInstallation>> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        ensure!(
+            self.core_downloads.is_some(),
+            "core installation requires bundle-managed resources"
+        );
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::CoreInstallation(reply))
+            .await
+            .context("core manager stopped")?;
+        response.await.context("core manager stopped")?
     }
 
     pub fn status(&self) -> CoreStatus {
@@ -1418,7 +1472,7 @@ impl Actor {
                 _ = closing(&mut self.shutdown) => break,
                 request = self.receiver.recv() => {
                     let Some(request) = request else { break; };
-                    if let Err(error) = self.profile_store.recover_import()
+                    if let Err(error) = self.recover_core_upgrade().await.and_then(|()| self.profile_store.recover_import())
                         .and_then(|()| self.profile_store.recover_refresh(self.store.state().current.as_ref()))
                         .and_then(|()| self.profile_store.recover_enhancement(self.store.state().current.as_ref()))
                         .and_then(|()| self.settings_store.recover(self.store.state().current.as_ref()))
@@ -1426,6 +1480,8 @@ impl Actor {
                         let message = format!("configuration recovery failed: {error:#}");
                         self.status.send_modify(|state| state.error = Some(message.clone()));
                         match request {
+                            CommandMessage::ActivateCoreUpgrade {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
+                            CommandMessage::CoreInstallation(reply) => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::StageCoreUpgrade { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadProfileRaw { reply, .. } | CommandMessage::SetProfileRaw { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadProfileDns { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
@@ -1447,13 +1503,21 @@ impl Actor {
                     self.settings = self.settings_store.snapshot();
                     self.dns_confirmations.retain(|uid, _| self.profile_store.get_item(uid).is_ok());
                     match request {
-                        CommandMessage::StageCoreUpgrade {id, downloads, reply, _permit} => {
+                        CommandMessage::ActivateCoreUpgrade {id, downloads, reply, _permit: permit} => {
+                            if !reply.is_closed() {let result = self.activate_core(&id, downloads).await;drop(permit);let _ = reply.send(result);}
+                        }
+                        CommandMessage::CoreInstallation(reply) => {
+                            let result = crate::core_upgrade::installation(self.options.binary.parent().expect("managed core directory"));
+                            let _ = reply.send(result);
+                        }
+                        CommandMessage::StageCoreUpgrade {id, downloads, reply, _permit: permit} => {
                             if !reply.is_closed() {
                                 let result = async {
                                     let yaml = serde_yaml_ng::to_string(&read_config(&self.options.config).await?)?;
                                     let revision = self.store.state().current.map(|revision| revision.file);
                                     downloads.stage(&id, yaml, revision, &self.options.data_dir, &mut self.shutdown).await
                                 }.await;
+                                drop(permit);
                                 let _ = reply.send(result);
                             }
                         }
@@ -2263,7 +2327,189 @@ impl Actor {
         crate::proxy_access::verify_ports(&config, &core)
     }
 
+    async fn recover_core_upgrade(&mut self) -> Result<()> {
+        if self.options.resources.is_none() {
+            return Ok(());
+        }
+        let core = self
+            .options
+            .binary
+            .parent()
+            .context("managed core directory missing")?
+            .to_path_buf();
+        if crate::core_upgrade::pending(&core)? {
+            self.retry_at = None;
+            self.publish(CorePhase::Stopping, None);
+            self.stop_process().await?;
+        }
+        if let Some(was_running) = crate::core_upgrade::recover(&core)? {
+            self.publish(CorePhase::Stopped, None);
+            if was_running && !*self.shutdown.borrow() {
+                self.publish(CorePhase::Starting, None);
+                self.start_inner().await?;
+                self.begin_restoration(false).await;
+            }
+        }
+        Ok(())
+    }
+
+    async fn activate_core(
+        &mut self,
+        id: &str,
+        downloads: Arc<crate::core_release::CoreDownloads>,
+    ) -> Result<CoreActivation> {
+        self.observe_exit().await?;
+        let staged = downloads.inspect_stage(id)?;
+        let yaml = serde_yaml_ng::to_string(&read_config(&self.options.config).await?)?;
+        ensure!(
+            crate::core_upgrade::config_hash(yaml.as_bytes()) == staged.config_sha256,
+            "current configuration changed; stage the core again"
+        );
+        let revision = self.store.state().current.map(|revision| revision.file);
+        let checked = downloads
+            .stage(
+                &staged.prepared.id,
+                yaml,
+                revision,
+                &self.options.data_dir,
+                &mut self.shutdown,
+            )
+            .await?;
+        ensure!(checked.stage_id == id, "candidate configuration proof changed");
+        let source = downloads.staged_binary(id)?;
+        let from =
+            crate::validation::probe_version(&self.options.binary, &mut self.shutdown, Duration::from_secs(5)).await?;
+        let core = self
+            .options
+            .binary
+            .parent()
+            .context("managed core directory missing")?
+            .to_path_buf();
+        let was_running = self.status.borrow().phase == CorePhase::Running;
+        self.retry_at = None;
+        let mut stopped = false;
+        let result = async {
+            let directory = core.clone();
+            let candidate = checked.clone();
+            let stop = self.shutdown.clone();
+            let receipt = tokio::task::spawn_blocking(move || {
+                ensure!(!*stop.borrow(), "core activation cancelled during shutdown");
+                crate::core_upgrade::prepare(&directory, &source, &candidate, was_running)
+            })
+            .await
+            .context("core replacement worker failed")??;
+            ensure!(!*self.shutdown.borrow(), "core activation cancelled during shutdown");
+            self.publish(CorePhase::Stopping, None);
+            self.stop_process().await?;
+            stopped = true;
+            ensure!(!*self.shutdown.borrow(), "core activation cancelled during shutdown");
+            crate::core_upgrade::publish(&core)?;
+            self.publish(CorePhase::Starting, None);
+            self.start_inner().await?;
+            ensure!(
+                self.status.borrow().version.as_deref() == Some(&receipt.version),
+                "activated runtime version differs from candidate"
+            );
+            // A second live probe catches immediate exits after the first readiness response.
+            tokio::select! {biased;
+                _ = closing(&mut self.shutdown) => bail!("core activation cancelled during shutdown"),
+                _ = sleep(self.options.policy.probe_interval) => {},
+            }
+            self.observe_exit().await?;
+            ensure!(
+                self.status.borrow().phase == CorePhase::Running,
+                "candidate exited during activation health check"
+            );
+            let version = timeout(self.options.policy.probe_timeout, self.client.get_version())
+                .await
+                .context("activation health check timed out")??;
+            ensure!(
+                version.version == receipt.version,
+                "activated core failed version health check"
+            );
+            self.verify_proxy_ports(&self.options.config.clone()).await?;
+            if !was_running {
+                self.stop_process().await?;
+                self.publish(CorePhase::Stopped, None);
+            }
+            ensure!(!*self.shutdown.borrow(), "core activation cancelled during shutdown");
+            crate::core_upgrade::commit(&core)?;
+            crate::core_upgrade::recover(&core)?;
+            Ok::<_, anyhow::Error>(receipt)
+        }
+        .await;
+        let receipt = match result {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                // A committed marker survives metadata/cleanup errors; never roll it back.
+                if !crate::core_upgrade::pending(&core)? {
+                    let committed = core.join(".core-upgrade/journal.json").try_exists()?;
+                    if committed {
+                        crate::core_upgrade::recover(&core).context("activated core metadata recovery required")?;
+                        crate::core_upgrade::installation(&core)?.context("activated core receipt missing")?
+                    } else {
+                        // Preparation failed, or a committed cleanup failed after removing the log.
+                        crate::core_upgrade::recover(&core)?;
+                        if stopped && crate::core_upgrade::installation(&core)?.is_some_and(|r| r.stage_id == id) {
+                            crate::core_upgrade::installation(&core)?.expect("checked receipt")
+                        } else {
+                            return Err(error);
+                        }
+                    }
+                } else {
+                    self.retry_at = None;
+                    self.publish(CorePhase::Stopping, None);
+                    if let Err(cleanup) = self.stop_process().await {
+                        self.publish(
+                            CorePhase::Failed,
+                            Some("core upgrade rollback requires process cleanup".into()),
+                        );
+                        return Err(error.context(format!("core rollback cleanup failed: {cleanup:#}")));
+                    }
+                    if let Err(recovery) = crate::core_upgrade::recover(&core) {
+                        self.publish(
+                            CorePhase::Failed,
+                            Some("core upgrade rollback recovery required".into()),
+                        );
+                        return Err(error.context(format!("core upgrade rollback recovery required: {recovery:#}")));
+                    }
+                    self.publish(CorePhase::Stopped, None);
+                    if was_running && !*self.shutdown.borrow() {
+                        self.publish(CorePhase::Starting, None);
+                        if let Err(restart) = self.start_inner().await {
+                            let _ = self.stop_process().await;
+                            self.publish(
+                                CorePhase::Failed,
+                                Some("previous core restored but failed to restart".into()),
+                            );
+                            self.schedule_recovery();
+                            return Err(error.context(format!("previous core restart failed: {restart:#}")));
+                        }
+                        self.begin_restoration(false).await;
+                    }
+                    let message = "core activation failed; previous core restored";
+                    self.status.send_modify(|state| state.error = Some(message.into()));
+                    bail!(message);
+                }
+            }
+        };
+        self.retry_at = None;
+        if was_running {
+            self.begin_restoration(false).await;
+        }
+        Ok(CoreActivation {
+            upgraded: true,
+            from,
+            to: receipt.version.clone(),
+            installation: receipt,
+            status: self.status.borrow().clone(),
+        })
+    }
+
     async fn start_core(&mut self) -> Result<()> {
+        if self.options.resources.is_some() && self.process.is_none() {
+            crate::core_upgrade::recover(self.options.binary.parent().context("managed core directory missing")?)?;
+        }
         self.cancel_restoration();
         self.publish(CorePhase::Starting, None);
         let previous = self.store.state();
@@ -2342,7 +2588,9 @@ impl Actor {
                 Err(error) => return Err(error).context("cannot inspect existing controller socket"),
             }
         }
-        let mut child = Command::new(&self.options.binary)
+        let mut command = Command::new(&self.options.binary);
+        crate::shutdown::bind_child_lifetime(&mut command);
+        let mut child = command
             .arg("-d")
             .arg(&self.options.data_dir)
             .arg("-f")

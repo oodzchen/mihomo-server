@@ -1207,3 +1207,43 @@ a caller disconnects. Existing status, runtime, selections and live executable s
 unchanged. Tests cover malformed archives/CRC/members/limits/ELF, output/time/cancel
 bounds, cache permissions/links/tampering, actual Mihomo compatibility failures and
 successful actor staging with a running core and restart proof readback.
+
+
+## Actor-owned core activation and interrupted-switch recovery
+
+Source: src-tauri/src/feat/core_upgrade.rs::upgrade_core and StagedCore::publish,
+pinned commit b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b. Destination:
+service/src/core_upgrade.rs, activation/admission adapters in core_manager.rs and
+management commands. Retained behavior fixes a validated target before replacement,
+uses a same-filesystem atomic publish, retains a restorable previous core, checks
+actual restart outcome and restores/restarts the old core after replacement failure.
+No desktop approved-copy/elevation, singleton, tray/notification or Mihomo self-upgrade
+API is introduced. Upstream latest/no-op/force command compatibility and upgrade UI
+remain a following increment; this explicit stage-ID command always replaces.
+
+Private bounded copies replace upstream's hard-link backup to allow independent
+hash checking and preserve ordinary file mode. A versioned journal plus atomic
+installation receipt adds crash recovery: pending means restore old bytes/receipt,
+committed means complete new metadata/cleanup. Startup recovery precedes bundle
+seeding; actor admission and retries recover before lifecycle changes. Unknown
+files/links, malformed records or required-backup/live-hash conflicts fail closed.
+The actor requires current configuration identity and reruns candidate validation,
+then checks live version/ports twice before commit. Stopped-mode activation briefly
+starts the candidate to verify runtime behavior and returns to stopped state.
+Existing revision/profile/settings/node stores and bounded node restoration are reused.
+
+Linux parent lifetime is bound for ordinary core and validator children using
+[PR_SET_PDEATHSIG](https://man7.org/linux/man-pages/man2/PR_SET_PDEATHSIG.2const.html)
+with SIGKILL and a getppid race check in async-signal-safe pre_exec calls. This is
+Linux-specific, refers to the creating parent thread, and does not replace normal
+SIGTERM/reaping. Candidate copies have no privilege xattrs; activation rejects
+capability-bearing/set-ID previous cores rather than silently losing privileges.
+Native privilege integration and other-platform recovery remain pending.
+
+Tests cover both journal phases, partial preparation/rollback checkpoints, mode and
+receipt restoration, conflicting/corrupt data, links, failed stopped activation,
+actual running/stopped Mihomo replacement, preserved node/config/profile state,
+stale candidate rejection, startup-failure rollback, shutdown without restart,
+changed bundle seed preservation, and SIGKILL of a real management process during
+replacement followed by candidate termination and successful startup rollback.
+No new package dependency is needed.

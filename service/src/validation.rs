@@ -17,7 +17,9 @@ pub(crate) async fn probe_version(
     deadline: Duration,
 ) -> Result<String> {
     ensure!(!*shutdown.borrow(), "core version probe cancelled during shutdown");
-    let mut child = Command::new(binary)
+    let mut command = Command::new(binary);
+    crate::shutdown::bind_child_lifetime(&mut command);
+    let mut child = command
         .arg("-v")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -60,7 +62,9 @@ pub(crate) async fn validate(
     deadline: Duration,
 ) -> Result<()> {
     ensure!(!*shutdown.borrow(), "validation cancelled during shutdown");
-    let mut child = Command::new(binary)
+    let mut command = Command::new(binary);
+    crate::shutdown::bind_child_lifetime(&mut command);
+    let mut child = command
         .arg("-t")
         .arg("-d")
         .arg(data_dir)

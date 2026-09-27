@@ -211,6 +211,11 @@ impl CoreDownloads {
         sync_directory(&self.root)?;
         Ok(core)
     }
+    pub(crate) fn staged_binary(&self, id: &str) -> Result<PathBuf> {
+        self.inspect_stage(id)?;
+        Ok(self.root.join(format!(".validated-{id}")).join("verge-mihomo"))
+    }
+
     pub(crate) fn inspect_stage(&self, id: &str) -> Result<StagedCore> {
         let (package_id, config_hash) = stage_name(id)?;
         let prepared = self.inspect(package_id)?;

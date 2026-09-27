@@ -1800,3 +1800,59 @@ if identical YAML has since been committed again. The stored proof does not impl
 the current configuration/resources are still identical, and no core is installed
 or activated. The next activation workflow must check them again. Failed/shutdown
 work removes temporary files; completed candidates remain until future cleanup.
+
+
+## Activate a verified managed core
+
+After stage_core_upgrade, use the returned stage_id:
+
+```json
+{"command":"activate_core_upgrade","id":"<stage_id>"}
+{"command":"core_installation"}
+```
+
+These authenticated commands require bundle-managed resources. Activation does not
+accept paths, checksums, configuration overrides or force; selecting a staged ID
+explicitly replaces it even when the version is unchanged. The upstream upgrade
+wrapper's latest-version/no-op/force semantics and Web controls are still pending.
+The returned report includes upgraded, from, to, installation and current status.
+core_installation returns null for an untouched bundle seed, or the last committed
+receipt with stage/version/target/executable/configuration hashes and byte count.
+Readback checks its installed bytes and detects independent file changes.
+
+Activation holds the shared upgrade slot in the actor through completion even if
+the HTTP caller disconnects. Lifecycle/configuration requests wait; HTTP state and
+WebSocket transport remain available. Current normalized YAML must match the saved
+configuration hash, otherwise stage again. The service reruns bounded extraction,
+version and isolated configuration/resource validation before creating backups.
+Only Linux x86_64 ordinary executables are supported; capability-bearing/set-ID
+cores require the pending native privilege integration before upgrade.
+
+A private .core-upgrade directory holds bounded hash-checked old/new copies and a
+versioned pending journal. The service stops/reaps the old child, atomically renames
+the new executable, starts it and verifies its controller version plus actual proxy
+ports. A second check after the configured short probe interval catches immediate
+exits. Running cores remain running and restore recorded nodes. A previously stopped
+core briefly starts for verification, then stops again before the committed marker.
+The report's to and receipt version reflect that checked runtime; stopped status
+has no running PID/version. Runtime configuration, active subscription, settings
+and node records are not replaced by activation. Proxy traffic can pause during
+core replacement and resumes after readiness/selection restoration.
+
+Before the commit point, failure/shutdown stops and reaps the candidate, restores
+previous bytes/permissions/receipt and restarts the old core only if it was running
+and the service is continuing. A failed upgrade remains an error even when rollback
+restores service. After commit, metadata/cleanup errors retain the new core and are
+recovered from the committed journal. An older or changed bundle seed never overwrites
+an existing activated core. Initial construction recovers interrupted switches
+before seeding/startup; actor admission also retries recovery. Known partial work is
+cleaned without following links or deleting unknown files. Corruption/conflicting
+live bytes retain the journal and fail instead of guessing or overwriting them.
+
+Linux core and validation children terminate on emergency parent death, allowing
+pending filesystem recovery after a management-process crash. Normal service
+termination still gracefully stops/reaps its children. Upgrade backups preserve
+ordinary file bytes/mode; privilege xattrs are not transferred. Verification covers
+bounded startup readiness, not continued health indefinitely after commit. Completed
+compressed and executable candidates remain cached; their garbage collection is
+pending.

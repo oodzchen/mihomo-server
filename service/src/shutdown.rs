@@ -40,3 +40,25 @@ impl ShutdownSignals {
         tokio::select! { _ = self.interrupt.recv() => {}, _ = self.close.recv() => {} }
     }
 }
+
+/// Emergency parent death must not leave a core/validator running through startup recovery.
+pub(crate) fn bind_child_lifetime(command: &mut tokio::process::Command) {
+    #[cfg(target_os = "linux")]
+    {
+        let parent = std::process::id() as libc::pid_t;
+        // Only async-signal-safe syscalls run between fork and exec.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::getppid() != parent {
+                    libc::_exit(1);
+                }
+                Ok(())
+            });
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = command;
+}
