@@ -22,6 +22,15 @@ pub struct BackupDownload {
     pub(crate) permit: tokio::sync::OwnedSemaphorePermit,
 }
 
+#[derive(Debug)]
+pub(crate) struct RestoreNeedsStopped;
+impl std::fmt::Display for RestoreNeedsStopped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("stop the core before restoring a backup")
+    }
+}
+impl std::error::Error for RestoreNeedsStopped {}
+
 #[cfg(unix)]
 pub(crate) mod export {
     pub(crate) use super::hash;

@@ -119,3 +119,15 @@ fn generation_retains_merge_semantics_and_controller_ownership() -> Result<()> {
     ensure!(parse("mode: [").is_err());
     Ok(())
 }
+
+#[test]
+fn staging_archived_yaml_retains_exact_bytes_and_controller_boundary() -> Result<()> {
+    let directory = Directory::new()?;
+    let store = RuntimeStore::open(&directory.0)?;
+    let yaml = "# archived manual edit\r\nmode: direct\r\nexternal-controller: ''\r\n";
+    let revision = store.stage_yaml(yaml)?;
+    assert_eq!(std::fs::read_to_string(store.path(&revision)?)?, yaml);
+    assert!(store.stage_yaml("external-controller: '0.0.0.0:9090'\n").is_err());
+    assert!(store.stage_yaml("- not-a-mapping\n").is_err());
+    Ok(())
+}

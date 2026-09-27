@@ -1,8 +1,8 @@
-//! Disposable candidate validation before a future multi-store restore transaction.
+//! Private restore validation and explicit stopped-core publication candidates.
 use super::hash;
 use anyhow::{Context as _, Result, ensure};
 use headless_core::{
-    backup::BackupRestoreValidation,
+    backup::{BackupRestoreValidation, BackupRuntimePolicy},
     config::{
         dns::DnsOverrideState,
         profile_store::{DEFAULT_GLOBAL_SCRIPT, GenerationPlan, ProfileStore},
@@ -191,6 +191,7 @@ struct Candidate {
     settings: ServiceSettings,
     generation: Option<GenerationPlan>,
     runtime: Vec<u8>,
+    entries: Vec<headless_core::backup::BackupEntry>,
 }
 fn prepare(bytes: &[u8], data: &Path, stop: watch::Receiver<bool>) -> Result<Candidate> {
     let budget = Budget::new(stop.clone());
@@ -224,7 +225,51 @@ fn prepare(bytes: &[u8], data: &Path, stop: watch::Receiver<bool>) -> Result<Can
         settings,
         generation,
         runtime,
+        entries: archive.manifest.entries,
     })
+}
+
+fn verify_sources(candidate: &Candidate, stop: watch::Receiver<bool>) -> Result<()> {
+    let budget = Budget::new(stop);
+    for entry in &candidate.entries {
+        budget.check()?;
+        let path = candidate.directory.0.join(&entry.path);
+        let mut input = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
+            .open(&path)?;
+        let before = input.metadata()?;
+        ensure!(
+            before.is_file()
+                && before.nlink() == 1
+                && before.uid() == unsafe { libc::geteuid() }
+                && before.mode() & 0o7077 == 0
+                && before.len() == entry.bytes,
+            "restore source changed during probes"
+        );
+        let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
+        let mut total = 0;
+        let mut chunk = [0; 64 * 1024];
+        loop {
+            budget.check()?;
+            let count = input.read(&mut chunk)?;
+            if count == 0 {
+                break;
+            }
+            total += count as u64;
+            ensure!(total <= entry.bytes, "restore source changed during read");
+            digest.update(&chunk[..count]);
+        }
+        let sha256: String = digest.finish().as_ref().iter().map(|b| format!("{b:02x}")).collect();
+        ensure!(
+            total == entry.bytes
+                && sha256 == entry.sha256
+                && same(&before, &input.metadata()?)
+                && same(&before, &fs::symlink_metadata(path)?),
+            "restore source changed during probes"
+        );
+    }
+    Ok(())
 }
 
 /// Provider paths must remain within disposable validation data. Backup ZIPs do
@@ -325,18 +370,22 @@ async fn regenerate(
     Ok((bytes, requested && !dns.enabled && dns.source.is_some()))
 }
 
-pub(crate) async fn validate(
+async fn prepare_candidate(
     bytes: axum::body::Bytes,
-    options: crate::core_manager::CoreOptions,
-    mut stop: watch::Receiver<bool>,
-) -> Result<BackupRestoreValidation> {
+    options: &crate::core_manager::CoreOptions,
+    stop: watch::Receiver<bool>,
+) -> Result<Candidate> {
     let source = options.data_dir.clone();
-    let cancellation = stop.clone();
-    // Always join the cooperative filesystem worker before dropping its guard/permit.
-    let candidate = tokio::task::spawn_blocking(move || prepare(&bytes, &source, cancellation))
+    tokio::task::spawn_blocking(move || prepare(&bytes, &source, stop))
         .await
-        .context("restore preparation worker failed")??;
-    let result = async {
+        .context("restore preparation worker failed")?
+}
+async fn probe(
+    candidate: &Candidate,
+    options: &crate::core_manager::CoreOptions,
+    mut stop: watch::Receiver<bool>,
+) -> Result<(BackupRestoreValidation, Option<Vec<u8>>)> {
+    async {
         ensure!(!*stop.borrow(), "backup restore validation cancelled");
         let directory = &candidate.directory.0;
         let runtime_path = directory.join("runtime.yaml");
@@ -377,24 +426,94 @@ pub(crate) async fn validate(
             regenerated = Some(bytes);
         }
         ensure!(!*stop.borrow(), "backup restore validation cancelled");
-        Ok(BackupRestoreValidation {
+        verify_sources(candidate, stop.clone())?;
+        let report = BackupRestoreValidation {
             archive: candidate.archive.clone(),
             runtime_bytes: candidate.runtime.len() as u64,
             runtime_sha256: hash(&candidate.runtime),
             regenerated_runtime_bytes: regenerated.as_ref().map(|bytes| bytes.len() as u64),
             regenerated_runtime_sha256: regenerated.as_ref().map(|bytes| hash(bytes)),
             dns_override_requires_confirmation: confirmation,
-        })
+        };
+        Ok((report, regenerated))
+    }
+    .await
+}
+pub(crate) async fn validate(
+    bytes: axum::body::Bytes,
+    options: crate::core_manager::CoreOptions,
+    stop: watch::Receiver<bool>,
+) -> Result<BackupRestoreValidation> {
+    let candidate = prepare_candidate(bytes, &options, stop.clone()).await?;
+    let result = probe(&candidate, &options, stop).await;
+    candidate.directory.cleanup()?;
+    result.map(|(report, _)| report)
+}
+
+/// This guard retains the privately verified catalog until publication or cancellation.
+/// It cannot be constructed from a client-provided rehearsal report.
+pub(crate) struct Publication {
+    candidate: Candidate,
+    pub report: BackupRestoreValidation,
+    pub runtime: Vec<u8>,
+    pub settings: ServiceSettings,
+}
+impl Publication {
+    pub fn profiles(&self) -> Result<ProfileStore> {
+        ProfileStore::open(&self.candidate.directory.0)
+    }
+    pub fn cleanup(&self) -> Result<()> {
+        self.candidate.directory.cleanup()
+    }
+}
+pub(crate) async fn publication(
+    bytes: axum::body::Bytes,
+    options: crate::core_manager::CoreOptions,
+    policy: BackupRuntimePolicy,
+    stop: watch::Receiver<bool>,
+) -> Result<Publication> {
+    let candidate = prepare_candidate(bytes, &options, stop.clone()).await?;
+    let result = async {
+        let (report, regenerated) = probe(&candidate, &options, stop.clone()).await?;
+        let runtime = match policy {
+            BackupRuntimePolicy::Archived => {
+                // An archived snapshot may contain a previous session's DNS override.
+                // Require regeneration whenever the active raw source has protected DNS.
+                ensure!(
+                    candidate.generation.as_ref().is_none_or(|g| g.dns_source.is_none()),
+                    "archived runtime has protected provider DNS; choose regeneration"
+                );
+                candidate.runtime.clone()
+            }
+            BackupRuntimePolicy::Regenerated => {
+                regenerated.context("regeneration requires an active archived profile")?
+            }
+        };
+        let mut settings = candidate.settings.clone();
+        if report.dns_override_requires_confirmation {
+            let uid = &candidate
+                .generation
+                .as_ref()
+                .context("active generation missing")?
+                .profile_uid;
+            settings.profile_dns.insert(
+                uid.clone(),
+                headless_core::config::dns::ProfileDnsSettings { enabled: false },
+            );
+        }
+        ensure!(!*stop.borrow(), "restore publication preparation cancelled");
+        Ok::<_, anyhow::Error>((report, runtime, settings))
     }
     .await;
-    let cleanup = candidate.directory.cleanup();
     match result {
-        Ok(report) => {
-            cleanup?;
-            Ok(report)
-        }
+        Ok((report, runtime, settings)) => Ok(Publication {
+            candidate,
+            report,
+            runtime,
+            settings,
+        }),
         Err(error) => {
-            cleanup?;
+            candidate.directory.cleanup()?;
             Err(error)
         }
     }

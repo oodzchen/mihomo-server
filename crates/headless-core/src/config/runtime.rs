@@ -156,6 +156,12 @@ impl RuntimeStore {
     pub fn stage(&self, config: Mapping) -> Result<Revision> {
         let config = generate(config, &Mapping::new())?;
         let yaml = serde_yaml_ng::to_string(&config)?;
+        self.stage_yaml(&yaml)
+    }
+
+    /// Preserve an explicitly selected archived snapshot's exact bytes after validation.
+    pub fn stage_yaml(&self, yaml: &str) -> Result<Revision> {
+        parse(yaml)?;
         ensure!(yaml.len() <= MAX_CONFIG_BYTES, "configuration exceeds 8 MiB");
         let revision = Revision {
             file: format!("rev-{}.yaml", unique_id()?),

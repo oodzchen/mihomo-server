@@ -322,6 +322,13 @@ enum ProfileEnhancement {
 }
 
 enum CommandMessage {
+    RestoreBackup {
+        bytes: axum::body::Bytes,
+        policy: headless_core::backup::BackupRuntimePolicy,
+        permit: tokio::sync::OwnedSemaphorePermit,
+        closing: watch::Receiver<bool>,
+        reply: oneshot::Sender<Result<headless_core::backup::BackupRestoreReceipt>>,
+    },
     ValidateBackupRestore {
         bytes: axum::body::Bytes,
         permit: tokio::sync::OwnedSemaphorePermit,
@@ -1173,6 +1180,32 @@ impl CoreManager {
         result.await.context("restore validation cancelled")?
     }
 
+    pub(crate) async fn restore_backup(
+        &self,
+        bytes: axum::body::Bytes,
+        policy: headless_core::backup::BackupRuntimePolicy,
+        permit: tokio::sync::OwnedSemaphorePermit,
+        closing: watch::Receiver<bool>,
+    ) -> Result<headless_core::backup::BackupRestoreReceipt> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        ensure!(
+            bytes.len() <= headless_core::backup::MAX_ARCHIVE_BYTES,
+            "backup archive exceeds 65 MiB"
+        );
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::RestoreBackup {
+                bytes,
+                policy,
+                permit,
+                closing,
+                reply,
+            })
+            .await
+            .context("core manager stopped")?;
+        result.await.context("backup restore cancelled")?
+    }
+
     pub async fn runtime_config(&self) -> Result<Mapping> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let (reply, result) = oneshot::channel();
@@ -1699,6 +1732,7 @@ impl Actor {
                         match request {
                             CommandMessage::ExportBackup {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::ValidateBackupRestore {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
+                            CommandMessage::RestoreBackup {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::InstalledCoreVersion(reply) => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::CheckCoreUpgrade {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::UpgradePreparedCore {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
@@ -1725,6 +1759,13 @@ impl Actor {
                     self.settings = self.settings_store.snapshot();
                     self.dns_confirmations.retain(|uid, _| self.profile_store.get_item(uid).is_ok());
                     match request {
+                        CommandMessage::RestoreBackup {bytes,policy,permit,closing,mut reply} => {
+                            if !reply.is_closed() {
+                                let result = self.restore_backup(bytes,policy,closing,&mut reply).await;
+                                drop(permit);
+                                let _ = reply.send(result);
+                            }
+                        }
                         CommandMessage::ValidateBackupRestore {bytes, permit, closing, mut reply} => {
                             if !reply.is_closed() {
                                 let result = self.validate_backup_restore(bytes, closing, &mut reply).await;
@@ -2621,6 +2662,139 @@ impl Actor {
             }
             Err(error) => Err(error),
         }
+    }
+
+    #[cfg(unix)]
+    async fn restore_backup(
+        &mut self,
+        bytes: axum::body::Bytes,
+        policy: headless_core::backup::BackupRuntimePolicy,
+        mut http_closing: watch::Receiver<bool>,
+        reply: &mut oneshot::Sender<Result<headless_core::backup::BackupRestoreReceipt>>,
+    ) -> Result<headless_core::backup::BackupRestoreReceipt> {
+        // Check in the actor after recovery, so a queued start cannot race publication.
+        if self.process.is_some() || self.status.borrow().phase != CorePhase::Stopped || self.retry_at.is_some() {
+            return Err(crate::backup::RestoreNeedsStopped.into());
+        }
+        ensure!(
+            !*self.shutdown.borrow() && !*http_closing.borrow() && !reply.is_closed(),
+            "restore cancelled"
+        );
+        let (cancel, cancellation) = watch::channel(false);
+        let prepared = {
+            let operation = crate::backup::restore::publication(bytes, self.options.clone(), policy, cancellation);
+            tokio::pin!(operation);
+            tokio::select! { biased;
+                _ = closing(&mut self.shutdown) => {cancel.send_replace(true); let _ = operation.await; bail!("restore cancelled during shutdown");},
+                _ = closing(&mut http_closing) => {cancel.send_replace(true); let _ = operation.await; bail!("restore cancelled during HTTP shutdown");},
+                _ = reply.closed() => {cancel.send_replace(true); let _ = operation.await; bail!("restore client disconnected");},
+                result = &mut operation => result?,
+            }
+        };
+        // Publication below is synchronous under actor/data ownership. Cancellation is
+        // checked at each durable phase; after manifest commit cleanup must finish.
+        let previous = self.store.state();
+        let old_path = self.options.config.clone();
+        let check = || -> Result<()> {
+            ensure!(
+                !*self.shutdown.borrow() && !*http_closing.borrow() && !reply.is_closed(),
+                "restore cancelled before commit"
+            );
+            Ok(())
+        };
+        let result = (|| -> Result<_> {
+            check()?;
+            let revision = self.store.stage_yaml(std::str::from_utf8(&prepared.runtime)?)?;
+            let candidate = prepared.profiles()?;
+            let plan = self.profile_store.prepare_restore(
+                &candidate,
+                &self.settings_store,
+                prepared.settings.clone(),
+                &self.store,
+                revision.clone(),
+            )?;
+            check()?;
+            self.store
+                .begin_profile(revision.clone(), plan.active_profile().map(str::to_owned))?;
+            self.profile_store
+                .begin_restore(plan, &self.settings_store, &self.store)?;
+            check()?;
+            self.profile_store
+                .publish_restore(&mut self.settings_store, &self.store)?;
+            check()?;
+            let commit = self.store.commit();
+            // RuntimeStore updates its in-memory state after rename and before fsync.
+            if self.store.state().current.as_ref() != Some(&revision) {
+                commit?;
+                bail!("restore did not commit");
+            }
+            Ok((revision, commit.is_err()))
+        })();
+        match result {
+            Ok((revision, mut cleanup_pending)) => {
+                self.options.config = self.store.path(&revision)?;
+                self.retry_at = None;
+                self.cancel_restoration();
+                self.dns_confirmations.clear();
+                cleanup_pending |= self
+                    .profile_store
+                    .recover_restore(&mut self.settings_store, &self.store)
+                    .is_err();
+                cleanup_pending |= prepared.cleanup().is_err();
+                self.settings = self.settings_store.snapshot();
+                self.profile_state.send_replace(self.profile_store.snapshot());
+                self.status.send_modify(|state| {
+                    state.config_revision = Some(revision.file.clone());
+                    state.active_profile = self.store.state().active_profile;
+                    state.error = cleanup_pending.then(|| {
+                        "backup restore committed; cleanup or durability acknowledgement requires recovery".into()
+                    });
+                    state.selection_pending.clear();
+                    state.selection_error = None;
+                    state.recovery_attempt = 0;
+                });
+                Ok(headless_core::backup::BackupRestoreReceipt {
+                    committed: true,
+                    archive: prepared.report.archive.clone(),
+                    runtime_policy: policy,
+                    runtime_revision: revision.file,
+                    runtime_bytes: prepared.runtime.len() as u64,
+                    runtime_sha256: crate::backup::hash(&prepared.runtime),
+                    dns_override_requires_confirmation: prepared.report.dns_override_requires_confirmation,
+                    cleanup_pending,
+                })
+            }
+            Err(error) => {
+                self.options.config = old_path;
+                let rollback = self.store.restore(previous).and_then(|()| {
+                    self.profile_store
+                        .recover_restore(&mut self.settings_store, &self.store)
+                });
+                let cleanup = prepared.cleanup();
+                self.settings = self.settings_store.snapshot();
+                self.profile_state.send_replace(self.profile_store.snapshot());
+                if rollback.is_err() || cleanup.is_err() {
+                    self.status
+                        .send_modify(|state| state.error = Some("backup restore failed; recovery is pending".into()));
+                }
+                // No uploaded diagnostics are included in the HTTP error or live logs.
+                Err(error.context(format!(
+                    "restore recovery: {}; candidate cleanup: {}",
+                    rollback.is_ok(),
+                    cleanup.is_ok()
+                )))
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    async fn restore_backup(
+        &mut self,
+        _bytes: axum::body::Bytes,
+        _policy: headless_core::backup::BackupRuntimePolicy,
+        _closing: watch::Receiver<bool>,
+        _reply: &mut oneshot::Sender<Result<headless_core::backup::BackupRestoreReceipt>>,
+    ) -> Result<headless_core::backup::BackupRestoreReceipt> {
+        bail!("backup restoration is not yet supported on this platform")
     }
 
     #[cfg(unix)]

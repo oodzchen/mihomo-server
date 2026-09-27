@@ -278,18 +278,21 @@ async fn restore_probe_and_script_failures_are_sanitized_and_release_backup_admi
 
 #[tokio::test]
 async fn restore_disconnect_http_close_and_manager_shutdown_reap_probes_and_remove_private_candidates() -> Result<()> {
-    for case in ["disconnect", "http-close", "manager-shutdown"] {
-        let dir = Directory::new()?;
-        let manager = dir.manager(false)?;
-        let auth = Authentication::load_or_create(&dir.0.join("management-token"), "127.0.0.1:9090".parse()?, None)?;
-        let token = fs::read_to_string(dir.0.join("management-token"))?.trim().to_owned();
-        let state = HttpState::new(Management::new(manager.clone(), auth));
-        let app = router(state.clone());
-        let result = async {
+    for route in ["rehearsal", "restore"] {
+        for case in ["disconnect", "http-close", "manager-shutdown"] {
+            let dir = Directory::new()?;
+            let manager = dir.manager(false)?;
+            let auth =
+                Authentication::load_or_create(&dir.0.join("management-token"), "127.0.0.1:9090".parse()?, None)?;
+            let token = fs::read_to_string(dir.0.join("management-token"))?.trim().to_owned();
+            let state = HttpState::new(Management::new(manager.clone(), auth));
+            let app = router(state.clone());
+            let result = async {
             let download = manager.export_backup().await?; let bytes = download.bytes.clone(); drop(download);
             let marker = dir.0.join("probe.json");
             fs::write(dir.0.join("validator.py"), format!("#!/usr/bin/python3\nimport sys,time,pathlib,json,os\npathlib.Path({:?}).write_text(json.dumps({{'pid':os.getpid(),'config':sys.argv[sys.argv.index('-f')+1],'data':sys.argv[sys.argv.index('-d')+1]}}))\ntime.sleep(60)\n", marker.to_str().unwrap()))?;
-            let upload = tokio::spawn(app.oneshot(restore_request(&token, bytes)));
+            let request = if route == "restore" {apply_restore_request(&token,bytes,"archived")} else {restore_request(&token,bytes)};
+            let upload = tokio::spawn(app.oneshot(request));
             let probe: serde_json::Value = tokio::time::timeout(Duration::from_secs(3), async { loop { if let Ok(data) = fs::read(&marker) && let Ok(probe) = serde_json::from_slice::<serde_json::Value>(&data) { break probe; } tokio::time::sleep(Duration::from_millis(10)).await; } }).await?;
             let temporary = PathBuf::from(probe["config"].as_str().unwrap()).parent().unwrap().to_path_buf();
             assert_eq!(fs::metadata(&temporary)?.permissions().mode() & 0o777, 0o700);
@@ -306,8 +309,9 @@ async fn restore_disconnect_http_close_and_manager_shutdown_reap_probes_and_remo
             assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "validator must be reaped");
             Ok::<_, anyhow::Error>(())
         }.await;
-        let cleanup = manager.shutdown().await;
-        result.and(cleanup)?;
+            let cleanup = manager.shutdown().await;
+            result.and(cleanup)?;
+        }
     }
     Ok(())
 }
@@ -968,6 +972,34 @@ async fn real_data_restore_transaction_preserves_sources_and_proxy_traffic_after
             }
             ensure!(connected, "restored actual proxy did not return HTTPS 204");
             ensure!(!dir.0.join("backup-restore.yaml").exists(), "restore cleanup pending");
+            if restart == 0 {
+                let (app, token) = dir.app(&manager)?;
+                let download = manager.export_backup().await?;
+                let bytes = download.bytes.clone();
+                drop(download);
+                let pid = manager.status().pid;
+                let response = app
+                    .clone()
+                    .oneshot(apply_restore_request(&token, bytes.clone(), "regenerated"))
+                    .await?;
+                ensure!(
+                    response.status() == StatusCode::CONFLICT && manager.status().pid == pid,
+                    "running restore must require stopping the core"
+                );
+                manager.stop().await?;
+                let mut settings = manager.settings().await?.runtime;
+                settings.mode = Some(headless_core::config::settings::Mode::Direct);
+                manager.set_settings(settings).await?;
+                let receipt = apply_restore_report(&app, &token, bytes, "regenerated").await?;
+                ensure!(
+                    receipt.committed && !receipt.cleanup_pending && manager.status().phase == CorePhase::Stopped,
+                    "stopped API restore did not commit"
+                );
+                ensure!(
+                    manager.runtime_config().await?["mode"].as_str() == Some("global"),
+                    "archived mode was not restored"
+                );
+            }
             Ok::<_, anyhow::Error>(())
         }
         .await;
@@ -983,4 +1015,238 @@ async fn real_data_restore_transaction_preserves_sources_and_proxy_traffic_after
         nodes.len()
     );
     Ok(())
+}
+
+fn apply_restore_request(token: &str, bytes: Vec<u8>, policy: &str) -> Request<Body> {
+    let mut request = restore_request(token, bytes);
+    *request.uri_mut() = "/api/backup/restore".parse().unwrap();
+    request
+        .headers_mut()
+        .insert("x-backup-runtime", policy.parse().unwrap());
+    request
+}
+async fn apply_restore_report(
+    app: &Router,
+    token: &str,
+    bytes: Vec<u8>,
+    policy: &str,
+) -> Result<headless_core::backup::BackupRestoreReceipt> {
+    let response = app.clone().oneshot(apply_restore_request(token, bytes, policy)).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    Ok(serde_json::from_slice(&to_bytes(response.into_body(), 4096).await?)?)
+}
+#[tokio::test]
+async fn stopped_restore_publishes_explicit_runtime_policy_catalog_settings_and_persists_restart() -> Result<()> {
+    for policy in ["archived", "regenerated"] {
+        let dir = Directory::new()?;
+        let manager = dir.manager(false)?;
+        let (app, token) = dir.app(&manager)?;
+        let result = async {
+            let item = manager
+                .import_profile_yaml(
+                    "# exact archived raw\r\nmode: rule\r\nproxies: []\r\nrules: ['MATCH,DIRECT']\r\n".into(),
+                    "archived profile".into(),
+                )
+                .await?;
+            let uid = item.uid.unwrap().to_string();
+            manager.select_profile(uid.clone()).await?;
+            let settings = manager.settings().await?;
+            let download = manager.export_backup().await?;
+            let bytes = download.bytes.clone();
+            drop(download);
+            let archived_runtime =
+                b"# exact manual runtime\r\nmode: direct\r\nlog-level: debug\r\nrules: ['MATCH,DIRECT']\r\n";
+            let bytes = rewrite_archive(&bytes, |files| {
+                files.insert("runtime.yaml".into(), archived_runtime.to_vec());
+            })?;
+            let changed = manager
+                .import_profile_yaml("mode: global\n".into(), "later profile".into())
+                .await?;
+            manager.select_profile(changed.uid.unwrap().to_string()).await?;
+            let before = manager.status().config_revision;
+            let receipt = apply_restore_report(&app, &token, bytes.clone(), policy).await?;
+            assert!(receipt.committed && !receipt.cleanup_pending);
+            assert_eq!(receipt.archive.archive_sha256, hash(&bytes));
+            assert_eq!(manager.status().phase, CorePhase::Stopped);
+            assert_eq!(manager.status().active_profile.as_deref(), Some(uid.as_str()));
+            assert_eq!(
+                manager.status().config_revision.as_deref(),
+                Some(receipt.runtime_revision.as_str())
+            );
+            assert_ne!(manager.status().config_revision, before);
+            assert_eq!(manager.settings().await?, settings);
+            assert_eq!(
+                manager.profile_raw(uid.clone()).await?.yaml,
+                "# exact archived raw\r\nmode: rule\r\nproxies: []\r\nrules: ['MATCH,DIRECT']\r\n"
+            );
+            assert!(manager.profile_raw(uid.clone()).await?.revision.starts_with("restore-"));
+            let runtime = manager.runtime_config().await?;
+            if policy == "archived" {
+                assert_eq!(receipt.runtime_sha256, hash(archived_runtime));
+                assert_eq!(runtime["mode"].as_str(), Some("direct"));
+            } else {
+                assert_ne!(receipt.runtime_sha256, hash(archived_runtime));
+                assert_eq!(runtime["mode"].as_str(), Some("rule"));
+            }
+            assert!(!dir.0.join("backup-restore.yaml").exists());
+            let export = manager.export_backup().await?;
+            drop(export);
+            Ok::<_, anyhow::Error>((uid, receipt.runtime_revision))
+        }
+        .await;
+        let cleanup = manager.shutdown().await;
+        let (uid, revision) = result?;
+        cleanup?;
+        let restarted = dir.manager(false)?;
+        let result = async {
+            assert_eq!(restarted.status().config_revision.as_deref(), Some(revision.as_str()));
+            assert_eq!(restarted.status().active_profile.as_deref(), Some(uid.as_str()));
+            restarted.profile_raw(uid).await?;
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        result.and(restarted.shutdown().await)?;
+    }
+    Ok(())
+}
+#[tokio::test]
+async fn restore_requires_single_explicit_policy_auth_and_bootstrap_archived_choice() -> Result<()> {
+    let dir = Directory::new()?;
+    let manager = dir.manager(false)?;
+    let (app, token) = dir.app(&manager)?;
+    let result = async {
+        let download = manager.export_backup().await?;
+        let bytes = download.bytes.clone();
+        drop(download);
+        assert_eq!(
+            app.clone()
+                .oneshot(apply_restore_request("wrong", bytes.clone(), "archived"))
+                .await?
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        for value in ["unknown", "", "Archived"] {
+            assert_eq!(
+                app.clone()
+                    .oneshot(apply_restore_request(&token, bytes.clone(), value))
+                    .await?
+                    .status(),
+                StatusCode::BAD_REQUEST
+            );
+        }
+        let mut missing = apply_restore_request(&token, bytes.clone(), "archived");
+        missing.headers_mut().remove("x-backup-runtime");
+        assert_eq!(app.clone().oneshot(missing).await?.status(), StatusCode::BAD_REQUEST);
+        let mut duplicate = apply_restore_request(&token, bytes.clone(), "archived");
+        duplicate
+            .headers_mut()
+            .append("x-backup-runtime", "regenerated".parse()?);
+        assert_eq!(app.clone().oneshot(duplicate).await?.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            app.clone()
+                .oneshot(apply_restore_request(&token, bytes.clone(), "regenerated"))
+                .await?
+                .status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert!(manager.status().config_revision.is_none());
+        let receipt = apply_restore_report(&app, &token, bytes, "archived").await?;
+        assert!(receipt.committed && !receipt.archive.active_profile_present);
+        assert!(manager.status().active_profile.is_none());
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    result.and(manager.shutdown().await)
+}
+#[tokio::test]
+async fn restore_failure_and_private_source_mutation_leave_publication_unchanged_and_release_slot() -> Result<()> {
+    let dir = Directory::new()?;
+    let manager = dir.manager(false)?;
+    let (app, token) = dir.app(&manager)?;
+    let result = async {
+        let item = manager.import_profile_yaml("mode: rule\nrules: ['MATCH,DIRECT']\n".into(),"source".into()).await?;
+        manager.select_profile(item.uid.unwrap().to_string()).await?;
+        let download = manager.export_backup().await?; let bytes = download.bytes.clone();drop(download);
+        let before=json!(manager.profiles());let settings=manager.settings().await?;let revision=manager.status().config_revision;
+        for fault in ["probe-reject","source-mutation","publication-write"] {
+            let script=match fault {
+                "probe-reject"=>"#!/usr/bin/python3\nimport sys\nprint('PRIVATE_RESTORE_FAILURE')\nsys.exit(1)\n".into(),
+                "source-mutation"=>"#!/usr/bin/python3\nimport pathlib,sys\np=pathlib.Path(sys.argv[sys.argv.index('-f')+1]).parent\nif (p/'profiles.yaml').exists(): (p/'profiles.yaml').write_text('items: []\\ncurrent: null\\n')\nsys.exit(0)\n".into(),
+                "publication-write"=>format!("#!/usr/bin/python3\nimport os,sys\nos.chmod({:?},0o500)\nsys.exit(0)\n",dir.0.join("profiles").to_str().unwrap()),
+                _=>unreachable!(),
+            };
+            fs::write(dir.0.join("validator.py"),script)?;
+            let response=app.clone().oneshot(apply_restore_request(&token,bytes.clone(),"regenerated")).await?;
+            assert_eq!(response.status(),StatusCode::UNPROCESSABLE_ENTITY,"{fault}");
+            let error=to_bytes(response.into_body(),4096).await?;
+            assert!(!String::from_utf8_lossy(&error).contains("PRIVATE_RESTORE_FAILURE"));
+            assert!(!String::from_utf8_lossy(&error).contains(dir.0.to_str().unwrap()));
+            fs::set_permissions(dir.0.join("profiles"),fs::Permissions::from_mode(0o700))?;
+            assert_eq!(json!(manager.profiles()),before);assert_eq!(manager.settings().await?,settings);assert_eq!(manager.status().config_revision,revision);
+            assert!(!dir.0.join("backup-restore.yaml").exists());
+            let export=manager.export_backup().await?;drop(export);
+        }
+        Ok::<_,anyhow::Error>(())
+    }.await;
+    result.and(manager.shutdown().await)
+}
+#[tokio::test]
+async fn restoring_provider_dns_requires_regeneration_and_disables_imported_preference() -> Result<()> {
+    let dir = Directory::new()?;
+    let manager = dir.manager(false)?;
+    let (app, token) = dir.app(&manager)?;
+    let result=async {
+        let item=manager.import_profile_yaml("mode: rule\ndns: {enable: false, nameserver: [8.8.8.8], nameserver-policy: {'+.example.test': 8.8.8.8}}\nrules: ['MATCH,DIRECT']\n".into(),"DNS source".into()).await?;
+        let uid=item.uid.unwrap().to_string();manager.select_profile(uid.clone()).await?;
+        let download=manager.export_backup().await?;let bytes=download.bytes.clone();drop(download);
+        let bytes=rewrite_archive(&bytes,|files| {
+            let mut settings:ServiceSettings=serde_yaml_ng::from_slice(&files["settings.yaml"]).unwrap();
+            settings.runtime.dns=Some(serde_yaml_ng::from_str("enable: true\nnameserver: [1.1.1.1]").unwrap());
+            settings.profile_dns.insert(uid.clone(),headless_core::config::dns::ProfileDnsSettings{enabled:true});
+            files.insert("settings.yaml".into(),serde_yaml_ng::to_string(&settings).unwrap().into_bytes());
+        })?;
+        let before=manager.status().config_revision;
+        assert_eq!(app.clone().oneshot(apply_restore_request(&token,bytes.clone(),"archived")).await?.status(),StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(manager.status().config_revision,before);
+        let receipt=apply_restore_report(&app,&token,bytes,"regenerated").await?;
+        assert!(receipt.dns_override_requires_confirmation);
+        assert!(!manager.settings().await?.profile_dns[&uid].enabled);
+        assert_eq!(manager.runtime_config().await?["dns"]["nameserver"][0].as_str(),Some("8.8.8.8"));
+        let state=manager.profile_dns(uid).await?;assert!(state.source.is_some() && !state.requested && !state.enabled);
+        Ok::<_,anyhow::Error>(())
+    }.await;
+    result.and(manager.shutdown().await)
+}
+
+#[tokio::test]
+async fn committed_restore_reports_private_cleanup_failure_without_undoing_publication() -> Result<()> {
+    let dir = Directory::new()?;
+    let manager = dir.manager(false)?;
+    let (app, token) = dir.app(&manager)?;
+    let marker = dir.0.join("private-candidate-path");
+    let result=async {
+        let item=manager.import_profile_yaml("mode: rule\nrules: ['MATCH,DIRECT']\n".into(),"source".into()).await?;
+        manager.select_profile(item.uid.unwrap().to_string()).await?;
+        let download=manager.export_backup().await?;let bytes=download.bytes.clone();drop(download);
+        let before=manager.status().config_revision;
+        fs::write(dir.0.join("validator.py"),format!("#!/usr/bin/python3\nimport pathlib,sys,os\np=pathlib.Path(sys.argv[sys.argv.index('-f')+1])\nif p.name=='regenerated.yaml':\n pathlib.Path({:?}).write_text(str(p.parent))\n os.chmod(p.parent,0o500)\nsys.exit(0)\n",marker.to_str().unwrap()))?;
+        let receipt=apply_restore_report(&app,&token,bytes,"regenerated").await?;
+        assert!(receipt.committed && receipt.cleanup_pending);
+        assert_ne!(manager.status().config_revision,before);
+        assert_eq!(manager.status().config_revision.as_deref(),Some(receipt.runtime_revision.as_str()));
+        assert!(manager.status().error.is_some_and(|e| e.contains("committed")));
+        assert!(!dir.0.join("backup-restore.yaml").exists());
+        assert_eq!(manager.runtime_config().await?["mode"].as_str(),Some("rule"));
+        Ok::<_,anyhow::Error>(())
+    }.await;
+    let cleanup = manager.shutdown().await;
+    // The deliberately inaccessible candidate is test-owned and recorded by the probe.
+    if let Ok(path) = fs::read_to_string(marker) {
+        let path = PathBuf::from(path);
+        assert!(path.file_name().unwrap().to_str().unwrap().starts_with("ms-restore-"));
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
+        fs::remove_dir_all(path)?;
+    }
+    result.and(cleanup)
 }

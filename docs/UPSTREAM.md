@@ -1519,3 +1519,24 @@ This is a persistence foundation, not an online restore API. Active scripts/core
 validation remain caller responsibilities; rehearsal does not issue a reusable
 proof. Online runtime/DNS policy, cancellation/apply/receipt, orphan cleanup,
 retention, schedules, WebDAV, backup UI and other restore targets remain pending.
+
+
+## Explicit stopped-core service backup restoration
+
+Reference: `src-tauri/src/feat/backup.rs::restore_local_backup` and
+`restore_webdav_backup`, pinned commit b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b.
+The service continues to replace direct desktop ZIP extraction/settings repair
+with original verified candidate and journal logic. No new upstream source is
+copied. Destinations: headless-core/src/backup.rs policy/receipt models,
+config/runtime.rs exact-byte staging, service/src/backup_restore.rs private
+publication guard and post-probe integrity, core_manager.rs actor transaction and
+management/http.rs authenticated binary restore route.
+
+Explicit archived/regenerated selection retains snapshot bytes or uses existing
+migrated enhancement stages. Fresh provider DNS protection reuses service
+confirmation semantics. The lifecycle actor applies only while stopped, commits
+through the runtime marker and recovers precommit failure; committed cleanup is
+reported without undoing publication. Admission, probes/workers, cancellation and
+catalog/settings/source journal machinery are reused. No dependency changes.
+Running-core restoration, orphan cleanup, retention/schedules/WebDAV/UI and other
+platforms remain pending.

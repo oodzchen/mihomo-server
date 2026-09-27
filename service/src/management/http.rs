@@ -66,6 +66,7 @@ pub fn router(state: HttpState) -> Router {
         .route("/api/backup", post(backup))
         .route("/api/backup/inspect", post(inspect_backup))
         .route("/api/backup/validate", post(validate_backup_restore))
+        .route("/api/backup/restore", post(restore_backup))
         .route("/api/status", get(status))
         .route("/api/logs", get(logs))
         .route("/api/profiles", get(profiles))
@@ -209,9 +210,27 @@ async fn validate_backup_restore(State(state): State<HttpState>, request: Reques
     backup_upload(state, request, BackupUpload::ValidateRestore).await
 }
 
+async fn restore_backup(State(state): State<HttpState>, request: Request) -> Response {
+    use headless_core::backup::BackupRuntimePolicy;
+    let values: Vec<_> = request.headers().get_all("x-backup-runtime").iter().collect();
+    let policy = match values.as_slice() {
+        [value] if *value == "archived" => BackupRuntimePolicy::Archived,
+        [value] if *value == "regenerated" => BackupRuntimePolicy::Regenerated,
+        _ => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_restore_policy",
+                "send one X-Backup-Runtime header: archived or regenerated",
+            );
+        }
+    };
+    backup_upload(state, request, BackupUpload::Restore(policy)).await
+}
+
 enum BackupUpload {
     Inspect,
     ValidateRestore,
+    Restore(headless_core::backup::BackupRuntimePolicy),
 }
 
 async fn backup_upload(state: HttpState, request: Request, operation: BackupUpload) -> Response {
@@ -292,6 +311,33 @@ async fn backup_upload(state: HttpState, request: Request, operation: BackupUplo
             "invalid_backup_length",
             "upload length mismatch",
         );
+    }
+    if let BackupUpload::Restore(policy) = operation {
+        // Do not discard a committed receipt merely because graceful close started.
+        // The actor cancels before commit and finishes recovery after commit.
+        return match state
+            .management
+            .manager
+            .restore_backup(bytes, policy, permit, closing.clone())
+            .await
+        {
+            Ok(receipt) => Json(receipt).into_response(),
+            Err(cause) if cause.downcast_ref::<crate::backup::RestoreNeedsStopped>().is_some() => error(
+                StatusCode::CONFLICT,
+                "restore_requires_stopped_core",
+                "stop the core before restoring a backup",
+            ),
+            Err(_) if *shutdown.borrow() || *closing.borrow() => error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "restore_interrupted",
+                "service is closing; inspect status before retrying restoration",
+            ),
+            Err(_) => error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "backup_restore_failed",
+                "backup restoration failed; inspect service status before retrying",
+            ),
+        };
     }
     if matches!(operation, BackupUpload::ValidateRestore) {
         let operation = state

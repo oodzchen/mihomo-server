@@ -40,6 +40,28 @@ pub struct BackupRestoreValidation {
     pub dns_override_requires_confirmation: bool,
 }
 
+/// Explicit publication policy; a rehearsal digest does not authorize restoration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackupRuntimePolicy {
+    Archived,
+    Regenerated,
+}
+
+/// Committed stopped-core restoration. Cleanup failure never changes committed=true.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackupRestoreReceipt {
+    pub committed: bool,
+    pub archive: BackupInspection,
+    pub runtime_policy: BackupRuntimePolicy,
+    pub runtime_revision: String,
+    pub runtime_bytes: u64,
+    pub runtime_sha256: String,
+    pub dns_override_requires_confirmation: bool,
+    pub cleanup_pending: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackupEntry {

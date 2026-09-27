@@ -81,7 +81,7 @@ mihomo-server/
 │       ├── Geo/provider resources and proxy views   [Pending]
 │       ├── Immutable revision / orphan file garbage collection [Pending]
 │       ├── Timed update metadata / saved refresh source [Migrated + service scheduler]
-│       ├── Backup manifest / bounded entry / download, inspection and restore validation models [Implemented; upstream ZIP adaptation]
+│       ├── Backup manifest / bounded entries / inspection, validation, runtime policy and restore receipt models [Implemented; upstream ZIP adaptation]
 │       ├── Opaque restore plan / durable catalog-settings journal / runtime commit recovery [Implemented; Linux verified]
 │       └── Backup retention models / full upgrade resource settings [Pending]
 ├── service/                                         [Partially implemented]
@@ -147,7 +147,9 @@ mihomo-server/
 │   │   ├── Actor-owned core snapshot / isolated Geo data / probe cancellation and cleanup [Implemented; Linux verified]
 │   │   ├── Durable catalog/settings restore journal / runtime-marker recovery [Implemented; Linux verified]
 │   │   ├── Startup + actor recovery before DNS pruning/defaults/current mirror [Implemented; Linux verified]
-│   │   ├── Restore upload / running-core apply / cancellation / final receipt [Pending]
+│   │   ├── Explicit stopped-core restore upload / DNS policy / durable receipt [Implemented; Linux verified]
+│   │   ├── Restore preparation cancellation / phase checks / committed cleanup [Implemented; bounded synchronous publication]
+│   │   ├── Running-core restore reload/restart/apply rollback [Pending]
 │   │   ├── Abrupt-termination candidate orphan cleanup [Pending]
 │   │   └── Local retention / restore / schedule / WebDAV / UI [Pending]
 │   ├── Full application context and domain events  [Pending]
@@ -167,6 +169,7 @@ mihomo-server/
 │   │   ├── Authenticated POST /api/backup ZIP export [Implemented; Linux verified]
 │   │   ├── Authenticated POST /api/backup/inspect validation report [Implemented; Linux verified]
 │   │   ├── Authenticated POST /api/backup/validate restore rehearsal [Implemented; Linux verified]
+│   │   ├── Authenticated POST /api/backup/restore explicit stopped-core restoration [Implemented; Linux verified]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -2829,6 +2832,107 @@ cleanup, retained old-source/revision garbage collection, local retention/list/d
 schedules, WebDAV and backup UI remain pending alongside the full design's other
 platforms, native settings/resources, advanced pages and optional shared components.
 The complete project is not finished.
+
+## Latest increment: explicit stopped-core backup restoration API
+
+Delivery step 7 now connects verified upload candidates to the durable restore
+transaction. Authenticated `POST /api/backup/restore` accepts a raw ZIP and exactly
+one `X-Backup-Runtime: archived` or `regenerated` header. The caller explicitly
+chooses runtime policy; missing/unknown/duplicate choices are 400. The route shares
+existing bearer/Host/Origin/query controls, exact application/zip upload handling,
+65 MiB/15-second bounds and single pre-buffer backup admission. No destination,
+server-side archive filename, reusable rehearsal receipt or arbitrary path is
+accepted. Archives are not retained. Responses are private, no-store metadata.
+
+The actor checks stopped phase, absence of a child and automatic retry after
+configuration recovery and before validation/publication. Running/recovering/
+failed or otherwise unsettled cores return 409 with a stop-first instruction.
+Lifecycle commands are serialized so a queued start cannot race the check. This
+increment deliberately supports stopped restoration; running-core reload/restart
+and rollback remain the next bounded integration task. Restoration leaves the
+core stopped; an ordinary start later uses the restored snapshot and existing
+saved-node reconciliation.
+
+The upload is verified afresh and privately materialized. Existing isolated Geo,
+archived-runtime, active regeneration and bounded script/Mihomo probes are reused.
+Both archived and regenerated candidates must pass when an active profile exists,
+even when archived publication is selected. After probes, all archived source,
+catalog/settings/runtime entries are read no-follow, bounded, with owner/private
+mode/type/link/identity checks and their original lengths/SHA-256 rechecked before
+publication. This closes the probe-induced source mutation gap for rehearsal and
+restore. No uploaded diagnostics are appended to service logs or HTTP errors.
+
+`archived` preserves exact runtime bytes, including comments/line endings, using
+new validated RuntimeStore::stage_yaml. Settings and catalog sources are restored
+from the archive; manual runtime values can intentionally differ from settings.
+`regenerated` selects the candidate produced from active raw/global/profile
+sources and archived authority, discarding manual runtime-only edits; it requires
+an active archived profile. Bootstrap-only archives therefore use archived policy.
+Fresh session DNS protection is enforced during generation. Archived policy is
+rejected whenever the active raw source has protected provider DNS, because a
+snapshot might contain an earlier session's override. Regeneration suppresses
+unconfirmed page overrides, persists the active DNS preference disabled when
+confirmation was required and reports that requirement. Commit clears all live
+session confirmations; subsequent enabling uses the existing confirmation flow.
+Inactive preferences remain catalog-bounded and are checked normally on selection.
+
+The actor stages the selected exact bytes, prepares the opaque restore plan,
+registers runtime pending, journals new sources, publishes catalog/settings and
+commits the runtime manifest. Cancellation is checked before each durable phase.
+Preparation disconnect/HTTP-close/manager-shutdown joins filesystem work, cancels
+and reaps probes/workers and drops private candidate ownership before releasing
+backup admission. Publication is bounded synchronous filesystem work under actor
+ownership; it cannot interrupt a single write/fsync. Precommit error/cancellation
+restores previous runtime and recovers catalog/settings/files. If recovery fails,
+status reports pending recovery and intent is retained; the generic response asks
+clients to inspect status rather than promising that nothing changed.
+
+After manifest rename, restoration is logically committed even if directory fsync
+fails. The actor does not roll that state back: it finishes journal/private cleanup,
+refreshes settings/profile/status watches, clears old retry/selection/session state
+and returns a `BackupRestoreReceipt` with committed=true, archive metadata, policy,
+exact applied byte length/digest and revision, DNS confirmation flag and
+cleanup_pending. Cleanup/durability acknowledgement problems remain observable in
+receipt/status. The HTTP route awaits the actor result rather than discarding a
+committed receipt on graceful close. A disconnected client can still miss a commit
+made after its final precommit check; inspect status/revision before retrying. No
+separate permanent installation receipt or exactly-once replay API is promised.
+
+Verification: `cargo check --workspace --locked --offline`, all 306 regular workspace
+Rust tests and all 17 regular backup API tests (307 distinct regular tests, including
+the additional committed-cleanup case), 3 real-Mihomo backup tests, warnings-denied
+Clippy, formatting and diff checks pass. New coverage verifies archived byte
+preservation/controller rejection, explicit policy/auth/duplicates, bootstrap and
+active restores, regenerated-versus-manual runtime choice, private source mutation,
+probe rejection, journaled publication write failure with rollback, committed private
+cleanup failure reported without rollback, released shared
+admission, fresh DNS protection and service restart persistence. Existing probe
+cancellation tests now exercise both rehearsal and restore disconnect/HTTP-close/
+manager-shutdown. Real data coverage restores an exported actual 56-node archive
+through the API after changing live settings, verifies the running request is 409,
+and checks restored mode/source/selected-node HTTPS 204 through restart. Original
+catalog and raw subscription bytes remain unchanged.
+
+The runnable Linux MVP is refreshed at
+`target/mihomo-server-linux-x86_64-restore-api` using the current Rust binary,
+unchanged Web assets, pinned independent Mihomo and updated deployment/provenance
+docs. All 12 checksums pass and the packaged release binary/docs match source.
+Fresh-bundle smoke verifies a 1,110,883-byte/13-entry actual 56-node archive, running
+restore rejection (409), stopped API commit after changing settings, restored
+source/settings/node state, start and service-restart HTTPS 204 traffic, and unchanged
+original data-file hashes. Runtime/profile/log state remains unchanged during
+rehearsal; publication intentionally advances the runtime revision and source
+filenames. Final cleanup leaves no owned service/core processes or disposable
+restore directories. No sandbox Git writes/commits occur; the host script owns the
+commit.
+
+Next Delivery step 7 subtask: extend explicit restoration to running cores with
+validated reload, restart fallback, cancellation-aware rollback of the old core,
+commit-aware completion and preserved node records. Abrupt-termination private
+candidate cleanup, source/revision garbage collection, retained archive list/delete,
+scheduled backups, WebDAV, backup UI and the full design's other platform/settings/
+resource/advanced-page/shared-component work remain pending. The full project is
+not complete.
 
 ## MVP completion boundary
 

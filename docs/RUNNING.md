@@ -2101,9 +2101,9 @@ symlinks/FIFO/directory sources are rejected. Changes during export are detected
 The cooperative worker budget is 15 seconds; shutdown checks cancel work and join
 it before releasing the data-directory lock. No archive is retained by the service.
 
-This is a `mihomo-server` backup format. Restore transactions, local retention/
-list/delete, scheduling, WebDAV and backup Web controls remain pending; these
-endpoints do not restore or accept desktop backup files.
+This is a `mihomo-server` backup format. Explicit stopped-core restoration is
+available through `/api/backup/restore`; local retention/list/delete, scheduling,
+WebDAV and backup Web controls remain pending. Desktop backup files are not accepted.
 
 ## Inspect a service backup before restoring
 
@@ -2146,7 +2146,7 @@ until it finishes/cancels. Status/settings/lifecycle commands remain independent
 Limits remain 65 MiB upload, 64 MiB content, 8 MiB per content entry and 1,024 ZIP
 entries, with a 1 MiB manifest and the existing 64 KiB settings limit. Only this
 binary route uses the larger upload allowance; JSON commands retain their 9 MiB
-envelope limit. Transactional restore and rollback remain pending.
+envelope limit. Explicit stopped-core restore and rollback are described below.
 
 ## Validate a restore candidate with Mihomo and enhancement workers
 
@@ -2201,11 +2201,57 @@ HTTP shutdown and manager shutdown cancel the work, terminate/reap probes/worker
 join preparation and remove candidates before releasing admission/data ownership.
 Successful, failed and cancelled rehearsals clean their temporary files. Abrupt
 process termination can leave a private temporary directory; automatic orphan
-cleanup remains pending with the restore recovery work.
+cleanup remains pending; durable catalog/settings restore recovery is available.
 
 Invalid archives, source generation, scripts, provider paths, Mihomo rejection,
 probe mutation or cleanup failure return generic 422; no restore state is
 published and no restore journal is created. Success is a disposable rehearsal,
-not a saved restore candidate or permission to skip validation later. Durable
-catalog/settings/runtime publication, recovery, rollback and restore UI remain
-the next backup work.
+not a saved restore candidate or permission to skip validation later. Explicit
+stopped-core publication/recovery/rollback is described below. Running-core
+restoration and restore UI remain pending.
+
+
+## Restore a service backup while the core is stopped
+
+`POST /api/backup/restore` accepts the same authenticated, unencoded raw ZIP body
+as `/api/backup/inspect` and `/api/backup/validate`. Set exactly one
+`X-Backup-Runtime` header to `archived` or `regenerated`; there is no implicit
+choice. Stop the core using the existing stop command first. Running, recovering,
+failed or unsettled lifecycle states return 409 `restore_requires_stopped_core`;
+stop settles the lifecycle before retrying. The restored core remains stopped.
+
+Archived policy preserves the snapshot's exact runtime bytes after validation.
+Regenerated policy executes active archived source/enhancements with archived
+settings and replaces manual runtime-only edits. It requires an active profile;
+bootstrap-only archives must choose archived policy. Both archived and regenerated
+probes must pass for active archives. Protected provider DNS in the raw active
+source forbids archived policy: choose regeneration. Unconfirmed page overrides
+are suppressed and their active preference is disabled; the receipt reports the
+need for fresh confirmation. Enabling later uses the normal DNS confirmation API.
+Live session confirmations are cleared on commit, never imported from a backup.
+
+Successful JSON contains `committed: true`, `archive` inspection metadata,
+`runtime_policy`, `runtime_revision`, exact `runtime_bytes`/`runtime_sha256`,
+`dns_override_requires_confirmation` and `cleanup_pending`. It contains no source,
+profile names, host paths or credentials. Catalog records/links/node selections and
+settings are restored, with new immutable source filenames; old source files are
+retained for later garbage collection. Starting normally restores saved nodes.
+
+Missing/duplicate/unknown runtime policy is 400 `invalid_restore_policy`. Auth,
+media, length, body bounds, 15-second upload timeout and shared admission use the
+existing binary backup contract. Generic 422 `backup_restore_failed` covers
+validation/publication failures without uploaded diagnostics; inspect service
+status before retrying. Closing before commit yields 503 `restore_interrupted`.
+The route awaits committed cleanup to preserve a truthful receipt during graceful
+close, but a disconnected client may miss a commit; query status/revision before
+repeating an upload. Receipt is not a reusable candidate or an exactly-once key.
+
+Preparation is cancelled and joined on disconnect/shutdown. Publication uses
+bounded synchronous filesystem writes/fsyncs and checks cancellation between
+durable phases; individual syscalls cannot be preempted. Precommit failure rolls
+runtime/catalog/settings/files back through the journal. Unresolved recovery is
+reported in status and retains intent. Manifest rename means logically committed
+regardless of a following directory fsync error; such acknowledgement/cleanup
+errors set cleanup_pending rather than undoing the restoration. Startup rolls back
+uncommitted intent or finishes committed publication before normal catalog/DNS
+initialization. Abrupt-termination disposable directory cleanup remains pending.
