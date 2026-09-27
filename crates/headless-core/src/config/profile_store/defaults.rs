@@ -13,6 +13,7 @@ impl ProfileStore {
     pub fn ensure_global_defaults(&mut self) -> Result<()> {
         for journal in [
             "profile-import.yaml",
+            "backup-restore.yaml",
             "profile-refresh.yaml",
             "profile-merge.yaml",
             "profile-delete.yaml",

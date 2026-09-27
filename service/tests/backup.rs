@@ -694,3 +694,293 @@ async fn real_backup_exports_preserve_running_pid_config_and_saved_nodes_and_sur
     let cleanup = restarted.shutdown().await;
     result.and(cleanup)
 }
+
+fn seed_backup_restore(dir: &Directory, committed: bool) -> Result<(String, String)> {
+    use headless_core::config::{
+        dns::ProfileDnsSettings,
+        profile_store::ProfileStore,
+        runtime::{RuntimeStore, parse},
+        settings::SettingsStore,
+    };
+    let candidate_dir = Directory::new()?;
+    let mut old = ProfileStore::open(&dir.0)?;
+    let mut candidate = ProfileStore::open(&candidate_dir.0)?;
+    old.ensure_global_defaults()?;
+    candidate.ensure_global_defaults()?;
+    let old_yaml = "mode: direct\nmixed-port: 0\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']\n";
+    let new_yaml = "mode: global\nmixed-port: 0\ndns: {enable: false}\ntun: {enable: false}\nproxy-groups: [{name: Main, type: select, proxies: [DIRECT, REJECT]}]\nrules: ['MATCH,Main']\n";
+    let old_uid = old
+        .import_local_with_defaults("previous", old_yaml)?
+        .uid
+        .unwrap()
+        .to_string();
+    let new_uid = candidate
+        .import_local_with_defaults("archived", new_yaml)?
+        .uid
+        .unwrap()
+        .to_string();
+    old.set_current(Some(&old_uid))?;
+    candidate.set_current(Some(&new_uid))?;
+    candidate.record_selection(&new_uid, "Main", "REJECT")?;
+    let mut settings = SettingsStore::open(&dir.0)?;
+    let mut target = settings.snapshot();
+    target
+        .profile_dns
+        .insert(new_uid.clone(), ProfileDnsSettings { enabled: true });
+    let mut runtime = RuntimeStore::open(&dir.0)?;
+    let revision = runtime.stage(parse(old_yaml)?)?;
+    runtime.begin_profile(revision, Some(old_uid.clone()))?;
+    runtime.commit()?;
+    let revision = runtime.stage(parse(new_yaml)?)?;
+    let plan = old.prepare_restore(&candidate, &settings, target, &runtime, revision.clone())?;
+    runtime.begin_profile(revision, Some(new_uid.clone()))?;
+    old.begin_restore(plan, &settings, &runtime)?;
+    old.publish_restore(&mut settings, &runtime)?;
+    if committed {
+        runtime.commit()?;
+    }
+    Ok((old_uid, new_uid))
+}
+#[tokio::test]
+async fn startup_recovers_backup_restore_before_dns_pruning_defaults_and_active_mirror() -> Result<()> {
+    for committed in [false, true] {
+        let dir = Directory::new()?;
+        let (old_uid, new_uid) = seed_backup_restore(&dir, committed)?;
+        let manager = dir.manager(false)?;
+        let result = async {
+            let expected = if committed { &new_uid } else { &old_uid };
+            assert_eq!(manager.status().active_profile.as_deref(), Some(expected.as_str()));
+            assert_eq!(manager.profiles().current.as_deref(), Some(expected.as_str()));
+            let settings = manager.settings().await?;
+            assert_eq!(settings.profile_dns.contains_key(&new_uid), committed);
+            assert_eq!(
+                manager.runtime_config().await?["mode"].as_str(),
+                Some(if committed { "global" } else { "direct" })
+            );
+            assert!(!dir.0.join("backup-restore.yaml").exists());
+            manager.export_backup().await?;
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        let cleanup = manager.shutdown().await;
+        result.and(cleanup)?;
+    }
+    Ok(())
+}
+#[tokio::test]
+async fn startup_rejects_conflicting_restore_intent_and_releases_data_lock() -> Result<()> {
+    let dir = Directory::new()?;
+    seed_backup_restore(&dir, true)?;
+    let mut catalog: IProfiles = serde_yaml_ng::from_slice(&fs::read(dir.0.join("profiles.yaml"))?)?;
+    catalog.items.as_mut().unwrap()[0].name = Some("conflict".into());
+    fs::write(dir.0.join("profiles.yaml"), serde_yaml_ng::to_string(&catalog)?)?;
+    assert!(dir.manager(false).is_err());
+    assert!(dir.0.join("backup-restore.yaml").exists());
+    // A second attempt also reaches recovery rather than an unreleased ownership lock.
+    let error = dir.manager(false).err().context("expected recovery failure")?;
+    assert!(error.to_string().contains("restore conflicts"));
+    Ok(())
+}
+#[tokio::test]
+#[ignore = "requires real MIHOMO_TEST_BINARY; durable restore startup and saved-node recovery"]
+async fn real_committed_restore_journal_recovers_config_and_saved_node_on_restart() -> Result<()> {
+    let dir = Directory::new()?;
+    let (_, uid) = seed_backup_restore(&dir, true)?;
+    for _ in 0..2 {
+        let manager = dir.manager(true)?;
+        let result = async {
+            assert_eq!(manager.status().active_profile.as_deref(), Some(uid.as_str()));
+            manager.start().await?;
+            tokio::time::timeout(Duration::from_secs(8), async {
+                loop {
+                    if manager.client().get_proxies().await.is_ok_and(|p| {
+                        p.proxies
+                            .get("Main")
+                            .is_some_and(|p| p.now.as_deref() == Some("REJECT"))
+                    }) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                }
+            })
+            .await?;
+            assert_eq!(manager.runtime_config().await?["mode"].as_str(), Some("global"));
+            assert!(!dir.0.join("backup-restore.yaml").exists());
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        let cleanup = manager.shutdown().await;
+        result.and(cleanup)?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires MIHOMO_TEST_BINARY and MIHOMO_TEST_DATA; isolated real-node restore transaction"]
+async fn real_data_restore_transaction_preserves_sources_and_proxy_traffic_after_restart() -> Result<()> {
+    use anyhow::ensure;
+    use headless_core::config::{
+        profile_store::ProfileStore,
+        runtime::{RuntimeStore, parse},
+        settings::SettingsStore,
+    };
+    let source = PathBuf::from(std::env::var_os("MIHOMO_TEST_DATA").context("set MIHOMO_TEST_DATA")?);
+    let original_catalog = fs::read(source.join("profiles.yaml"))?;
+    let catalog: IProfiles = serde_yaml_ng::from_slice(&original_catalog)?;
+    let item = catalog
+        .items
+        .as_ref()
+        .context("actual catalog missing")?
+        .iter()
+        .find(|i| i.uid == catalog.current)
+        .context("actual active source missing")?;
+    let file = item.file.as_deref().context("actual source filename missing")?;
+    headless_core::config::profile_store::validate_profile_file(file)?;
+    let source_path = source.join("profiles").join(file);
+    let raw = fs::read_to_string(&source_path)?;
+    let config: serde_yaml_ng::Mapping = serde_yaml_ng::from_str(&raw)?;
+    let nodes: Vec<_> = config
+        .get("proxies")
+        .and_then(|v| v.as_sequence())
+        .context("actual nodes missing")?
+        .iter()
+        .filter_map(|p| {
+            let name = p.get("name")?.as_str()?;
+            let kind = p.get("type")?.as_str()?;
+            (!matches!(kind, "direct" | "reject")
+                && !["剩余", "到期", "流量", "套餐", "官网"]
+                    .iter()
+                    .any(|s| name.contains(s)))
+            .then(|| name.to_owned())
+        })
+        .collect();
+    ensure!(!nodes.is_empty(), "actual proxy nodes missing");
+    let dir = Directory::new()?;
+    let candidate_dir = Directory::new()?;
+    for name in ["geoip.metadb", "GeoSite.dat", "Country.mmdb", "GeoIP.dat"] {
+        if source.join(name).is_file() {
+            fs::copy(source.join(name), dir.0.join(name))?;
+            fs::set_permissions(dir.0.join(name), fs::Permissions::from_mode(0o600))?;
+        }
+    }
+    let mut profiles = ProfileStore::open(&dir.0)?;
+    profiles.ensure_global_defaults()?;
+    let previous = profiles.import_local_with_defaults("previous", "mode: direct\nrules: ['MATCH,DIRECT']")?;
+    profiles.set_current(previous.uid.as_deref())?;
+    let mut runtime = RuntimeStore::open(&dir.0)?;
+    let old = runtime.stage(parse(
+        "mode: direct\nmixed-port: 0\ndns: {enable: false}\nrules: ['MATCH,DIRECT']",
+    )?)?;
+    runtime.begin_profile(old, previous.uid.map(|s| s.to_string()))?;
+    runtime.commit()?;
+    let mut candidate = ProfileStore::open(&candidate_dir.0)?;
+    candidate.ensure_global_defaults()?;
+    let item = candidate.import_local_with_defaults("actual archived source", &raw)?;
+    let uid = item.uid.unwrap().to_string();
+    candidate.set_current(Some(&uid))?;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let port = listener.local_addr()?.port();
+    drop(listener);
+    let mut settings = SettingsStore::open(&dir.0)?;
+    let target: ServiceSettings = serde_yaml_ng::from_str(&format!(
+        "schema_version: 1\nruntime:\n  mode: global\n  mixed-port: {port}\n  port: 0\n  socks-port: 0\n  redir-port: 0\n  tproxy-port: 0\n  allow-lan: false\n  dns: {{enable: false}}\n  tun: {{enable: false}}\n"
+    ))?;
+    let generated = headless_core::enhance::finalize::finalize(target.runtime.prepare(candidate.read_mapping(&uid)?)?);
+    let revision = runtime.stage(generated)?;
+    let binary = PathBuf::from(std::env::var_os("MIHOMO_TEST_BINARY").context("set MIHOMO_TEST_BINARY")?);
+    let output = tokio::time::timeout(
+        Duration::from_secs(15),
+        tokio::process::Command::new(binary)
+            .args(["-t", "-d"])
+            .arg(&dir.0)
+            .arg("-f")
+            .arg(runtime.path(&revision)?)
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await??;
+    ensure!(output.status.success(), "actual candidate rejected by Mihomo");
+    let plan = profiles.prepare_restore(&candidate, &settings, target, &runtime, revision.clone())?;
+    runtime.begin_profile(revision, Some(uid.clone()))?;
+    profiles.begin_restore(plan, &settings, &runtime)?;
+    profiles.publish_restore(&mut settings, &runtime)?;
+    runtime.commit()?;
+    let mut selected = None;
+    for restart in 0..2 {
+        let manager = dir.manager(true)?;
+        let result = async {
+            ensure!(
+                manager.profile_raw(uid.clone()).await?.yaml == raw,
+                "archived raw source changed"
+            );
+            manager.start().await?;
+            let choices = if restart == 0 {
+                nodes.iter().take(8).cloned().collect::<Vec<_>>()
+            } else {
+                vec![selected.clone().context("selected node missing")?]
+            };
+            let mut connected = false;
+            for node in choices {
+                if restart == 0 {
+                    manager.select_node("GLOBAL".into(), node.clone()).await?;
+                } else {
+                    tokio::time::timeout(Duration::from_secs(8), async {
+                        loop {
+                            if manager.client().get_proxies().await.is_ok_and(|p| {
+                                p.proxies
+                                    .get("GLOBAL")
+                                    .is_some_and(|p| p.now.as_deref() == Some(node.as_str()))
+                            }) {
+                                break;
+                            }
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                        }
+                    })
+                    .await?;
+                }
+                let result = tokio::time::timeout(
+                    Duration::from_secs(12),
+                    tokio::process::Command::new("curl")
+                        .args([
+                            "--silent",
+                            "--show-error",
+                            "--noproxy",
+                            "",
+                            "--proxy",
+                            &format!("http://127.0.0.1:{port}"),
+                            "--max-time",
+                            "8",
+                            "--output",
+                            "/dev/null",
+                            "--write-out",
+                            "%{http_code}",
+                            "https://www.gstatic.com/generate_204",
+                        ])
+                        .kill_on_drop(true)
+                        .output(),
+                )
+                .await??;
+                if result.status.success() && result.stdout == b"204" {
+                    connected = true;
+                    selected = Some(node);
+                    break;
+                }
+            }
+            ensure!(connected, "restored actual proxy did not return HTTPS 204");
+            ensure!(!dir.0.join("backup-restore.yaml").exists(), "restore cleanup pending");
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        let cleanup = manager.shutdown().await;
+        result.and(cleanup)?;
+    }
+    ensure!(
+        fs::read(source.join("profiles.yaml"))? == original_catalog && fs::read_to_string(source_path)? == raw,
+        "original data changed"
+    );
+    println!(
+        "isolated restore transaction: {} actual nodes; HTTPS 204 before/after restart; original source unchanged",
+        nodes.len()
+    );
+    Ok(())
+}

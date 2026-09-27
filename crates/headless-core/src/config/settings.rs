@@ -220,6 +220,11 @@ struct SettingsJournal {
 }
 
 impl SettingsStore {
+    #[cfg(unix)]
+    pub(crate) fn data_dir(&self) -> &Path {
+        &self.root
+    }
+
     pub fn open(data_dir: &Path) -> Result<Self> {
         fs::create_dir_all(data_dir)?;
         let path = data_dir.join("settings.yaml");
@@ -284,6 +289,10 @@ impl SettingsStore {
     }
 
     pub fn begin(&self, candidate: ServiceSettings, runtime_revision: Revision) -> Result<()> {
+        ensure!(
+            !self.root.join("backup-restore.yaml").try_exists()?,
+            "backup restore recovery is pending"
+        );
         candidate.validate()?;
         ensure!(
             !self.root.join("settings-transaction.yaml").try_exists()?,

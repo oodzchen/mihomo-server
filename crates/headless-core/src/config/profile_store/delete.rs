@@ -75,7 +75,8 @@ impl ProfileStore {
         );
         ensure!(!uid.is_empty() && uid.len() <= 256, "invalid profile UID");
         ensure!(
-            !self.data_dir.join("profile-import.yaml").try_exists()?
+            !self.data_dir.join("backup-restore.yaml").try_exists()?
+                && !self.data_dir.join("profile-import.yaml").try_exists()?
                 && !self.data_dir.join("profile-delete.yaml").try_exists()?
                 && !self.data_dir.join("profile-refresh.yaml").try_exists()?
                 && !self.data_dir.join("profile-merge.yaml").try_exists()?,

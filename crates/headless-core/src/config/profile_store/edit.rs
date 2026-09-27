@@ -29,6 +29,7 @@ impl ProfileStore {
     pub fn edit_profile(&mut self, uid: &str, patch: ProfilePatch) -> Result<PrfItem> {
         ensure!(
             !self.data_dir.join("profile-refresh.yaml").try_exists()?
+                && !self.data_dir.join("backup-restore.yaml").try_exists()?
                 && !self.data_dir.join("profile-import.yaml").try_exists()?
                 && !self.data_dir.join("profile-delete.yaml").try_exists()?
                 && !self.data_dir.join("profile-merge.yaml").try_exists()?,

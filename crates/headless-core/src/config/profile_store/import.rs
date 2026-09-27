@@ -174,6 +174,7 @@ impl ProfileStore {
             "profile-refresh.yaml",
             "profile-merge.yaml",
             "profile-delete.yaml",
+            "backup-restore.yaml",
         ] {
             ensure!(!self.data_dir.join(name).try_exists()?, "profile recovery is pending");
         }

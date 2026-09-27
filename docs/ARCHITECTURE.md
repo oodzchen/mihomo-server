@@ -82,7 +82,8 @@ mihomo-server/
 │       ├── Immutable revision / orphan file garbage collection [Pending]
 │       ├── Timed update metadata / saved refresh source [Migrated + service scheduler]
 │       ├── Backup manifest / bounded entry / download, inspection and restore validation models [Implemented; upstream ZIP adaptation]
-│       └── Backup restore / retention models / full upgrade resource settings [Pending]
+│       ├── Opaque restore plan / durable catalog-settings journal / runtime commit recovery [Implemented; Linux verified]
+│       └── Backup retention models / full upgrade resource settings [Pending]
 ├── service/                                         [Partially implemented]
 │   ├── Persistent foreground entry point            [Implemented]
 │   ├── Binary/data/config/import args, directory lock [Implemented]
@@ -144,7 +145,9 @@ mihomo-server/
 │   │   ├── Authenticated read-only binary inspection / pre-upload shared admission [Implemented; Linux verified]
 │   │   ├── Disposable restore candidate / archived runtime / active enhancement validation [Implemented; Linux verified]
 │   │   ├── Actor-owned core snapshot / isolated Geo data / probe cancellation and cleanup [Implemented; Linux verified]
-│   │   ├── Durable restore publication / startup recovery / failure rollback [Pending]
+│   │   ├── Durable catalog/settings restore journal / runtime-marker recovery [Implemented; Linux verified]
+│   │   ├── Startup + actor recovery before DNS pruning/defaults/current mirror [Implemented; Linux verified]
+│   │   ├── Restore upload / running-core apply / cancellation / final receipt [Pending]
 │   │   ├── Abrupt-termination candidate orphan cleanup [Pending]
 │   │   └── Local retention / restore / schedule / WebDAV / UI [Pending]
 │   ├── Full application context and domain events  [Pending]
@@ -2733,6 +2736,99 @@ publication with startup recovery and failure rollback, including temporary
 candidate ownership/cleanup. Retention/list/delete, schedules, WebDAV, backup UI,
 other targets, native settings/resources, advanced pages, garbage collection,
 optional shared components and platform/service integrations remain pending.
+
+## Latest increment: durable backup restore intent and startup recovery
+
+Delivery step 7 now has a working persistence layer for backup restoration.
+`ProfileStore::prepare_restore` returns an opaque bounded plan from an already
+verified disposable catalog and a staged runtime revision. `begin_restore`,
+`publish_restore` and `recover_restore` coordinate catalog, settings and source
+files through a single private `backup-restore.yaml` journal. The service uses
+recovery at startup and before actor commands. Online restoration is still
+pending: no upload route invokes publication yet, and rehearsal reports remain
+read-only metadata rather than installable receipts.
+
+Preparation checks matching store roots, settled runtime/catalog identity, source
+schemas, UID/type/active/link/DNS references, source file boundaries and existing
+transaction admission. It preserves raw bytes, UID/metadata/auxiliary links and
+node records, allocating new immutable filenames for unique archived sources.
+Shared files of the same type remain shared; different types cannot share one
+source. Old live files are retained untouched. New sources are limited to 1,020
+files, 8 MiB each (1 MiB for scripts), 64 MiB combined; catalogs remain 8 MiB and
+settings 64 KiB. The bounded journal holds previous/candidate pointers and settings,
+source lengths/digests and the staged runtime digest, with an 18 MiB limit.
+
+The caller validates generation/scripts/Mihomo and decides runtime/DNS publication
+policy before registering the candidate with `RuntimeStore::begin_profile`.
+Preparation's source parsing is not equivalent to a core probe and does not
+execute scripts. Durable journal intent precedes any allocated source write.
+Each source uses a private `.part` file, fsync, rename and profiles-directory sync.
+Catalog/settings publication precedes `RuntimeStore::commit`; that manifest rename
+is the sole logical commit marker, even if its subsequent directory fsync fails.
+A caller must distinguish an already committed manifest from a precommit error.
+
+After restart RuntimeStore first discards pending activation. Recovery compares
+committed revision and active UID: the previous revision rolls catalog/settings
+back and removes only allocated sources/partial files; the candidate revision
+finishes publication and retains restored sources. Cleanup is idempotent and the
+journal is removed only after pointers/files are consistent. A truncated private
+`.part` is recoverable; finalized sources must match their recorded digest before
+any recovery mutation. Missing committed files, changed sources/runtime, unsafe
+files/directories, a third catalog/settings/runtime state or conflicting journals
+fail closed and retain intent for investigation. Recovery never overwrites an old
+source or rolls a committed revision back. Precommit callers must abort pending
+runtime before invoking recovery.
+
+New journal/source reads are bounded and no-follow/nonblocking, checking regular
+file type, owner/private permissions, single links and stable file identity.
+Directory checks reject symlinks/foreign ownership/unsafe write modes. Pending
+restore intent blocks new import/edit/delete/enhancement/default/settings
+transactions. Startup resolves it before other configuration journals, DNS
+preference pruning, current-profile mirroring and global defaults; actor commands
+also stop on unresolved recovery. The implementation and syscall dependency are
+Unix-only; Linux is verified and other restore targets remain pending. Filesystem
+operations are bounded synchronous work under caller ownership, not a cancellable
+online restore worker or an OS sandbox.
+
+Verification: `cargo check --workspace --locked --offline`, 300 regular Rust tests,
+11 focused persistence tests (including the additional first-restore case),
+the 3 real-Mihomo backup tests, warnings-denied Clippy,
+formatting and diff checks pass. The recovery matrix covers partial source staging,
+files without publication, catalog-only/settings-only/both publication, committed
+pointer repair, repeated recovery, shared and empty catalogs, stale plans,
+first restore without a committed revision, root/runtime conflicts,
+source/runtime mutation, missing files, unsafe parent
+symlinks, hard links, modes, forged paths/sizes/schema and admission conflicts.
+Service tests verify startup order, preserved DNS preferences and data-lock release
+on recovery failure. Real-core startup verifies restored configuration and saved
+node choice through a second restart.
+
+A separate real-core test privately imports the actual 56-node source from `data`,
+probes the staged candidate, commits a restore journal, starts the service through
+recovery and checks HTTPS 204 proxy traffic. A second service restart retains the
+restored source, selected node and HTTPS 204 traffic. Original catalog/raw bytes
+remain unchanged; uploaded contents/node names are not printed. These checks
+exercise the persistence layer directly, not an unimplemented HTTP restore route.
+
+The runnable Linux MVP is refreshed in
+`target/mihomo-server-linux-x86_64-restore-journal`, with the current Rust binary,
+existing Web assets, independent pinned Mihomo and current deployment/provenance
+docs. All 12 bundle checksums pass; the packaged binary and docs match source.
+Fresh-bundle smoke checks export/inspect/rehearse running, stopped and restarted
+56-node data, preserving PID/generation/catalog/configuration and selected node.
+The archive has 1,110,883 bytes and 13 entries, proxy HTTPS returns 204, and all
+original data-file hashes remain unchanged. Web source/assets are unchanged.
+No sandbox Git writes/commits occur; the host script owns the commit.
+
+Next Delivery step 7 subtask: connect verified candidate ownership to an
+authenticated restore upload and actor operation; define archived-versus-regenerated
+runtime and fresh DNS confirmation policy, validate/apply to a running or stopped
+core, roll back precommit failures, finish committed cleanup and return a truthful
+receipt on disconnect/shutdown/fsync errors. Abrupt-termination disposable candidate
+cleanup, retained old-source/revision garbage collection, local retention/list/delete,
+schedules, WebDAV and backup UI remain pending alongside the full design's other
+platforms, native settings/resources, advanced pages and optional shared components.
+The complete project is not finished.
 
 ## MVP completion boundary
 

@@ -84,6 +84,11 @@ pub fn parse_profile(yaml: &str) -> Result<Mapping> {
 }
 
 impl RuntimeStore {
+    #[cfg(unix)]
+    pub(crate) fn data_dir(&self) -> &Path {
+        self.root.parent().expect("runtime root has a parent")
+    }
+
     pub fn open(data_dir: &Path) -> Result<Self> {
         let root = data_dir.join("config");
         fs::create_dir_all(root.join("revisions"))?;

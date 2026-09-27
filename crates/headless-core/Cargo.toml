@@ -20,5 +20,8 @@ boa_engine = "=0.22.0"
 serde_json.workspace = true
 ring = "=0.17.14"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.189"
+
 [dev-dependencies]
 anyhow.workspace = true

@@ -455,8 +455,10 @@ impl CoreManager {
         };
         let store = RuntimeStore::open(&options.data_dir)?;
         let mut settings_store = SettingsStore::open(&options.data_dir)?;
-        settings_store.recover(store.state().current.as_ref())?;
         let mut profile_store = ProfileStore::open(&options.data_dir)?;
+        #[cfg(unix)]
+        profile_store.recover_restore(&mut settings_store, &store)?;
+        settings_store.recover(store.state().current.as_ref())?;
         profile_store.recover_import()?;
         profile_store.recover_refresh(store.state().current.as_ref())?;
         profile_store.recover_enhancement(store.state().current.as_ref())?;
@@ -1683,7 +1685,11 @@ impl Actor {
                 _ = closing(&mut self.shutdown) => break,
                 request = self.receiver.recv() => {
                     let Some(request) = request else { break; };
-                    if let Err(error) = self.recover_core_upgrade().await.and_then(|()| self.profile_store.recover_import())
+                    if let Err(error) = self.recover_core_upgrade().await.and_then(|()| {
+                        #[cfg(unix)]
+                        self.profile_store.recover_restore(&mut self.settings_store, &self.store)?;
+                        self.profile_store.recover_import()
+                    })
                         .and_then(|()| self.profile_store.recover_refresh(self.store.state().current.as_ref()))
                         .and_then(|()| self.profile_store.recover_enhancement(self.store.state().current.as_ref()))
                         .and_then(|()| self.settings_store.recover(self.store.state().current.as_ref()))

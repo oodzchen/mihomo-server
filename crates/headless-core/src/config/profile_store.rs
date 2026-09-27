@@ -23,6 +23,8 @@ mod edit;
 mod import;
 mod merge;
 mod refresh;
+#[cfg(unix)]
+mod restore;
 mod sequence;
 pub use defaults::{DEFAULT_GLOBAL_MERGE, DEFAULT_GLOBAL_SCRIPT};
 pub use merge::{
@@ -32,6 +34,8 @@ pub use sequence::SequenceKind;
 
 pub use edit::{ProfilePatch, RemoteOptionsPatch};
 pub use import::ImportPlan;
+#[cfg(unix)]
+pub use restore::RestorePlan;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RawContent {

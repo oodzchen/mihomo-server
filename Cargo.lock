@@ -1102,6 +1102,7 @@ dependencies = [
  "boa_engine",
  "clash-verge-draft",
  "clash-verge-limiter",
+ "libc",
  "percent-encoding",
  "ring",
  "serde",

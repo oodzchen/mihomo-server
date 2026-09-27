@@ -1495,3 +1495,27 @@ serializes actor core use, and cleans candidates on completion/failure/cancellat
 without restore journals or live config changes. No dependency changes are needed.
 Transactional publication/recovery/rollback, orphan cleanup after abrupt process
 termination, retention, scheduling, WebDAV and backup UI remain pending.
+
+
+## Durable service restore intent and runtime-marker recovery
+
+Reference: `src-tauri/src/feat/backup.rs::restore_local_backup` and
+`restore_webdav_backup`, pinned commit b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b.
+Upstream directly extracts its desktop archive then repairs Verge settings; this
+increment implements original service transaction logic instead of copying that
+extraction or desktop restart flow. No new upstream source is copied.
+
+Destinations: headless-core/src/config/profile_store/restore.rs, ProfileStore and
+SettingsStore transaction admission, service/src/core_manager.rs startup/actor
+recovery. Existing service schema, sequence/runtime validators and persistence
+helpers are reused. A private journal binds previous/candidate catalogs/settings,
+allocated source digests and staged runtime identity. New immutable source names
+preserve archived bytes and shared references without replacing live files.
+Runtime manifest commit determines rollback versus roll-forward; conflicting or
+unsafe state retains the journal. Unix no-follow/nonblocking reads require the
+already locked libc 0.2.189 dependency in headless-core; Linux is verified.
+
+This is a persistence foundation, not an online restore API. Active scripts/core
+validation remain caller responsibilities; rehearsal does not issue a reusable
+proof. Online runtime/DNS policy, cancellation/apply/receipt, orphan cleanup,
+retention, schedules, WebDAV, backup UI and other restore targets remain pending.
