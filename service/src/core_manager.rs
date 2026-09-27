@@ -98,6 +98,14 @@ pub struct CoreActivation {
     pub status: CoreStatus,
 }
 
+/// Preserve upstream's stable-upgrade result shape.
+#[derive(Debug, Clone, Serialize)]
+pub struct CoreUpgradeReport {
+    pub upgraded: bool,
+    pub from: String,
+    pub to: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CoreLog {
     pub stream: &'static str,
@@ -314,6 +322,19 @@ enum ProfileEnhancement {
 }
 
 enum CommandMessage {
+    InstalledCoreVersion(oneshot::Sender<Result<String>>),
+    CheckCoreUpgrade {
+        version: String,
+        force: bool,
+        reply: oneshot::Sender<Result<Option<CoreUpgradeReport>>>,
+    },
+    UpgradePreparedCore {
+        _permit: tokio::sync::OwnedSemaphorePermit,
+        prepared: crate::core_release::PreparedCore,
+        force: bool,
+        downloads: Arc<crate::core_release::CoreDownloads>,
+        reply: oneshot::Sender<Result<CoreUpgradeReport>>,
+    },
     ActivateCoreUpgrade {
         _permit: tokio::sync::OwnedSemaphorePermit,
         id: String,
@@ -611,6 +632,65 @@ impl CoreManager {
         let (reply, response) = oneshot::channel();
         self.commands
             .send(CommandMessage::CoreInstallation(reply))
+            .await
+            .context("core manager stopped")?;
+        response.await.context("core manager stopped")?
+    }
+
+    pub async fn installed_core_version(&self) -> Result<String> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        ensure!(
+            self.core_downloads.is_some(),
+            "core upgrade requires bundle-managed resources"
+        );
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::InstalledCoreVersion(reply))
+            .await
+            .context("core manager stopped")?;
+        response.await.context("core manager stopped")?
+    }
+
+    pub async fn upgrade_clash_core(&self, force: bool) -> Result<CoreUpgradeReport> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let downloads = self
+            .core_downloads
+            .clone()
+            .context("core upgrade requires bundle-managed resources")?;
+        let permit = Arc::clone(&self.core_release_admission)
+            .try_acquire_owned()
+            .context("core release request already in progress")?;
+        let mut shutdown = self.shutdown.subscribe();
+        let release = tokio::select! {biased;
+            _ = closing(&mut shutdown) => bail!("core upgrade cancelled during shutdown"),
+            result = crate::core_release::discover(None) => result?,
+        };
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::CheckCoreUpgrade {
+                version: release.version.clone(),
+                force,
+                reply,
+            })
+            .await
+            .context("core manager stopped")?;
+        if let Some(report) = response.await.context("core manager stopped")?? {
+            return Ok(report);
+        }
+        let cancellation = self.shutdown.subscribe();
+        let prepared = tokio::select! {biased;
+            _ = closing(&mut shutdown) => bail!("core upgrade cancelled during shutdown"),
+            result = downloads.prepare_resolved(release, &cancellation) => result?,
+        };
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::UpgradePreparedCore {
+                _permit: permit,
+                prepared,
+                force,
+                downloads,
+                reply,
+            })
             .await
             .context("core manager stopped")?;
         response.await.context("core manager stopped")?
@@ -1480,6 +1560,9 @@ impl Actor {
                         let message = format!("configuration recovery failed: {error:#}");
                         self.status.send_modify(|state| state.error = Some(message.clone()));
                         match request {
+                            CommandMessage::InstalledCoreVersion(reply) => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
+                            CommandMessage::CheckCoreUpgrade {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
+                            CommandMessage::UpgradePreparedCore {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::ActivateCoreUpgrade {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::CoreInstallation(reply) => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::StageCoreUpgrade { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
@@ -1503,6 +1586,18 @@ impl Actor {
                     self.settings = self.settings_store.snapshot();
                     self.dns_confirmations.retain(|uid, _| self.profile_store.get_item(uid).is_ok());
                     match request {
+                        CommandMessage::InstalledCoreVersion(reply) => {
+                            if !reply.is_closed() {let result = self.installed_version().await;let _ = reply.send(result);}
+                        }
+                        CommandMessage::CheckCoreUpgrade {version,force,reply} => {
+                            if !reply.is_closed() {let result = self.check_upgrade(&version,force).await;let _ = reply.send(result);}
+                        }
+                        CommandMessage::UpgradePreparedCore {prepared,force,downloads,reply,_permit:permit} => {
+                            if !reply.is_closed() {
+                                let result = self.upgrade_prepared(prepared,force,downloads).await;
+                                drop(permit);let _ = reply.send(result);
+                            }
+                        }
                         CommandMessage::ActivateCoreUpgrade {id, downloads, reply, _permit: permit} => {
                             if !reply.is_closed() {let result = self.activate_core(&id, downloads).await;drop(permit);let _ = reply.send(result);}
                         }
@@ -2353,6 +2448,42 @@ impl Actor {
         Ok(())
     }
 
+    async fn installed_version(&mut self) -> Result<String> {
+        crate::validation::probe_version(&self.options.binary, &mut self.shutdown, Duration::from_secs(5)).await
+    }
+
+    async fn check_upgrade(&mut self, version: &str, force: bool) -> Result<Option<CoreUpgradeReport>> {
+        let from = self.installed_version().await?;
+        Ok((!force && from == version).then(|| CoreUpgradeReport {
+            upgraded: false,
+            from,
+            to: version.into(),
+        }))
+    }
+
+    async fn upgrade_prepared(
+        &mut self,
+        prepared: crate::core_release::PreparedCore,
+        force: bool,
+        downloads: Arc<crate::core_release::CoreDownloads>,
+    ) -> Result<CoreUpgradeReport> {
+        // Lifecycle/configuration commands may have run while the download was in flight.
+        if let Some(report) = self.check_upgrade(&prepared.release.version, force).await? {
+            return Ok(report);
+        }
+        let yaml = serde_yaml_ng::to_string(&read_config(&self.options.config).await?)?;
+        let revision = self.store.state().current.map(|revision| revision.file);
+        let stage = downloads
+            .stage(&prepared.id, yaml, revision, &self.options.data_dir, &mut self.shutdown)
+            .await?;
+        let activated = self.activate_core(&stage.stage_id, downloads).await?;
+        Ok(CoreUpgradeReport {
+            upgraded: activated.upgraded,
+            from: activated.from,
+            to: activated.to,
+        })
+    }
+
     async fn activate_core(
         &mut self,
         id: &str,
@@ -2749,3 +2880,7 @@ async fn read_config(path: &Path) -> Result<Mapping> {
         .with_context(|| format!("cannot read configuration {}", path.display()))?;
     runtime::parse(&yaml)
 }
+
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+#[path = "core_upgrade_adapter_tests.rs"]
+mod upgrade_tests;

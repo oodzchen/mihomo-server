@@ -260,6 +260,17 @@ impl CoreDownloads {
         let release = tokio::time::timeout(Duration::from_secs(20), self.repository.discover(&client, version))
             .await
             .context("core release metadata timed out")??;
+        self.prepare_resolved(release, shutdown).await
+    }
+    /// Keep the metadata/hash pinned across the pre-download no-op check.
+    pub(crate) async fn prepare_resolved(
+        &self,
+        release: CoreRelease,
+        shutdown: &watch::Receiver<bool>,
+    ) -> Result<PreparedCore> {
+        self.repository.validate(&release)?;
+        ensure!(!*shutdown.borrow(), "core preparation cancelled during shutdown");
+        let client = self.repository.client()?;
         let id = format!("{}-{}", release.version, release.sha256);
         let final_path = self.root.join(&id);
         if fs::symlink_metadata(&final_path).is_ok() {

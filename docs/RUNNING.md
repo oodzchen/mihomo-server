@@ -1813,8 +1813,8 @@ After stage_core_upgrade, use the returned stage_id:
 
 These authenticated commands require bundle-managed resources. Activation does not
 accept paths, checksums, configuration overrides or force; selecting a staged ID
-explicitly replaces it even when the version is unchanged. The upstream upgrade
-wrapper's latest-version/no-op/force semantics and Web controls are still pending.
+explicitly replaces it even when the version is unchanged. The stable upgrade
+wrapper and Web controls below provide latest-version/no-op/force behavior.
 The returned report includes upgraded, from, to, installation and current status.
 core_installation returns null for an untouched bundle seed, or the last committed
 receipt with stage/version/target/executable/configuration hashes and byte count.
@@ -1856,3 +1856,45 @@ ordinary file bytes/mode; privilege xattrs are not transferred. Verification cov
 bounded startup readiness, not continued health indefinitely after commit. Completed
 compressed and executable candidates remain cached; their garbage collection is
 pending.
+
+## Upgrade the latest stable core from the browser
+
+Open `/core` (内核升级) in the authenticated management page. Installed version
+and installation receipt are read from the managed file even while stopped.
+Check updates to display official latest metadata; upgrade resolves latest again
+at the time of the action. The API accepts exactly these shapes:
+
+```json
+{"command":"installed_core_version"}
+{"command":"upgrade_clash_core","force":false}
+{"command":"upgrade_clash_core","force":true}
+```
+
+`force` is a required boolean. The result preserves upstream's
+`{"upgraded":true|false,"from":"v...","to":"v..."}` shape. When already at
+the latest stable version and force is false, no package is downloaded, no file
+is replaced and no core is restarted. With force true, the service installs the
+latest version even if unchanged. A verified cached compressed package may be
+reused; its digest and executable/configuration probes are checked again.
+
+One upgrade admission slot spans metadata discovery, the actor version check,
+download and final actor-owned staging/activation. Download remains outside the
+lifecycle actor, so lifecycle/configuration work can continue until switching
+starts. Resolved release metadata/hash remain pinned if latest changes during
+download. A second installed-version check and fresh configuration snapshot run
+after download. Once admitted to the actor, switching continues after browser
+disconnect; queued switching can be skipped if its caller has already gone away.
+Shutdown cancels network work and uses the existing switch rollback/reaping path.
+
+The page disables duplicate actions, confirms force reinstall, clears obsolete
+results before retry, refreshes installed information after success or failure,
+and rereads it after reconnection/navigation. Upgrade failure remains visible;
+refresh installation information and retry after addressing the reported error.
+An unmanaged `--mihomo` service shows that online upgrading requires a bundle.
+
+This increment supports stable Linux x86_64 ordinary managed executables. An
+unreadable/empty installed core fails the bounded version probe; upstream's repair
+of a previously truncated binary remains pending. Core-download managed/system
+proxy fallback and static-root TLS retry, Alpha and other platforms also remain
+pending. The browser does not accept package URLs, paths, hashes or version
+overrides for the latest-stable wrapper.

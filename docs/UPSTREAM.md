@@ -1247,3 +1247,31 @@ stale candidate rejection, startup-failure rollback, shutdown without restart,
 changed bundle seed preservation, and SIGKILL of a real management process during
 replacement followed by candidate termination and successful startup rollback.
 No new package dependency is needed.
+
+## Stable force/no-op upgrade command and browser workflow
+
+Source: src-tauri/src/feat/core_upgrade.rs::upgrade_core, CoreUpgradeReport and
+src-tauri/src/cmd/clash.rs::upgrade_clash_core at pinned commit
+b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b. The service command retains required
+boolean force, latest stable resolution, same-version no-op before download and
+the upgraded/from/to report. Force follows verified staging and actor-owned
+activation even for the same version. The new `/core` React page uses authenticated
+commands, installed version/receipt readback, busy controls, force confirmation
+and retry/reconnect reconciliation; it introduces no desktop IPC dependency.
+
+Adaptations pin the official API asset metadata/digest across discovery/download,
+retain one upgrade admission slot, keep network work outside the lifecycle actor,
+and recheck installed version/current configuration at final actor admission.
+Verified immutable compressed caches can be reused. Existing durable activation
+and running/stopped semantics are unchanged. The wrapper deliberately fails on an
+unreadable/empty old executable until broken-core repair has a durable recovery
+design. Upstream managed/system/direct route fallback, static-root TLS retry,
+Alpha assets, native privilege and other-platform integrations remain pending.
+
+Tests cover pinned metadata when latest moves, pre-publication cancellation,
+same-version no-op preserving PID/inode/revision/receipt, forced failed-candidate
+rollback and real running/stopped same-version reinstall. Browser transport
+fixtures check duplicate suppression, no-op/result/error display and force
+confirmation; forced success delegates to real authenticated stage/activation,
+including persistent receipt readback after service restart. Separate official
+release smoke exercises the actual end-to-end wrapper.

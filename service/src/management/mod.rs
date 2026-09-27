@@ -34,6 +34,10 @@ pub enum ManagementCommand {
         id: String,
     },
     CoreInstallation {},
+    InstalledCoreVersion {},
+    UpgradeClashCore {
+        force: bool,
+    },
     Logs {},
     Profiles {},
     Config {},
@@ -209,6 +213,12 @@ impl Management {
                 serde_json::to_value(self.manager.activate_core_upgrade(id).await?)?
             }
             ManagementCommand::CoreInstallation {} => serde_json::to_value(self.manager.core_installation().await?)?,
+            ManagementCommand::InstalledCoreVersion {} => {
+                serde_json::to_value(self.manager.installed_core_version().await?)?
+            }
+            ManagementCommand::UpgradeClashCore { force } => {
+                serde_json::to_value(self.manager.upgrade_clash_core(force).await?)?
+            }
             ManagementCommand::Status {} => serde_json::to_value(self.manager.status())?,
             ManagementCommand::Logs {} => serde_json::to_value(self.manager.logs())?,
             ManagementCommand::Profiles {} => serde_json::to_value(self.manager.profiles())?,

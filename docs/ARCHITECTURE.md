@@ -120,7 +120,8 @@ mihomo-server/
 │   │   ├── Actor snapshot / staged manifest / verified restart readback [Implemented]
 │   │   ├── Actor activation / live version and port checks / rollback [Implemented; Linux x86_64]
 │   │   ├── Durable switch journal / installation receipt / startup recovery [Implemented; Linux x86_64]
-│   │   ├── Upstream force/no-op adapter / upgrade Web workflow [Pending]
+│   │   ├── Stable upstream force/no-op adapter / upgrade Web workflow [Implemented; Linux x86_64]
+│   │   ├── Repair of unreadable/empty previous core [Pending]
 │   │   └── Proxy routing / static-root fallback / Alpha / other targets [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
@@ -138,7 +139,7 @@ mihomo-server/
 │   ├── Axum management API / command adapters       [Implemented; MVP allowlist]
 │   │   ├── State, logs, profiles, config, proxies queries [Implemented]
 │   │   ├── Lifecycle, YAML import/edit/overlay, profile edit/delete/import/refresh, linked read/set/clear, global read/set/reset, settings read/replace, profile DNS read/set, raw profile read/edit and node selection [Implemented]
-│   │   ├── Stable core query / preparation / staging / activation / installation readback [Implemented; Linux x86_64]
+│   │   ├── Stable core query / preparation / staging / activation / installation/version readback / force-no-op upgrade [Implemented; Linux x86_64]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -172,7 +173,8 @@ mihomo-server/
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── DNS/TUN editor / lossless nested inheritance / readback [Implemented; Linux verified]
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
-│   └── Full settings, core upgrade, backup UI       [Pending]
+│   ├── Stable core upgrade / force confirmation / installation readback / retry [Implemented; Linux x86_64]
+│   └── Full settings, Alpha core upgrade, backup UI [Pending]
 ├── Release and deployment                           [Partially implemented]
 │   ├── Linux x86_64 bundle: Rust + independent Mihomo + Web [Implemented]
 │   ├── Explicit target/version/SHA-256 resource manifest [Implemented]
@@ -1928,7 +1930,7 @@ Core-download proxy routing/static roots, Alpha/other targets, upgrade UI, full
 DNS/hosts/native TUN, resources, backups/WebDAV, advanced pages, garbage collection,
 SOCKS/PAC and additional platform/deployment checks remain pending.
 
-## Latest increment: managed core activation, health checks and durable rollback
+## Previous increment: managed core activation, health checks and durable rollback
 
 Delivery step 7 now exposes activate_core_upgrade (staged ID) and core_installation.
 The actor retains upgrade admission through replacement, including caller disconnect,
@@ -2007,6 +2009,81 @@ and Web upgrade workflow, including version/result readback and failure repair.
 Core-download managed/system routing/static roots, Alpha/other targets, full native
 TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage collection, SOCKS/PAC
 and additional platform/deployment integrations remain pending.
+
+## Latest increment: stable force/no-op adapter and browser upgrade workflow
+
+Delivery step 7 now exposes upstream-shaped upgrade_clash_core with required
+boolean force, returning upgraded/from/to, plus installed_core_version for an
+actor-bounded probe of the actual managed executable while running or stopped.
+The wrapper resolves latest stable metadata once, checks the installed version
+in the actor, and skips download/staging/replacement/restart when already current
+and force is false. Force validates and replaces even the same version. Existing
+immutable compressed caches may be reused after digest checks.
+
+One shared admission permit spans discovery, preflight, pinned metadata/hash
+download and final actor staging/activation. Network work stays outside the
+lifecycle actor. On final admission the actor checks version again, uses current
+normalized configuration and reuses the durable activation/health/rollback path.
+Active switching retains permit ownership through caller disconnect; shutdown
+cancels network work and rolls back an uncommitted switch. No source/path/hash
+or version overrides are accepted by the latest-stable wrapper.
+
+The new authenticated /core page reads installed version and receipt independently
+of running status, checks latest metadata, upgrades or confirms force reinstall,
+disables duplicate actions and clears previous results on retry. It rereads
+installation information after success/failure, reconnection and navigation.
+Errors remain repairable through refresh/retry. Unmanaged launches report that a
+managed bundle is required. The scoped server SPA navigation allowlist includes
+/core, supporting direct links and browser refresh without broadening API fallback.
+The existing Linux MVP and stopped-mode behavior remain.
+
+Verification for this increment:
+
+- Workspace check, formatting and Clippy (`--all-targets -- -D warnings`) pass.
+  Regular workspace tests pass 244 cases; all 66 opt-in tests pass with the real
+  `/usr/bin/verge-mihomo` and `--test-threads=1`. Web TypeScript/Vite build and
+  formatting checks pass.
+- New tests cover metadata pinned across a moving latest release, cancellation
+  before cache publication, version preflight/final no-op preserving PID/inode,
+  revision and receipt, forced failure rollback, and real running/stopped force
+  reinstalls with unchanged configuration. The isolated controller fixture uses
+  a short enough directory for Linux Unix socket paths.
+- The final verified package is
+  `target/mihomo-server-linux-x86_64-core-workflow-final`. Its service binary
+  matches this round's `target/release/mihomo-server`; every package checksum
+  passes and bundled deployment/provenance documents match source. An initial
+  packaging attempt selected a stale binary from the explicit-target directory;
+  command smoke caught it, and the verified package explicitly selects the newly
+  built host release binary. The server's new /core navigation route is checked
+  by the existing static-asset/auth-boundary test. All 23 Playwright workflows pass
+  against this final bundle, including direct /core navigation, version/receipt
+  reads, busy controls, force cancellation/confirmation, obsolete-result clearing,
+  failure/retry, actual running/stopped activation and receipt readback on restart.
+  Browser release/no-op/error responses use transport fixtures; force success
+  delegates to real authenticated staging/activation. The separate official smoke
+  covers the actual wrapper's discovery/download/no-op decisions.
+- Official-release smoke verifies latest stable `v1.19.31`, default no-op with
+  no package downloaded or PID/inode change, forced installation of the official
+  22,805,792-byte compressed asset, live health checks, stopped/running intent,
+  version/receipt persistence across restart and running force replacement.
+- An isolated copy of the actual saved subscription supplies 56 traffic-capable
+  nodes. The first node returns HTTPS 204 before and after the actual official
+  force wrapper, with restored selection, preserved active UID/configuration,
+  new PID/inode and hash-verified receipt. Subscription system-proxy fetching
+  still reaches YAML validation. Original `data` hashes remain unchanged and
+  automatic refresh is disabled only in the disposable copy. This smoke uses
+  ordinary platform roots; core-download static-root fallback remains pending.
+- The final process audit finds zero fixture services, cores, script workers or
+  probe scripts remaining. Disposable smoke data is removed; original data is
+  untouched. No Git metadata was written.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The complete project is not done. Next Delivery step 7 subtask: core-download
+managed/system/direct proxy routing with static-root TLS fallback, retaining the
+successful metadata route for package download and lifecycle cancellation.
+Broken/empty-core repair, Alpha/other targets, native TUN/DNS/hosts/resources,
+backups/WebDAV, advanced pages, garbage collection, SOCKS/PAC and additional
+platform/deployment integrations remain pending.
 
 ## MVP completion boundary
 

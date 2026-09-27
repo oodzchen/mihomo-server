@@ -44,6 +44,8 @@ async fn core_release_commands_authenticate_reject_source_overrides_and_require_
             json!({"command":"staged_core_upgrade","id":"v1.2.3-invalid"}),
             json!({"command":"activate_core_upgrade","id":"v1.2.3-invalid"}),
             json!({"command":"core_installation"}),
+            json!({"command":"installed_core_version"}),
+            json!({"command":"upgrade_clash_core","force":false}),
         ] {
             assert_eq!(
                 response(&app, request("wrong", "/api/commands", Some(command))?)
@@ -67,6 +69,12 @@ async fn core_release_commands_authenticate_reject_source_overrides_and_require_
             json!({"command":"staged_core_upgrade","id":"v1.2.3-invalid","sha256":"arbitrary"}),
             json!({"command":"activate_core_upgrade","id":"v1.2.3-invalid","force":true}),
             json!({"command":"core_installation","directory":"/tmp"}),
+            json!({"command":"installed_core_version"}),
+            json!({"command":"upgrade_clash_core","force":false}),
+            json!({"command":"upgrade_clash_core"}),
+            json!({"command":"upgrade_clash_core","force":"true"}),
+            json!({"command":"upgrade_clash_core","force":true,"version":"v1.2.3"}),
+            json!({"command":"upgrade_clash_core","force":true,"url":"https://untrusted.invalid"}),
         ] {
             assert_eq!(
                 response(&app, request(&token, "/api/commands", Some(command))?)

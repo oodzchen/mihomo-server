@@ -11,6 +11,7 @@ import { ApiError, command, subscribe, type Perform } from "./api";
 import { SettingsPage } from "./settings";
 import { ProxyAccessPanel } from "./proxy-access";
 import { RawEditor } from "./raw-editor";
+import { CoreUpgradePage } from "./core-upgrade";
 import type {
   CoreLog,
   CoreStatus,
@@ -37,6 +38,7 @@ const pages = [
   ["/proxies", "节点", "04"],
   ["/logs", "日志", "05"],
   ["/settings", "设置", "06"],
+  ["/core", "内核升级", "07"],
 ];
 const describe = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -389,6 +391,15 @@ function Manager({
           />
         ) : route === "/logs" ? (
           <LogPage logs={logs} />
+        ) : route === "/core" ? (
+          <CoreUpgradePage
+            token={token}
+            status={status}
+            connection={connection}
+            busy={busy}
+            perform={perform}
+            logout={logout}
+          />
         ) : route === "/settings" ? (
           <SettingsPage
             token={token}

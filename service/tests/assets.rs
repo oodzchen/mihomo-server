@@ -70,7 +70,7 @@ async fn public_assets_and_navigation_preserve_authenticated_api_boundaries() ->
     let (manager, state, token) = manager(&directory)?;
     let app = router(state.with_web_assets(&directory.0.join("web"))?);
     let result = async {
-        for path in ["/", "/profiles", "/config", "/proxies", "/logs", "/settings"] {
+        for path in ["/", "/profiles", "/config", "/proxies", "/logs", "/settings", "/core"] {
             let response = app.clone().oneshot(request(path, "GET", None)?).await?;
             assert_eq!(response.status(), StatusCode::OK);
             assert!(

@@ -220,6 +220,23 @@ async fn metadata_requires_published_stable_uploaded_exact_asset_digest_size_and
     Ok(())
 }
 #[tokio::test]
+async fn resolved_preparation_pins_metadata_across_a_moving_latest_and_cancels_before_publication() -> Result<()> {
+    let dir = Directory::new()?;
+    let fixture = Fixture::new().await?;
+    let downloads = fixture.downloads(&dir)?;
+    let client = fixture.repository.client()?;
+    let release = fixture.repository.discover(&client, None).await?;
+    fixture.state.metadata.lock().unwrap()["tag_name"] = json!("v9.9.9");
+    let (closing, rx) = watch::channel(false);
+    let prepared = downloads.prepare_resolved(release.clone(), &rx).await?;
+    assert_eq!(prepared.release, release);
+    assert_eq!(fixture.state.requests.lock().unwrap().len(), 2);
+    closing.send_replace(true);
+    assert!(downloads.prepare_resolved(release, &rx).await.is_err());
+    assert_eq!(fs::read_dir(&downloads.root)?.count(), 1);
+    Ok(())
+}
+#[tokio::test]
 async fn verified_preparation_is_private_atomic_reusable_and_rechecked_after_restart() -> Result<()> {
     let dir = Directory::new()?;
     let fixture = Fixture::new().await?;
