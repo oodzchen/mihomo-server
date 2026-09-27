@@ -3,15 +3,17 @@
 use anyhow::{Result, ensure};
 use std::ffi::OsString;
 
-pub(super) fn validate() -> Result<()> {
+/// True means all system proxy discovery must be disabled for this request.
+pub(super) fn bypass_all() -> Result<bool> {
     validate_values(|name| std::env::var_os(name))
 }
 
-fn validate_values(read: impl Fn(&str) -> Option<OsString>) -> Result<()> {
+fn validate_values(read: impl Fn(&str) -> Option<OsString>) -> Result<bool> {
     // The locked Reqwest/Hyper implementation disables system proxies in CGI contexts.
     if read("REQUEST_METHOD").is_some() {
-        return Ok(());
+        return Ok(true);
     }
+    let mut bypass_all = false;
     for (upper, lower) in [
         ("HTTP_PROXY", "http_proxy"),
         ("HTTPS_PROXY", "https_proxy"),
@@ -30,7 +32,13 @@ fn validate_values(read: impl Fn(&str) -> Option<OsString>) -> Result<()> {
             "invalid service proxy environment {name}: expected UTF-8 without control characters, at most 8 KiB"
         );
         let value = value.unwrap();
-        if value.is_empty() || upper == "NO_PROXY" {
+        if upper == "NO_PROXY" {
+            // Hyper-util 0.1.20 only matches its domain wildcard on domain names.
+            // Preserve standard global bypass semantics for IP literals as well.
+            bypass_all = value.split(',').any(|entry| entry.trim() == "*");
+            continue;
+        }
+        if value.is_empty() {
             continue;
         }
         // Validate the same URI representation used by Hyper's system proxy matcher.
@@ -49,7 +57,7 @@ fn validate_values(read: impl Fn(&str) -> Option<OsString>) -> Result<()> {
             "invalid service proxy environment {name}: expected an HTTP(S) proxy endpoint"
         );
     }
-    Ok(())
+    Ok(bypass_all)
 }
 
 #[cfg(test)]
@@ -62,6 +70,7 @@ mod tests {
                 .find(|(key, _)| *key == name)
                 .map(|(_, value)| OsString::from(value))
         })
+        .map(|_| ())
     }
     #[test]
     fn accepts_http_https_credentials_authorities_bypass_and_empty_configuration() -> Result<()> {
@@ -102,6 +111,16 @@ mod tests {
         check(&[("HTTP_PROXY", ""), ("http_proxy", "invalid secret")])?;
         check(&[("REQUEST_METHOD", "GET"), ("HTTP_PROXY", "invalid secret")])?;
         assert!(check(&[("http_proxy", "invalid secret")]).is_err());
+        Ok(())
+    }
+    #[test]
+    fn global_bypass_is_explicit_for_domains_and_ip_literals() -> Result<()> {
+        assert!(validate_values(
+            |name| (name == "NO_PROXY").then(|| OsString::from("localhost, *, .example.org"))
+        )?);
+        assert!(!validate_values(
+            |name| (name == "NO_PROXY").then(|| OsString::from("localhost,127.0.0.1"))
+        )?);
         Ok(())
     }
     #[cfg(unix)]

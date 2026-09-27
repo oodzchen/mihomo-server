@@ -375,9 +375,10 @@ no proxy, ten redirects, existing reqwest TLS defaults, upstream-style user agen
 keepalive/no idle pooling and the actual from_url default of 20 seconds. Reqwest
 0.13.5 was already locked and used by the client/tests; it is now a regular service
 dependency. URL/percent-encoding versions already locked are also used by the
-HTTP-independent core helper. TLS static-root fallback, system proxy mode and invalid-certificate bypass
-remain pending. Managed core proxy mode and auxiliary defaults are implemented
-in the later increments documented below; unsupported options remain rejected.
+HTTP-independent core helper. TLS static-root fallback and invalid-certificate
+bypass remain pending. Managed/system proxy modes and auxiliary defaults are
+implemented in the later increments documented below; unsupported options remain
+rejected.
 The service adds timeout/concurrency/body limits, strict HTTP(S) validation and
 transport error URL removal. Live third-party HTTPS/provider checks remain pending.
 
@@ -1031,3 +1032,37 @@ proxy discovery, SOCKS-only transport, TLS fallback/bypass and scheduling remain
 pending. Real-Mihomo integration exercises an authenticated ingress and controlled
 HTTP upstream tunnel, so a synthetic subscription hostname succeeds only through
 that proxy chain; origin/upstream headers are checked for credential separation.
+
+
+## System-proxy remote subscriptions in the headless service
+
+Adapted from pinned `src-tauri/src/config/prfitem.rs::from_url` (self_proxy before
+with_proxy before direct) and `src-tauri/src/utils/network.rs::create_request_with_tls_mode`
+(system Sysproxy discovery, disabled/unavailable proxy permits direct). The Linux
+service uses Reqwest 0.13.5 / Hyper-util 0.1.20's environment-based system matcher
+instead of querying a desktop Sysproxy singleton. These already locked libraries
+provide protocol routing, HTTP basic authentication, HTTPS CONNECT and NO_PROXY;
+Reqwest's system-proxy feature is explicitly retained. Windows/macOS native discovery
+code remains available in those libraries but is not newly runtime-verified.
+
+Only with_proxy true and self_proxy false enables default discovery. Direct and
+managed modes call no_proxy before any explicit managed route. Strict boolean
+options are persisted, merged by metadata patches and used on refresh. No new
+client-supplied proxy URL is accepted. Bounded validation of effective environment
+variables rejects malformed/unsupported proxy endpoints using only variable names
+in errors. Uppercase precedence and CGI suppression follow the inspected locked
+matcher. The service additionally treats a NO_PROXY `*` entry as global bypass
+for IP literals as well as hostnames, correcting the locked matcher's domain-only
+wildcard behavior. An unavailable selected endpoint fails instead of retrying directly;
+missing configuration and explicit NO_PROXY retain normal direct behavior.
+
+Process-isolated tests avoid unsafe/global Rust environment mutation and exercise
+actual service imports/refreshes through controlled HTTP proxies, credentials,
+redirects to bypassed origins, HTTP/HTTPS/ALL precedence, HTTPS CONNECT, absent and
+empty configuration, CGI/bypass, metadata conflicts, restart persistence, body/
+time/concurrency bounds and shutdown cancellation. A real Mihomo workflow verifies
+managed priority, authenticated local ingress and that system refresh remains
+pending across core stop then succeeds. Provider/proxy requests never carry the
+management token. Browser import/edit choices preserve failed drafts and explicit
+false mode switches. Linux desktop gsettings, PAC/WPAD, SOCKS, TLS fallback/bypass,
+scheduling and other-platform runtime verification remain separate work.

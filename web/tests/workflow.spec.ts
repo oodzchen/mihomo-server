@@ -13,6 +13,23 @@ let subscriptionUsage = "upload=1024; download=2048; total=4096; expire=0";
 let subscriptionRequests = 0;
 const errors: string[] = [];
 async function start() {
+  const fixtureEnv = { ...process.env, MIHOMO_SERVER_DATA_DIR: directory };
+  for (const name of [
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
+    "REQUEST_METHOD",
+  ])
+    delete fixtureEnv[name as keyof typeof fixtureEnv];
+  Object.assign(fixtureEnv, {
+    HTTP_PROXY: subscriptionUrl,
+    NO_PROXY: "127.0.0.1,localhost",
+  });
   const bundle = process.env.MIHOMO_TEST_BUNDLE;
   service = spawn(
     bundle
@@ -37,7 +54,7 @@ async function start() {
         ],
     {
       stdio: ["ignore", "ignore", "pipe"],
-      env: { ...process.env, MIHOMO_SERVER_DATA_DIR: directory },
+      env: fixtureEnv,
     },
   );
   let stderr = "";
@@ -2734,6 +2751,95 @@ test("managed proxy downloads persist the mode, keep failed drafts and allow exp
   await page.getByRole("button", { name: "下载并导入", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Keep proxy draft", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+});
+
+test("service system proxy import and refresh work while the core is stopped and persist explicit mode changes", async ({
+  page,
+}) => {
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await fetch(`${base}/api/commands`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ command, ...fields }),
+    });
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  await api("stop");
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务", exact: true }).click();
+  const url = "http://browser-subscription.invalid/ok?system=1";
+  await page.getByLabel("订阅链接", { exact: true }).fill(url);
+  await page.getByLabel("远程订阅名称（可选）").fill("System download");
+  await page.getByLabel("使用服务系统代理下载", { exact: true }).check();
+  await page.getByRole("button", { name: "下载并导入", exact: true }).click();
+  const card = page.locator("article.profile").filter({
+    has: page.getByRole("heading", { name: "System download", exact: true }),
+  });
+  await expect(card).toBeVisible();
+  const item = (await api("profiles")).items.find(
+    (p: { name: string }) => p.name === "System download",
+  );
+  expect(item.option.with_proxy).toBe(true);
+  expect(item.option.self_proxy).toBe(false);
+  const count = subscriptionRequests;
+  await api("refresh_profile", { uid: item.uid });
+  expect(subscriptionRequests).toBe(count + 1);
+  expect((await api("status")).phase).toBe("stopped");
+  await stop();
+  await start();
+  await expect(page.getByText("已连接", { exact: true })).toBeVisible({
+    timeout: 15000,
+  });
+  expect(
+    (await api("profiles")).items.find(
+      (p: { uid: string }) => p.uid === item.uid,
+    ).option.with_proxy,
+  ).toBe(true);
+  await api("stop");
+  await card
+    .getByRole("button", { name: "编辑订阅 System download", exact: true })
+    .click();
+  await expect(
+    page.getByLabel("订阅刷新使用服务系统代理", { exact: true }),
+  ).toBeChecked();
+  await page.getByLabel("订阅刷新使用服务系统代理", { exact: true }).uncheck();
+  await page
+    .getByLabel("远程订阅链接", { exact: true })
+    .fill(`${subscriptionUrl}/ok?direct=1`);
+  await page.getByRole("button", { name: "保存订阅信息", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "保存订阅信息", exact: true }),
+  ).toHaveCount(0);
+  expect(
+    (await api("profiles")).items.find(
+      (p: { uid: string }) => p.uid === item.uid,
+    ).option.with_proxy,
+  ).toBe(false);
+  await api("refresh_profile", { uid: item.uid });
+  const requests = subscriptionRequests;
+  await page.getByLabel("订阅链接", { exact: true }).fill(url);
+  await page.getByLabel("远程订阅名称（可选）").fill("Keep system draft");
+  await page.getByLabel("通过托管内核代理下载", { exact: true }).check();
+  await page.getByRole("button", { name: "下载并导入", exact: true }).click();
+  await expect(
+    page.getByText(/self_proxy requires a running managed core/),
+  ).toBeVisible();
+  expect(subscriptionRequests).toBe(requests);
+  await expect(page.getByLabel("订阅链接", { exact: true })).toHaveValue(url);
+  await expect(
+    page.getByLabel("使用服务系统代理下载", { exact: true }),
+  ).toBeChecked();
+  await page.getByLabel("通过托管内核代理下载", { exact: true }).uncheck();
+  await page.getByRole("button", { name: "下载并导入", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Keep system draft", exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
 });

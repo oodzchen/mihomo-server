@@ -50,7 +50,7 @@ mihomo-server/
 │       ├── Source controller removal / original YAML preservation [Implemented; Linux verified]
 │       ├── Remote URL/YAML/header processing        [Migrated + adaptation]
 │       ├── Remote raw-content import and metadata  [Implemented]
-│       ├── Manual remote refresh + recovery journal [Implemented; direct/self_proxy]
+│       ├── Manual remote refresh + recovery journal [Implemented; direct/self_proxy/with_proxy]
 │       ├── Metadata edit / noncurrent deletion     [Implemented; local/remote]
 │       ├── Linked YAML merge storage / recovery    [Implemented; upstream schema]
 │       ├── Linked rules/proxies/groups storage     [Implemented; upstream schema]
@@ -102,11 +102,13 @@ mihomo-server/
 │   ├── Global/profile staged generation on select/refresh/edit [Implemented; Linux verified]
 │   ├── Global read/set/reset, validation/apply/recovery [Implemented; Linux verified]
 │   ├── Disposable script worker / limits / cancellation / reap [Implemented; Linux only]
-│   ├── Remote HTTP(S) download + actor-backed import [Implemented; direct/self_proxy]
+│   ├── Remote HTTP(S) download + actor-backed import [Implemented; direct/self_proxy/with_proxy]
 │   │   ├── Bounded download size/concurrency, timeout/cancel [Implemented]
 │   │   ├── Manual refresh / stale-download guard / journal recovery [Implemented; Linux]
 │   │   ├── Managed core proxy / live route / auth / lifecycle cancellation [Implemented; Linux verified]
-│   │   └── System proxy, TLS fallback/bypass and scheduling [Pending]
+│   │   ├── Service system proxy / environment / bypass / auth [Implemented; Linux verified]
+│   │   ├── Native Windows/macOS proxy discovery runtime validation [Pending; library code retained]
+│   │   └── SOCKS, TLS fallback/bypass and scheduling [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
@@ -139,7 +141,7 @@ mihomo-server/
 │   ├── Local profiles, config editor, core state    [Implemented; MVP]
 │   │   ├── Remote URL import, usage display, saved auxiliary defaults [Implemented]
 │   │   ├── Manual remote refresh / usage updates  [Implemented]
-│   │   ├── Managed proxy import / saved mode editor / failed drafts [Implemented; Linux verified]
+│   │   ├── Managed/system proxy import / saved mode editor / failed drafts [Implemented; Linux verified]
 │   │   ├── Metadata editor / confirmed cascade deletion [Implemented; Linux verified]
 │   │   ├── Linked YAML merge editor / detach       [Implemented]
 │   │   ├── Linked rules/proxies/groups editor / detach [Implemented]
@@ -184,10 +186,10 @@ shutdown. It can start with `examples/minimal.yaml`; see
 before core startup and while the core is stopped or failed. A minimal React UI
 is available when `--web-dir ./web/dist` supplies built assets, including failed-core
 repair, local profiles, runtime editing, nodes, logs and realtime metrics.
-Direct and managed-proxy remote import and manual refresh preserve downloaded YAML, upstream metadata
+Direct, managed and system-proxy remote import and manual refresh preserve downloaded YAML, upstream metadata
 and profile identity. Active refresh uses validated application and recoverable
 commit; linked sequence, YAML merge and script editing feed selection and refresh generation.
-Scheduling, system proxy/TLS modes and the remaining enhancement workflows are incomplete. Local profile imports,
+Scheduling, TLS modes and the remaining enhancement workflows are incomplete. Local profile imports,
 selection and restoration now feed the runtime validation/application flow. Runtime YAML imports,
 upstream merge overlays, validation, application, persistence, and interrupted
 application recovery work through the manager; `--import-config` exposes the
@@ -1538,7 +1540,7 @@ full DNS/hosts/TUN settings, resources, core upgrades, backups/WebDAV, advanced 
 revision garbage collection and additional platforms remain pending. The Linux
 MVP remains runnable; the complete project is not done.
 
-## Latest increment: managed-core proxy subscription downloads
+## Previous increment: managed-core proxy subscription downloads
 
 Delivery step 7 now supports self_proxy on remote import, saved remote metadata
 patches and manual refresh. Missing/false retains direct transport. Persisted
@@ -1595,6 +1597,76 @@ refresh recovery. TLS fallback/bypass, scheduled updates, full DNS/hosts/TUN set
 resources, upgrades, backups/WebDAV, advanced pages, revision garbage collection
 and additional platforms remain pending. The Linux MVP remains runnable; the
 complete project is not done.
+
+## Latest increment: service system-proxy subscription downloads
+
+Delivery step 7 now supports with_proxy on import, strict saved metadata patches
+and manual refresh. Only with_proxy true and self_proxy false enables system
+discovery; direct/default and managed modes still disable implicit proxies.
+Upstream self_proxy > with_proxy > direct precedence is retained, including saved
+profiles with both flags. Missing/false remains opt-in behavior, and explicit false
+patches disable the saved mode without changing other profile options/links.
+
+Linux discovery uses Reqwest 0.13.5 / Hyper-util 0.1.20's service process environment:
+HTTP(S)_PROXY and ALL_PROXY, uppercase before lowercase, plus NO_PROXY domain/IP/
+CIDR matching. A `*` bypass entry is explicitly global for IP literals too,
+correcting the locked matcher's domain-only wildcard. Missing configuration or
+bypass permits direct access, matching upstream disabled/unavailable discovery.
+CGI REQUEST_METHOD suppresses discovery, following the locked matcher. Native
+Windows/macOS discovery remains library code awaiting runtime verification.
+No Linux desktop session, PAC/WPAD or external discovery command is required.
+
+Effective variables are bounded UTF-8/control-free values; HTTP(S) endpoint
+validation rejects malformed/unsupported routes with only variable names in errors.
+Configured connection/status/TLS failures never retry through direct mode. Basic
+proxy authentication and HTTPS CONNECT use the library matcher; proxy credentials
+are absent from bypassed origin headers after redirect. Proxy endpoints are trusted
+deployment environment, never management-supplied URLs or API readback. The
+service never changes machine proxy settings or forwards management credentials.
+
+All modes retain download admission, request/body/redirect limits, verified TLS,
+shutdown cancellation and existing import/refresh recovery. System downloads run
+outside the lifecycle actor and survive unrelated managed-core stop/reload. Changes
+to URL/source/metadata/options invalidate an older refresh through existing guards.
+UI checkboxes expose import and saved refresh modes, explain service environment
+and priority, retain failed drafts, and support explicit switches back to direct.
+
+Verification: 200 regular Rust tests pass. Five environment tests cover valid
+endpoints, credentials, malformed/unsupported/oversized/non-Unicode values,
+uppercase/empty precedence, CGI suppression and global bypass. Four isolated
+service workflows verify actual proxy authentication, protocol/env precedence,
+NO_PROXY, redirects and header isolation, no-configuration direct behavior,
+HTTPS CONNECT, stale metadata, restart persistence, failed-route non-fallback,
+size/time/admission bounds and active/queued shutdown. One real-Mihomo workflow
+confirms authenticated managed priority and system refresh surviving core stop.
+All 57 real-Mihomo integration tests and all 20 Chromium workflows pass against
+the fresh `target/mihomo-server-linux-x86_64-system-proxy-verified` bundle. The new
+browser workflow verifies stopped-core system import/refresh, mode persistence,
+metadata switch to direct, both-flag managed priority with retained failed drafts,
+and explicit retry through system mode. Existing managed/direct workflows also
+pass with a controlled proxy in the service environment. Cargo check, Rust format,
+warning-free all-target Clippy, TypeScript/Vite, changed-file Prettier, bundle
+checksums and bundled provenance/deployment document comparisons pass.
+
+Actual-node smoke uses the saved node data in an isolated temporary service with
+HTTP_PROXY/HTTPS_PROXY pointing to its generated proxy and NO_PROXY for management.
+The first of 56 traffic candidates returns HTTPS 204 after selected-node readback.
+A with_proxy HTTPS download also reaches subscription YAML validation: the empty
+204 body is correctly rejected without a catalog change. This verifies HTTPS
+transport independently of successful subscription content, which the controlled
+proxy workflows cover. Original data remains byte-for-byte unchanged, no secrets
+are printed, and fixture services/cores/script workers are cleaned up.
+
+Git handoff: per the user's updated instructions, no Git write or commit is
+performed in the sandbox. The external host script owns the completed increment's
+commit. Unrelated automation/script edits are left untouched.
+
+Next Delivery step 7 subtask: TLS trust-root fallback and explicit subscription
+certificate options, preserving redaction, transport priority, bounds, cancellation
+and recovery. SOCKS/PAC, scheduled updates, full DNS/hosts/TUN settings, resources,
+upgrades, backups/WebDAV, advanced pages, immutable-file garbage collection and
+additional platform runtime/deployment checks remain pending. The Linux MVP remains
+runnable; the complete project is not done.
 
 ## MVP completion boundary
 

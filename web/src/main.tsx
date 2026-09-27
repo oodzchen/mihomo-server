@@ -595,7 +595,8 @@ function ProfileEditor({
         options.allow_auto_update = auto;
       if (selfProxy !== (item.option?.self_proxy ?? false))
         options.self_proxy = selfProxy;
-      if (withProxy !== (item.option?.with_proxy ?? false)) options.with_proxy = withProxy;
+      if (withProxy !== (item.option?.with_proxy ?? false))
+        options.with_proxy = withProxy;
       if (Object.keys(options).length) patch.options = options;
     }
     if (!Object.keys(patch).length) {
@@ -698,7 +699,12 @@ function ProfileEditor({
               订阅刷新通过托管内核代理
             </label>
             <label className="check-label">
-              <input type="checkbox" disabled={busy} checked={withProxy} onChange={(event) => setWithProxy(event.target.checked)} />
+              <input
+                type="checkbox"
+                disabled={busy}
+                checked={withProxy}
+                onChange={(event) => setWithProxy(event.target.checked)}
+              />
               订阅刷新使用服务系统代理
             </label>
             <p className="muted">
@@ -1469,7 +1475,12 @@ function ProfilePage({
             通过托管内核代理下载
           </label>
           <label className="check-label">
-            <input type="checkbox" disabled={busy} checked={remoteWithProxy} onChange={(event) => setRemoteWithProxy(event.target.checked)} />
+            <input
+              type="checkbox"
+              disabled={busy}
+              checked={remoteWithProxy}
+              onChange={(event) => setRemoteWithProxy(event.target.checked)}
+            />
             使用服务系统代理下载
           </label>
           <p className="muted">

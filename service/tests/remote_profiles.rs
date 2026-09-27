@@ -678,12 +678,11 @@ async fn serve(State(mut state): State<FixtureState>, request: Request) -> Respo
 #[tokio::test]
 async fn remote_options_reject_unsupported_modes_and_invalid_inputs_before_network() -> Result<()> {
     use headless_core::config::PrfOption;
-    for option in [PrfOption {
+    let option = PrfOption {
         danger_accept_invalid_certs: Some(true),
         ..Default::default()
-    }] {
-        assert!(RemoteOptions::from_profile(Some(&option)).is_err());
-    }
+    };
+    assert!(RemoteOptions::from_profile(Some(&option)).is_err());
     let options = RemoteOptions::from_profile(Some(&PrfOption {
         self_proxy: Some(true),
         with_proxy: Some(true),

@@ -646,6 +646,7 @@ without changing its UID; the workflow is described below.
   "name": "Optional display name",
   "options": {
     "self_proxy": false,
+    "with_proxy": false,
     "timeout_seconds": 20,
     "user_agent": "clash-verge/v0.1.0",
     "update_interval": 120,
@@ -663,7 +664,8 @@ non-success status, invalid UTF-8/YAML, oversized responses and mappings without
 `proxies` or `proxy-providers`. An empty proxies list remains valid import content;
 core validation happens on activation.
 
-The transport disables environment proxies, follows at most ten redirects and
+Direct and managed-core transport disable implicit environment proxies; all modes
+follow at most ten redirects and
 uses reqwest's verified platform TLS. No service bearer token is sent to providers.
 Request/body errors omit subscription URLs. Authenticated profile queries expose
 stored subscription metadata, including its URL, using the existing private file
@@ -672,8 +674,10 @@ listener, or its HTTP listener when Mixed is disabled. The core must be running;
 listener ports must match the committed runtime snapshot. A stopped core, missing
 HTTP-compatible ingress or incompatible bind address returns an error without
 falling back to direct access. Direct downloads can work while the core is stopped.
-System proxy (`with_proxy`), TLS certificate bypass and linked-enhancement download
-options remain unsupported. Desktop TLS root fallback remains pending.
+`with_proxy: true` enables service system proxy discovery when self_proxy is false.
+Linux uses the service process environment; browser/desktop proxy settings are not
+consulted. TLS certificate bypass and linked-enhancement download options remain
+unsupported. Desktop TLS root fallback remains pending.
 
 Usage accepts `subscription-userinfo` and storage-provider prefixes ending in a
 hyphen, preserving upload/download/total/expire fields. Valid HTTP(S) profile home
@@ -715,9 +719,10 @@ Choose “刷新订阅” on an existing remote profile, or send the authenticat
 Only `uid` is accepted; local/unknown profiles fail before any provider request.
 The request reuses saved URL/user agent/timeout/update options. Manual refresh is
 allowed even with allow_auto_update false. Saved self_proxy selects the managed
-core; unsupported saved system-proxy/TLS-bypass options fail explicitly. Linked
+core; saved with_proxy enables system discovery when self_proxy is false.
+Unsupported TLS-bypass options fail explicitly. Linked
 sequences/YAML merge/scripts are supported and applied to active updates. Refresh
-uses the same direct or managed-proxy transport,
+uses the same direct, system or managed-proxy transport,
 shared four-download admission, body limits and shutdown cancellation as import.
 No automatic scheduler runs yet.
 
@@ -778,6 +783,7 @@ Authenticated commands use these strict shapes:
     "url": "https://provider.example/new-subscription",
     "options": {
       "self_proxy": true,
+      "with_proxy": false,
       "user_agent": "clash-verge/v0.1.0",
       "timeout_seconds": 20,
       "update_interval": 120,
@@ -793,7 +799,7 @@ descriptions at most 4 KiB, URLs valid HTTP(S) at most 8 KiB, user agents at mos
 1 KiB without control characters and timeouts 1..120 seconds. update_interval is
 an unsigned count of minutes; zero is retained as disabled update metadata.
 URL/options are remote-only. Supported option fields merge into saved options;
-unsupported system-proxy/TLS-bypass/enhancement fields and UID/type/file/selected/
+unsupported TLS-bypass/enhancement fields and UID/type/file/selected/
 extra/updated changes are rejected. The dedicated raw subscription editor edits
 the source; the configuration editor edits the separate runtime YAML.
 
@@ -1575,5 +1581,62 @@ in-flight proxy downloads. Shutdown cancels active and queued requests. Network
 work remains outside the lifecycle actor. A metadata/raw/URL change during refresh
 invalidates the old result through the existing source guard; successful results
 continue through the original transactional import/refresh recovery workflows.
-SOCKS-only ingress, system proxies, TLS fallback/bypass and scheduled updates are
-separate pending increments.
+SOCKS-only ingress, TLS fallback/bypass and scheduled updates are separate pending
+increments. System proxy discovery is described below.
+
+
+Remote downloads using service system proxies
+-------------------------------------------
+
+Enable `options: {"with_proxy": true}` on import, or save
+`patch: {"options": {"with_proxy": true}}` with edit_profile. Refresh honors the
+saved flag, including while the core is stopped or failed. The page exposes
+“使用服务系统代理下载” and “订阅刷新使用服务系统代理”. A missing/false flag leaves
+system discovery disabled. If both flags are true, self_proxy wins and still
+requires its running managed listener. To switch from managed to system mode,
+explicitly save self_proxy false and with_proxy true. Failed drafts remain intact.
+
+Linux system discovery reads HTTP_PROXY/http_proxy, HTTPS_PROXY/https_proxy,
+ALL_PROXY/all_proxy and NO_PROXY/no_proxy from the **service process environment**.
+Uppercase takes precedence, including an explicitly empty value. HTTP/HTTPS values
+select their protocol's route; ALL_PROXY is a fallback. NO_PROXY supports the
+locked Reqwest matcher rules: comma-separated domains/subdomains, IPs, CIDRs and
+`*`. Matching destinations bypass the proxy. No configured proxy also permits
+direct download, matching upstream's disabled/unavailable-system-proxy behavior.
+The locked Reqwest implementation disables system discovery if REQUEST_METHOD is
+present (CGI protection), including empty REQUEST_METHOD.
+
+For example, start the bundle from its directory with:
+
+```sh
+HTTP_PROXY='http://127.0.0.1:7890' \
+HTTPS_PROXY='http://127.0.0.1:7890' \
+NO_PROXY='127.0.0.1,localhost' \
+./launch --listen 127.0.0.1:9910
+```
+
+For systemd, supply these variables in the service environment or an appropriate
+private EnvironmentFile. The service never changes the machine's proxy settings.
+Changing its environment requires restarting the service; metadata mode edits
+apply to the next download. Proxy endpoints are deployment configuration, not
+arbitrary URLs accepted from management clients, and are never exposed by the API.
+
+HTTP and HTTPS proxy endpoints (including scheme-less host:port and credentials)
+are supported. Effective uppercase/lowercase variables must be UTF-8, no control
+characters and at most 8 KiB each. Nonempty endpoints must parse as HTTP(S); invalid
+values, port zero and unsupported SOCKS endpoints fail with the variable name
+only, before contacting a provider. This prevents malformed configuration from
+silently falling back to direct transport. Selected-proxy connection/status/TLS
+failures also return errors; there is no retry through direct mode. HTTP basic proxy
+authentication stays on the selected proxy hop, including HTTPS CONNECT; credentials
+are stripped on cross-host redirects to direct NO_PROXY destinations. Management
+authentication is never attached to provider/proxy requests.
+
+Reqwest's native Windows/macOS discovery remains available in its platform code;
+those runtime paths still require platform verification. Linux does not read a
+desktop gsettings session, use PAC/WPAD or invoke an external discovery process.
+TLS verification defaults, download/redirect/body/concurrency bounds, cancellation,
+source guards and import/refresh recovery remain shared across all modes. A system
+proxy download survives unrelated managed-core stop/reload; service shutdown still
+cancels active and queued requests. Socks transport, TLS fallback/bypass and
+scheduling remain pending.

@@ -136,10 +136,10 @@ async fn serve(State(state): State<Arc<Provider>>, request: Request) -> Response
     }) {
         return StatusCode::PROXY_AUTHENTICATION_REQUIRED.into_response();
     }
-    if state.hold.load(Ordering::SeqCst) {
-        if let Ok(permit) = state.release.acquire().await {
-            permit.forget();
-        }
+    if state.hold.load(Ordering::SeqCst)
+        && let Ok(permit) = state.release.acquire().await
+    {
+        permit.forget();
     }
     if request.method() == axum::http::Method::CONNECT {
         return StatusCode::BAD_GATEWAY.into_response();
@@ -409,6 +409,7 @@ async fn service_environment_precedence_bypass_defaults_and_https_connect() -> R
         environment(&[("HTTP_PROXY", "".into()), ("http_proxy", "invalid secret".into())]),
         environment(&[("HTTP_PROXY", proxy.base.clone()), ("NO_PROXY", "127.0.0.0/8".into())]),
         environment(&[("HTTP_PROXY", proxy.base.clone()), ("no_proxy", "127.0.0.1".into())]),
+        environment(&[("HTTP_PROXY", proxy.base.clone()), ("NO_PROXY", "localhost, *".into())]),
         environment(&[
             ("HTTP_PROXY", "invalid secret".into()),
             ("REQUEST_METHOD", "GET".into()),
@@ -423,7 +424,7 @@ async fn service_environment_precedence_bypass_defaults_and_https_connect() -> R
         assert_eq!(result?["option"]["with_proxy"], true);
         cleanup?;
     }
-    assert_eq!(origin.count(), 5);
+    assert_eq!(origin.count(), 6);
     assert_eq!(proxy.count(), 3);
     let dir = Directory::new()?;
     let mut service = Service::start(
@@ -460,7 +461,7 @@ async fn malformed_and_failed_system_proxy_never_fall_back_and_keep_catalog_unch
     for endpoint in [
         "http://private-user:private-password@:7890",
         "socks5://private-user:private-password@proxy:1080",
-        "http://127.0.0.1:1",
+        "http://private-user:private-password@127.0.0.1:1",
     ] {
         let dir = Directory::new()?;
         let mut service = Service::start(&dir, &environment(&[("HTTP_PROXY", endpoint.into())]), false).await?;
@@ -571,4 +572,51 @@ async fn system_download_bounds_admission_lifecycle_and_shutdown_are_preserved()
         2
     );
     Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires real Mihomo and local proxy sockets"]
+async fn managed_proxy_wins_over_system_and_system_refresh_survives_core_stop() -> Result<()> {
+    let dir = Directory::new()?;
+    let origin = Fixture::new().await?;
+    let proxy = Fixture::new().await?;
+    let values = environment(&[
+        ("HTTP_PROXY", proxy.base.clone()),
+        ("NO_PROXY", "127.0.0.1,localhost".into()),
+    ]);
+    let mut service = Service::start(&dir, &values, true).await?;
+    let result = async {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
+        let yaml = format!("mode: direct\nmixed-port: {port}\nauthentication: ['fixture:private:password']\ndns: {{enable: false}}\nrules: ['MATCH,DIRECT']");
+        service.api(json!({"command":"apply_config","yaml":yaml})).await?;
+        service.api(json!({"command":"start"})).await?;
+        let before = service.api(json!({"command":"status"})).await?;
+        let local = service.api(import(&format!("{}/ok", origin.base), json!({"with_proxy":true,"self_proxy":true}))).await?;
+        assert_eq!(local["option"]["with_proxy"], true);
+        assert_eq!(local["option"]["self_proxy"], true);
+        assert_eq!(proxy.count(), 0);
+        assert_eq!(origin.count(), 1);
+        assert!(!origin.state.requests.lock().unwrap()[0].1.contains_key(header::PROXY_AUTHORIZATION));
+        let item = service.api(import("http://subscription.invalid/ok", json!({"with_proxy":true,"timeout_seconds":5}))).await?;
+        assert_eq!(service.api(json!({"command":"status"})).await?["pid"], before["pid"]);
+        proxy.state.hold.store(true, Ordering::SeqCst);
+        let mut refresh = Box::pin(service.request(json!({"command":"refresh_profile","uid":item["uid"]})));
+        tokio::select! {
+            result = &mut refresh => { result?; anyhow::bail!("unexpected early refresh") },
+            result = proxy.wait(2) => result?,
+        }
+        service.api(json!({"command":"stop"})).await?;
+        assert!(timeout(Duration::from_millis(50), &mut refresh).await.is_err());
+        proxy.state.hold.store(false, Ordering::SeqCst);
+        proxy.state.release.add_permits(1);
+        assert!(refresh.await?.0.is_success());
+        let count = proxy.count();
+        assert!(!service.request(import("http://subscription.invalid/ok", json!({"with_proxy":true,"self_proxy":true}))).await?.0.is_success());
+        assert_eq!(proxy.count(), count);
+        service.api(import("http://subscription.invalid/ok", json!({"with_proxy":true}))).await?;
+        assert_eq!(proxy.count(), count + 1);
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = service.shutdown().await;
+    result.and(cleanup)
 }

@@ -152,7 +152,9 @@ pub(crate) async fn download_via(
         .pool_max_idle_per_host(0)
         .pool_idle_timeout(None);
     if options.with_proxy == Some(true) && options.self_proxy != Some(true) {
-        environment::validate()?;
+        if environment::bypass_all()? {
+            builder = builder.no_proxy();
+        }
         // Default Reqwest discovery handles environment variables, NO_PROXY and
         // native platform settings. Only an explicit with_proxy option enables it.
     } else {
