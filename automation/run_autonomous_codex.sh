@@ -39,6 +39,28 @@ SANDBOX_MODE="${SANDBOX_MODE:-workspace-write}"          # 沙箱模式: workspa
 APPROVAL_POLICY="${APPROVAL_POLICY:-never}"              # 审批模式: never (完全无人值守自动执行)
 COMPLETION_FLAG="${COMPLETION_FLAG:-===ALL_TASKS_COMPLETED_SUCCESSFULLY===}" # 全部任务完成标志
 
+# ------------------------------------------------------------------------------
+# 资源限制与调度配置 (保护 Samba 媒体服务器与宿主系统响应)
+# ------------------------------------------------------------------------------
+ENABLE_RESOURCE_LIMITS="${ENABLE_RESOURCE_LIMITS:-1}"       # 是否启用资源调度限制 (0=禁用, 1=启用)
+TOTAL_SYSTEM_CPUS=$(nproc 2>/dev/null || echo 16)
+# 仅预留少量核心 (如 CPU 0-1) 专供 Samba、网络中断与前台网页浏览，其余核心全部分配给开发编译
+if [ "$TOTAL_SYSTEM_CPUS" -ge 8 ]; then
+    DEFAULT_CPU_AFFINITY="2-$((TOTAL_SYSTEM_CPUS - 1))"
+    DEFAULT_CARGO_JOBS="$((TOTAL_SYSTEM_CPUS - 4 > 4 ? TOTAL_SYSTEM_CPUS - 4 : 4))" # 16核时默认 12 并发
+elif [ "$TOTAL_SYSTEM_CPUS" -ge 4 ]; then
+    DEFAULT_CPU_AFFINITY="1-$((TOTAL_SYSTEM_CPUS - 1))"
+    DEFAULT_CARGO_JOBS="$((TOTAL_SYSTEM_CPUS - 1))"
+else
+    DEFAULT_CPU_AFFINITY=""
+    DEFAULT_CARGO_JOBS="$TOTAL_SYSTEM_CPUS"
+fi
+CPU_AFFINITY="${CPU_AFFINITY:-$DEFAULT_CPU_AFFINITY}"       # 绑定的 CPU 核心列表 (16核默认 2-15，共 14 线程)
+PROCESS_NICE="${PROCESS_NICE:-10}"                          # 进程调度优先级 (10: 温和后台，Samba 随时抢占，平时全速)
+PROCESS_IONICE_CLASS="${PROCESS_IONICE_CLASS:-2}"           # 磁盘 IO 调度类 (2 = Best Effort，避免 IO 饥饿)
+PROCESS_IONICE_PRIO="${PROCESS_IONICE_PRIO:-6}"             # 磁盘 IO 优先级 (6: 略低于默认，兼顾媒体读取与编译吞吐)
+CARGO_JOBS="${CARGO_JOBS:-$DEFAULT_CARGO_JOBS}"             # Cargo 编译与测试最大并发数 (16核默认 12)
+
 # 运行日志与状态持久化 (集中在 automation 目录下，不污染项目源码根目录)
 LOG_DIR="${SCRIPT_DIR}/logs"
 mkdir -p "$LOG_DIR"
@@ -78,6 +100,48 @@ log_box() {
     echo -e "${color}${line}"
     echo -e "  $text"
     echo -e "${line}${CLR_RESET}"
+}
+
+# ------------------------------------------------------------------------------
+# 2.1 资源调度与核心隔离 (防卡顿、保障 Samba 媒体服务与宿主响应)
+# ------------------------------------------------------------------------------
+apply_resource_limits() {
+    [ "$ENABLE_RESOURCE_LIMITS" -ne 1 ] && return 0
+
+    # 1. 约束衍生子进程 (cargo, rustc, rayon, test runner) 的并发度
+    export CARGO_BUILD_JOBS="$CARGO_JOBS"
+    export RAYON_NUM_THREADS="$CARGO_JOBS"
+    export RUST_TEST_THREADS="$CARGO_JOBS"
+
+    # 2. 降低自身及衍生子进程的 CPU 调度优先级 (Nice: 默认 10，温和让位，Samba 随时抢占，平时全速)
+    if renice -n "$PROCESS_NICE" -p $$ >/dev/null 2>&1; then
+        log_info "已配置进程调度 Nice 优先级: $PROCESS_NICE (温和让位，Samba 随时抢占，平时全速编译)"
+    fi
+
+    # 3. 降低自身及衍生子进程的磁盘 IO 调度级别 (ionice)
+    if command -v ionice >/dev/null 2>&1; then
+        if [ "$PROCESS_IONICE_CLASS" -eq 2 ]; then
+            if ionice -c 2 -n "$PROCESS_IONICE_PRIO" -p $$ >/dev/null 2>&1; then
+                log_info "已配置磁盘 IO 调度: Best Effort (Prio $PROCESS_IONICE_PRIO，保障编译 IO 吞吐并兼顾媒体优先)"
+            fi
+        elif ionice -c "$PROCESS_IONICE_CLASS" -p $$ >/dev/null 2>&1; then
+            log_info "已配置磁盘 IO 调度类: class $PROCESS_IONICE_CLASS"
+        fi
+    fi
+
+    # 4. 绑定 CPU 核心亲和度 (Core Pinning)
+    if [ -n "$CPU_AFFINITY" ] && command -v taskset >/dev/null 2>&1; then
+        if taskset -cp "$CPU_AFFINITY" $$ >/dev/null 2>&1; then
+            local reserved_end=""
+            if [[ "$CPU_AFFINITY" =~ ^([0-9]+)- ]]; then
+                local first_c="${BASH_REMATCH[1]}"
+                if [ "$first_c" -gt 0 ]; then
+                    reserved_end=" (隔离 CPU 0-$((first_c - 1)) 专供 Samba 媒体服务与前台网页浏览)"
+                fi
+            fi
+            log_info "已绑定 CPU 核心亲和度: $CPU_AFFINITY${reserved_end}"
+        fi
+    fi
 }
 
 # ------------------------------------------------------------------------------
@@ -926,6 +990,21 @@ run_single_turn() {
     fi
     CURRENT_CODEX_PID=$!
 
+    # 显式确保 codex 主进程及其衍生子进程应用 CPU 限制与亲和度
+    if [ "$ENABLE_RESOURCE_LIMITS" -eq 1 ]; then
+        if [ -n "$CPU_AFFINITY" ] && command -v taskset >/dev/null 2>&1; then
+            taskset -cp "$CPU_AFFINITY" "$CURRENT_CODEX_PID" >/dev/null 2>&1 || true
+        fi
+        renice -n "$PROCESS_NICE" -p "$CURRENT_CODEX_PID" >/dev/null 2>&1 || true
+        if command -v ionice >/dev/null 2>&1; then
+            if [ "$PROCESS_IONICE_CLASS" -eq 2 ]; then
+                ionice -c 2 -n "$PROCESS_IONICE_PRIO" -p "$CURRENT_CODEX_PID" >/dev/null 2>&1 || true
+            else
+                ionice -c "$PROCESS_IONICE_CLASS" -p "$CURRENT_CODEX_PID" >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+
     # 启动 10 分钟看门狗 (监测每个 request 超过 10 分钟无响应/无操作)
     (
         while kill -0 "$CURRENT_CODEX_PID" 2>/dev/null; do
@@ -1054,6 +1133,22 @@ main() {
                 COMPLETION_FLAG="$2"
                 shift 2
                 ;;
+            --cpu-affinity)
+                CPU_AFFINITY="$2"
+                shift 2
+                ;;
+            --cargo-jobs)
+                CARGO_JOBS="$2"
+                shift 2
+                ;;
+            --nice)
+                PROCESS_NICE="$2"
+                shift 2
+                ;;
+            --no-limit)
+                ENABLE_RESOURCE_LIMITS=0
+                shift
+                ;;
             -h|--help)
                 echo "用法: $0 [选项]"
                 echo "选项:"
@@ -1063,6 +1158,10 @@ main() {
                 echo "  --restart-daemon       重启本地 Codex daemon 并清理所有残留会话锁"
                 echo "  --clean-logs           清理过期的历史全量日志，仅保留最近日志与交付摘要文件"
                 echo "  --max-logs <数量>      设置最多保留的历史全量日志数 (默认: 5)"
+                echo "  --cpu-affinity <核心>  绑定运行的 CPU 核心 (默认: 2-15，空出 0-1 预留给 Samba 与前台网页浏览)"
+                echo "  --cargo-jobs <并发数>  设置 Cargo 编译与测试最大并发数 (16核默认: 12)"
+                echo "  --nice <数值>          设置 CPU 调度优先级 Nice 值 (默认: 10，温和让位)"
+                echo "  --no-limit             禁用全部 CPU 与资源调度限制"
                 echo "  --upstream <目录>      指定上游代码库路径 (默认: ../clash-verge-rev)"
                 echo "  --timeout <秒>         设置单次请求无响应超时时限 (默认: 600 秒)"
                 echo "  --cooldown <秒>        设置遭遇 5 小时 Limit 时的等待时限 (默认: 18000 秒)"
@@ -1077,11 +1176,17 @@ main() {
         esac
     done
 
+    # 应用系统级资源限制与核心隔离 (防抢占、保护媒体播放与 Samba 服务)
+    apply_resource_limits
+
     log_box "mihomo-server 无人值守自动化 Codex 编程工作台已启动" "$CLR_GREEN"
     log_info "工作区目录: $PROJECT_ROOT"
     log_info "上游源码库: $UPSTREAM_DIR $([ -d "$UPSTREAM_DIR" ] && echo -e "${CLR_GREEN}[有效目录，已开放沙箱跨库读取]${CLR_RESET}" || echo -e "${CLR_YELLOW}[未找到该目录]${CLR_RESET}")"
     log_info "Codex 路径: $CODEX_BIN"
     log_info "运行配置: 沙箱=$SANDBOX_MODE | 自动审批=$APPROVAL_POLICY | 无响应超时=${INACTIVITY_TIMEOUT}s | 5小时冷却=${RATE_LIMIT_COOLDOWN}s | 日志保留=${MAX_RETAINED_LOGS}轮"
+    local res_status="已禁用"
+    [ "$ENABLE_RESOURCE_LIMITS" -eq 1 ] && res_status="已启用 (CPU亲和度: ${CPU_AFFINITY:-全部}, Nice: $PROCESS_NICE, IOClass: $PROCESS_IONICE_CLASS, Cargo并发: $CARGO_JOBS)"
+    log_info "资源调度限制: $res_status"
     log_info "计划完成标志: $COMPLETION_FLAG"
     log_info "提示: 任何时候均可按 Ctrl+C 安全中断退出。"
 

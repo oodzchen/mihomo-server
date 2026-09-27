@@ -38,6 +38,16 @@ automation/
 
 # 自定义最多保留的最近全量日志轮数 (默认: 5)
 ./automation/run_autonomous_codex.sh --max-logs 3
+
+# 系统资源调度与防抢占 (仅预留 CPU 0-1 供 Samba 与日常网页浏览，其余 14 线程全部分配给开发编译)
+# 默认已自动开启: 绑定 CPU 2-15, Nice=10 (温和让位), Ionice=Best Effort, Cargo 并发=12
+./automation/run_autonomous_codex.sh
+
+# 自定义绑定核心与编译并发数 (如只留 1 个核或分配不同核)
+./automation/run_autonomous_codex.sh --cpu-affinity 4-15 --cargo-jobs 10
+
+# 完全禁用资源限制 (全核极速编译模式)
+./automation/run_autonomous_codex.sh --no-limit
 ```
 
 ### 2. 随时安全中断与追查会话
