@@ -2392,8 +2392,9 @@ this command does not change whether Mihomo accepts the configuration.
 that its content format is valid or that a running core has loaded it. Missing Geo
 files may be normal when rules do not require them. The filesystem can change after
 a read; refresh after a core download or external file change. Geo installation,
-controlled updates, DAT validation and Provider refresh/reload APIs remain future
-work. MMDB checks are available explicitly as described below. Optional bundle Geo seeds can now initialize missing files under pinned
+online/running-core updates, DAT validation and Provider refresh/reload APIs remain
+future work. MMDB checks and stopped-core bundle installs are available explicitly
+as described below. Optional bundle Geo seeds can now initialize missing files under pinned
 size/SHA-256 checks; see [Geo deployment inputs](DEPLOYMENT.md#include-existing-geo-files-for-first-use-initialization).
 
 
@@ -2423,8 +2424,61 @@ it is not a declaration of corruption or a successful full validation. Other
 verification failures return 422 with a fixed diagnostic, without database records.
 
 Results identify the snapshot by SHA-256. Refresh clears them; external file
-changes/core automatic updates require a fresh check. This increment exposes no
-Geo download, upload, replacement, or DAT validation command.
+changes/core automatic updates require a fresh check. Geo download, upload and DAT
+validation commands remain pending; stopped-core bundle replacement follows below.
+
+
+## Install a pinned Geo bundle file while the core is stopped
+
+Bundles may declare optional Geo seeds as described in
+[Geo deployment inputs](DEPLOYMENT.md#include-existing-geo-files-for-first-use-initialization).
+The resource page can inspect and explicitly install their MMDB entries. Bootstrap
+continues to preserve existing files; deploying a newer bundle alone does not
+overwrite them. Restart the service to load a changed manifest's new pins.
+
+Read authenticated update information first:
+
+```json
+{"command":"geo_seed","name":"Country.mmdb"}
+```
+
+The reply contains `name`, `current_sha256` (null when missing), `seed_sha256` and
+`seed_bytes`. It reads the current file snapshot, not candidate file contents.
+Stop the managed core, read information again, then send the expected hashes:
+
+```json
+{
+  "command": "install_geo_seed",
+  "name": "Country.mmdb",
+  "expected_current_sha256": "<current_sha256 from geo_seed, or null>",
+  "expected_seed_sha256": "<seed_sha256 from geo_seed>",
+  "accept_metadata_only": false
+}
+```
+
+Use JSON null rather than a string for a missing current file. Only declared
+`Country.mmdb`, `ASN.mmdb` and `geoip.metadb` seeds are accepted. Installation
+requires the core's Stopped phase with its child reaped. The command checks pins,
+MMDB validity and the current-file digest before atomically publishing one file;
+stale hashes require a fresh inspection. No path, URL or file upload is accepted.
+For an empty-description MMDB, explicitly opting into `accept_metadata_only: true`
+allows installation with the known limitation; the receipt still says
+`validation.verified: false`. The Web checkbox represents this same choice.
+
+The receipt includes `previous_sha256`, `validation` (including installed SHA-256),
+`changed`, `durable` and `cleanup_pending`. Identical files return `changed: false`.
+`durable: false` or `cleanup_pending: true` means publication completed but directory
+sync/cleanup needs attention; do not treat it as a rollback. Normal failures before
+publication preserve old bytes. Interrupted staging is reclaimed during the next
+startup; after atomic publication the new file remains authoritative. Files are
+private (0600). No retained backup or automatic rollback of later startup failure
+is created by this operation.
+
+Start the core explicitly after installation to use the new file. Installation
+never starts/restarts it or changes the configuration revision. Browser disconnect
+or request cancellation after work begins cannot undo a committed file; inspect
+again after an ambiguous response. External file writers must honor the same data
+lock. Live/online updates, DAT handling and automatic runtime rollback are pending.
 
 ## Provider candidate paths and shared HTTP caches
 

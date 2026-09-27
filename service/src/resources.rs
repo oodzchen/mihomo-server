@@ -98,6 +98,36 @@ impl Resources {
         }
     }
 
+    #[cfg(unix)]
+    pub(crate) fn geo_seed_info(&self, data: &Path, name: &str) -> Result<crate::geo_update::SeedInfo> {
+        ensure!(
+            crate::geo_validation::MMDB_FILES.contains(&name),
+            "only MMDB bundle updates are supported"
+        );
+        let seed = self
+            .geo
+            .get(name)
+            .ok_or_else(|| anyhow::anyhow!("no pinned bundle seed for this Geo file"))?;
+        crate::geo_update::info(data, name, seed)
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn install_geo_seed(
+        &self,
+        data: &Path,
+        request: &crate::geo_update::InstallRequest,
+    ) -> Result<crate::geo_update::Receipt> {
+        ensure!(
+            crate::geo_validation::MMDB_FILES.contains(&request.name.as_str()),
+            "only MMDB bundle updates are supported"
+        );
+        let seed = self
+            .geo
+            .get(&request.name)
+            .ok_or_else(|| anyhow::anyhow!("no pinned bundle seed for this Geo file"))?;
+        crate::geo_update::install(&self.root.join("geo"), data, seed, request)
+    }
+
     /// Called only while the manager owns its data-directory lock.
     /// Existing managed cores are authoritative, including independently upgraded ones.
     pub fn initialize_core(&self, directory: &Path) -> Result<PathBuf> {

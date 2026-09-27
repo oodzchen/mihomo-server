@@ -53,13 +53,12 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** authenticated, actor-serialized read-only MMDB
-validation and resource-page actions, with snapshot SHA-256 and explicit strict
-verification/metadata-only compatibility outcomes. Optional Geo seeds and provider
-path authority remain delivered. **Next implementation task (P1):** controlled Geo
-replacement/update and recovery, including remaining DAT format validation. Full
-settings and cross-revision provider cache ownership remain pending; finish this
-priority before starting P2.
+**Latest completed task (P1):** explicit stopped-core MMDB installation from
+pinned bundle seeds, with current/candidate digest guards, atomic publication,
+interrupted-staging cleanup and Web actions. **Next implementation task (P1):**
+authoritative Geo runtime settings/readback, a prerequisite for controlled online
+updates. DAT validation, running-core Geo update/rollback and cross-revision
+provider cache ownership remain pending; finish P1 before starting P2.
 
 ## Complete target architecture
 
@@ -148,7 +147,8 @@ mihomo-server/
 │   │   ├── Probe/start/reload resource-path checks / service-file protection [Implemented; Linux verified]
 │   │   ├── Pinned Geo seed schema / bounded staging / no-overwrite bootstrap / orphan recovery [Implemented; Linux verified]
 │   │   ├── Read-only MMDB verification / pinned parser / metadata-only compatibility outcome [Implemented; Linux verified]
-│   │   └── DAT validation / controlled Geo updates / full settings [Pending; P1]
+│   │   ├── Stopped-core pinned MMDB replacement / digest guards / atomic commit / orphan recovery [Implemented; Linux verified]
+│   │   └── DAT validation / online and running-core Geo updates / full settings [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
 │   ├── Profile snapshots/watches and active UID     [Implemented]
@@ -262,7 +262,8 @@ mihomo-server/
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
 │   ├── Geo/Provider inventory / metadata states / refresh and retry [Implemented; Linux verified]
 │   ├── Explicit MMDB checks / errors and compatibility warnings / stale-result clearing [Implemented; Linux verified]
-│   ├── Full settings/resource lifecycle UI [Pending; P1]
+│   ├── Pinned MMDB update inspection / stopped-state install / explicit metadata-only acceptance [Implemented; Linux verified]
+│   ├── Remaining full settings/resource lifecycle UI [Pending; P1]
 │   └── Backup UI [Deferred; outside active scope]
 ├── Release and deployment                           [Partially implemented]
 │   ├── Linux x86_64 bundle: Rust + independent Mihomo + Web [Implemented]
@@ -3475,6 +3476,88 @@ No Git writes occur in the sandbox; the host owns the Conventional Commit.
 Next task: controlled Geo replacement/update and recovery within P1, followed by
 remaining full settings and provider cache ownership. Preserve the usable MVP and
 complete these priorities before expanding other capabilities.
+
+
+## P1 increment: stopped-core installation of pinned MMDB bundle resources
+
+The previous read-only MMDB increment is complete. `geo_update.rs` now adds
+explicit offline update inspection and installation, using the existing bundle
+manifest and seed source. Authenticated `geo_seed` returns the current-file digest
+(or null for a missing file) and pinned candidate size/digest. `install_geo_seed`
+requires those expected digests; callers cannot supply arbitrary paths or URLs.
+Only Country/ASN/MetaDB MMDB filenames declared in the manifest are supported.
+
+The actor accepts installation only with phase Stopped and no managed process;
+it serializes publication with lifecycle/configuration operations and joins the
+blocking worker. Running, Failed, Recovering and other unsettled phases must be
+explicitly stopped first. A failed or stale request does not change the committed
+runtime revision, subscription/settings state or core generation. Bundle resources
+and manifest pins are loaded at startup; a newly deployed manifest requires a
+service restart before inspecting its new pins.
+
+The installer uses the existing private `.geo-seed` namespace and bounded pin
+copy. It checks candidate size/SHA-256 and MMDB parser outcome before publication,
+then rechecks the current file's SHA-256. Nonempty or empty invalid current files
+can be repaired while the manager is already available. Symlinks/special files
+are rejected. A metadata-only candidate requires explicit `accept_metadata_only`
+and the receipt keeps `verified: false`; this does not add structural verification
+to the empty-description compatibility case. Identical valid candidate/current
+content is idempotent and does not replace the inode.
+
+Publication is one complete file: descriptor-based rename replaces an inspected
+existing file; no-replace hard linking installs a missing file. The staged file
+is synchronized before commit. Rename/link is the commit boundary, followed by
+data-directory synchronization and staging cleanup. Ordinary precommit failures
+leave the old destination intact. A receipt reports `durable` and `cleanup_pending`
+so a postcommit sync/cleanup error is not misrepresented as an aborted update.
+
+Startup reuses known-entry staging cleanup: an interrupted unpublished candidate
+is removed and authoritative data is retained; a committed candidate remains the
+new data. Unknown/unsafe staging entries are retained and reported. No retained
+backup, multi-file transaction, automatic rollback after a later core start, online
+download or running-core restart transaction is claimed here. External writers
+must respect the service data-directory lock; digest guards protect serialized
+service updates, not an OS-level compare-and-swap against arbitrary writers.
+
+The Resources panel exposes candidate/current hashes, stopping-state restrictions,
+explicit metadata-only acceptance and result readback. Failed installation clears
+the candidate state and requires inspection again. Successful installation refreshes
+inventory and keeps its receipt visible. Lifecycle/revision/connection changes and
+logout clear pending browser state. Aborting a browser request after installation
+begins does not cancel/undo a filesystem commit; inspect again after an interrupted
+response. This is an explicit adaptation of upstream bundled Geo copying, avoiding
+its automatic modification-time overwrites.
+
+Validation:
+
+- `cargo check --workspace --locked --offline`, service build and the regular
+  workspace suite passed: 344 tests, 0 failures, 76 opt-ins ignored.
+- Four installer boundary tests cover missing installs, guarded repair, idempotence,
+  private permissions, hardlink alias preservation, stale file/seed digests,
+  corrupt pinned formats, links, explicit compatibility acceptance and interrupted
+  staging recovery. Existing ten Geo/core initialization tests still pass.
+- Authenticated HTTP tests exercise a real strict-valid MMDB installation, unchanged
+  runtime state, stale-request rejection, missing bundle resources, authentication
+  and forbidden source overrides.
+- The actual-node integration passed with private node/Geo copies: running-core
+  rejection, tampered candidate preservation, stale digest rejection, explicit
+  metadata-only restoration of a damaged isolated MetaDB, clean staging, unchanged
+  runtime revision and usable proxy HTTPS 204 before and after stopping/installing/
+  starting. Original subscription and Geo hashes were unchanged.
+- TypeScript/Vite build and two targeted Playwright workflows passed. Browser update
+  controls use API/WebSocket fixtures to verify running-state disabling, fresh
+  inspection, exact digest fields, failure cleanup and retained compatibility
+  warnings. Actual file publication is verified by HTTP/Rust/live-core tests.
+
+The complete tree above distinguishes delivered offline MMDB installation from
+remaining Geo formats/settings/online updates. P2 rules/providers/delay views,
+P3 i18n/signals and P4 actual systemd installation remain pending; unrelated
+backup expansion stays deferred. The host script owns Git commits.
+
+Next task: authoritative Geo settings and readback within P1. This enables
+configuration-controlled Geo mode/URL/automatic-update behavior before adding
+online update transactions. DAT validation and provider cache ownership remain
+named P1 work; the usable MVP is preserved.
 
 ## MVP completion boundary
 

@@ -97,6 +97,96 @@ async fn provider_candidate_policy_preserves_sources_and_rejects_unsafe_edits_be
 }
 
 #[tokio::test]
+async fn stopped_geo_seed_install_authenticates_guards_state_and_preserves_runtime() -> Result<()> {
+    use ring::digest::{SHA256, digest};
+    use std::fs;
+    let directory = Directory::new()?;
+    let bundle = directory.0.join("bundle");
+    fs::create_dir_all(bundle.join("core"))?;
+    fs::create_dir(bundle.join("geo"))?;
+    let core = b"#!/bin/sh\nexit 1\n";
+    fs::write(bundle.join("core/verge-mihomo"), core)?;
+    fs::set_permissions(bundle.join("core/verge-mihomo"), fs::Permissions::from_mode(0o700))?;
+    let hash = |bytes: &[u8]| {
+        digest(&SHA256, bytes)
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    };
+    let string = |value: &str| {
+        let mut bytes = vec![0x40 | value.len() as u8];
+        bytes.extend(value.as_bytes());
+        bytes
+    };
+    let mut geo = vec![0, 0, 17, 0, 0, 1];
+    geo.extend([0; 16]);
+    geo.extend(string("CN"));
+    geo.extend(b"\xab\xcd\xefMaxMind.com");
+    geo.push(0xe9);
+    for (key, value) in [
+        ("binary_format_major_version", vec![0xa1, 2]),
+        ("binary_format_minor_version", vec![0xa0]),
+        ("build_epoch", vec![1, 2, 1]),
+        ("database_type", string("fixture")),
+        ("description", [vec![0xe1], string("en"), string("fixture")].concat()),
+        ("ip_version", vec![0xa1, 4]),
+        ("languages", vec![0, 4]),
+        ("node_count", vec![0xc1, 1]),
+        ("record_size", vec![0xa1, 24]),
+    ] {
+        geo.extend(string(key));
+        geo.extend(value);
+    }
+    fs::write(bundle.join("geo/Country.mmdb"), &geo)?;
+    fs::write(
+        bundle.join("manifest.json"),
+        serde_json::to_vec(
+            &json!({"schema_version":1,"target":mihomo_server::resources::TARGET,"core":{"version":"v1","sha256":hash(core)},"geo":{"Country.mmdb":{"bytes":geo.len(),"sha256":hash(&geo)}}}),
+        )?,
+    )?;
+    let mut options = CoreOptions::new(
+        bundle.join("core/verge-mihomo"),
+        directory.0.clone(),
+        directory.0.join("missing.yaml"),
+    );
+    options.resources = Some(mihomo_server::resources::Resources::open(&bundle)?);
+    let manager = CoreManager::spawn(options)?;
+    let app = router(HttpState::new(Management::new(
+        manager.clone(),
+        directory.authentication()?,
+    )));
+    let token = directory.token()?;
+    let result = async {
+        let before = manager.status();
+        fs::write(directory.0.join("Country.mmdb"), "old invalid Geo")?;
+        let (status, info) = response(&app, request(&token, "/api/commands", Some(json!({"command":"geo_seed", "name":"Country.mmdb"})))?).await?;
+        assert!(status.is_success());
+        assert_eq!(info["current_sha256"], hash(b"old invalid Geo"));
+        assert_eq!(info["seed_sha256"], hash(&geo));
+        let payload = json!({"command":"install_geo_seed", "name":"Country.mmdb", "expected_current_sha256":info["current_sha256"], "expected_seed_sha256":info["seed_sha256"]});
+        let (status, _) = response(&app, request("wrong", "/api/commands", Some(payload.clone()))?).await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, installed) = response(&app, request(&token, "/api/commands", Some(payload.clone()))?).await?;
+        assert!(status.is_success(), "{installed}");
+        assert_eq!(installed["changed"], true); assert_eq!(installed["validation"]["verified"], true);
+        assert_eq!(installed["validation"]["sha256"], info["seed_sha256"]);
+        assert_eq!(fs::read(directory.0.join("Country.mmdb"))?, geo);
+        assert_eq!(manager.status().generation, before.generation);
+        assert_eq!(manager.status().config_revision, before.config_revision);
+        assert_eq!(manager.status().pid, before.pid);
+        let (status, stale) = response(&app, request(&token, "/api/commands", Some(payload))?).await?;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(stale.to_string().contains("changed since"));
+        assert_eq!(fs::read(directory.0.join("Country.mmdb"))?, geo);
+        assert!(!directory.0.join(".geo-seed").exists());
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
 async fn resource_inventory_authenticates_tracks_committed_config_and_redacts_sources() -> Result<()> {
     let directory = Directory::new()?;
     let manager = directory.manager()?;
@@ -107,6 +197,18 @@ async fn resource_inventory_authenticates_tracks_committed_config_and_redacts_so
     let token = directory.token()?;
     let result = async {
         let payload = json!({"command":"resources"});
+        for command in [json!({"command":"geo_seed", "name":"Country.mmdb"}), json!({"command":"install_geo_seed", "name":"Country.mmdb", "expected_current_sha256":null, "expected_seed_sha256":"0".repeat(64)})] {
+            let (status, _) = response(&app, request("wrong", "/api/commands", Some(command.clone()))?).await?;
+            assert_eq!(status, StatusCode::UNAUTHORIZED);
+            let (status, unavailable) = response(&app, request(&token, "/api/commands", Some(command))?).await?;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert!(unavailable.to_string().contains("require bundle resources"));
+        }
+        for command in [json!({"command":"geo_seed", "name":"Country.mmdb", "path":"/etc/passwd"}), json!({"command":"install_geo_seed", "name":"Country.mmdb", "expected_seed_sha256":"0".repeat(64), "url":"https://override.invalid"})] {
+            let (status, _) = response(&app, request(&token, "/api/commands", Some(command))?).await?;
+            assert!(!status.is_success());
+        }
+
         let (status, _) = response(&app, request("wrong", "/api/commands", Some(payload.clone()))?).await?;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         let (status, empty) = response(&app, request(&token, "/api/commands", Some(payload.clone()))?).await?;

@@ -23,8 +23,7 @@ pub struct Validation {
 /// Caller serializes against service resource/lifecycle mutations. The snapshot is
 /// bounded and read through no-follow descriptors; validation does not modify it.
 #[cfg(unix)]
-pub(crate) fn validate(root: &Path, name: &str) -> Result<Validation> {
-    use ring::digest::{SHA256, digest};
+pub(crate) fn snapshot(root: &Path, name: &str) -> Result<Option<Vec<u8>>> {
     use std::{
         ffi::CString,
         fs::{File, OpenOptions},
@@ -50,12 +49,18 @@ pub(crate) fn validate(root: &Path, name: &str) -> Result<Validation> {
             libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
         )
     };
-    ensure!(fd >= 0, "Geo file missing, unreadable or linked");
+    if fd < 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::NotFound {
+            return Ok(None);
+        }
+        anyhow::bail!("Geo file unreadable or linked");
+    }
     let mut file = unsafe { File::from_raw_fd(fd) };
     let before = file.metadata()?;
     ensure!(
-        before.is_file() && before.len() > 0 && before.len() <= MAX_BYTES,
-        "Geo validation requires a nonempty regular file up to 128 MiB"
+        before.is_file() && before.len() <= MAX_BYTES,
+        "Geo reads require a regular file up to 128 MiB"
     );
     let mut bytes = Vec::new();
     (&mut file).take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
@@ -69,11 +74,23 @@ pub(crate) fn validate(root: &Path, name: &str) -> Result<Validation> {
             && before.ctime_nsec() == after.ctime_nsec(),
         "Geo file changed while reading; retry validation"
     );
-    let hash = digest(&SHA256, &bytes)
+    Ok(Some(bytes))
+}
+
+pub(crate) fn sha256(bytes: &[u8]) -> String {
+    ring::digest::digest(&ring::digest::SHA256, bytes)
         .as_ref()
         .iter()
         .map(|byte| format!("{byte:02x}"))
-        .collect();
+        .collect()
+}
+
+#[cfg(unix)]
+pub(crate) fn validate(root: &Path, name: &str) -> Result<Validation> {
+    let bytes = snapshot(root, name)?.ok_or_else(|| anyhow::anyhow!("Geo file missing"))?;
+    ensure!(!bytes.is_empty(), "Geo validation requires a nonempty file");
+    let size = bytes.len() as u64;
+    let hash = sha256(&bytes);
     let reader = maxminddb::Reader::from_source(bytes)
         .map_err(|_| anyhow::anyhow!("invalid MMDB metadata or search tree header"))?;
     ensure!(
@@ -97,7 +114,7 @@ pub(crate) fn validate(root: &Path, name: &str) -> Result<Validation> {
         format: "mmdb",
         verified: warning.is_none(),
         warning,
-        bytes: before.len(),
+        bytes: size,
         sha256: hash,
         ip_version: metadata.ip_version,
         node_count: metadata.node_count,
@@ -111,7 +128,7 @@ pub(crate) fn validate(_root: &Path, _name: &str) -> Result<Validation> {
 }
 
 #[cfg(all(test, target_os = "linux"))]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::{fs, os::unix::fs::symlink, path::PathBuf};
     struct Directory(PathBuf);
@@ -138,7 +155,7 @@ mod tests {
         result.extend(value.as_bytes());
         result
     }
-    fn fixture_with_description(description: bool) -> Vec<u8> {
+    pub(crate) fn fixture_with_description(description: bool) -> Vec<u8> {
         let mut bytes = vec![0, 0, 17, 0, 0, 1];
         bytes.extend([0; 16]);
         bytes.extend(string("CN"));

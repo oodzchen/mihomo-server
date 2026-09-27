@@ -252,6 +252,61 @@ test("resource inventory reads metadata, refreshes changes and retries without e
   } finally { await rm(join(directory, "Country.mmdb"), { force: true }); }
 });
 
+test("Geo bundle update requests guard hashes, require fresh inspection and retain warnings", async ({ page }) => {
+  let reads = 0, installs = 0;
+  let sendPhase: (phase: string) => void = () => { throw new Error("WebSocket fixture not ready"); };
+  await page.routeWebSocket("**/api/events", socket => {
+    sendPhase = phase => socket.send(JSON.stringify({ type: "status", data: { phase, generation: 0, selection_pending: [] } }));
+    socket.onMessage(message => {
+      if (JSON.parse(String(message)).type === "authenticate") {
+        socket.send(JSON.stringify({ type: "ready" }));
+        sendPhase("running");
+      }
+    });
+  });
+  const seedHash = "a".repeat(64), oldHash = "b".repeat(64), newHash = "c".repeat(64);
+  await page.route("**/api/commands", async route => {
+    const body = route.request().postDataJSON();
+    if (body.command === "resources") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data_dir: directory, bundle_dir: "/fixture/bundle", config_revision: null, geo: [{ section: "geo", name: "Country.mmdb", state: "available", path: "Country.mmdb", provider_type: null, bytes: installs > 1 ? 32 : 16, conflict: false }], providers: [] }) });
+    } else if (body.command === "geo_seed") {
+      reads++;
+      expect(body.name).toBe("Country.mmdb");
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ name: body.name, current_sha256: reads < 3 ? oldHash : newHash, seed_sha256: seedHash, seed_bytes: 32 }) });
+    } else if (body.command === "install_geo_seed") {
+      installs++;
+      expect(body).toEqual({ command: "install_geo_seed", name: "Country.mmdb", expected_current_sha256: installs === 1 ? oldHash : newHash, expected_seed_sha256: seedHash, accept_metadata_only: installs > 1 });
+      await route.fulfill({ status: installs === 1 ? 422 : 200, contentType: "application/json", body: JSON.stringify(installs === 1 ? { error: { message: "Geo file changed since update inspection" } } : { changed: true, durable: true, cleanup_pending: false, validation: { verified: false, sha256: seedHash } }) });
+    } else await route.continue();
+  });
+  await page.goto(`${base}/settings`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  const panel = page.getByRole("region", { name: "运行资源清单", exact: true });
+  const read = panel.getByRole("button", { name: "读取 Country.mmdb 打包更新", exact: true });
+  await read.click();
+  const install = panel.getByRole("button", { name: "安装 Country.mmdb 打包资源", exact: true });
+  await expect(install).toBeDisabled();
+  await expect(panel).toContainText("停止内核后可安装打包资源");
+  sendPhase("stopped");
+  await expect(install).toHaveCount(0);
+  await read.click();
+  await expect(install).toBeEnabled();
+  await install.click();
+  await expect(panel.getByRole("alert")).toContainText("Geo file changed");
+  await expect(install).toHaveCount(0);
+  await read.click();
+  await panel.getByRole("checkbox", { name: "允许安装描述为空、完整结构未验证的 MMDB" }).check();
+  await install.click();
+  await expect(panel.getByRole("status")).toContainText("已安装打包资源");
+  await expect(panel.getByRole("status")).toContainText("完整结构未验证");
+  await expect(panel).toContainText("32 字节");
+  await expect(install).toHaveCount(0);
+  expect(reads).toBe(3); expect(installs).toBe(2);
+  await page.unroute("**/api/commands");
+  await page.getByRole("button", { name: "退出登录" }).click();
+});
+
 test("browser repairs failed startup, saves selection/config, restores after service restart and logs out", async ({
   page,
 }) => {

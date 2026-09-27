@@ -110,6 +110,23 @@ Web checks and strict/metadata-only outcome tests are service code. No general
 DAT parser, country/ASN schema validator, upload/update/rollback flow or upstream
 Geo auto-update behavior is claimed migrated by this increment.
 
+## Explicit stopped-core MMDB bundle installation
+
+Reference: `init_resources`/`handle_copy` in pinned upstream
+`src-tauri/src/utils/init.rs`, which installs Country/ASN/DAT resources and can
+replace existing files by modification time. No new source is copied. The service
+retains bundle-to-data resource ownership but makes MMDB replacement an explicit
+stopped-core actor operation with expected current/candidate hashes, pinned copy,
+format diagnostics and single-file atomic publication.
+
+`geo_update.rs` is original service code. It reuses `geo_resources.rs` staging/pin
+verification and startup orphan cleanup, and `geo_validation.rs` bounded snapshots
+and parser outcomes. Existing seed initialization keeps its no-overwrite behavior.
+Authenticated commands and Web actions cover inspection, stopped-state restriction
+and explicit metadata-only acceptance. There are no new dependencies. Online core
+`update_geo`/`upgrade_geo`, DAT validation, multi-file Geo transactions and runtime
+rollback after failed activation are still pending.
+
 ## Mihomo plugin
 
 - Repository: https://github.com/clash-verge-rev/tauri-plugin-mihomo

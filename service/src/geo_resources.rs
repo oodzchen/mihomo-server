@@ -49,24 +49,10 @@ pub(crate) fn initialize(source: &Path, data: &Path, seeds: &BTreeMap<String, Se
             needed.push((name, seed));
         }
     }
-    let stage = data.join(STAGE);
-    if needed.is_empty() && !stage.try_exists()? {
+    if needed.is_empty() && !data.join(STAGE).try_exists()? {
         return Ok(Vec::new());
     }
-    use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
-    let mut builder = fs::DirBuilder::new();
-    builder.mode(0o700);
-    match builder.create(&stage) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(error.into()),
-    }
-    let metadata = fs::symlink_metadata(&stage)?;
-    ensure!(
-        metadata.is_dir() && !metadata.file_type().is_symlink() && metadata.permissions().mode() & 0o077 == 0,
-        "Geo staging directory must be private and real"
-    );
-    cleanup(&stage)?;
+    let stage = prepare_stage(data)?;
     let result = (|| {
         for (name, seed) in &needed {
             copy(source, &stage, name, seed)?;
@@ -94,6 +80,25 @@ pub(crate) fn initialize(source: &Path, data: &Path, seeds: &BTreeMap<String, Se
     }
 }
 
+pub(crate) fn prepare_stage(data: &Path) -> Result<std::path::PathBuf> {
+    let stage = data.join(STAGE);
+    use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+    let mut builder = fs::DirBuilder::new();
+    builder.mode(0o700);
+    match builder.create(&stage) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
+    }
+    let metadata = fs::symlink_metadata(&stage)?;
+    ensure!(
+        metadata.is_dir() && !metadata.file_type().is_symlink() && metadata.permissions().mode() & 0o077 == 0,
+        "Geo staging directory must be private and real"
+    );
+    cleanup(&stage)?;
+    Ok(stage)
+}
+
 fn existing(path: &Path) -> Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
@@ -111,7 +116,7 @@ fn existing(path: &Path) -> Result<bool> {
     }
 }
 
-fn cleanup(stage: &Path) -> Result<()> {
+pub(crate) fn cleanup(stage: &Path) -> Result<()> {
     // Fixed six-entry namespace. Inspect every entry before removing any orphan.
     let entries: Vec<_> = fs::read_dir(stage)?
         .take(GEO_ASSETS.len() + 1)
@@ -134,7 +139,7 @@ fn cleanup(stage: &Path) -> Result<()> {
     Ok(())
 }
 
-fn copy(source: &Path, stage: &Path, name: &str, seed: &Seed) -> Result<()> {
+pub(crate) fn copy(source: &Path, stage: &Path, name: &str, seed: &Seed) -> Result<()> {
     use std::{
         ffi::CString,
         os::{

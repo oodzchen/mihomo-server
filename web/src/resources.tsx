@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, command } from "./api";
+import { GeoSeedAction } from "./geo_seed";
 import type { CoreStatus } from "./types";
 
 type Resource = {
@@ -40,6 +41,8 @@ export function ResourcesPanel({ token, status, connection, logout }: {
   const epoch = useRef(0);
   const [checks, setChecks] = useState<Record<string, { message: string; error?: boolean }>>({});
   const [checking, setChecking] = useState<string>();
+  const [notice, setNotice] = useState("");
+  useEffect(() => { setNotice(""); }, [token, status.phase, status.generation, status.config_revision, connection]);
   const [value, setValue] = useState<Inventory>();
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
@@ -89,19 +92,21 @@ export function ResourcesPanel({ token, status, connection, logout }: {
       {item.path && <code>{item.path}</code>}
       {item.section === "geo" && ["Country.mmdb", "ASN.mmdb", "geoip.metadb"].includes(item.name) && item.state === "available" && <button type="button" disabled={!!checking} onClick={() => void validate(item.name)}>校验 {item.name}</button>}
       {item.section === "geo" && checks[item.name] && <p role={checks[item.name].error ? "alert" : "status"} className={checks[item.name].error ? "alert" : "info"}>{checks[item.name].message}</p>}
+      {item.section === "geo" && value?.bundle_dir && ["Country.mmdb", "ASN.mmdb", "geoip.metadb"].includes(item.name) && <GeoSeedAction name={item.name} token={token} status={status} connection={connection} logout={logout} installed={message => { setNotice(message); setRefresh(previous => previous + 1); }} />}
       {item.conflict && <p className="alert">多个资源声明共用此路径，请检查缓存是否冲突。</p>}
     </li>)}</ul>;
   }
 
   return <section className="panel" aria-label="运行资源清单">
     <div className="panel-title"><h2>Geo / Provider 资源</h2><button type="button" disabled={connection !== "已连接"} onClick={() => setRefresh(value => value + 1)}>刷新资源清单</button></div>
+    {notice && <p role="status" className="info">{notice}</p>}
     {connection !== "已连接" ? <p className="info">服务连接中断，资源状态待重新核对。</p> : error ? <p className="alert" role="alert">读取资源失败：{error}</p> : !value ? <p className="muted">正在读取资源清单…</p> : <>
       <p>运行数据目录：<code>{value.data_dir}</code></p>
       {value.bundle_dir && <p>打包资源目录：<code>{value.bundle_dir}</code></p>}
       {!value.config_revision && <p className="info">尚无已提交配置，导入并使用订阅后显示 Provider 声明。</p>}
       <h3>Geo 文件</h3>{rows(value.geo)}
       <h3>Provider 文件与缓存</h3>{value.providers.length ? rows(value.providers) : <p className="muted">当前已提交配置没有 Provider 声明。</p>}
-      <p className="hint">路径相对于运行数据目录。文件存在仅表示元数据可读取，尚未验证内容格式。MMDB 可手动校验结构，结果仅针对当次读取的文件摘要，不证明规则覆盖或内核兼容性；DAT 格式校验待实现。Geo 文件是否必需取决于配置规则。Provider 声明来自已提交配置，内核下载后可刷新清单核对文件状态。</p>
+      <p className="hint">路径相对于运行数据目录。文件存在仅表示元数据可读取，尚未验证内容格式。MMDB 可手动校验结构，结果仅针对当次读取的文件摘要，不证明规则覆盖或内核兼容性；打包 MMDB 可在停止内核后显式安装，安装失败或请求中断后请重新读取状态。DAT 格式校验待实现。Geo 文件是否必需取决于配置规则。Provider 声明来自已提交配置，内核下载后可刷新清单核对文件状态。</p>
     </>}
   </section>;
 }

@@ -215,11 +215,39 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
         assert_eq!(validation.sha256, hex(&fs::read(directory.0.join("geoip.metadb"))?));
         assert_eq!(manager.status().pid, before_check.pid);
         assert_eq!(manager.status().config_revision, before_check.config_revision);
+        let seed_info = manager.geo_seed_info("geoip.metadb".into()).await?;
+        let mut update = mihomo_server::geo_update::InstallRequest {
+            name: "geoip.metadb".into(),
+            expected_current_sha256: seed_info.current_sha256,
+            expected_seed_sha256: seed_info.seed_sha256,
+            accept_metadata_only: false,
+        };
+        assert!(manager.install_geo_seed(update.clone()).await.is_err()); // Never replace under a running core.
+        assert_eq!(manager.status().pid, before_check.pid);
+        manager.stop().await?;
+        fs::write(bundle.join("geo/geoip.metadb"), "changed bundle candidate")?;
+        assert!(manager.install_geo_seed(update.clone()).await.is_err());
+        assert_eq!(fs::read(directory.0.join("geoip.metadb"))?, geo_bytes);
+        fs::write(bundle.join("geo/geoip.metadb"), &geo_bytes)?;
+        fs::write(directory.0.join("geoip.metadb"), "damaged isolated Geo")?;
+        assert!(manager.install_geo_seed(update.clone()).await.is_err()); // Reject stale current-file digest.
+        update.expected_current_sha256 = manager.geo_seed_info("geoip.metadb".into()).await?.current_sha256;
+        if !validation.verified {
+            assert!(manager.install_geo_seed(update.clone()).await.is_err());
+        }
+        update.accept_metadata_only = true;
+        let receipt = manager.install_geo_seed(update).await?;
+        assert!(receipt.changed && receipt.durable && !receipt.cleanup_pending);
+        assert_eq!(receipt.validation.sha256, hex(&geo_bytes));
+        assert_eq!(receipt.validation.verified, validation.verified);
+        assert_eq!(manager.status().phase, mihomo_server::core_manager::CorePhase::Stopped);
+        assert_eq!(manager.status().config_revision, before_check.config_revision);
+        assert!(!directory.0.join(".geo-seed").exists());
         let installed = fs::read(directory.0.join("geoip.metadb"))?;
         fs::write(bundle.join("geo/geoip.metadb"), "bundle changed after initialization")?;
         assert!(resources.initialize_geo(&directory.0)?.is_empty());
         assert_eq!(fs::read(directory.0.join("geoip.metadb"))?, installed);
-        manager.restart().await?;
+        manager.start().await?;
         assert_eq!(manager.resource_inventory().await?.providers.len(), 4);
         assert_eq!(
             manager.runtime_config().await?["proxy-providers"]["remote_one"]["path"],

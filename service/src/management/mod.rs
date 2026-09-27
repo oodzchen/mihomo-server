@@ -52,6 +52,18 @@ pub enum ManagementCommand {
     Config {},
     Settings {},
     Resources {},
+    #[cfg(unix)]
+    GeoSeed {
+        name: String,
+    },
+    #[cfg(unix)]
+    InstallGeoSeed {
+        name: String,
+        expected_current_sha256: Option<String>,
+        expected_seed_sha256: String,
+        #[serde(default)]
+        accept_metadata_only: bool,
+    },
     ValidateGeo {
         name: String,
     },
@@ -245,6 +257,24 @@ impl Management {
             ManagementCommand::Logs {} => serde_json::to_value(self.manager.logs())?,
             ManagementCommand::Profiles {} => serde_json::to_value(self.manager.profiles())?,
             ManagementCommand::Settings {} => serde_json::to_value(self.manager.settings().await?)?,
+            #[cfg(unix)]
+            ManagementCommand::GeoSeed { name } => serde_json::to_value(self.manager.geo_seed_info(name).await?)?,
+            #[cfg(unix)]
+            ManagementCommand::InstallGeoSeed {
+                name,
+                expected_current_sha256,
+                expected_seed_sha256,
+                accept_metadata_only,
+            } => serde_json::to_value(
+                self.manager
+                    .install_geo_seed(crate::geo_update::InstallRequest {
+                        name,
+                        expected_current_sha256,
+                        expected_seed_sha256,
+                        accept_metadata_only,
+                    })
+                    .await?,
+            )?,
             ManagementCommand::ValidateGeo { name } => serde_json::to_value(self.manager.validate_geo(name).await?)?,
             ManagementCommand::Resources {} => serde_json::to_value(self.manager.resource_inventory().await?)?,
             ManagementCommand::ProxyAccess {} => crate::proxy_access::inspect(&self.manager).await?,

@@ -392,6 +392,16 @@ enum CommandMessage {
         confirmation: Option<String>,
         reply: oneshot::Sender<Result<DnsOverrideOutcome>>,
     },
+    #[cfg(unix)]
+    GeoSeedInfo {
+        name: String,
+        reply: oneshot::Sender<Result<crate::geo_update::SeedInfo>>,
+    },
+    #[cfg(unix)]
+    InstallGeoSeed {
+        request: crate::geo_update::InstallRequest,
+        reply: oneshot::Sender<Result<crate::geo_update::Receipt>>,
+    },
     ValidateGeo {
         name: String,
         reply: oneshot::Sender<Result<crate::geo_validation::Validation>>,
@@ -1265,6 +1275,33 @@ impl CoreManager {
         result.await.context("settings read cancelled during shutdown")?
     }
 
+    #[cfg(unix)]
+    pub async fn geo_seed_info(&self, name: String) -> Result<crate::geo_update::SeedInfo> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::GeoSeedInfo { name, reply })
+            .await
+            .context("core manager stopped")?;
+        result.await.context("Geo seed read cancelled during shutdown")?
+    }
+
+    #[cfg(unix)]
+    pub async fn install_geo_seed(
+        &self,
+        request: crate::geo_update::InstallRequest,
+    ) -> Result<crate::geo_update::Receipt> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::InstallGeoSeed { request, reply })
+            .await
+            .context("core manager stopped")?;
+        result
+            .await
+            .context("Geo installation response cancelled during shutdown")?
+    }
+
     pub async fn validate_geo(&self, name: String) -> Result<crate::geo_validation::Validation> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let (reply, result) = oneshot::channel();
@@ -1811,6 +1848,10 @@ impl Actor {
                             CommandMessage::ReadEnhancement { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::DeleteProfile { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadConfig(reply) => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
+                            #[cfg(unix)]
+                            CommandMessage::GeoSeedInfo { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
+                            #[cfg(unix)]
+                            CommandMessage::InstallGeoSeed { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ValidateGeo { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadResources(reply) => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadSettings(reply) | CommandMessage::SetSettings { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
@@ -1958,6 +1999,29 @@ impl Actor {
                         }
                         CommandMessage::ReadConfig(reply) => {
                             let _ = reply.send(self.store.read_current());
+                        }
+                        #[cfg(unix)]
+                        CommandMessage::GeoSeedInfo { name, reply } => {
+                            if !reply.is_closed() {
+                                let result = async {
+                                    let resources = self.options.resources.clone().context("Geo updates require bundle resources")?;
+                                    let data = self.options.data_dir.clone();
+                                    tokio::task::spawn_blocking(move || resources.geo_seed_info(&data, &name)).await.context("Geo seed worker failed")?
+                                }.await;
+                                let _ = reply.send(result);
+                            }
+                        }
+                        #[cfg(unix)]
+                        CommandMessage::InstallGeoSeed { request, reply } => {
+                            if !reply.is_closed() {
+                                let result = async {
+                                    ensure!(self.status.borrow().phase == CorePhase::Stopped && self.process.is_none(), "stop the core before installing a Geo seed");
+                                    let resources = self.options.resources.clone().context("Geo updates require bundle resources")?;
+                                    let data = self.options.data_dir.clone();
+                                    tokio::task::spawn_blocking(move || resources.install_geo_seed(&data, &request)).await.context("Geo install worker failed")?
+                                }.await;
+                                let _ = reply.send(result);
+                            }
                         }
                         CommandMessage::ValidateGeo { name, reply } => {
                             if !reply.is_closed() {
