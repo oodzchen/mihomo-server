@@ -20,6 +20,45 @@ Status meanings:
 A copied source file, a successful build, or an empty route does not by itself
 establish a working integration. Mark partially migrated components explicitly.
 
+## Active priorities (user override)
+
+The user has explicitly narrowed the current delivery scope. This order overrides
+older increment next-task notes and the previous broad feature-expansion plan:
+
+1. **P1 — Configuration and resource management.** Complete authoritative service
+   settings, Geo/provider resource paths, discovery, validation and lifecycle,
+   configuration generation/application/recovery, and the corresponding Web
+   management. Preserve real subscription data and verify usable proxy traffic.
+2. **P2 — Rules, providers and delay testing.** Connect the retained client methods
+   to authenticated service commands and usable Web views; verify actual core
+   readback, refresh/reload behavior, delay results and failure handling.
+3. **P3 — i18n and signals.** Migrate backend/browser language resources and signal
+   behavior needed by this Linux service. Keep browser language independent of
+   service-global state and preserve the already working unified Unix shutdown.
+4. **P4 — Linux packaging and actual systemd installation.** Deliver a reproducible
+   Linux bundle and install/run a systemd unit. Verify boot/start, stop/restart,
+   logs, authentication, persistent state, Mihomo child reaping and real proxy
+   traffic through the installed service. A template or static unit check alone
+   does not complete this priority.
+
+The user's original numbering was 1, 2, 4, 5; the sequence above normalizes labels
+without adding another priority. Finish reviewable increments in this order.
+Only supporting work necessary for these priorities belongs in the active scope.
+
+All other unfinished work is **Deferred until the user expands scope**: further
+backup automation/change triggers/retention/WebDAV/backup UI, media unlock,
+SOCKS/PAC, full connection dashboards, unrelated shared-component/domain-event
+expansion, containers, non-Linux releases/services and external publication.
+Windows compatibility remains deferred. Existing verified backup/upgrade and
+other delivered functionality is retained; it does not justify expanding it now.
+Do not resume backup work based on an older chapter's next-task paragraph.
+
+**Current task:** synchronize this priority change and withdraw the unshipped
+backup automation scaffold. **Next implementation task (P1):** inventory current
+Geo/provider resource handling against upstream, then implement explicit resource
+path/readback and validation with isolated real-data tests. Continue full settings
+and resource lifecycle work before starting P2.
+
 ## Complete target architecture
 
 This tree describes target responsibilities. Pending entries are planned
@@ -34,8 +73,9 @@ mihomo-server/
 │   │   └── Snapshots, drafts, transactions, tests, benchmarks
 │   ├── clash-verge-limiter/                          [Migrated]
 │   │   └── Period checks, concurrent admission, existing tests
-│   ├── Shared upstream components                   [Pending]
-│   │   └── Logging, i18n, signals, media unlock as needed
+│   ├── Shared upstream components                   [Pending; i18n/signals P3, unrelated expansion deferred]
+│   │   ├── i18n and service signals                 [Pending; P3]
+│   │   └── Additional logging / media unlock         [Deferred; outside active scope]
 │   ├── mihomo-client/                               [Migrated; Linux verified]
 │   │   ├── Unix socket / explicit loopback HTTP      [Migrated]
 │   │   ├── API methods, response models, errors      [Migrated]
@@ -84,7 +124,8 @@ mihomo-server/
 │       ├── Backup manifest / bounded entries / inspection, validation, runtime policy and restore receipt models [Implemented; upstream ZIP adaptation]
 │       ├── Opaque restore plan / durable catalog-settings journal / runtime commit recovery [Implemented; Linux verified]
 │       ├── Retained backup metadata / list / create-delete receipt models [Implemented]
-│       └── Automatic retention models / full upgrade resource settings [Pending]
+│       └── Full resource settings                       [Pending; P1]
+│       └── Automatic retention models               [Deferred; outside active scope]
 ├── service/                                         [Partially implemented]
 │   ├── Persistent foreground entry point            [Implemented]
 │   ├── Binary/data/config/import args, directory lock [Implemented]
@@ -115,11 +156,11 @@ mihomo-server/
 │   │   ├── Manual refresh / stale-download guard / journal recovery [Implemented; Linux]
 │   │   ├── Managed core proxy / live route / auth / lifecycle cancellation [Implemented; Linux verified]
 │   │   ├── Service system proxy / environment / bypass / auth [Implemented; Linux verified]
-│   │   ├── Native macOS proxy discovery runtime validation [Pending; library code retained]
+│   │   ├── Native macOS proxy discovery runtime validation [Deferred; library code retained]
 <!--│   │   ├── Native Windows proxy discovery runtime validation [Deferred; Windows compatibility postponed] -->
 │   │   ├── TLS platform/static roots / explicit certificate option [Migrated + adaptation; Linux verified]
 │   │   ├── Scheduled refresh / retirement / bounded workers / drain [Migrated + adaptation; Linux verified]
-│   │   └── SOCKS/PAC                               [Pending]
+│   │   └── SOCKS/PAC                               [Deferred; outside active scope]
 │   ├── Core release preparation / stable and Alpha activation [Partially implemented; Linux x86_64]
 │   │   ├── Official stable/Alpha metadata and platform asset [Implemented; Linux x86_64]
 │   │   ├── Bounded compressed download / SHA-256 / private atomic cache [Implemented]
@@ -135,7 +176,7 @@ mihomo-server/
 │   │   ├── Alpha executable/version/config staging / private proof / readback [Implemented; Linux x86_64]
 │   │   ├── Alpha activation / receipts / durable rollback / startup recovery [Implemented; Linux x86_64]
 │   │   ├── Alpha upstream force/no-op adapter / channel-aware Web workflow [Implemented; Linux x86_64]
-│   │   └── Other core upgrade targets [Pending]
+│   │   └── Other core upgrade targets [Deferred; outside active scope]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
@@ -153,8 +194,8 @@ mihomo-server/
 │   │   ├── Running-core restore reload/restart/apply rollback / saved-node reconciliation [Implemented; Linux verified]
 │   │   ├── Scoped candidate leases / bounded abrupt-termination orphan cleanup [Implemented; Linux verified]
 │   │   ├── Private retained archives / create-list-download-delete / partial recovery [Implemented; Linux verified]
-│   │   └── Automatic retention policy / schedule / WebDAV / UI [Pending]
-│   ├── Full application context and domain events  [Pending]
+│   │   └── Automatic retention / schedule / change triggers / WebDAV / UI [Deferred; outside active scope]
+│   ├── Full application context and domain events  [Deferred; expand only as needed for P1–P3]
 │   ├── Sole Mihomo lifecycle manager                [Implemented; Linux verified]
 │   │   ├── Start, readiness, stop, restart, recovery, reap
 │   │   ├── Linux core/validator parent-death termination [Implemented; Linux verified]
@@ -173,7 +214,7 @@ mihomo-server/
 │   │   ├── Authenticated POST /api/backup/validate restore rehearsal [Implemented; Linux verified]
 │   │   ├── Authenticated POST /api/backup/restore running/stopped restoration [Implemented; Linux verified]
 │   │   ├── Authenticated POST/GET /api/backups and GET/DELETE /api/backups/{id} [Implemented; Linux verified]
-│   │   └── Broader rules/providers/connections/delay commands [Pending]
+│   │   └── Rules/providers/delay commands [Pending; P2; full connection expansion deferred]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
 │   │   ├── State/profile snapshots, watches, log tail/reset [Implemented]
@@ -182,12 +223,12 @@ mihomo-server/
 │   ├── Web static assets and scoped SPA fallback    [Implemented; Linux verified]
 │   ├── Unix SIGINT/SIGTERM and unified shutdown     [Implemented]
 │   ├── User systemd unit template                  [Scaffold; static check only]
-│   └── Other platform service integration           [Pending]
+│   └── Other platform service integration           [Deferred; Linux only]
 <!--│   └── Windows SCM service integration              [Deferred; Windows compatibility postponed] -->
 ├── web/                                             [Partially implemented]
 │   ├── React build, login and responsive layout     [Implemented; MVP]
 │   ├── HTTP commands, WebSocket events/feed adapters [Implemented; MVP allowlist]
-│   │   └── Broader command and feed views           [Pending]
+│   │   └── Rules/providers/delay command views      [Pending; P2; unrelated views deferred]
 │   ├── Local profiles, config editor, core state    [Implemented; MVP]
 │   │   ├── Remote URL import, usage display, saved auxiliary defaults [Implemented]
 │   │   ├── Manual remote refresh / usage updates  [Implemented]
@@ -203,12 +244,14 @@ mihomo-server/
 │   ├── Proxy selection, unfix and bounded logs      [Implemented; MVP]
 │   ├── Proxy connection information / actual ports / save verification [Implemented; Linux verified]
 │   ├── Traffic, memory and connection-count overview [Implemented; MVP]
-│   ├── Rules and full connection/provider views     [Pending]
+│   ├── Rules/provider/delay views                   [Pending; P2]
+│   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── DNS/TUN editor / lossless nested inheritance / readback [Implemented; Linux verified]
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
-│   └── Full settings and backup UI [Pending]
+│   └── Full settings/resource UI [Pending; P1]
+│   └── Backup UI [Deferred; outside active scope]
 ├── Release and deployment                           [Partially implemented]
 │   ├── Linux x86_64 bundle: Rust + independent Mihomo + Web [Implemented]
 │   ├── Explicit target/version/SHA-256 resource manifest [Implemented]
@@ -216,9 +259,11 @@ mihomo-server/
 │   ├── One foreground exec launcher                 [Implemented; Linux verified]
 │   ├── Preserve data and existing upgraded core      [Implemented; Linux verified]
 │   ├── Managed core installation receipt / interrupted-switch recovery [Implemented; Linux x86_64]
-│   ├── User systemd template deployment              [Scaffold; runtime pending]
-│   ├── Other platforms, containers, Alpha bundle seeds / Geo resources [Pending]
-│   └── External publication/license resolution      [Pending]
+│   ├── Actual Linux systemd installation / lifecycle verification [Pending; P4; template exists]
+│   ├── Linux Geo resource packaging               [Pending; P4]
+│   ├── Other platforms / containers / Alpha bundle seeds [Deferred]
+│   └── Linux package license inventory              [Pending; P4]
+│   └── External publication                      [Deferred]
 └── Documentation and provenance                     [Implemented; maintained]
     ├── headless.md
     ├── docs/UPSTREAM.md
@@ -3140,6 +3185,31 @@ resources, advanced pages, shared components and additional release/service
 targets remain pending; Windows compatibility stays deferred. The Linux MVP
 remains runnable and the full project is not complete.
 
+## Latest increment: core-focused delivery priorities
+
+The user stopped further backup expansion and set the active order to P1
+configuration/resources, P2 rules/providers/delay tests, P3 i18n/signals and P4
+Linux packaging plus actual systemd installation. The complete architecture tree
+now distinguishes active pending work from deferred non-core work. Historical
+backup next-task notes are superseded by the Active priorities and Delivery order
+sections; delivered manual backup functionality remains intact.
+
+The unshipped automatic-backup policy models, operation variant and unused policy
+module from the interrupted increment were withdrawn. No scheduler, policy API,
+pruning or runtime change was delivered in that increment. The working baseline
+remains the verified Linux retained-backups MVP; this priority update does not
+claim new features or actual systemd deployment.
+
+Validation: `cargo check --workspace --locked --offline` passed using the existing
+Cargo cache. The service settings integration suite passed its two regular tests;
+eight opt-in real-Mihomo cases were not run for this documentation-only priority
+update. Runtime sources match the previously verified baseline. No sandbox Git
+writes/commits occur; the host script owns the commit.
+
+Next task: P1 Geo/provider resource inventory, explicit paths/readback and
+validation, followed by full authoritative settings and resource lifecycle.
+The active priorities and the complete original design are not yet completed.
+
 ## MVP completion boundary
 
 The first usable MVP must provide an actual working path through the layers,
@@ -3187,15 +3257,17 @@ remaining integration gaps. Prioritize the usable MVP before expanding features:
 5. Add Axum, authentication, WebSocket adapters, and a small usable React UI
    for that flow. Serve its built assets through the Rust service.
 6. Supply the initial deployment path and complete the MVP behavior checks.
-7. Complete remaining remote subscription/enhancement workflows, then expand
-   scheduled updates, stable/Alpha core upgrades with rollback, backups
-   and WebDAV, media detection, advanced settings, the remaining UI pages,
-   and additional platform release/service integrations from `headless.md`
-   (Windows-related compatibility is deferred).
+7. **P1:** complete configuration/settings and Geo/provider resource management.
+8. **P2:** implement rules, provider management and delay testing APIs/Web views.
+9. **P3:** complete i18n and the Linux service signal behavior.
+10. **P4:** package Linux and actually install/verify the systemd service.
 
-Deferred capabilities remain required by the full design. Preserve existing
-business semantics during extraction, even when the initial UI exposes only
-the operations needed for the MVP.
+Steps 1–6 describe the delivered MVP foundation; the current continuation is
+steps 7–10, in strict priority order. The Active priorities section takes
+precedence over historical next-task statements. Other unfinished design
+capabilities are deferred and must not consume implementation time unless the
+user expands scope. Preserve delivered behavior and formats; do not equate a
+priority reorder with implementation or full-project completion.
 <!-- Note: Windows-specific compatibility plans (Named Pipe, Windows SCM, native Windows proxy discovery) are deferred. -->
 
 ## Migration report requirements
