@@ -65,6 +65,7 @@ pub fn router(state: HttpState) -> Router {
         .route("/api/commands", post(command))
         .route("/api/backup", post(backup))
         .route("/api/backup/inspect", post(inspect_backup))
+        .route("/api/backup/validate", post(validate_backup_restore))
         .route("/api/status", get(status))
         .route("/api/logs", get(logs))
         .route("/api/profiles", get(profiles))
@@ -201,6 +202,19 @@ async fn backup(State(state): State<HttpState>, body: Bytes) -> Response {
 }
 
 async fn inspect_backup(State(state): State<HttpState>, request: Request) -> Response {
+    backup_upload(state, request, BackupUpload::Inspect).await
+}
+
+async fn validate_backup_restore(State(state): State<HttpState>, request: Request) -> Response {
+    backup_upload(state, request, BackupUpload::ValidateRestore).await
+}
+
+enum BackupUpload {
+    Inspect,
+    ValidateRestore,
+}
+
+async fn backup_upload(state: HttpState, request: Request, operation: BackupUpload) -> Response {
     use headless_core::backup::MAX_ARCHIVE_BYTES;
     let headers = request.headers();
     if headers.get_all(header::CONTENT_TYPE).iter().count() != 1
@@ -243,7 +257,7 @@ async fn inspect_backup(State(state): State<HttpState>, request: Request) -> Res
             "backup archive exceeds 65 MiB",
         );
     }
-    let (permit, mut shutdown) = match state.management.manager.admit_backup_inspection() {
+    let (permit, mut shutdown) = match state.management.manager.admit_backup_upload() {
         Ok(admission) => admission,
         Err(_) => {
             return error(
@@ -278,6 +292,20 @@ async fn inspect_backup(State(state): State<HttpState>, request: Request) -> Res
             "invalid_backup_length",
             "upload length mismatch",
         );
+    }
+    if matches!(operation, BackupUpload::ValidateRestore) {
+        let operation = state
+            .management
+            .manager
+            .validate_backup_restore(bytes, permit, closing.clone());
+        return tokio::select! {
+            _ = shutdown.changed() => error(StatusCode::SERVICE_UNAVAILABLE, "shutting_down", "service is shutting down"),
+            _ = closing.changed() => error(StatusCode::SERVICE_UNAVAILABLE, "shutting_down", "service is shutting down"),
+            result = operation => match result {
+                Ok(report) => Json(report).into_response(),
+                Err(_) => error(StatusCode::UNPROCESSABLE_ENTITY, "backup_restore_validation_failed", "backup restore candidate failed validation; no configuration was applied"),
+            }
+        };
     }
     let worker_shutdown = shutdown.clone();
     let worker_closing = closing.clone();

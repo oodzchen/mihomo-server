@@ -77,7 +77,7 @@ mihomo-server/
 │       ├── Geo/provider resources and proxy views   [Pending]
 │       ├── Immutable revision / orphan file garbage collection [Pending]
 │       ├── Timed update metadata / saved refresh source [Migrated + service scheduler]
-│       ├── Backup manifest / bounded entry / download and inspection models [Implemented; upstream ZIP adaptation]
+│       ├── Backup manifest / bounded entry / download, inspection and restore validation models [Implemented; upstream ZIP adaptation]
 │       └── Backup restore / retention models / full upgrade resource settings [Pending]
 ├── service/                                         [Partially implemented]
 │   ├── Persistent foreground entry point            [Implemented]
@@ -132,11 +132,15 @@ mihomo-server/
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
-│   ├── Local backup export and inspection           [Partially implemented; Linux verified]
+│   ├── Local backup export, inspection and restore rehearsal [Partially implemented; Linux verified]
 │   │   ├── Actor snapshot / bounded ZIP / digest manifest [Implemented]
 │   │   ├── Authenticated binary download / single body-owned admission [Implemented]
 │   │   ├── Strict ZIP structure / CRC / SHA-256 / catalog and settings references [Implemented; Linux verified]
 │   │   ├── Authenticated read-only binary inspection / pre-upload shared admission [Implemented; Linux verified]
+│   │   ├── Disposable restore candidate / archived runtime / active enhancement validation [Implemented; Linux verified]
+│   │   ├── Actor-owned core snapshot / isolated Geo data / probe cancellation and cleanup [Implemented; Linux verified]
+│   │   ├── Durable restore publication / startup recovery / failure rollback [Pending]
+│   │   ├── Abrupt-termination candidate orphan cleanup [Pending]
 │   │   └── Local retention / restore / schedule / WebDAV / UI [Pending]
 │   ├── Full application context and domain events  [Pending]
 │   ├── Sole Mihomo lifecycle manager                [Implemented; Linux verified]
@@ -154,6 +158,7 @@ mihomo-server/
 │   │   ├── Stable core query / preparation / staging / activation / installation/version readback / force-no-op; Alpha query / compressed preparation / executable staging / activation / installation readback / force-no-op [Implemented; Linux x86_64]
 │   │   ├── Authenticated POST /api/backup ZIP export [Implemented; Linux verified]
 │   │   ├── Authenticated POST /api/backup/inspect validation report [Implemented; Linux verified]
+│   │   ├── Authenticated POST /api/backup/validate restore rehearsal [Implemented; Linux verified]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -2624,6 +2629,99 @@ durable publication/recovery and failure rollback. Local retention/list/delete,
 automatic schedules, WebDAV and backup UI remain pending, along with other core/
 release targets, native resources/settings, advanced pages, garbage collection,
 shared optional components and platform/service integrations.
+
+## Latest increment: disposable restore candidate and runtime validation
+
+Delivery step 7's restore work is split into candidate validation and durable
+publication. This increment completes the functional candidate rehearsal phase:
+`BackupRestoreValidation` models and authenticated `POST /api/backup/validate`
+check an uploaded backup against the current core without publishing settings,
+catalog or runtime state. Durable restoration, recovery and rollback are still
+pending; the report is not an installation receipt or reusable staged candidate.
+
+The route reuses inspection's strict binary upload boundary and shared backup
+admission before buffering, then sends validation to the lifecycle actor after
+normal pending-transaction recovery. Actor serialization keeps the core stable
+against concurrent upgrades/configuration/lifecycle commands. Existing proxy
+traffic and watched state continue; queued actor commands wait. A disconnected
+reply, HTTP closing or manager shutdown triggers a private cancellation channel.
+The actor joins preparation, terminates/reaps probes/workers and removes the
+candidate before releasing admission and data-directory ownership.
+
+Strict archive verification now also provides borrowed verified manifest/entry
+contents for internal consumers. The disposable worker materializes only verified
+configuration/profile paths into a fresh 0700 temporary directory with 0600 files,
+preserving raw source bytes and excluding credentials/runtime sockets/core files.
+Existing ProfileStore generation reads the isolated catalog/files. Current Geo
+resources are copied into separate validation data with no-follow/nonblocking
+reads, owner/mode/type/link/identity checks and a combined 256 MiB limit. Provider
+paths must be relative and remain within disposable validation data; omitted
+provider caches can fail probes. Mihomo can fetch resources into that disposable
+directory; current-core resource isolation is not a full OS sandbox.
+
+The exact archived runtime is checked first with current Mihomo `-t`. If there is
+an active profile, its raw/sequence/global/profile source and archived settings
+produce a separate regenerated candidate following existing settings/TUN/DNS,
+merge/script/final-authority/finalization order without deriving twice. Identity
+scripts skip processes; other active scripts use the existing bounded Linux Boa
+worker. Uploaded logs and diagnostics are discarded rather than appended to live
+logs. Inactive profiles receive source/schema checks, not execution/core probes.
+Requested provider DNS overrides need fresh session confirmation and are suppressed
+in regeneration until then, with a boolean reported to the caller. No live DNS
+confirmation or preference changes occur.
+
+Responses contain the inspection metadata and separate archived/regenerated byte
+lengths/SHA-256, plus the DNS confirmation flag; they expose no YAML/source/profile
+names, paths or logs. Digests may differ for manual runtime edits or session DNS
+policy. Both runtime candidates are checked for bounded bytes and unchanged
+regular-file identity/content after probes. No runtime revision, restore journal,
+catalog/settings publication or candidate proof is retained. Normal success,
+failure and cancellation clean temporary data; cleanup errors fail the request.
+Abrupt process termination can leave private temporary files; orphan cleanup is
+an explicit pending restore recovery responsibility.
+
+Upload bounds remain 65 MiB/15 seconds and one shared backup slot; preparation has
+a separate 15-second cooperative filesystem budget. Script/core probes use existing
+configured timeouts (5 seconds by default), IPC/output limits and cancellation.
+Parsing/filesystem I/O cannot be forcibly preempted. Generic 422 failures cover
+archives, regeneration/scripts, missing/unsafe resources, Mihomo rejection,
+candidate mutation and cleanup, without leaking uploaded content or host paths.
+
+Verification: `cargo check --workspace --locked --offline`, all 288 regular Rust
+tests with `--test-threads=1`, focused backup/restore tests, warnings-denied Clippy,
+formatting and diff checks pass. New tests cover private staging/raw preservation/
+cleanup, Geo links/hard links/FIFO/unsafe modes/oversize, bounded no-follow candidate
+checks, provider traversal, bootstrap-only and active rehearsals, script execution/
+failure/loop timeout, preserved live settings/state/logs, archived authority and
+fresh provider DNS confirmation. Disconnect/HTTP closing/manager shutdown tests
+observe probe PIDs and verify reaping and temporary-directory removal. Real-core
+backup regression also rehearses running/stopped/restarted archives and rejects
+format-valid but unsupported-protocol runtime while preserving the live core.
+
+An isolated copy of the actual 56-node subscription exports a 1,110,883-byte,
+13-entry archive. Both archived runtime and active regeneration pass rehearsal
+while running, stopped and after service restart. Running PID/generation/config/
+catalog/selected node remain unchanged. Selected-node HTTPS proxy requests return
+204 before/after rehearsal and after restart, and original data hashes are
+unchanged. The fresh runnable Linux bundle is
+`target/mihomo-server-linux-x86_64-restore-validation`; all 12 checksums pass, the
+binary matches the release build and bundled deployment/provenance docs match
+source. Web source/assets are unchanged.
+
+All 72 real-Mihomo opt-in tests and all 24 default browser workflows pass against
+the fresh production bundle. Two optional Alpha executable browser cases are
+skipped without their separate verified-binary fixture; stable/Alpha core paths
+remain covered by the real-core regressions. The final audit reports zero owned
+service/core/worker/validator processes and zero remaining restore candidate
+directories after normal success, failures and cancellation.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The Linux MVP remains runnable; the full project is not complete. Next Delivery
+step 7 subtask: durable backup restoration coordinating catalog/settings/runtime
+publication with startup recovery and failure rollback, including temporary
+candidate ownership/cleanup. Retention/list/delete, schedules, WebDAV, backup UI,
+other targets, native settings/resources, advanced pages, garbage collection,
+optional shared components and platform/service integrations remain pending.
 
 ## MVP completion boundary
 

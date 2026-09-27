@@ -27,6 +27,9 @@ integrity and configuration references without applying it. Both share one
 bounded operation slot. No archive is retained or extracted; backup restore,
 retention, automatic schedules and WebDAV remain pending. Full request limits and
 error codes are documented in the source repository's `docs/RUNNING.md`.
+The same binary upload sent to `/api/backup/validate` additionally rehearses the
+archived runtime and active profile regeneration using isolated Mihomo/script
+probes, removes its disposable files and returns digests without applying data.
 
 ```sh
 python3 scripts/package_bundle.py --build \

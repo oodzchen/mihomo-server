@@ -1464,3 +1464,34 @@ collection, with upload timeout, cooperative worker cancellation and sanitized
 errors. Reports contain counts/digests and metadata without source contents or
 host paths. No dependency changes are needed. Transactional restore/rollback,
 retention, schedules, WebDAV and backup UI remain pending.
+
+## Disposable restore runtime and enhancement rehearsal
+
+Reference: `src-tauri/src/feat/backup.rs::restore_local_backup` and
+`restore_webdav_backup`, pinned commit b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b.
+Upstream extracts directly into application data and finalizes desktop config.
+This bounded increment implements candidate validation before future durable
+service publication; desktop/WebDAV settings and direct extraction remain absent.
+
+Destinations: headless-core/src/backup.rs (disposable validation report),
+service/src/backup_restore.rs, backup_inspect.rs, core_manager.rs and management/
+http.rs. Strict verification now also supplies borrowed manifest/entry contents
+for the restore path without weakening inspection. Verified files are privately
+materialized, preserving raw bytes and catalog/settings records; current Geo data
+is bounded/copied safely into isolated probe data. The actor prevents core
+replacement while validating both archived runtime and active regeneration.
+
+Active regeneration reuses ProfileStore::read_generation, migrated sequence/
+merge/TUN/DNS/final processing and the bounded Boa worker, following existing
+actor order without double derivation. Session DNS confirmations are not imported;
+the report indicates suppressed provider overrides. Scripts run only in disposable
+workers and their uploaded logs/diagnostics are not added to live logs. Snapshots
+and regenerated configs retain separate digests; manual runtime edits are not
+silently replaced or published. Current-core Mihomo probes are cancelled/reaped
+and candidate identities/content are verified afterward.
+
+Authenticated `/api/backup/validate` shares the existing upload boundary/admission,
+serializes actor core use, and cleans candidates on completion/failure/cancellation
+without restore journals or live config changes. No dependency changes are needed.
+Transactional publication/recovery/rollback, orphan cleanup after abrupt process
+termination, retention, scheduling, WebDAV and backup UI remain pending.

@@ -114,6 +114,203 @@ async fn inspection_report(
     assert_eq!(report.archive_bytes, expected_length);
     Ok(report)
 }
+
+fn restore_request(token: &str, bytes: Vec<u8>) -> Request<Body> {
+    let mut request = inspection_request(token, Body::from(bytes));
+    *request.uri_mut() = "/api/backup/validate".parse().unwrap();
+    request
+}
+async fn restore_report(
+    app: &Router,
+    token: &str,
+    bytes: Vec<u8>,
+) -> Result<headless_core::backup::BackupRestoreValidation> {
+    let digest = hash(&bytes);
+    let response = app.clone().oneshot(restore_request(token, bytes)).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    assert_eq!(response.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    let report: headless_core::backup::BackupRestoreValidation =
+        serde_json::from_slice(&to_bytes(response.into_body(), 8192).await?)?;
+    assert_eq!(report.archive.archive_sha256, digest);
+    Ok(report)
+}
+fn rewrite_archive(
+    bytes: &[u8],
+    change: impl FnOnce(&mut std::collections::BTreeMap<String, Vec<u8>>),
+) -> Result<Vec<u8>> {
+    use std::io::Write as _;
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes))?;
+    let mut files = std::collections::BTreeMap::new();
+    for index in 0..zip.len() {
+        let mut file = zip.by_index(index)?;
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)?;
+        files.insert(file.name().to_string(), data);
+    }
+    let mut manifest: BackupManifest = serde_json::from_slice(&files.remove("manifest.json").unwrap())?;
+    change(&mut files);
+    manifest.entries = files
+        .iter()
+        .map(|(path, data)| headless_core::backup::BackupEntry {
+            path: path.clone(),
+            bytes: data.len() as u64,
+            sha256: hash(data),
+        })
+        .collect();
+    files.insert("manifest.json".into(), serde_json::to_vec(&manifest)?);
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for (name, data) in files {
+        writer.start_file(
+            name,
+            zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored)
+                .unix_permissions(0o600),
+        )?;
+        writer.write_all(&data)?;
+    }
+    Ok(writer.finish()?.into_inner())
+}
+
+#[tokio::test]
+async fn restore_rehearsal_validates_snapshot_and_scripts_without_publishing_or_logging_uploaded_content() -> Result<()>
+{
+    let dir = Directory::new()?;
+    let manager = dir.manager(false)?;
+    let (app, token) = dir.app(&manager)?;
+    let result = async {
+        // A bootstrap-only backup has no profile regeneration stage.
+        let download = manager.export_backup().await?; let bytes = download.bytes.clone(); drop(download);
+        let report = restore_report(&app, &token, bytes).await?;
+        assert!(report.regenerated_runtime_sha256.is_none());
+        assert_eq!(app.clone().oneshot(restore_request("wrong", Vec::new())).await?.status(), StatusCode::UNAUTHORIZED);
+        let mut invalid = restore_request(&token, Vec::new());
+        invalid.headers_mut().remove(header::CONTENT_TYPE);
+        assert_eq!(app.clone().oneshot(invalid).await?.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let profile = manager.import_profile_yaml("mode: rule\nproxies: []\nrules: ['MATCH,DIRECT']\n".into(), "candidate source".into()).await?;
+        manager.select_profile(profile.uid.unwrap().to_string()).await?;
+        let before = manager.status(); let catalog = json!(manager.profiles()); let settings = manager.settings().await?; let runtime = manager.runtime_config().await?;
+        let script = manager.profiles().items.unwrap().into_iter().find(|item| item.uid.as_deref() == Some("Script")).unwrap().file.unwrap();
+        let download = manager.export_backup().await?; let bytes = download.bytes.clone(); drop(download);
+        let altered = rewrite_archive(&bytes, |files| { files.insert(format!("profiles/{script}"), b"function main(config) { console.log('PRIVATE_ARCHIVE_DIAGNOSTIC'); config['log-level']='debug'; return config; }".to_vec()); })?;
+        inspection_report(&app, &token, altered.clone()).await?;
+        let report = restore_report(&app, &token, altered).await?;
+        assert!(report.regenerated_runtime_bytes.is_some());
+        assert_ne!(report.regenerated_runtime_sha256.as_deref(), Some(report.runtime_sha256.as_str()));
+        let logs = manager.logs().into_iter().map(|line| line.message).collect::<Vec<_>>().join("\n");
+        assert!(!logs.contains("PRIVATE_ARCHIVE_DIAGNOSTIC"));
+        assert_eq!(manager.status().generation, before.generation); assert_eq!(manager.status().config_revision, before.config_revision);
+        assert_eq!(json!(manager.profiles()), catalog); assert_eq!(manager.settings().await?, settings); assert_eq!(manager.runtime_config().await?, runtime);
+        assert!(!dir.0.join("backup-restore.yaml").exists());
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
+async fn restore_rehearsal_enforces_archived_authority_and_requires_fresh_provider_dns_confirmation() -> Result<()> {
+    let dir = Directory::new()?;
+    let manager = dir.manager(false)?;
+    let (app, token) = dir.app(&manager)?;
+    let result = async {
+        let profile = manager.import_profile_yaml("mode: rule\nproxies: []\ndns: {enable: true, nameserver: [8.8.8.8], nameserver-policy: {'+.example.test': 8.8.8.8}}\nrules: ['MATCH,DIRECT']\n".into(), "provider DNS".into()).await?;
+        let uid = profile.uid.unwrap().to_string(); manager.select_profile(uid.clone()).await?;
+        let download = manager.export_backup().await?; let bytes = download.bytes.clone(); drop(download);
+        let archive = rewrite_archive(&bytes, |files| {
+            let mut profile_dns = serde_json::Map::new(); profile_dns.insert(uid, json!({"enabled":true}));
+            files.insert("settings.yaml".into(), serde_yaml_ng::to_string(&json!({"schema_version":1,"runtime":{"mixed-port":12345,"allow-lan":false,"tun":{"enable":false},"dns":{"enable":true,"nameserver":["1.1.1.1"]}},"profile_dns":profile_dns})).unwrap().into_bytes());
+        })?;
+        let script = format!("#!/usr/bin/python3\nimport sys,pathlib\np=pathlib.Path(sys.argv[sys.argv.index('-f')+1])\nif p.name=='regenerated.yaml': pathlib.Path({:?}).write_bytes(p.read_bytes())\nsys.exit(0)\n", dir.0.join("regenerated-seen.yaml").to_str().unwrap());
+        fs::write(dir.0.join("validator.py"), script)?;
+        let before = manager.settings().await?;
+        let report = restore_report(&app, &token, archive).await?;
+        assert!(report.dns_override_requires_confirmation);
+        let regenerated: serde_yaml_ng::Value = serde_yaml_ng::from_slice(&fs::read(dir.0.join("regenerated-seen.yaml"))?)?;
+        assert_eq!(regenerated["mixed-port"].as_u64(), Some(12345));
+        assert_eq!(regenerated["dns"]["nameserver"][0].as_str(), Some("8.8.8.8"));
+        assert!(regenerated["dns"]["nameserver-policy"].as_mapping().is_some());
+        assert_eq!(manager.settings().await?, before);
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
+async fn restore_probe_and_script_failures_are_sanitized_and_release_backup_admission() -> Result<()> {
+    let dir = Directory::new()?;
+    let mut options = CoreOptions::new(dir.0.join("validator.py"), dir.0.clone(), dir.0.join("bootstrap.yaml"));
+    options.script_worker = Some(PathBuf::from(env!("CARGO_BIN_EXE_mihomo-server")));
+    options.policy.script_timeout = Duration::from_millis(120);
+    let manager = CoreManager::spawn(options)?;
+    let (app, token) = dir.app(&manager)?;
+    let result = async {
+        let profile = manager.import_profile_yaml("proxies: []\nrules: ['MATCH,DIRECT']\n".into(), "source".into()).await?; manager.select_profile(profile.uid.unwrap().to_string()).await?;
+        let script = manager.profiles().items.unwrap().into_iter().find(|item| item.uid.as_deref() == Some("Script")).unwrap().file.unwrap();
+        let download = manager.export_backup().await?; let bytes = download.bytes.clone(); drop(download);
+        let before = manager.status(); let original = fs::read(dir.0.join("validator.py"))?;
+        for case in ["probe", "probe-mutation", "script-error", "script-loop", "provider-escape"] {
+            let archive = rewrite_archive(&bytes, |files| {
+                match case {
+                    "script-error" => { files.insert(format!("profiles/{script}"), b"function main(config) { throw Error('PRIVATE_DIAGNOSTIC'); }".to_vec()); },
+                    "script-loop" => { files.insert(format!("profiles/{script}"), b"function main(config) { while (true) {} }".to_vec()); },
+                    "provider-escape" => { files.insert("runtime.yaml".into(), b"rule-providers: {escape: {type: file, behavior: domain, path: ../live.yaml}}\n".to_vec()); },
+                    _ => {},
+                }
+            })?;
+            inspection_report(&app, &token, archive.clone()).await?;
+            let validator = if case == "probe" { b"#!/usr/bin/python3\nimport sys\nprint('PRIVATE_DIAGNOSTIC /tmp/private')\nsys.exit(1)\n".to_vec() }
+                else if case == "probe-mutation" { b"#!/usr/bin/python3\nimport sys,pathlib\np=pathlib.Path(sys.argv[sys.argv.index('-f')+1]);p.write_text('changed')\n".to_vec() } else { original.clone() };
+            fs::write(dir.0.join("validator.py"), validator)?;
+            let response = tokio::time::timeout(Duration::from_secs(3), app.clone().oneshot(restore_request(&token, archive))).await??;
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY, "{case}");
+            let body = to_bytes(response.into_body(), 4096).await?; let body = String::from_utf8_lossy(&body);
+            assert!(!body.contains("PRIVATE_DIAGNOSTIC") && !body.contains("/tmp/") && !body.contains(&token));
+            assert_eq!(manager.status().generation, before.generation); assert_eq!(manager.status().config_revision, before.config_revision);
+            let download = manager.export_backup().await?; drop(download);
+        }
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
+async fn restore_disconnect_http_close_and_manager_shutdown_reap_probes_and_remove_private_candidates() -> Result<()> {
+    for case in ["disconnect", "http-close", "manager-shutdown"] {
+        let dir = Directory::new()?;
+        let manager = dir.manager(false)?;
+        let auth = Authentication::load_or_create(&dir.0.join("management-token"), "127.0.0.1:9090".parse()?, None)?;
+        let token = fs::read_to_string(dir.0.join("management-token"))?.trim().to_owned();
+        let state = HttpState::new(Management::new(manager.clone(), auth));
+        let app = router(state.clone());
+        let result = async {
+            let download = manager.export_backup().await?; let bytes = download.bytes.clone(); drop(download);
+            let marker = dir.0.join("probe.json");
+            fs::write(dir.0.join("validator.py"), format!("#!/usr/bin/python3\nimport sys,time,pathlib,json,os\npathlib.Path({:?}).write_text(json.dumps({{'pid':os.getpid(),'config':sys.argv[sys.argv.index('-f')+1],'data':sys.argv[sys.argv.index('-d')+1]}}))\ntime.sleep(60)\n", marker.to_str().unwrap()))?;
+            let upload = tokio::spawn(app.oneshot(restore_request(&token, bytes)));
+            let probe: serde_json::Value = tokio::time::timeout(Duration::from_secs(3), async { loop { if let Ok(data) = fs::read(&marker) && let Ok(probe) = serde_json::from_slice::<serde_json::Value>(&data) { break probe; } tokio::time::sleep(Duration::from_millis(10)).await; } }).await?;
+            let temporary = PathBuf::from(probe["config"].as_str().unwrap()).parent().unwrap().to_path_buf();
+            assert_eq!(fs::metadata(&temporary)?.permissions().mode() & 0o777, 0o700);
+            assert!(probe["data"].as_str().unwrap().starts_with(temporary.to_str().unwrap()));
+            match case {
+                "disconnect" => { upload.abort(); assert!(upload.await.unwrap_err().is_cancelled()); },
+                "http-close" => { state.close(); assert_eq!(upload.await??.status(), StatusCode::SERVICE_UNAVAILABLE); },
+                "manager-shutdown" => { tokio::time::timeout(Duration::from_secs(3), manager.shutdown()).await??; assert_eq!(upload.await??.status(), StatusCode::SERVICE_UNAVAILABLE); },
+                _ => unreachable!(),
+            }
+            if case != "manager-shutdown" { tokio::time::timeout(Duration::from_secs(3), manager.settings()).await??; let download = manager.export_backup().await?; drop(download); }
+            assert!(!temporary.exists(), "{case}");
+            let pid = probe["pid"].as_i64().unwrap() as libc::pid_t;
+            assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "validator must be reaped");
+            Ok::<_, anyhow::Error>(())
+        }.await;
+        let cleanup = manager.shutdown().await;
+        result.and(cleanup)?;
+    }
+    Ok(())
+}
 fn inspect(bytes: Vec<u8>) -> Result<(BackupManifest, IProfiles, ServiceSettings, serde_yaml_ng::Mapping)> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes))?;
     let manifest: BackupManifest = serde_json::from_reader(zip.by_name("manifest.json")?)?;
@@ -467,8 +664,13 @@ async fn real_backup_exports_preserve_running_pid_config_and_saved_nodes_and_sur
         let before=manager.status();let config=manager.runtime_config().await?;let profiles=json!(manager.profiles());let (app,token)=dir.app(&manager)?;
         let download=manager.export_backup().await?;let (manifest,catalog,_,yaml)=inspect(download.bytes.clone())?;drop(download);
         let download=manager.export_backup().await?;let bytes=download.bytes.clone();drop(download);inspection_report(&app,&token,bytes).await?;
+        let download=manager.export_backup().await?;let bytes=download.bytes.clone();drop(download);
+        let report=restore_report(&app,&token,bytes.clone()).await?;assert!(report.regenerated_runtime_sha256.is_some());
+        let invalid=rewrite_archive(&bytes,|files| {files.insert("runtime.yaml".into(),b"mode: rule\nproxies: [{name: Invalid, type: invalid-protocol}]\nrules: ['MATCH,DIRECT']\n".to_vec());})?;
+        inspection_report(&app,&token,invalid.clone()).await?;
+        assert_eq!(app.clone().oneshot(restore_request(&token,invalid)).await?.status(),StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(manifest.active_profile.as_deref(),Some(uid.as_str()));assert_eq!(manifest.runtime_revision,before.config_revision);assert_eq!(json!(catalog),profiles);assert_eq!(yaml,config);assert_eq!(manager.status().pid,before.pid);assert_eq!(manager.status().generation,before.generation);assert_eq!(manager.client().get_proxies().await?.proxies["Main"].now.as_deref(),Some("REJECT"));
-        manager.stop().await?;let download=manager.export_backup().await?;let bytes=download.bytes.clone();let (_,catalog,_,yaml)=inspect(bytes.clone())?;drop(download);inspection_report(&app,&token,bytes).await?;assert_eq!(json!(catalog),profiles);assert_eq!(yaml,config);assert_eq!(manager.status().phase,CorePhase::Stopped);
+        manager.stop().await?;let download=manager.export_backup().await?;let bytes=download.bytes.clone();let (_,catalog,_,yaml)=inspect(bytes.clone())?;drop(download);inspection_report(&app,&token,bytes.clone()).await?;restore_report(&app,&token,bytes).await?;assert_eq!(json!(catalog),profiles);assert_eq!(yaml,config);assert_eq!(manager.status().phase,CorePhase::Stopped);
         Ok::<_,anyhow::Error>((config,profiles))
     }.await;
     let cleanup = manager.shutdown().await;
@@ -482,7 +684,8 @@ async fn real_backup_exports_preserve_running_pid_config_and_saved_nodes_and_sur
         let (_, catalog, _, yaml) = inspect(download.bytes.clone())?;
         drop(download);
         let (app, token) = dir.app(&restarted)?;
-        inspection_report(&app, &token, bytes).await?;
+        inspection_report(&app, &token, bytes.clone()).await?;
+        restore_report(&app, &token, bytes).await?;
         assert_eq!(json!(catalog), profiles);
         assert_eq!(yaml, config);
         Ok::<_, anyhow::Error>(())

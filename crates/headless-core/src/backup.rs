@@ -27,6 +27,19 @@ pub struct BackupInspection {
     pub runtime_revision_present: bool,
 }
 
+/// A disposable restore rehearsal, not a retained stage or an activation receipt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackupRestoreValidation {
+    pub archive: BackupInspection,
+    pub runtime_bytes: u64,
+    pub runtime_sha256: String,
+    pub regenerated_runtime_bytes: Option<u64>,
+    pub regenerated_runtime_sha256: Option<String>,
+    /// Provider DNS confirmations are session-scoped and are never imported.
+    pub dns_override_requires_confirmation: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackupEntry {

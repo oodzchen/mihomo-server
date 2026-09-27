@@ -322,6 +322,12 @@ enum ProfileEnhancement {
 }
 
 enum CommandMessage {
+    ValidateBackupRestore {
+        bytes: axum::body::Bytes,
+        permit: tokio::sync::OwnedSemaphorePermit,
+        closing: watch::Receiver<bool>,
+        reply: oneshot::Sender<Result<headless_core::backup::BackupRestoreValidation>>,
+    },
     ExportBackup {
         permit: tokio::sync::OwnedSemaphorePermit,
         reply: oneshot::Sender<Result<crate::backup::BackupDownload>>,
@@ -1133,12 +1139,36 @@ impl CoreManager {
     }
 
     /// Admit before buffering an upload; shares the export/download memory slot.
-    pub(crate) fn admit_backup_inspection(&self) -> Result<(tokio::sync::OwnedSemaphorePermit, watch::Receiver<bool>)> {
+    pub(crate) fn admit_backup_upload(&self) -> Result<(tokio::sync::OwnedSemaphorePermit, watch::Receiver<bool>)> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let permit = Arc::clone(&self.backup_admission)
             .try_acquire_owned()
             .context("backup operation already in progress")?;
         Ok((permit, self.shutdown.subscribe()))
+    }
+
+    pub(crate) async fn validate_backup_restore(
+        &self,
+        bytes: axum::body::Bytes,
+        permit: tokio::sync::OwnedSemaphorePermit,
+        closing: watch::Receiver<bool>,
+    ) -> Result<headless_core::backup::BackupRestoreValidation> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        ensure!(
+            bytes.len() <= headless_core::backup::MAX_ARCHIVE_BYTES,
+            "backup archive exceeds 65 MiB"
+        );
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::ValidateBackupRestore {
+                bytes,
+                permit,
+                closing,
+                reply,
+            })
+            .await
+            .context("core manager stopped")?;
+        result.await.context("restore validation cancelled")?
     }
 
     pub async fn runtime_config(&self) -> Result<Mapping> {
@@ -1662,6 +1692,7 @@ impl Actor {
                         self.status.send_modify(|state| state.error = Some(message.clone()));
                         match request {
                             CommandMessage::ExportBackup {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
+                            CommandMessage::ValidateBackupRestore {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::InstalledCoreVersion(reply) => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::CheckCoreUpgrade {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::UpgradePreparedCore {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
@@ -1688,6 +1719,13 @@ impl Actor {
                     self.settings = self.settings_store.snapshot();
                     self.dns_confirmations.retain(|uid, _| self.profile_store.get_item(uid).is_ok());
                     match request {
+                        CommandMessage::ValidateBackupRestore {bytes, permit, closing, mut reply} => {
+                            if !reply.is_closed() {
+                                let result = self.validate_backup_restore(bytes, closing, &mut reply).await;
+                                drop(permit);
+                                let _ = reply.send(result);
+                            }
+                        }
                         CommandMessage::ExportBackup {permit, reply} => {
                             if !reply.is_closed() {
                                 let result = self.export_backup(permit).await;
@@ -2577,6 +2615,37 @@ impl Actor {
             }
             Err(error) => Err(error),
         }
+    }
+
+    #[cfg(unix)]
+    async fn validate_backup_restore(
+        &mut self,
+        bytes: axum::body::Bytes,
+        mut http_closing: watch::Receiver<bool>,
+        reply: &mut oneshot::Sender<Result<headless_core::backup::BackupRestoreValidation>>,
+    ) -> Result<headless_core::backup::BackupRestoreValidation> {
+        ensure!(
+            !*self.shutdown.borrow() && !*http_closing.borrow(),
+            "restore validation cancelled"
+        );
+        let (cancel, cancellation) = watch::channel(false);
+        let operation = crate::backup::restore::validate(bytes, self.options.clone(), cancellation);
+        tokio::pin!(operation);
+        tokio::select! { biased;
+            _ = closing(&mut self.shutdown) => { cancel.send_replace(true); let _ = operation.await; bail!("restore validation cancelled during shutdown"); },
+            _ = closing(&mut http_closing) => { cancel.send_replace(true); let _ = operation.await; bail!("restore validation cancelled during HTTP shutdown"); },
+            _ = reply.closed() => { cancel.send_replace(true); let _ = operation.await; bail!("restore validation client disconnected"); },
+            result = &mut operation => result,
+        }
+    }
+    #[cfg(not(unix))]
+    async fn validate_backup_restore(
+        &mut self,
+        _bytes: axum::body::Bytes,
+        _closing: watch::Receiver<bool>,
+        _reply: &mut oneshot::Sender<Result<headless_core::backup::BackupRestoreValidation>>,
+    ) -> Result<headless_core::backup::BackupRestoreValidation> {
+        bail!("restore validation is not yet supported on this platform")
     }
 
     #[cfg(unix)]

@@ -2146,4 +2146,66 @@ until it finishes/cancels. Status/settings/lifecycle commands remain independent
 Limits remain 65 MiB upload, 64 MiB content, 8 MiB per content entry and 1,024 ZIP
 entries, with a 1 MiB manifest and the existing 64 KiB settings limit. Only this
 binary route uses the larger upload allowance; JSON commands retain their 9 MiB
-envelope limit. Transactional restore and rollback are the next backup increment.
+envelope limit. Transactional restore and rollback remain pending.
+
+## Validate a restore candidate with Mihomo and enhancement workers
+
+Send the exported ZIP body to authenticated **POST `/api/backup/validate`** with
+`Content-Type: application/zip`. This route shares `/api/backup/inspect`'s upload
+limits, bearer/Host/Origin/query controls, no-store/nosniff headers, media rules,
+15-second upload timeout and single backup operation slot. Read the export to EOF
+or close its response before uploading. Allow time for queued lifecycle work and
+the validation probes; this request performs more work than archive inspection.
+
+The successful JSON report includes `archive` (the existing inspection metadata),
+`runtime_bytes`/`runtime_sha256` for the exact archived runtime, optional
+`regenerated_runtime_bytes`/`regenerated_runtime_sha256` for the active profile,
+and `dns_override_requires_confirmation`. It returns no configuration contents,
+profile names/URLs, logs, token, temporary paths, retained stage ID or receipt.
+
+After strict ZIP validation, the lifecycle actor materializes only verified
+configuration/profile entries in a disposable 0700 directory with 0600 files.
+It validates the archived runtime snapshot against the current core. If an active
+profile is recorded, it separately rebuilds the candidate using the archived raw
+profile, auxiliary/global files and settings, with the existing sequence,
+settings/TUN/DNS, global merge/script, profile merge/script, final authority and
+finalization order, then validates the regenerated runtime too. Identity templates
+skip workers; other active scripts run in disposable Linux workers with existing
+time/memory/IPC bounds. Uploaded console messages and errors are not appended to
+live logs. Inactive profiles receive the inspector's schema/source checks, not
+execution or per-profile Mihomo probes.
+
+The two runtime digests can differ legitimately: archived runtime may include
+manual edits, and DNS provider confirmations belong to the original session.
+Preview imports no session confirmations. A requested override with protected
+provider DNS is suppressed during regeneration and reported as requiring fresh
+confirmation. This flag does not change the archived settings or live session.
+The exact archived runtime remains a separately checked snapshot; no restore
+publication policy is implied by either digest.
+
+Mihomo `-t` uses isolated validation data containing bounded private copies of the
+current service's Geo resources, not the live data directory. Geo copies reject
+links, shared/nonregular/unsafe files, changed identities and more than 256 MiB
+combined content. Provider cache files are not carried in backup ZIPs; missing
+resources can fail validation. Absolute/traversing/backslash/colon provider paths
+are rejected. Probes may fetch resources into the disposable directory using the
+core's normal behavior. This is resource isolation, not an OS sandbox for the
+current trusted Mihomo executable.
+
+Preparation has a 15-second cooperative filesystem budget; each script/core probe
+uses the existing configured timeout (5 seconds by default). YAML parsing and
+filesystem I/O cannot be forcibly preempted. The actor serializes validation with
+core upgrades/configuration/lifecycle commands to keep the core executable stable;
+traffic and watched state continue, while queued actor commands wait. Disconnect,
+HTTP shutdown and manager shutdown cancel the work, terminate/reap probes/workers,
+join preparation and remove candidates before releasing admission/data ownership.
+Successful, failed and cancelled rehearsals clean their temporary files. Abrupt
+process termination can leave a private temporary directory; automatic orphan
+cleanup remains pending with the restore recovery work.
+
+Invalid archives, source generation, scripts, provider paths, Mihomo rejection,
+probe mutation or cleanup failure return generic 422; no restore state is
+published and no restore journal is created. Success is a disposable rehearsal,
+not a saved restore candidate or permission to skip validation later. Durable
+catalog/settings/runtime publication, recovery, rollback and restore UI remain
+the next backup work.

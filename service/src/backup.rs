@@ -1,8 +1,12 @@
-//! Bounded ZIP export and read-only inspection. No backup files are written to disk.
+//! Bounded ZIP export, inspection and disposable restore rehearsal. No archive is retained.
 use headless_core::backup::BackupMetadata;
 
 #[path = "backup_inspect.rs"]
 pub(crate) mod inspect;
+
+#[cfg(unix)]
+#[path = "backup_restore.rs"]
+pub(crate) mod restore;
 
 pub(crate) fn hash(bytes: &[u8]) -> String {
     ring::digest::digest(&ring::digest::SHA256, bytes)

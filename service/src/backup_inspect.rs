@@ -327,11 +327,17 @@ fn configurations(entries: &BTreeMap<&str, &[u8]>, manifest: &BackupManifest, bu
     Ok(base_count)
 }
 
-pub(crate) fn run(
+pub(crate) struct VerifiedArchive<'a> {
+    pub report: BackupInspection,
+    pub manifest: BackupManifest,
+    pub contents: BTreeMap<&'a str, &'a [u8]>,
+}
+
+pub(crate) fn verify(
     bytes: &[u8],
     shutdown: watch::Receiver<bool>,
     closing: watch::Receiver<bool>,
-) -> Result<BackupInspection> {
+) -> Result<VerifiedArchive<'_>> {
     let budget = Budget {
         deadline: Instant::now() + Duration::from_secs(15),
         shutdown,
@@ -373,10 +379,10 @@ pub(crate) fn run(
     let profile_count = configurations(&contents, &manifest, &budget)?;
     let archive_sha256 = super::hash(bytes);
     budget.check()?;
-    Ok(BackupInspection {
+    let report = BackupInspection {
         schema_version: manifest.schema_version,
-        source: manifest.source,
-        service_version: manifest.service_version,
+        source: manifest.source.clone(),
+        service_version: manifest.service_version.clone(),
         created_at: manifest.created_at,
         archive_bytes: bytes.len() as u64,
         archive_sha256,
@@ -385,7 +391,20 @@ pub(crate) fn run(
         profile_count,
         active_profile_present: manifest.active_profile.is_some(),
         runtime_revision_present: manifest.runtime_revision.is_some(),
+    };
+    Ok(VerifiedArchive {
+        report,
+        manifest,
+        contents,
     })
+}
+
+pub(crate) fn run(
+    bytes: &[u8],
+    shutdown: watch::Receiver<bool>,
+    closing: watch::Receiver<bool>,
+) -> Result<BackupInspection> {
+    verify(bytes, shutdown, closing).map(|archive| archive.report)
 }
 
 #[cfg(test)]
