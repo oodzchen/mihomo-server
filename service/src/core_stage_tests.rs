@@ -427,7 +427,7 @@ async fn alpha_probe_cancellation_terminates_reaps_and_removes_pending_in_both_p
     Ok(())
 }
 #[tokio::test]
-async fn actor_alpha_staging_readback_preserves_live_file_and_rejects_activation_before_new_probes() -> Result<()> {
+async fn actor_alpha_activation_revalidates_and_restores_stopped_core_after_failed_readiness() -> Result<()> {
     use crate::{
         core_manager::{CoreManager, CoreOptions},
         resources::Resources,
@@ -458,7 +458,6 @@ async fn actor_alpha_staging_readback_preserves_live_file_and_rejects_activation
     let result = async {
         let downloads = CoreDownloads::new(&dir.0.join("data/core"))?;
         let prepared = seed(&downloads, &fs::read(alpha)?, "alpha-63bd52e")?;
-        let before = serde_json::to_value(manager.status())?;
         let live = dir.0.join("data/core/verge-mihomo");
         let old = fs::read(&live)?;
         let staged = manager.stage_core_upgrade(prepared.id.clone()).await?;
@@ -468,9 +467,10 @@ async fn actor_alpha_staging_readback_preserves_live_file_and_rejects_activation
             .activate_core_upgrade(staged.stage_id.clone())
             .await
             .unwrap_err();
-        assert!(format!("{error:#}").contains("Alpha core activation is not yet supported"));
-        assert_eq!(fs::read(dir.0.join("alpha-versions"))?, b"1");
-        assert_eq!(serde_json::to_value(manager.status())?, before);
+        assert!(format!("{error:#}").contains("previous core restored"));
+        assert_eq!(fs::read(dir.0.join("alpha-versions"))?, b"2");
+        assert_eq!(manager.status().phase, crate::core_manager::CorePhase::Stopped);
+        assert!(manager.status().pid.is_none());
         assert_eq!(fs::read(live)?, old);
         assert!(manager.core_installation().await?.is_none());
         assert!(!dir.0.join("data/core/.core-upgrade").exists());

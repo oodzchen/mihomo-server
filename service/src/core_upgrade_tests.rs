@@ -23,14 +23,21 @@ impl Drop for Directory {
     }
 }
 fn staged(dir: &Directory) -> Result<(PathBuf, StagedCore)> {
-    let bytes = b"validated replacement core";
+    staged_version(dir, "v1.2.3")
+}
+fn staged_version(dir: &Directory, version: &str) -> Result<(PathBuf, StagedCore)> {
+    let bytes = format!("validated replacement core {version}").into_bytes();
     let path = dir.0.join("staged");
-    fs::write(&path, bytes)?;
+    fs::write(&path, &bytes)?;
     fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
-    let version = "v1.2.3";
     let package_hash = "a".repeat(64);
     let config_sha256 = "b".repeat(64);
     let id = format!("{version}-{package_hash}");
+    let tag = if crate::core_release::alpha_version(version) {
+        "Prerelease-Alpha"
+    } else {
+        version
+    };
     Ok((
         path,
         StagedCore {
@@ -44,12 +51,12 @@ fn staged(dir: &Directory) -> Result<(PathBuf, StagedCore)> {
                     bytes: 100,
                     sha256: package_hash,
                     download_url: format!(
-                        "https://github.com/MetaCubeX/mihomo/releases/download/{version}/mihomo-linux-amd64-v2-{version}.gz"
+                        "https://github.com/MetaCubeX/mihomo/releases/download/{tag}/mihomo-linux-amd64-v2-{version}.gz"
                     ),
                 },
             },
             executable_bytes: bytes.len() as u64,
-            executable_sha256: config_hash(bytes),
+            executable_sha256: config_hash(&bytes),
             config_sha256,
             config_revision: None,
         },
@@ -318,6 +325,122 @@ fn repair_identity_conflicts_and_unsafe_files_fail_without_overwriting() -> Resu
             assert_eq!(fs::read(&live)?, before);
             assert!(dir.0.join(TRANSACTION).exists());
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn stable_alpha_and_alpha_alpha_transactions_restore_or_commit_exact_receipts() -> Result<()> {
+    for (old_version, next_version) in [
+        ("v1.2.3", "alpha-63bd52e"),
+        ("alpha-63bd52e", "v1.2.3"),
+        ("alpha-63bd52e", "alpha-abcdef0"),
+        ("alpha-0123456789abcdef0123456789abcdef01234567", "v1.2.3"),
+    ] {
+        for boundary in ["prepared", "published", "committed"] {
+            let dir = Directory::new()?;
+            let (source, old) = staged_version(&dir, old_version)?;
+            let old_receipt = prepare(&dir.0, &source, &old, false)?;
+            publish(&dir.0)?;
+            commit(&dir.0)?;
+            recover(&dir.0)?;
+            let old_bytes = fs::read(dir.0.join("verge-mihomo"))?;
+            let old_record = fs::read(dir.0.join(RECEIPT))?;
+            let (source, next) = staged_version(&dir, next_version)?;
+            let next_receipt = prepare(&dir.0, &source, &next, true)?;
+            assert_eq!(journal(&dir.0.join(TRANSACTION))?.schema_version, 1);
+            if boundary != "prepared" {
+                publish(&dir.0)?;
+            }
+            if boundary == "committed" {
+                commit(&dir.0)?;
+                assert_eq!(recover(&dir.0)?, None);
+                assert_eq!(installation(&dir.0)?, Some(next_receipt));
+                assert_eq!(fs::read(dir.0.join("verge-mihomo"))?, fs::read(source)?);
+            } else {
+                assert_eq!(recover(&dir.0)?, Some(true));
+                assert_eq!(installation(&dir.0)?, Some(old_receipt));
+                assert_eq!(fs::read(dir.0.join("verge-mihomo"))?, old_bytes);
+                assert_eq!(fs::read(dir.0.join(RECEIPT))?, old_record);
+            }
+            assert_eq!(recover(&dir.0)?, None);
+            assert!(!dir.0.join(TRANSACTION).exists());
+        }
+    }
+    Ok(())
+}
+#[test]
+fn alpha_receipt_grammar_rejects_forgery_before_switch_or_recovery_overwrites() -> Result<()> {
+    for invalid in [
+        "alpha-ABCDEF0",
+        "alpha-abc123",
+        "alpha-abcdefg",
+        "alpha-abcdef0-extra",
+        "../alpha-abcdef0",
+    ] {
+        let dir = Directory::new()?;
+        let (source, mut staged) = staged_version(&dir, "alpha-63bd52e")?;
+        staged.prepared.release.version = invalid.into();
+        staged.stage_id = format!("{invalid}-{}-{}", "a".repeat(64), staged.config_sha256);
+        assert!(prepare(&dir.0, &source, &staged, false).is_err());
+        assert!(!dir.0.join(TRANSACTION).exists());
+        assert_eq!(fs::read(dir.0.join("verge-mihomo"))?, b"previous working core");
+    }
+    for field in ["version", "package", "config"] {
+        let dir = Directory::new()?;
+        let (source, staged) = staged_version(&dir, "alpha-63bd52e")?;
+        prepare(&dir.0, &source, &staged, false)?;
+        publish(&dir.0)?;
+        let root = dir.0.join(TRANSACTION);
+        let mut record = journal(&root)?;
+        match field {
+            "version" => record.installation.version = "alpha-abcdef0".into(),
+            "package" => {
+                record.installation.stage_id = record.installation.stage_id.replace(&"a".repeat(64), "invalid")
+            }
+            "config" => record.installation.config_sha256 = "c".repeat(64),
+            _ => unreachable!(),
+        }
+        write_journal(&root, &record)?;
+        let current = fs::read(dir.0.join("verge-mihomo"))?;
+        assert!(recover(&dir.0).is_err());
+        assert_eq!(fs::read(dir.0.join("verge-mihomo"))?, current);
+        assert!(root.exists());
+    }
+    Ok(())
+}
+#[test]
+fn broken_alpha_core_repair_restores_original_inode_and_previous_receipt() -> Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+    for commit_repair in [false, true] {
+        let dir = Directory::new()?;
+        let (source, old) = staged_version(&dir, "alpha-63bd52e")?;
+        prepare(&dir.0, &source, &old, false)?;
+        publish(&dir.0)?;
+        commit(&dir.0)?;
+        recover(&dir.0)?;
+        let old_record = fs::read(dir.0.join(RECEIPT))?;
+        let live = dir.0.join("verge-mihomo");
+        fs::write(&live, [])?;
+        fs::set_permissions(&live, fs::Permissions::from_mode(0o0))?;
+        let inode = fs::metadata(&live)?.ino();
+        let (source, next) = staged_version(&dir, "alpha-abcdef0")?;
+        let repaired = prepare_with_repair(&dir.0, &source, &next, false, true)?;
+        assert_eq!(journal(&dir.0.join(TRANSACTION))?.schema_version, 2);
+        publish(&dir.0)?;
+        if commit_repair {
+            commit(&dir.0)?;
+            recover(&dir.0)?;
+            assert_eq!(installation(&dir.0)?, Some(repaired));
+        } else {
+            assert_eq!(recover(&dir.0)?, Some(false));
+            assert_eq!(fs::metadata(&live)?.ino(), inode);
+            assert_eq!(fs::metadata(&live)?.len(), 0);
+            assert_eq!(fs::metadata(&live)?.permissions().mode() & 0o777, 0);
+            assert_eq!(fs::read(dir.0.join(RECEIPT))?, old_record);
+            assert!(installation(&dir.0).is_err());
+        }
+        assert!(!dir.0.join(TRANSACTION).exists());
     }
     Ok(())
 }

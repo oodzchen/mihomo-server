@@ -87,7 +87,7 @@ pub(crate) fn alpha_version(version: &str) -> bool {
         (7..=40).contains(&hash.len()) && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     })
 }
-fn release_version(version: &str) -> bool {
+pub(crate) fn release_version(version: &str) -> bool {
     stable_version(version) || alpha_version(version)
 }
 fn valid_hash(hash: &str) -> bool {

@@ -232,17 +232,11 @@ fn validate_installation(r: &CoreInstallation) -> Result<()> {
         "invalid core installation record"
     );
     let (package, config) = r.stage_id.rsplit_once('-').context("invalid installation stage ID")?;
-    let (version, package_hash) = package.split_once('-').context("invalid installation stage ID")?;
-    let valid_version = version.strip_prefix('v').is_some_and(|s| {
-        let parts: Vec<_> = s.split('.').collect();
-        parts.len() == 3
-            && parts
-                .iter()
-                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
-    });
+    // Both schema-1 upgrades and schema-2 repairs retain the same digest suffixes.
+    // Parse from the right so an Alpha commit remains part of the version token.
+    let (version, package_hash) = package.rsplit_once('-').context("invalid installation stage ID")?;
     ensure!(
-        version.len() <= 64
-            && valid_version
+        crate::core_release::release_version(version)
             && version == r.version
             && hash_valid(package_hash)
             && config == r.config_sha256,

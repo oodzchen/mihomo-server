@@ -2572,10 +2572,6 @@ impl Actor {
     ) -> Result<CoreActivation> {
         self.observe_exit().await?;
         let staged = downloads.inspect_stage(id)?;
-        ensure!(
-            !crate::core_release::alpha_version(&staged.prepared.release.version),
-            "Alpha core activation is not yet supported"
-        );
         let yaml = serde_yaml_ng::to_string(&read_config(&self.options.config).await?)?;
         ensure!(
             crate::core_upgrade::config_hash(yaml.as_bytes()) == staged.config_sha256,

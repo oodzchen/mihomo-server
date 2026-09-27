@@ -268,6 +268,7 @@ async fn real_broken_core_repair_replaces_unverified_receipt_and_restores_saved_
             let uid = profile.uid.unwrap().to_string();
             manager.select_profile(uid.clone()).await?;
             manager.start().await?;
+            wait_for_repair_group(&manager, None).await?;
             manager.select_node("Main".into(), "REJECT".into()).await?;
             manager.stop().await?;
             let prepared = dir.seed(&binary, &version, manager.core_downloads.as_ref().unwrap())?;
@@ -299,10 +300,7 @@ async fn real_broken_core_repair_replaces_unverified_receipt_and_restores_saved_
             assert_eq!(serde_json::to_value(manager.profiles())?, profiles);
             manager.start().await?;
             assert_eq!(manager.status().active_profile.as_deref(), Some(uid.as_str()));
-            assert_eq!(
-                manager.client().get_proxies().await?.proxies["Main"].now.as_deref(),
-                Some("REJECT")
-            );
+            wait_for_repair_group(&manager, Some("REJECT")).await?;
             Ok::<_, anyhow::Error>(receipt)
         }
         .await;
@@ -314,10 +312,7 @@ async fn real_broken_core_repair_replaces_unverified_receipt_and_restores_saved_
         let result = async {
             assert_eq!(manager.core_installation().await?, Some(receipt));
             manager.start().await?;
-            assert_eq!(
-                manager.client().get_proxies().await?.proxies["Main"].now.as_deref(),
-                Some("REJECT")
-            );
+            wait_for_repair_group(&manager, Some("REJECT")).await?;
             Ok::<_, anyhow::Error>(())
         }
         .await;
@@ -325,4 +320,25 @@ async fn real_broken_core_repair_replaces_unverified_receipt_and_restores_saved_
         result.and(cleanup)?;
     }
     Ok(())
+}
+
+async fn wait_for_repair_group(manager: &CoreManager, selected: Option<&str>) -> Result<()> {
+    // Readiness checks the controller/version; groups and saved selection restoration
+    // can become visible later. Bound that runtime contract instead of indexing an
+    // initial empty proxy snapshot immediately after start.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(snapshot) = manager.client().get_proxies().await
+                && snapshot
+                    .proxies
+                    .get("Main")
+                    .is_some_and(|group| selected.is_none() || group.now.as_deref() == selected)
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .context("repaired core did not publish its expected proxy group/selection before the deadline")
 }

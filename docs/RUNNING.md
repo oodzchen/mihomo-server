@@ -1945,7 +1945,7 @@ live/backup changes preserve the transaction for recovery instead of overwriting
 A stopped/failed core stays stopped after successful repair: explicitly start it
 and verify proxy traffic. The existing profiles, runtime YAML and saved node
 selections remain authoritative. Failed repair leaves a broken original broken;
-management remains available to retry with a valid candidate. Alpha, other targets
+management remains available to retry with a valid candidate. Other targets
 and native privilege integration remain pending.
 
 ## Prepare an Alpha core candidate
@@ -1977,7 +1977,8 @@ saved node selections are unchanged by preparation. Metadata remains limited to
 1 MiB, package to 64 MiB; the same deadlines and redirect allowlist apply.
 
 Alpha executable staging and readback are available through the existing commands
-below. Alpha activation, receipts, force/no-op and Web controls remain pending.
+below. Alpha activation and receipts are available; channel-aware force/no-op
+and Web controls remain pending.
 Stable upgrade/repair remains available through `/core`. Cached candidate garbage
 collection remains pending.
 
@@ -2007,7 +2008,34 @@ immutable proof. Failed validation leaves the live core/configuration and compre
 candidate intact and removes pending work. The existing upgrade admission slot
 covers queued/running staging even if the browser disconnects.
 
-`activate_core_upgrade` explicitly rejects Alpha proofs before lifecycle changes
-or creating a switch journal. Alpha activation/rollback/installation receipts and
-Web controls are the next integration work. This staging step does not install
-Alpha or alter saved profiles/nodes; the running stable proxy remains available.
+## Activate an Alpha core and inspect its installation
+
+Use the full stage ID returned by `stage_core_upgrade`:
+
+```json
+{"command":"activate_core_upgrade","id":"alpha-<commit>-<package-sha256>-<config-sha256>"}
+{"command":"installed_core_version"}
+{"command":"core_installation"}
+```
+
+Activation rechecks the immutable proof and current YAML, then runs fresh version
+and configuration probes before preparing a private durable transaction. A changed
+configuration requires staging again. The candidate must start, report its exact
+Alpha version and expose the configured proxy ports before the commit marker and
+installation receipt are published. A running core restarts with its saved node
+selection; a stopped core remains stopped after successful validation. Use `start`
+to run it. The response includes `from`, `to`, `installation` and actual status.
+Existing profiles and generated runtime configuration remain authoritative.
+
+A failed probe/readiness/port check, shutdown or uncommitted crash restores the
+previous file and installation receipt. Startup completes interrupted rollback
+before exposing the core. A committed crash retains the verified replacement;
+restart reads its receipt and does not overwrite it with the stable bundle seed.
+Broken-core repair preserves the original inode/mode and prior receipt on failure.
+Tampered or conflicting files/records fail recovery without overwriting them.
+
+A prepared stable candidate can be staged and activated through the same commands
+to switch back to stable. Alpha force/no-op orchestration and channel controls in
+`/core` remain the next integration step; the page currently offers stable upgrades
+and reads back the actual installed version/receipt. Cached candidate garbage
+collection, Alpha bundle seeds and other target runtimes remain pending.

@@ -59,7 +59,12 @@ impl Directory {
         let dir = self.0.join("data/core/.upgrade-staging").join(&id);
         fs::create_dir(&dir)?;
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
-        let release = json!({"version":version,"target":TARGET,"asset":format!("mihomo-linux-amd64-v2-{version}.gz"),"bytes":package.len(),"sha256":sha256,"download_url":format!("https://github.com/MetaCubeX/mihomo/releases/download/{version}/mihomo-linux-amd64-v2-{version}.gz")});
+        let tag = if version.starts_with("alpha-") {
+            "Prerelease-Alpha"
+        } else {
+            version
+        };
+        let release = json!({"version":version,"target":TARGET,"asset":format!("mihomo-linux-amd64-v2-{version}.gz"),"bytes":package.len(),"sha256":sha256,"download_url":format!("https://github.com/MetaCubeX/mihomo/releases/download/{tag}/mihomo-linux-amd64-v2-{version}.gz")});
         fs::write(dir.join("package.gz"), package)?;
         fs::write(
             dir.join("release.json"),
@@ -185,8 +190,17 @@ async fn real_activation_verifies_runtime_preserves_profiles_and_retains_install
 #[tokio::test]
 #[ignore = "requires real MIHOMO_TEST_BINARY; failed running activation and shutdown rollback"]
 async fn real_failed_activation_restarts_old_core_and_shutdown_restores_without_restarting() -> Result<()> {
+    failed_running_switch(false).await
+}
+#[tokio::test]
+#[ignore = "requires real MIHOMO_TEST_BINARY; Alpha readiness failure and shutdown rollback"]
+async fn real_failed_alpha_activation_restores_stable_core_and_shutdown_reaps_candidate() -> Result<()> {
+    failed_running_switch(true).await
+}
+async fn failed_running_switch(alpha: bool) -> Result<()> {
     let real = PathBuf::from(std::env::var_os("MIHOMO_TEST_BINARY").context("set MIHOMO_TEST_BINARY")?);
     let version = version(&real)?;
+    let candidate_version = if alpha { "alpha-63bd52e" } else { version.as_str() };
     let dir = Directory::new()?;
     let resources = dir.resources(&real, &version)?;
     let manager = CoreManager::spawn(dir.options(&resources)?)?;
@@ -195,8 +209,8 @@ async fn real_failed_activation_restarts_old_core_and_shutdown_restores_without_
         let before = manager.status();
         let config = manager.runtime_config().await?;
         let old = hash(&fs::read(dir.live())?);
-        let candidate = fixture(&dir, "exits", &version, false)?;
-        let id = dir.seed(&candidate, &version)?;
+        let candidate = fixture(&dir, "exits", candidate_version, false)?;
+        let id = dir.seed(&candidate, candidate_version)?;
         let staged = manager.stage_core_upgrade(id).await?;
         assert!(manager.activate_core_upgrade(staged.stage_id.clone()).await.is_err());
         assert_eq!(manager.status().phase, CorePhase::Running);
@@ -216,8 +230,8 @@ async fn real_failed_activation_restarts_old_core_and_shutdown_restores_without_
         assert!(format!("{stale:#}").contains("configuration changed"));
         assert_eq!(manager.status().pid, unchanged_pid);
         assert_eq!(hash(&fs::read(dir.live())?), old);
-        let candidate = fixture(&dir, "hangs", &version, true)?;
-        let id = dir.seed(&candidate, &version)?;
+        let candidate = fixture(&dir, "hangs", candidate_version, true)?;
+        let id = dir.seed(&candidate, candidate_version)?;
         let staged = manager.stage_core_upgrade(id).await?;
         let own = manager.clone();
         let activation = tokio::spawn(async move { own.activate_core_upgrade(staged.stage_id).await });
@@ -315,7 +329,7 @@ async fn api(client: &reqwest::Client, base: &str, token: &str, command: Value) 
     ensure!(response.status().is_success(), "fixture management command rejected");
     Ok(response.json().await?)
 }
-async fn interrupted_cli_switch(repair: bool) -> Result<()> {
+async fn interrupted_cli_switch(repair: bool, alpha: bool) -> Result<()> {
     let _subreaper = Subreaper::new()?;
     let real = PathBuf::from(std::env::var_os("MIHOMO_TEST_BINARY").context("set MIHOMO_TEST_BINARY")?);
     let version = version(&real)?;
@@ -369,8 +383,9 @@ async fn interrupted_cli_switch(repair: bool) -> Result<()> {
     } else {
         hash(&fs::read(dir.live())?)
     };
-    let candidate = fixture(&dir, "crash_hangs", &version, true)?;
-    let id = dir.seed(&candidate, &version)?;
+    let candidate_version = if alpha { "alpha-63bd52e" } else { version.as_str() };
+    let candidate = fixture(&dir, "crash_hangs", candidate_version, true)?;
+    let id = dir.seed(&candidate, candidate_version)?;
     let staged = api(&client, &base, &token, json!({"command":"stage_core_upgrade","id":id})).await?;
     let own_client = client.clone();
     let own_base = base.clone();
@@ -460,10 +475,21 @@ async fn interrupted_cli_switch(repair: bool) -> Result<()> {
 #[tokio::test]
 #[ignore = "requires real MIHOMO_TEST_BINARY; SIGKILL during replacement, orphan termination and startup rollback"]
 async fn interrupted_cli_switch_kills_candidate_and_restores_previous_core_before_next_start() -> Result<()> {
-    interrupted_cli_switch(false).await
+    interrupted_cli_switch(false, false).await
 }
 #[tokio::test]
 #[ignore = "requires real MIHOMO_TEST_BINARY; SIGKILL during broken-core repair, inode rollback and retry"]
 async fn interrupted_cli_repair_restores_broken_inode_and_keeps_management_available_for_retry() -> Result<()> {
-    interrupted_cli_switch(true).await
+    interrupted_cli_switch(true, false).await
+}
+
+#[tokio::test]
+#[ignore = "requires real MIHOMO_TEST_BINARY; SIGKILL during Alpha activation and startup rollback"]
+async fn interrupted_alpha_cli_switch_restores_stable_core_before_restart() -> Result<()> {
+    interrupted_cli_switch(false, true).await
+}
+#[tokio::test]
+#[ignore = "requires real MIHOMO_TEST_BINARY; SIGKILL during Alpha repair and original inode recovery"]
+async fn interrupted_alpha_cli_repair_restores_broken_inode_before_retry() -> Result<()> {
+    interrupted_cli_switch(true, true).await
 }

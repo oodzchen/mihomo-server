@@ -1364,3 +1364,25 @@ probe phases, tampered readback and actor activation gating before new probes or
 journaling. Alpha activation remains explicitly rejected until durable receipt and
 rollback support is implemented. Existing stable lifecycle/upgrade behavior and
 MVP proxy traffic remain supported; no dependency is added.
+
+
+## Durable Alpha activation and installation recovery
+
+Source: `src-tauri/src/feat/core_upgrade.rs::upgrade_core`, `StagedCore::publish`
+and `read_core_version`, pinned commit b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b.
+Destinations: core_manager.rs and core_upgrade.rs. Alpha now enters the existing
+service-owned stable activation transaction after fresh snapshot/version/config
+validation. Exact runtime version and actual proxy ports gate the durable commit;
+failed activation, shutdown and pending crash recovery restore the previous core
+and receipt. Running/stopped semantics and profile/node selections are retained.
+The service's durable journal strengthens upstream's sidecar rollback; it never
+requests native elevation or updates an unrelated administrator-approved service.
+
+Receipt IDs parse digest suffixes from the right using the shared bounded
+stable/Alpha version grammar. Normal schema-1 journals/receipts and schema-2 repair
+journals retain their existing layouts. Alpha-to-stable, stable-to-Alpha and
+Alpha-to-Alpha rollback/commit, broken Alpha inode/receipt recovery, malformed IDs,
+failed readiness, shutdown and Alpha candidate SIGKILL recovery are covered.
+Official Alpha activation is exercised with an isolated real-node subscription.
+Channel-aware Alpha force/no-op, Web controls and other targets remain pending.
+No dependency is added.
