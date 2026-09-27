@@ -239,6 +239,31 @@ options and host policy can affect individual routes. Nonzero mark readback is
 verified on Linux x86_64; no capability elevation, policy-route installation or
 per-socket marking proof is introduced.
 
+## Global core download User-Agent and ETag authority
+
+The retained Mihomo plugin `BaseConfig` already exposes `global-ua` and
+`etag-support`; this increment adds optional, presence-preserving leaves to its
+narrow `ConnectionConfig` projection. New service code extends `RuntimeSettings`,
+its existing initial/final authority and schema-one recovery, actor comparison and
+`web/src/download-settings.tsx`. No new upstream source is copied or dependency
+added. This does not claim an identical Clash Verge Rev desktop editor was migrated.
+Its profile `PrfOption.user_agent`/download behavior remains separate and unchanged.
+
+Semantics reference Mihomo's primary sources:
+[general configuration](https://wiki.metacubex.one/en/config/general/),
+[config declarations](https://github.com/MetaCubeX/mihomo/blob/Meta/config/config.go),
+[HTTP User-Agent selection](https://github.com/MetaCubeX/mihomo/blob/Meta/component/http/http.go)
+and [HTTP resource vehicle](https://github.com/MetaCubeX/mihomo/blob/Meta/component/resource/vehicle.go).
+The service preserves explicit empty User-Agent/false ETag and adopts a strict
+1024 printable ASCII byte input policy; the bound is a service adaptation.
+Mihomo applies global User-Agent unless a resource has a nonempty header override,
+and its conditional ETag request requires a usable prior content hash/cache entry.
+
+A real local HTTP fixture verifies header precedence, an actual conditional 304,
+explicit disable/empty behavior and restart rather than inferring these from
+GET /configs. The regular API/Web/recovery checks and real-node workflow extend
+existing integration tests. Provider refresh commands and views remain P2 work.
+
 ## Mihomo plugin
 
 - Repository: https://github.com/clash-verge-rev/tauri-plugin-mihomo

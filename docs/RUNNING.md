@@ -1229,6 +1229,8 @@ runtime:
   disable-keep-alive: false
   interface-name: ""
   routing-mark: 0
+  global-ua: "mihomo-server/1.0"
+  etag-support: false
   log-level: info
 ```
 
@@ -2514,8 +2516,8 @@ lock. Live/online updates, DAT handling and automatic runtime rollback are pendi
 ## Connection settings and TCP keep-alive readback
 
 Use `set_settings` to save optional `tcp-concurrent`, `find-process-mode`,
-`keep-alive-interval`, `keep-alive-idle`, `disable-keep-alive`, `interface-name` and
-`routing-mark` along with any
+`keep-alive-interval`, `keep-alive-idle`, `disable-keep-alive`, `interface-name`,
+`routing-mark`, `global-ua` and `etag-support` along with any
 other runtime fields you want to retain; it replaces the entire runtime
 settings object. The Web editor preserves existing supported fields automatically.
 Owned values apply before enhancements and again after scripts/merges/overlays.
@@ -2530,9 +2532,10 @@ Read saved, committed and core-reported values through the authenticated command
 {"command":"connection_settings"}
 ```
 
-The response contains config_revision, running, optional error and seven fields
+The response contains config_revision, running, optional error and nine fields
 in this order: tcp-concurrent, find-process-mode, keep-alive-interval,
-keep-alive-idle, disable-keep-alive, interface-name and routing-mark. Each includes setting, configured, actual
+keep-alive-idle, disable-keep-alive, interface-name, routing-mark, global-ua and
+etag-support. Each includes setting, configured, actual
 and mismatch. Null setting means inheritance; null configured means unspecified;
 null actual means unknown. A core default for an unspecified value is not a
 mismatch. Native title-case mode names normalize to lower-case. Older cores that
@@ -2568,6 +2571,41 @@ Replace `wlo1` with this host's actual interface. Omit MIHOMO_REAL_INTERFACE to
 check the explicit empty-name default. The test copies node/Geo data, applies
 routing-mark 0, verifies settings before/after core restart and checks HTTPS 204;
 it does not change host route tables or grant socket capabilities.
+
+## Core download User-Agent and ETag
+
+`global-ua` controls the core's default external-resource download User-Agent;
+`etag-support` controls its conditional requests. They are optional runtime fields:
+missing/null inherits, an empty string is an explicit empty User-Agent, and false
+explicitly disables ETag. User-Agent must be a string with at most 1024 printable
+ASCII bytes (spaces allowed, control/non-ASCII characters rejected). This is the
+service's input bound, not a documented upstream limit. ETag accepts only booleans.
+Neither field changes the service's subscription import/refresh `user_agent` option.
+Per-resource nonempty User-Agent headers override the core's global value.
+
+Use **核心下载设置** in the Web editor. **管理核心下载 User-Agent** distinguishes
+inheritance from an owned empty string; the ETag select supports inherit/enable/
+disable. Confirmed saving, rereading, failed drafts and **全部改为继承** preserve
+these distinctions and other settings. The saved download snapshot and existing
+connection readback show both leaves. Explicit settings win before enhancement
+and after merges/scripts/overlays; failed application rolls back through the
+existing schema-one transaction, without rewriting original subscriptions.
+
+Core readback alone does not prove conditional requests. The isolated live test
+uses a local HTTP provider fixture to verify the actual User-Agent, provider
+header precedence, ETag/hash cache warmup followed by If-None-Match and HTTP 304,
+explicit ETag disable, empty User-Agent and persistence after core restart:
+
+```sh
+CARGO_HOME=/tmp/mihomo-server-cargo \
+MIHOMO_TEST_BINARY=/usr/bin/verge-mihomo \
+cargo test -p mihomo-server --test settings core_download_settings_control_real_http_headers_and_conditional_requests --locked --offline -- --ignored --test-threads=1
+```
+
+The fixture uses the retained client update call solely in the test harness;
+provider management commands/Web views remain P2 work. The real-node inventory
+test above also verifies owned User-Agent/ETag settings and usable HTTPS traffic
+in private node/Geo copies, preserving original data hashes.
 
 ## Authoritative Geo settings and readback
 

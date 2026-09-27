@@ -138,6 +138,8 @@ pub struct ConnectionConfig {
     pub disable_keep_alive: Option<bool>,
     pub interface_name: Option<String>,
     pub routing_mark: Option<i64>,
+    pub global_ua: Option<String>,
+    pub etag_support: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]

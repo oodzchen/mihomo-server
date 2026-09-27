@@ -325,6 +325,10 @@ test("connection settings save explicit false, preserve failed drafts and retry 
   const disable = page.getByRole("combobox", { name: "禁用 TCP 保活", exact: true });
   const managedInterface = page.getByRole("checkbox", { name: "管理出口网卡", exact: true });
   const interfaceName = page.getByRole("textbox", { name: "出口网卡名称", exact: true });
+  const managedAgent = page.getByRole("checkbox", { name: "管理核心下载 User-Agent", exact: true });
+  const agent = page.getByRole("textbox", { name: "核心下载 User-Agent", exact: true });
+  const etag = page.getByRole("combobox", { name: "核心下载 ETag", exact: true });
+  const agentRow = panel.locator("li").filter({ has: page.getByText("global-ua", { exact: true }) });
   const mark = page.getByRole("textbox", { name: "Linux 路由标记", exact: true });
   const interfaceRow = panel.locator("li").filter({ has: page.getByText("interface-name", { exact: true }) });
   const row = panel.locator("li").filter({ has: page.getByText("tcp-concurrent", { exact: true }) });
@@ -355,22 +359,35 @@ test("connection settings save explicit false, preserve failed drafts and retry 
       expect(await api("settings")).toEqual(original);
     }
     await mark.fill("0");
+    await expect(managedAgent).not.toBeChecked(); await expect(agent).toBeDisabled();
+    await managedAgent.check();
+    for (const invalid of ["非 ASCII", "x".repeat(1025)]) {
+      await agent.fill(invalid);
+      await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+      await expect(form.getByRole("alert")).toContainText("最多 1024 个可打印 ASCII 字符");
+      expect(await api("settings")).toEqual(original);
+    }
+    await agent.fill(""); await etag.selectOption("false");
     await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
     await expect(form.getByRole("status")).toContainText("保存结果已核对");
-    expect((await api("settings")).runtime).toEqual({ ...original.runtime, ipv6: false, "tcp-concurrent": false, "find-process-mode": "off", "keep-alive-interval": 0, "keep-alive-idle": -1, "disable-keep-alive": false, "interface-name": "", "routing-mark": 0 });
+    expect((await api("settings")).runtime).toEqual({ ...original.runtime, ipv6: false, "tcp-concurrent": false, "find-process-mode": "off", "keep-alive-interval": 0, "keep-alive-idle": -1, "disable-keep-alive": false, "interface-name": "", "routing-mark": 0, "global-ua": "", "etag-support": false });
     await expect(row).toContainText("服务设置：false");
     await expect(interfaceRow).toContainText('服务设置：""');
+    await expect(agentRow).toContainText('服务设置：""');
+    await expect(page.getByLabel("已保存核心下载设置", { exact: true })).toContainText('"etag-support": false');
     await expect(page.getByLabel("已保存出口设置", { exact: true })).toContainText('"interface-name": ""');
     await expect(panel).toContainText("内核未运行，实际值未确认");
     await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
     await expect(tcp).toHaveValue("false"); await expect(mode).toHaveValue("off");
     await expect(interval).toHaveValue("0"); await expect(idle).toHaveValue("-1"); await expect(disable).toHaveValue("false");
     await expect(managedInterface).toBeChecked(); await expect(interfaceName).toHaveValue(""); await expect(mark).toHaveValue("0");
+    await expect(managedAgent).toBeChecked(); await expect(agent).toHaveValue(""); await expect(etag).toHaveValue("false");
     await page.route("**/api/commands", async route => {
       if (route.request().postDataJSON().command === "set_settings") await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture settings failure" } }) });
       else await route.continue();
     });
     await interfaceName.fill("lo"); await mark.fill("123");
+    await agent.fill("browser-agent/1"); await etag.selectOption("true");
     await interval.fill("20"); await idle.fill("40"); await disable.selectOption("true");
     await tcp.selectOption("true"); await mode.selectOption("always");
     await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
@@ -378,6 +395,9 @@ test("connection settings save explicit false, preserve failed drafts and retry 
     await expect(tcp).toHaveValue("true"); await expect(mode).toHaveValue("always");
     await expect(interval).toHaveValue("20"); await expect(idle).toHaveValue("40"); await expect(disable).toHaveValue("true");
     await expect(interfaceName).toHaveValue("lo"); await expect(mark).toHaveValue("123");
+    await expect(agent).toHaveValue("browser-agent/1"); await expect(etag).toHaveValue("true");
+    expect((await api("settings")).runtime["global-ua"]).toBe("");
+    expect((await api("settings")).runtime["etag-support"]).toBe(false);
     expect((await api("settings")).runtime["interface-name"]).toBe("");
     expect((await api("settings")).runtime["routing-mark"]).toBe(0);
     expect((await api("settings")).runtime["keep-alive-interval"]).toBe(0);
@@ -408,6 +428,10 @@ test("connection settings save explicit false, preserve failed drafts and retry 
     expect((await api("settings")).runtime["routing-mark"]).toBe(4294967295);
     await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
     await expect(managedInterface).toBeChecked(); await expect(interfaceName).toHaveValue("lo"); await expect(mark).toHaveValue("4294967295");
+    expect((await api("settings")).runtime["global-ua"]).toBe("browser-agent/1");
+    expect((await api("settings")).runtime["etag-support"]).toBe(true);
+    await expect(agent).toHaveValue("browser-agent/1"); await expect(etag).toHaveValue("true");
+    await managedAgent.uncheck(); await etag.selectOption(""); await expect(agent).toBeDisabled();
     await managedInterface.uncheck(); await mark.fill("");
     await expect(interfaceName).toBeDisabled();
     await interval.fill(""); await idle.fill(""); await disable.selectOption("");

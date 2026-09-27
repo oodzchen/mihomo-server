@@ -35,6 +35,8 @@ fn interrupted_settings_update_follows_runtime_commit_at_each_publication_phase(
             candidate.runtime.keep_alive_idle = Some(-1);
             candidate.runtime.disable_keep_alive = Some(false);
             candidate.runtime.interface_name = Some(String::new());
+            candidate.runtime.global_ua = Some(String::new());
+            candidate.runtime.etag_support = Some(false);
             if cfg!(target_os = "linux") {
                 candidate.runtime.routing_mark = Some(u32::MAX);
             }
@@ -584,6 +586,62 @@ fn outbound_settings_validate_names_and_preserve_empty_zero_and_inheritance() ->
         "routing-mark: 1.5",
         "routing-mark: '1'",
         "routing-mark: true",
+    ] {
+        assert!(
+            serde_yaml_ng::from_str::<RuntimeSettings>(invalid).is_err(),
+            "{invalid}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn download_settings_preserve_empty_false_and_reject_invalid_header_text() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    let source = parse("global-ua: source/1\netag-support: true\ncustom: retained")?;
+    assert_eq!(RuntimeSettings::default().enforce(source.clone())?, source);
+    let null: RuntimeSettings = serde_yaml_ng::from_str("global-ua: null\netag-support: null")?;
+    assert_eq!(null.enforce(source.clone())?, source);
+    for agent in [String::new(), "agent/1.0 (Linux; x86_64)".into(), "x".repeat(1024)] {
+        let runtime = RuntimeSettings {
+            global_ua: Some(agent.clone()),
+            etag_support: Some(false),
+            ..Default::default()
+        };
+        assert_eq!(
+            runtime.prepare(source.clone())?["global-ua"].as_str(),
+            Some(agent.as_str())
+        );
+        let final_config = runtime.enforce(source.clone())?;
+        assert_eq!(final_config["global-ua"].as_str(), Some(agent.as_str()));
+        assert_eq!(final_config["etag-support"].as_bool(), Some(false));
+        assert_eq!(final_config["custom"], source["custom"]);
+        assert_eq!(
+            serde_yaml_ng::from_str::<RuntimeSettings>(&serde_yaml_ng::to_string(&runtime)?)?,
+            runtime
+        );
+    }
+    for agent in [
+        "x".repeat(1025),
+        "bad\r\nheader".into(),
+        "bad\tvalue".into(),
+        "bad\0".into(),
+        "bad\u{007f}".into(),
+        "中文".into(),
+    ] {
+        let runtime = RuntimeSettings {
+            global_ua: Some(agent),
+            ..Default::default()
+        };
+        assert!(runtime.validate().is_err());
+        assert!(runtime.enforce(source.clone()).is_err());
+    }
+    for invalid in [
+        "global-ua: 123",
+        "global-ua: true",
+        "global-ua: []",
+        "etag-support: 0",
+        "etag-support: 'false'",
     ] {
         assert!(
             serde_yaml_ng::from_str::<RuntimeSettings>(invalid).is_err(),

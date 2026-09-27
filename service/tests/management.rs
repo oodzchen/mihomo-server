@@ -1614,7 +1614,7 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
             StatusCode::UNAUTHORIZED
         );
         let (_, initial) = response(&app, request(&token, "/api/commands", Some(read.clone()))?).await?;
-        assert_eq!(initial["fields"].as_array().unwrap().len(), 7);
+        assert_eq!(initial["fields"].as_array().unwrap().len(), 9);
         assert!(
             initial["fields"]
                 .as_array()
@@ -1622,7 +1622,7 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
                 .iter()
                 .all(|f| f["setting"].is_null() && f["configured"].is_null() && f["actual"].is_null())
         );
-        let settings = json!({"command":"set_settings","runtime":{"tcp-concurrent":false,"find-process-mode":"off","keep-alive-interval":0,"keep-alive-idle":-1,"disable-keep-alive":false,"interface-name":"","routing-mark":0}});
+        let settings = json!({"command":"set_settings","runtime":{"tcp-concurrent":false,"find-process-mode":"off","keep-alive-interval":0,"keep-alive-idle":-1,"disable-keep-alive":false,"interface-name":"","routing-mark":0,"global-ua":"","etag-support":false}});
         assert!(
             response(&app, request(&token, "/api/commands", Some(settings))?)
                 .await?
@@ -1637,8 +1637,10 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
         assert_eq!(saved["fields"][4]["setting"], false);
         assert_eq!(saved["fields"][5]["setting"], "");
         assert_eq!(saved["fields"][6]["setting"], 0);
+        assert_eq!(saved["fields"][7]["setting"], "");
+        assert_eq!(saved["fields"][8]["setting"], false);
         assert!(saved["config_revision"].is_null());
-        let raw = "mode: direct\ntcp-concurrent: true\nfind-process-mode: strict\nkeep-alive-interval: 15\nkeep-alive-idle: 30\ndisable-keep-alive: true\ninterface-name: source0\nrouting-mark: 123";
+        let raw = "mode: direct\ntcp-concurrent: true\nfind-process-mode: strict\nkeep-alive-interval: 15\nkeep-alive-idle: 30\ndisable-keep-alive: true\ninterface-name: source0\nrouting-mark: 123\nglobal-ua: source/1\netag-support: true";
         let uid = manager
             .import_profile_yaml(raw.into(), "connection source".into())
             .await?
@@ -1649,12 +1651,12 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
         manager
             .set_profile_merge(
                 uid.clone(),
-                Some("tcp-concurrent: true\nfind-process-mode: always\nkeep-alive-interval: 20\nkeep-alive-idle: 40\ndisable-keep-alive: true\ninterface-name: merge0\nrouting-mark: 456".into()),
+                Some("tcp-concurrent: true\nfind-process-mode: always\nkeep-alive-interval: 20\nkeep-alive-idle: 40\ndisable-keep-alive: true\ninterface-name: merge0\nrouting-mark: 456\nglobal-ua: merge/1\netag-support: true".into()),
             )
             .await?;
         manager
             .apply_overlay(serde_yaml_ng::from_str(
-                "tcp-concurrent: true\nfind-process-mode: strict\nkeep-alive-interval: 15\nkeep-alive-idle: 30\ndisable-keep-alive: true\ninterface-name: source0\nrouting-mark: 123",
+                "tcp-concurrent: true\nfind-process-mode: strict\nkeep-alive-interval: 15\nkeep-alive-idle: 30\ndisable-keep-alive: true\ninterface-name: source0\nrouting-mark: 123\nglobal-ua: source/1\netag-support: true",
             )?)
             .await?;
         let (_, committed) = response(&app, request(&token, "/api/commands", Some(read))?).await?;
@@ -1672,9 +1674,17 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
         assert_eq!(committed["fields"][4]["configured"], false);
         assert_eq!(committed["fields"][5]["configured"], "");
         assert_eq!(committed["fields"][6]["configured"], 0);
+        assert_eq!(committed["fields"][7]["configured"], "");
+        assert_eq!(committed["fields"][8]["configured"], false);
         let before = manager.status();
         let settings = manager.settings().await?;
         for invalid in [
+            json!({"global-ua":true}),
+            json!({"global-ua":123}),
+            json!({"global-ua":"bad\r\nheader"}),
+            json!({"global-ua":"中文"}),
+            json!({"global-ua":"x".repeat(1025)}),
+            json!({"etag-support":"false"}),
             json!({"interface-name":true}),
             json!({"interface-name":"abcdefghijklmnop"}),
             json!({"interface-name":"eth:0"}),
@@ -1718,6 +1728,8 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
         assert_eq!(inherited.fields[4].configured, true);
         assert_eq!(inherited.fields[5].configured, "merge0");
         assert_eq!(inherited.fields[6].configured, 456);
+        assert_eq!(inherited.fields[7].configured, "merge/1");
+        assert_eq!(inherited.fields[8].configured, true);
         assert!(inherited.fields.iter().all(|f| f.setting.is_null()));
         assert_eq!(manager.profile_raw(uid).await?.yaml, raw);
         Ok::<_, anyhow::Error>(())

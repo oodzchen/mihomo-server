@@ -13,6 +13,7 @@ import { ProfileDnsPanel } from "./profile-dns";
 import { useProxyAccess } from "./proxy-access";
 import { GEO_KEYS, GeoFields, GeoReadback, geoDraft, geoRuntime, validateGeo } from "./geo-settings";
 import { OUTBOUND_KEYS, OutboundFields, outboundDraft, outboundRuntime, validateOutbound } from "./outbound-settings";
+import { DOWNLOAD_KEYS, DownloadFields, downloadDraft, downloadRuntime, validateDownload } from "./download-settings";
 import { SettingsReadback } from "./settings-readback";
 import { ResourcesPanel } from "./resources";
 
@@ -72,6 +73,7 @@ function toDraft(settings: Settings): Draft {
     ...Object.entries(networkDraft(settings.runtime)),
     ...Object.entries(geoDraft(settings.runtime)),
     ...Object.entries(outboundDraft(settings.runtime)),
+    ...Object.entries(downloadDraft(settings.runtime)),
     ...fields.map((field) => [
       field.key,
       settings.runtime[field.key] == null
@@ -81,7 +83,7 @@ function toDraft(settings: Settings): Draft {
   ]);
 }
 function runtime(draft: Draft): Runtime {
-  const result: Runtime = { ...networkRuntime(draft), ...geoRuntime(draft), ...outboundRuntime(draft) };
+  const result: Runtime = { ...networkRuntime(draft), ...geoRuntime(draft), ...outboundRuntime(draft), ...downloadRuntime(draft) };
   for (const field of fields) {
     const value = draft[field.key];
     if (value === "") continue;
@@ -114,6 +116,7 @@ function decode(value: unknown): Settings {
   validateGeo(settings.runtime);
   for (const [key, value] of Object.entries(settings.runtime)) {
     if (GEO_KEYS.has(key)) continue;
+    if (DOWNLOAD_KEYS.has(key)) { validateDownload(key, value); continue; }
     if (OUTBOUND_KEYS.has(key)) { validateOutbound(key, value); continue; }
     if (key === "dns" || key === "tun") {
       validateNetwork(key, value);
@@ -418,6 +421,10 @@ export function SettingsPage({
               setDraft(previous => ({ ...previous, [key]: value }));
               setError(""); setNotice(""); setConfirmation(undefined);
             }} />
+            <DownloadFields draft={draft} disabled={disabled} onChange={(key, value) => {
+              setDraft(previous => ({ ...previous, [key]: value }));
+              setError(""); setNotice(""); setConfirmation(undefined);
+            }} />
             <OutboundFields draft={draft} disabled={disabled} onChange={(key, value) => {
               setDraft(previous => ({ ...previous, [key]: value }));
               setError(""); setNotice(""); setConfirmation(undefined);
@@ -548,6 +555,7 @@ export function SettingsPage({
           ) : (
             <p className="muted">尚未读取到设置。</p>
           )}
+          {saved && <pre className="network-snapshot" aria-label="已保存核心下载设置">{JSON.stringify(Object.fromEntries([...DOWNLOAD_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
           {saved && <pre className="network-snapshot" aria-label="已保存出口设置">{JSON.stringify(Object.fromEntries([...OUTBOUND_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
           {saved && <pre className="network-snapshot" aria-label="已保存 Geo 设置">{JSON.stringify(Object.fromEntries([...GEO_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
           {saved && (

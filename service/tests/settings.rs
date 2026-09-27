@@ -813,14 +813,14 @@ async fn connection_settings_authority_switching_rollback_inheritance_and_restar
     let dir = Directory::new()?;
     let manager = CoreManager::spawn(dir.options()?)?;
     let runtime: RuntimeSettings = serde_yaml_ng::from_str(
-        "tcp-concurrent: false\nfind-process-mode: off\nkeep-alive-interval: 0\nkeep-alive-idle: -1\ndisable-keep-alive: false\ninterface-name: ''\nrouting-mark: 0\nipv6: false",
+        "tcp-concurrent: false\nfind-process-mode: off\nkeep-alive-interval: 0\nkeep-alive-idle: -1\ndisable-keep-alive: false\ninterface-name: ''\nrouting-mark: 0\nglobal-ua: ''\netag-support: false\nipv6: false",
     )?;
     let result = async {
         manager.set_settings(runtime.clone()).await?;
-        let source = "mode: direct\nmixed-port: 0\ntcp-concurrent: true\nfind-process-mode: strict\nkeep-alive-interval: 15\nkeep-alive-idle: 30\ndisable-keep-alive: true\ninterface-name: lo\nrouting-mark: 123\nipv6: false\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']";
+        let source = "mode: direct\nmixed-port: 0\ntcp-concurrent: true\nfind-process-mode: strict\nkeep-alive-interval: 15\nkeep-alive-idle: 30\ndisable-keep-alive: true\ninterface-name: lo\nrouting-mark: 123\nglobal-ua: source/1\netag-support: true\nipv6: false\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']";
         let uid = manager.import_profile_yaml(source.into(), "connection settings".into()).await?.uid.unwrap().to_string();
         manager.select_profile(uid.clone()).await?;
-        manager.set_profile_script(uid.clone(), Some("function main(c) { c['tcp-input']=c['tcp-concurrent']; c['process-input']=c['find-process-mode']; c['interval-input']=c['keep-alive-interval']; c['idle-input']=c['keep-alive-idle']; c['disable-input']=c['disable-keep-alive']; c['interface-input']=c['interface-name']; c['mark-input']=c['routing-mark']; c['interface-name']='lo'; c['routing-mark']=123; c['keep-alive-interval']=15; c['keep-alive-idle']=30; c['disable-keep-alive']=true; c['tcp-concurrent']=true; c['find-process-mode']='always'; if(c.ipv6) c.rules=['INVALID,DIRECT']; return c; }".into())).await?;
+        manager.set_profile_script(uid.clone(), Some("function main(c) { c['tcp-input']=c['tcp-concurrent']; c['process-input']=c['find-process-mode']; c['interval-input']=c['keep-alive-interval']; c['idle-input']=c['keep-alive-idle']; c['disable-input']=c['disable-keep-alive']; c['interface-input']=c['interface-name']; c['mark-input']=c['routing-mark']; c['ua-input']=c['global-ua']; c['etag-input']=c['etag-support']; c['global-ua']='script/1'; c['etag-support']=true; c['interface-name']='lo'; c['routing-mark']=123; c['keep-alive-interval']=15; c['keep-alive-idle']=30; c['disable-keep-alive']=true; c['tcp-concurrent']=true; c['find-process-mode']='always'; if(c.ipv6) c.rules=['INVALID,DIRECT']; return c; }".into())).await?;
         let config = manager.runtime_config().await?;
         assert_eq!(config["tcp-input"].as_bool(), Some(false));
         assert_eq!(config["process-input"].as_str(), Some("off"));
@@ -829,20 +829,23 @@ async fn connection_settings_authority_switching_rollback_inheritance_and_restar
         assert_eq!(config["disable-input"].as_bool(), Some(false));
         assert_eq!(config["interface-input"].as_str(), Some(""));
         assert_eq!(config["mark-input"].as_u64(), Some(0));
+        assert_eq!(config["ua-input"].as_str(), Some(""));
+        assert_eq!(config["etag-input"].as_bool(), Some(false));
         manager.start().await?;
         assert!(manager.connection_settings().await?.fields.iter().all(|f| f.actual == f.setting && f.configured == f.setting && !f.mismatch));
         for (mode, text) in [(FindProcessMode::Strict, "strict"), (FindProcessMode::Always, "always"), (FindProcessMode::Off, "off")] {
-            let mut changed = runtime.clone(); changed.interface_name = Some("lo".into()); changed.routing_mark = Some(u32::MAX); changed.keep_alive_interval = Some(20); changed.keep_alive_idle = Some(40); changed.disable_keep_alive = Some(true); changed.tcp_concurrent = Some(true); changed.find_process_mode = Some(mode);
+            let mut changed = runtime.clone(); changed.global_ua = Some("agent/2".into()); changed.etag_support = Some(true); changed.interface_name = Some("lo".into()); changed.routing_mark = Some(u32::MAX); changed.keep_alive_interval = Some(20); changed.keep_alive_idle = Some(40); changed.disable_keep_alive = Some(true); changed.tcp_concurrent = Some(true); changed.find_process_mode = Some(mode);
             manager.set_settings(changed).await?;
             let actual = manager.connection_settings().await?;
             assert_eq!(actual.fields[0].actual, true); assert_eq!(actual.fields[1].actual, text);
             assert_eq!(actual.fields[2].actual, 20); assert_eq!(actual.fields[3].actual, 40); assert_eq!(actual.fields[4].actual, true);
             assert_eq!(actual.fields[5].actual, "lo"); assert!(actual.fields[6].actual == serde_json::json!(u32::MAX) || actual.fields[6].actual == serde_json::json!(-1));
+            assert_eq!(actual.fields[7].actual, "agent/2"); assert_eq!(actual.fields[8].actual, true);
             assert!(actual.fields.iter().all(|f| !f.mismatch));
         }
         let saved = manager.set_settings(runtime.clone()).await?;
         let before = manager.status();
-        let mut invalid = runtime.clone(); invalid.interface_name = Some("lo".into()); invalid.routing_mark = Some(456); invalid.keep_alive_interval = Some(60); invalid.keep_alive_idle = Some(120); invalid.disable_keep_alive = Some(true); invalid.ipv6 = Some(true); invalid.tcp_concurrent = Some(true); invalid.find_process_mode = Some(FindProcessMode::Always);
+        let mut invalid = runtime.clone(); invalid.global_ua = Some("rejected/1".into()); invalid.etag_support = Some(true); invalid.interface_name = Some("lo".into()); invalid.routing_mark = Some(456); invalid.keep_alive_interval = Some(60); invalid.keep_alive_idle = Some(120); invalid.disable_keep_alive = Some(true); invalid.ipv6 = Some(true); invalid.tcp_concurrent = Some(true); invalid.find_process_mode = Some(FindProcessMode::Always);
         assert!(manager.set_settings(invalid).await.is_err());
         assert_eq!(manager.status().pid, before.pid); assert_eq!(manager.status().config_revision, before.config_revision);
         assert_eq!(manager.settings().await?, saved); assert_eq!(manager.runtime_config().await?, config);
@@ -855,6 +858,7 @@ async fn connection_settings_authority_switching_rollback_inheritance_and_restar
         assert_eq!(inherited.fields[0].configured, true); assert_eq!(inherited.fields[1].configured, "always");
         assert_eq!(inherited.fields[2].configured, 15); assert_eq!(inherited.fields[3].configured, 30); assert_eq!(inherited.fields[4].configured, true);
         assert_eq!(inherited.fields[5].configured, "lo"); assert_eq!(inherited.fields[6].configured, 123);
+        assert_eq!(inherited.fields[7].configured, "script/1"); assert_eq!(inherited.fields[8].configured, true);
         assert!(inherited.fields.iter().all(|f| f.setting.is_null() && f.actual.is_null()));
         manager.set_settings(runtime).await?;
         assert_eq!(manager.profile_raw(uid).await?.yaml, source);
@@ -879,5 +883,105 @@ async fn connection_settings_authority_switching_rollback_inheritance_and_restar
     }
     .await;
     let cleanup = restored.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
+#[ignore = "requires real Mihomo; isolated HTTP User-Agent and ETag fixture"]
+async fn core_download_settings_control_real_http_headers_and_conditional_requests() -> Result<()> {
+    use axum::{
+        extract::State,
+        http::{HeaderMap, StatusCode},
+        response::IntoResponse,
+        routing::get,
+    };
+    use headless_core::config::settings::RuntimeSettings;
+    use std::sync::{Arc, Mutex};
+    #[derive(Clone, Debug)]
+    struct Seen {
+        path: String,
+        agent: Option<String>,
+        conditional: Option<String>,
+    }
+    type Requests = Arc<Mutex<Vec<Seen>>>;
+    async fn serve(
+        State(requests): State<Requests>,
+        uri: axum::http::Uri,
+        headers: HeaderMap,
+    ) -> axum::response::Response {
+        let conditional = headers
+            .get("if-none-match")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        requests.lock().unwrap().push(Seen {
+            path: uri.path().into(),
+            agent: headers
+                .get("user-agent")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned),
+            conditional: conditional.clone(),
+        });
+        if conditional.as_deref() == Some("\"fixture-v1\"") {
+            return StatusCode::NOT_MODIFIED.into_response();
+        }
+        (
+            [("etag", "\"fixture-v1\"")],
+            "proxies: [{name: fixture, type: http, server: 127.0.0.1, port: 9}]",
+        )
+            .into_response()
+    }
+    let requests: Requests = Default::default();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("http://{}", listener.local_addr()?);
+    let app = axum::Router::new()
+        .route("/default", get(serve))
+        .route("/override", get(serve))
+        .with_state(requests.clone());
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let dir = Directory::new()?;
+    let manager = CoreManager::spawn(dir.options()?)?;
+    let result = async {
+        let mut runtime = RuntimeSettings { global_ua: Some("fixture-agent/1".into()), etag_support: Some(false), ..Default::default() };
+        manager.set_settings(runtime.clone()).await?;
+        let raw = format!("mode: direct\nmixed-port: 0\ndns: {{enable: false}}\ntun: {{enable: false}}\nproxy-providers:\n  download:\n    type: http\n    url: '{url}/default'\n    interval: 86400\n  override:\n    type: http\n    url: '{url}/override'\n    interval: 86400\n    header: {{User-Agent: [provider-agent/1]}}\nproxy-groups: [{{name: verification, type: select, use: [download]}}]\nrules: ['MATCH,DIRECT']");
+        let uid = manager.import_profile_yaml(raw.clone(), "download fixture".into()).await?.uid.unwrap().to_string();
+        manager.select_profile(uid.clone()).await?;
+        manager.start().await?;
+        let latest = |path: &str| -> Result<Seen> {
+            requests.lock().unwrap().iter().rev().find(|r| r.path == path).cloned().context("HTTP fixture was not contacted")
+        };
+        let update = |name: &'static str| {
+            let client = manager.client();
+            async move { tokio::time::timeout(std::time::Duration::from_secs(5), client.update_proxy_provider(name)).await??; Ok::<_, anyhow::Error>(()) }
+        };
+        update("download").await?;
+        let seen = latest("/default")?;
+        assert_eq!(seen.agent.as_deref(), Some("fixture-agent/1")); assert!(seen.conditional.is_none());
+        update("override").await?;
+        assert_eq!(latest("/override")?.agent.as_deref(), Some("provider-agent/1"));
+        runtime.etag_support = Some(true); manager.set_settings(runtime.clone()).await?;
+        // Warm the ETag/hash cache, then require a genuine conditional 304 request.
+        update("download").await?; update("download").await?;
+        let seen = latest("/default")?;
+        assert_eq!(seen.agent.as_deref(), Some("fixture-agent/1"));
+        assert_eq!(seen.conditional.as_deref(), Some("\"fixture-v1\""));
+        runtime.global_ua = Some(String::new()); runtime.etag_support = Some(false);
+        manager.set_settings(runtime.clone()).await?;
+        update("download").await?;
+        let seen = latest("/default")?;
+        assert!(seen.agent.is_none() || seen.agent.as_deref() == Some("")); assert!(seen.conditional.is_none());
+        assert_eq!(manager.client().get_connection_config().await?.global_ua.as_deref(), Some(""));
+        assert_eq!(manager.client().get_connection_config().await?.etag_support, Some(false));
+        assert_eq!(manager.profile_raw(uid).await?.yaml, raw);
+        manager.stop().await?; manager.start().await?;
+        update("download").await?;
+        let seen = latest("/default")?;
+        assert!(seen.agent.is_none() || seen.agent.as_deref() == Some("")); assert!(seen.conditional.is_none());
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = manager.shutdown().await;
+    server.abort();
     result.and(cleanup)
 }

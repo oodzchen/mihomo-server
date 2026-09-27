@@ -53,13 +53,14 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** authoritative outbound interface-name and Linux
-routing-mark settings, Web editing and presence-preserving core readback, with
-empty-name/zero inheritance semantics, script authority, rollback and restart
-verification. **Next implementation task (P1):** global download User-Agent and
-ETag settings with Web editing and core readback. DAT validation, controlled online
-and running-core Geo updates, and other remaining full settings still belong to P1;
-finish this priority before starting P2.
+**Latest completed task (P1):** authoritative global core download User-Agent and
+ETag settings, Web editing and presence-preserving readback. Real HTTP verification
+covers provider header precedence, conditional 304 requests, explicit empty/false
+values and core restart; configuration authority, rollback and real proxy traffic
+remain verified. **Next implementation task (P1):** hosts configuration authority
+and DNS host-use controls with Web editing and actual DNS behavior verification.
+DAT validation, controlled online/running-core Geo updates and remaining full
+settings still belong to P1; finish this priority before starting P2.
 
 ## Complete target architecture
 
@@ -81,7 +82,7 @@ mihomo-server/
 │   ├── mihomo-client/                               [Migrated; Linux verified]
 │   │   ├── Unix socket / explicit loopback HTTP      [Migrated]
 │   │   ├── API methods, response models, errors      [Migrated]
-│   │   ├── Presence-preserving connection/outbound GET /configs projection [Implemented; Linux verified]
+│   │   ├── Presence-preserving connection/outbound/download GET /configs projection [Implemented; Linux verified]
 │   │   └── Realtime feeds, cancellation, reconnect   [Migrated]
 <!--│   │   └── Windows Named Pipe runtime validation    [Deferred; code retained; Windows compatibility postponed] -->
 │   └── headless-core/                               [Partially migrated]
@@ -118,10 +119,11 @@ mihomo-server/
 │       ├── Pure TUN/DNS derivation / IPv6 range repair [Migrated + staged adaptation; Linux validation]
 │       ├── Provider DNS digest / profile preference / session confirmation [Migrated + adaptation; Linux verified]
 │       ├── Deleted-profile DNS preference / confirmation cleanup [Implemented; recoverable]
-│       ├── Hosts / native TUN integration            [Pending]
+│       ├── Hosts authority / DNS host-use controls    [Pending; next P1 task]
+│       ├── Remaining native TUN integration           [Pending; P1]
 │       ├── Final LAN bind / group cleanup / field order [Migrated + staged adaptation; Linux verified]
 │       ├── Outbound interface / Linux routing mark authority / bounds / recovery [Implemented; Linux verified]
-│       ├── Global download User-Agent / ETag authority [Pending; next P1 task]
+│       ├── Global download User-Agent / ETag authority / strict headers / recovery [Implemented; Linux verified]
 │       ├── Remaining authoritative settings          [Pending; P1]
 │       ├── Source-addressed HTTP provider cache identities / implicit paths [Implemented; Linux verified]
 │       ├── Runtime YAML + overlay generation        [Implemented; upstream merge reused]
@@ -158,7 +160,7 @@ mihomo-server/
 │   │   ├── Read-only MMDB verification / pinned parser / metadata-only compatibility outcome [Implemented; Linux verified]
 │   │   ├── Stopped-core pinned MMDB replacement / digest guards / atomic commit / orphan recovery [Implemented; Linux verified]
 │   │   ├── Geo actor settings/config/core comparison / geosite matcher / bounded readback / URL model aliases [Implemented; Linux verified]
-│   │   ├── Connection/outbound comparison / field presence / shared snapshot envelope [Implemented; Linux verified]
+│   │   ├── Connection/outbound/download comparison / nine presence-preserving fields / shared snapshot envelope [Implemented; Linux verified]
 │   │   └── DAT validation / controlled online and running-core Geo updates / remaining full settings [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
@@ -270,7 +272,7 @@ mihomo-server/
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
 │   ├── outbound-settings.tsx / interface ownership / Linux mark editor / readback [Implemented; Linux verified]
-│   ├── Global download User-Agent / ETag editor / readback [Pending; next P1 task]
+│   ├── download-settings.tsx / User-Agent ownership / ETag editor / readback [Implemented; Linux verified]
 │   ├── DNS/TUN editor / lossless nested inheritance / readback [Implemented; Linux verified]
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
@@ -3977,6 +3979,64 @@ followed by remaining configuration/Geo lifecycle work. P2 rules/provider/delay
 workflows, P3 i18n/signals and P4 actual Linux systemd installation remain incomplete.
 Deferred features remain deferred. The external host commits changes; no sandbox
 Git commit is performed.
+
+## Increment: global core download User-Agent and ETag settings
+
+Completed the next P1 task specified by Delivery order. The existing schema-one
+runtime settings now accept optional `global-ua` and `etag-support`. Absent/null
+inherits; `""` explicitly clears User-Agent and false disables ETag. Owned values
+are applied before enhancement and after scripts/merges/overlays through the
+existing settings authority. Original subscriptions, provider identity/cache
+allocation, subscription download options and persistence formats are preserved.
+
+User-Agent must be an actual string with at most 1024 printable ASCII bytes,
+including spaces; YAML numeric/boolean coercion, non-ASCII and control/header
+injection characters are rejected. The bound is a service policy. ETag is a strict
+boolean. Interrupted save recovery now exercises owned empty/false download values.
+The narrow client projection adds optional leaves, and the existing actor comparison
+shows nine connection/outbound/download fields without inventing missing core
+values or changing signed routing-mark handling. Shared comparison and timeout/
+retry behavior are reused.
+
+`web/src/download-settings.tsx` adds **核心下载设置**, a User-Agent ownership checkbox
+that preserves an explicitly empty input, a three-state ETag select, validation
+and a saved snapshot. Saving/rereading, failed drafts and full inheritance reset
+preserve other runtime fields. The existing connection panel reads both leaves.
+The UI distinguishes core resource downloads from the service's subscription
+`user_agent` option. Per-resource nonempty User-Agent headers may override the
+core global value; readback alone is not proof of actual request behavior.
+
+Verification:
+
+- `cargo check --workspace --locked --offline`, the Web production build,
+  formatting and whitespace checks succeed. Workspace tests report **363 passed,
+  80 opt-in ignored**. The new pure settings case covers empty/custom/max-length
+  strings, false/null values, invalid header/type bounds, authority and roundtrip;
+  existing recovery, authenticated commands and presence/mismatch cases extend
+  coverage without new dependencies.
+- Explicitly enabled real-core settings workflow passes initial/script/final
+  authority, mode changes, failed application rollback, restored inheritance,
+  stopped saves and service restart, including both new download fields.
+- A new local HTTP provider fixture passes against `/usr/bin/verge-mihomo`: actual
+  global User-Agent, provider-specific override, enabled ETag cache warmup followed
+  by If-None-Match/HTTP 304, disabled conditional requests, explicit empty agent
+  and core restart. The retained client update call is used only by the harness;
+  P2 provider-management commands/views remain pending.
+- Explicitly enabled live-node resource workflow passes through the existing
+  `wlo1` interface using private subscription/Geo copies. All nine settings match
+  before/after core restart and the HTTPS proxy request returns 204. Original node
+  and Geo SHA-256 fingerprints remain unchanged.
+- Full Chromium regression reports **26 passed, 4 optional bundle upgrade/repair
+  workflows skipped**. The extended connection workflow verifies printable ASCII
+  and length validation, explicit empty/false save/readback, failed drafts,
+  confirmed custom/true save, rereading and complete inheritance restoration.
+
+The complete architecture tree is synchronized above, and the MVP remains runnable.
+Next task: P1 hosts configuration authority and DNS host-use controls, Web editing
+and real DNS behavior verification. Remaining settings, DAT validation and controlled
+Geo updates stay in P1. P2 rules/provider/delay, P3 i18n/signals and P4 actual Linux
+systemd installation remain incomplete; unrelated work remains deferred. The host
+script commits this increment; no sandbox Git commit is performed.
 
 ## MVP completion boundary
 

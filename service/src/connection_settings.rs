@@ -1,4 +1,4 @@
-//! Connection-policy comparison, not proof of socket behavior or process discovery.
+//! Connection and core-download policy comparison; actual request behavior needs live verification.
 pub use crate::settings_readback::Snapshot;
 use headless_core::config::settings::RuntimeSettings;
 use mihomo_client::models::{ConnectionConfig, FindProcessMode};
@@ -21,7 +21,9 @@ pub(crate) fn snapshot(
             "keep-alive-idle": core.keep_alive_idle,
             "disable-keep-alive": core.disable_keep_alive,
             "interface-name": core.interface_name,
-            "routing-mark": core.routing_mark
+            "routing-mark": core.routing_mark,
+            "global-ua": core.global_ua,
+            "etag-support": core.etag_support
         })
     });
     let mut read = crate::settings_readback::snapshot(
@@ -38,6 +40,8 @@ pub(crate) fn snapshot(
             "disable-keep-alive",
             "interface-name",
             "routing-mark",
+            "global-ua",
+            "etag-support",
         ],
         "Connection settings core readback unavailable",
     )?;
@@ -63,14 +67,14 @@ mod tests {
     #[test]
     fn comparison_preserves_false_missing_fields_inheritance_and_core_mode_case() -> anyhow::Result<()> {
         let runtime: RuntimeSettings = serde_yaml_ng::from_str(
-            "tcp-concurrent: false\nfind-process-mode: off\nkeep-alive-interval: 0\nkeep-alive-idle: -1\ndisable-keep-alive: false\ninterface-name: ''\nrouting-mark: 0",
+            "tcp-concurrent: false\nfind-process-mode: off\nkeep-alive-interval: 0\nkeep-alive-idle: -1\ndisable-keep-alive: false\ninterface-name: ''\nrouting-mark: 0\nglobal-ua: ''\netag-support: false",
         )?;
         let config: Mapping = serde_yaml_ng::from_str(
-            "tcp-concurrent: false\nfind-process-mode: off\nkeep-alive-interval: 0\nkeep-alive-idle: -1\ndisable-keep-alive: false\ninterface-name: ''\nrouting-mark: 0",
+            "tcp-concurrent: false\nfind-process-mode: off\nkeep-alive-interval: 0\nkeep-alive-idle: -1\ndisable-keep-alive: false\ninterface-name: ''\nrouting-mark: 0\nglobal-ua: ''\netag-support: false",
         )?;
         for mode in ["Off", "off"] {
             let core = serde_json::from_value(
-                serde_json::json!({"tcp-concurrent":false,"find-process-mode":mode,"keep-alive-interval":0,"keep-alive-idle":-1,"disable-keep-alive":false,"interface-name":"","routing-mark":0}),
+                serde_json::json!({"tcp-concurrent":false,"find-process-mode":mode,"keep-alive-interval":0,"keep-alive-idle":-1,"disable-keep-alive":false,"interface-name":"","routing-mark":0,"global-ua":"","etag-support":false}),
             )?;
             let read = snapshot(&runtime, Some(&config), None, true, Some(&core))?;
             assert!(
@@ -86,13 +90,13 @@ mod tests {
         assert_eq!(partial.fields[2].actual, 0);
         assert!(partial.fields[3].actual.is_null());
         assert_eq!(partial.fields[4].actual, false);
-        assert!(partial.fields[5].actual.is_null() && partial.fields[6].actual.is_null());
+        assert!(partial.fields[5..].iter().all(|field| field.actual.is_null()));
         assert!(partial.fields.iter().all(|f| !f.mismatch));
         let missing = snapshot(&runtime, Some(&config), None, true, Some(&ConnectionConfig::default()))?;
         assert!(missing.error.is_none());
         assert!(missing.fields.iter().all(|f| f.actual.is_null() && !f.mismatch));
         let core = serde_json::from_value(
-            serde_json::json!({"tcp-concurrent":true,"find-process-mode":"Always","keep-alive-interval":30,"keep-alive-idle":60,"disable-keep-alive":true,"interface-name":"eth0","routing-mark":123}),
+            serde_json::json!({"tcp-concurrent":true,"find-process-mode":"Always","keep-alive-interval":30,"keep-alive-idle":60,"disable-keep-alive":true,"interface-name":"eth0","routing-mark":123,"global-ua":"test/1.0","etag-support":true}),
         )?;
         assert!(
             snapshot(&runtime, Some(&config), None, true, Some(&core))?
