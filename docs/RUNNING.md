@@ -2501,10 +2501,12 @@ this command does not change whether Mihomo accepts the configuration.
 `available` means a nonempty regular file's metadata was observed; it does not prove
 that its content format is valid or that a running core has loaded it. Missing Geo
 files may be normal when rules do not require them. The filesystem can change after
-a read; refresh after a core download or external file change. Online/running-core Geo updates and Provider refresh/reload APIs remain future
-work. MMDB/DAT checks and stopped-core bundle installs are available explicitly
-as described below. Optional bundle Geo seeds can now initialize missing files under pinned
-size/SHA-256 checks; see [Geo deployment inputs](DEPLOYMENT.md#include-existing-geo-files-for-first-use-initialization).
+a read; refresh after a core download or external file change. Running-core Geo
+replacement and Provider refresh/reload APIs remain future work. MMDB/DAT checks,
+stopped-core bundle installs and explicit stopped-core
+online updates are available as described below. Optional bundle Geo seeds can
+initialize missing files under pinned size/SHA-256 checks; see
+[Geo deployment inputs](DEPLOYMENT.md#include-existing-geo-files-for-first-use-initialization).
 
 
 ## Validate a Geo MMDB snapshot
@@ -2589,7 +2591,8 @@ Start the core explicitly after installation to use the new file. Installation
 never starts/restarts it or changes the configuration revision. Browser disconnect
 or request cancellation after work begins cannot undo a committed file; inspect
 again after an ambiguous response. External file writers must honor the same data
-lock. Live/online updates and automatic runtime rollback are pending.
+lock. Stopped-core online updates are described below; running-core replacement
+and automatic runtime rollback remain pending.
 
 
 ## Install a pinned GeoIP/GeoSite DAT bundle file
@@ -2626,9 +2629,63 @@ A successful receipt includes `core_load_verified: true`, the structural
 The structural report still has `validation.dat.core_matching_verified: false`:
 loading all groups does not prove every record's classification or future runtime
 configuration. Installation does not start/reload the core or change its revision;
-start it explicitly and inspect actual proxy behavior. No online download, upload
-or running-core Geo replacement is offered yet. Private `data` node/Geo copies are
+start it explicitly and inspect actual proxy behavior. This bundled operation does
+not download; the separate stopped-core online update follows below. Upload and
+running-core Geo replacement are not offered yet. Private `data` node/Geo copies are
 used for real proxy HTTPS 204 verification; the original files are left intact.
+
+## Update a Geo resource online while the core is stopped
+
+Set the relevant `geox-url` leaf in a committed configuration first: `geoip` for
+`geoip.dat`, `geosite` for `geosite.dat`, `mmdb` for `Country.mmdb` or
+`geoip.metadb`, and `asn` for `ASN.mmdb`. This operation does not use a caller-
+supplied URL or Mihomo's automatic Geo updater. Stop the managed core, then inspect
+one source and current resource:
+
+```json
+{"command":"geo_online_info","name":"geosite.dat"}
+```
+
+The authenticated result has `name`, `source_sha256` (the SHA-256 of the committed
+URL, without exposing it) and `current_sha256` (null if absent). Use those exact
+fingerprints in a separate explicit command:
+
+```json
+{
+  "command":"update_geo_online",
+  "name":"geosite.dat",
+  "expected_current_sha256":null,
+  "expected_source_sha256":"<source_sha256 from geo_online_info>",
+  "expected_download_sha256":null,
+  "accept_metadata_only":false
+}
+```
+
+Use the inspected current SHA-256 instead of null when a file exists. Optionally
+supply a known 64-character download SHA-256 to pin the new bytes. No arbitrary
+path, URL, credentials or filename is accepted. The source must be explicit in the
+committed configuration; an inherited Mihomo default URL is not assumed. Source
+or current-file changes require reinspection. The service fetches directly without
+ambient proxy settings or redirects, with a 10-second connect/20-second overall
+limit, streaming at most 128 MiB to a private file. Empty, oversized, HTTP-failed
+or mismatched downloads leave the current resource untouched. This direct route
+may be unavailable on networks requiring an HTTP proxy.
+
+After download, the existing bounded no-follow staging and validation applies.
+MMDB retains its optional explicit metadata-only acceptance; DAT never accepts
+that bypass and requires the isolated four-combination Mihomo group-load check.
+The service rechecks the current digest before atomic publication. The receipt is
+the same shape as a bundle install; DAT adds `core_load_verified: true`. Success
+does not start/reload the core or prove every rule matches as intended. Failure or
+an ambiguous browser response requires a new inspection. The fixed Geo staging
+namespace recovers orphans at startup. A running core cannot use this command;
+verified running-core replacement/rollback remains pending.
+
+The **Geo / Provider 资源** panel offers source inspection and stopped-core online
+update controls, including an optional digest field. No source URL or query token
+is rendered there. Existing bundle and read-only validation actions remain
+separate. Real-core validation uses local download fixtures; existing `data` node/
+Geo files are tested through private copies and are never downloaded over.
 
 ## GeoIP/GeoSite DAT validation and compatibility diagnostics
 
@@ -2682,8 +2739,8 @@ for available files, shows structural/unknown-field status, counts, CN absence,
 compatibility limits and the fingerprint. Failed checks, refresh, lifecycle/revision
 changes and disconnect clear stale outcomes; retry is available. Existing MMDB
 checks and stopped-core MMDB installation keep their behavior. Pinned stopped-core
-DAT installation is described above; controlled online/running-core updates and
-P2 provider actions remain pending.
+DAT installation and stopped-core online updates are described above;
+running-core replacement and P2 provider actions remain pending.
 
 An opt-in real-core check uses generated DAT fixtures (including CN), disabled
 external downloads and local HTTP proxy endpoints. It verifies exact/suffix/keyword/
@@ -2855,7 +2912,7 @@ reports actual values as unknown. The settings page
 provides editing and refresh/retry for this same comparison.
 
 Enabling geo-auto-update configures Mihomo's native downloading and filesystem
-updates; service-managed online staging/rollback remains pending. The settings
+updates; verified running-core Geo replacement and rollback remain pending. The settings
 comparison does not prove file validity, required DAT availability or rule loading.
 Offline pinned MMDB installation remains a separate, explicit stopped-core action.
 

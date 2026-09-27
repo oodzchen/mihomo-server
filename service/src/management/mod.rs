@@ -66,6 +66,20 @@ pub enum ManagementCommand {
         #[serde(default)]
         accept_metadata_only: bool,
     },
+    #[cfg(unix)]
+    GeoOnlineInfo {
+        name: String,
+    },
+    #[cfg(unix)]
+    UpdateGeoOnline {
+        name: String,
+        expected_current_sha256: Option<String>,
+        expected_source_sha256: String,
+        #[serde(default)]
+        expected_download_sha256: Option<String>,
+        #[serde(default)]
+        accept_metadata_only: bool,
+    },
     ValidateGeo {
         name: String,
     },
@@ -273,6 +287,28 @@ impl Management {
                         name,
                         expected_current_sha256,
                         expected_seed_sha256,
+                        accept_metadata_only,
+                    })
+                    .await?,
+            )?,
+            #[cfg(unix)]
+            ManagementCommand::GeoOnlineInfo { name } => {
+                serde_json::to_value(self.manager.geo_online_info(name).await?)?
+            }
+            #[cfg(unix)]
+            ManagementCommand::UpdateGeoOnline {
+                name,
+                expected_current_sha256,
+                expected_source_sha256,
+                expected_download_sha256,
+                accept_metadata_only,
+            } => serde_json::to_value(
+                self.manager
+                    .update_geo_online(crate::geo_online::Request {
+                        name,
+                        expected_current_sha256,
+                        expected_source_sha256,
+                        expected_download_sha256,
                         accept_metadata_only,
                     })
                     .await?,

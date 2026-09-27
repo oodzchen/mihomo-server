@@ -402,6 +402,16 @@ enum CommandMessage {
         request: crate::geo_update::InstallRequest,
         reply: oneshot::Sender<Result<crate::geo_update::Receipt>>,
     },
+    #[cfg(unix)]
+    GeoOnlineInfo {
+        name: String,
+        reply: oneshot::Sender<Result<crate::geo_online::Info>>,
+    },
+    #[cfg(unix)]
+    UpdateGeoOnline {
+        request: crate::geo_online::Request,
+        reply: oneshot::Sender<Result<crate::geo_update::Receipt>>,
+    },
     ValidateGeo {
         name: String,
         reply: oneshot::Sender<Result<crate::geo_validation::Validation>>,
@@ -1326,6 +1336,32 @@ impl CoreManager {
             .context("Geo installation response cancelled during shutdown")?
     }
 
+    #[cfg(unix)]
+    pub async fn geo_online_info(&self, name: String) -> Result<crate::geo_online::Info> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::GeoOnlineInfo { name, reply })
+            .await
+            .context("core manager stopped")?;
+        result
+            .await
+            .context("Geo source inspection cancelled during shutdown")?
+    }
+
+    #[cfg(unix)]
+    pub async fn update_geo_online(&self, request: crate::geo_online::Request) -> Result<crate::geo_update::Receipt> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::UpdateGeoOnline { request, reply })
+            .await
+            .context("core manager stopped")?;
+        result
+            .await
+            .context("Geo online update response cancelled during shutdown")?
+    }
+
     pub async fn validate_geo(&self, name: String) -> Result<crate::geo_validation::Validation> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let (reply, result) = oneshot::channel();
@@ -1523,6 +1559,44 @@ fn drain<R: AsyncRead + Unpin + Send + 'static>(reader: R, logs: Logs, stream: &
 }
 
 impl Actor {
+    #[cfg(unix)]
+    async fn publish_prepared_geo(
+        &mut self,
+        mut prepared: crate::geo_update::Prepared,
+        name: &str,
+    ) -> Result<crate::geo_update::Receipt> {
+        if crate::dat_validation::DAT_FILES.contains(&name) {
+            let (next, probe) = tokio::task::spawn_blocking(move || {
+                let probe = prepared.probe()?;
+                Ok::<_, anyhow::Error>((prepared, probe))
+            })
+            .await
+            .context("DAT probe staging worker failed")??;
+            prepared = next;
+            for loader in ["standard", "memconservative"] {
+                for matcher in ["mph", "succinct"] {
+                    tokio::fs::write(&probe.config, probe.config_for(loader, matcher)).await?;
+                    crate::validation::validate(
+                        &self.options.binary,
+                        &probe.directory,
+                        &probe.config,
+                        &mut self.shutdown,
+                        Duration::from_secs(15),
+                    )
+                    .await
+                    .with_context(|| {
+                        format!("isolated Mihomo DAT compatibility probe failed for {loader}/{matcher}")
+                    })?;
+                }
+            }
+            probe.verify_input()?;
+            prepared.mark_core_load_verified();
+        }
+        tokio::task::spawn_blocking(move || prepared.publish())
+            .await
+            .context("Geo publication worker failed")?
+    }
+
     fn cancel_restoration(&mut self) {
         self.restoration = None;
         self.status.send_modify(|state| {
@@ -1876,6 +1950,10 @@ impl Actor {
                             CommandMessage::GeoSeedInfo { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             #[cfg(unix)]
                             CommandMessage::InstallGeoSeed { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
+                            #[cfg(unix)]
+                            CommandMessage::GeoOnlineInfo { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
+                            #[cfg(unix)]
+                            CommandMessage::UpdateGeoOnline { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ValidateGeo { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadResources(reply) => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadGeoSettings(reply) | CommandMessage::ReadConnectionSettings(reply) => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
@@ -2044,30 +2122,60 @@ impl Actor {
                                     let resources = self.options.resources.clone().context("Geo updates require bundle resources")?;
                                     let data = self.options.data_dir.clone();
                                     if crate::dat_validation::DAT_FILES.contains(&request.name.as_str()) {
-                                        let (mut prepared, probe) = tokio::task::spawn_blocking(move || {
-                                            let prepared = resources.prepare_dat_seed(&data, &request)?;
-                                            let probe = prepared.probe()?;
-                                            Ok::<_, anyhow::Error>((prepared, probe))
-                                        }).await.context("DAT staging worker failed")??;
-                                        for loader in ["standard", "memconservative"] {
-                                            for matcher in ["mph", "succinct"] {
-                                                tokio::fs::write(&probe.config, probe.config_for(loader, matcher)).await?;
-                                                crate::validation::validate(
-                                                    &self.options.binary,
-                                                    &probe.directory,
-                                                    &probe.config,
-                                                    &mut self.shutdown,
-                                                    Duration::from_secs(15),
-                                                ).await.with_context(|| format!("isolated Mihomo DAT compatibility probe failed for {loader}/{matcher}"))?;
-                                            }
-                                        }
-                                        probe.verify_input()?;
-                                        prepared.mark_core_load_verified();
-                                        drop(probe);
-                                        tokio::task::spawn_blocking(move || prepared.publish()).await.context("DAT publication worker failed")?
+                                        let name = request.name.clone();
+                                        let prepared = tokio::task::spawn_blocking(move || resources.prepare_dat_seed(&data, &request)).await.context("DAT staging worker failed")??;
+                                        self.publish_prepared_geo(prepared, &name).await
                                     } else {
                                         tokio::task::spawn_blocking(move || resources.install_geo_seed(&data, &request)).await.context("Geo install worker failed")?
                                     }
+                                }.await;
+                                let _ = reply.send(result);
+                            }
+                        }
+                        #[cfg(unix)]
+                        CommandMessage::GeoOnlineInfo { name, reply } => {
+                            if !reply.is_closed() {
+                                let result = (|| {
+                                    let config = self.store.read_current()?;
+                                    crate::geo_online::info(&config, &self.options.data_dir, &name)
+                                })();
+                                let _ = reply.send(result);
+                            }
+                        }
+                        #[cfg(unix)]
+                        CommandMessage::UpdateGeoOnline { request, reply } => {
+                            if !reply.is_closed() {
+                                let result = async {
+                                    ensure!(self.status.borrow().phase == CorePhase::Stopped && self.process.is_none(), "stop the core before updating a Geo file online");
+                                    let config = self.store.read_current()?;
+                                    let (url, source_sha256) = crate::geo_online::source(&config, &request.name)?;
+                                    ensure!(request.expected_source_sha256.eq_ignore_ascii_case(&source_sha256), "Geo source changed since inspection; inspect again");
+                                    let inspected = crate::geo_online::info(&config, &self.options.data_dir, &request.name)?;
+                                    ensure!(
+                                        match (&request.expected_current_sha256, &inspected.current_sha256) {
+                                            (None, None) => true,
+                                            (Some(expected), Some(actual)) => expected.eq_ignore_ascii_case(actual),
+                                            _ => false,
+                                        },
+                                        "Geo file changed since online inspection; inspect again"
+                                    );
+                                    let downloaded = tokio::select! {
+                                        biased;
+                                        _ = closing(&mut self.shutdown) => bail!("Geo download cancelled during shutdown"),
+                                        result = crate::geo_online::fetch(&url, &request.name, request.expected_download_sha256.as_deref()) => result?,
+                                    };
+                                    let data = self.options.data_dir.clone();
+                                    let name = request.name.clone();
+                                    let prepared = tokio::task::spawn_blocking(move || {
+                                        let install = crate::geo_update::InstallRequest {
+                                            name: request.name,
+                                            expected_current_sha256: request.expected_current_sha256,
+                                            expected_seed_sha256: downloaded.seed.sha256.clone(),
+                                            accept_metadata_only: request.accept_metadata_only,
+                                        };
+                                        crate::geo_update::prepare(&downloaded.directory, &data, &downloaded.seed, &install)
+                                    }).await.context("online Geo staging worker failed")??;
+                                    self.publish_prepared_geo(prepared, &name).await
                                 }.await;
                                 let _ = reply.send(result);
                             }

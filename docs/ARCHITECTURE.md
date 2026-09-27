@@ -53,15 +53,14 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** stopped-core, integrity-pinned GeoIP/GeoSite
-DAT installation. Candidate staging requires known structure, CN and nonempty
-groups; Mihomo loads every group in an isolated directory across both loaders and
-both matchers before digest-guarded atomic publication. The Web action and receipt
-show the load proof while preserving the existing MMDB flow.
-**Next implementation task (P1):** controlled online Geo updates with bounded
-source downloads, validated staging and failure recovery for stopped/running cores.
-Remaining full settings and native TUN still belong to P1; finish this priority
-before starting P2.
+**Latest completed task (P1):** explicit stopped-core Geo online update from
+committed `geox-url` leaves. Source/current fingerprints guard a bounded direct
+download, optional content pin, format staging, DAT core-load probe and atomic
+publication; failures preserve old files and active runtime revisions.
+**Next implementation task (P1):** controlled running-core Geo replacement with
+verified reload/restart, rollback and crash recovery. Proxy-aware Geo download
+routing, remaining full settings and native TUN still belong to P1; finish this
+priority before starting P2.
 
 ## Complete target architecture
 
@@ -165,7 +164,11 @@ mihomo-server/
 │   │   ├── dat_validation.rs / bounded protobuf / CIDR-domain-attribute checks / CN diagnostics [Implemented; Linux verified]
 │   │   ├── Read-only DAT snapshots / aggregate reports / core compatibility warning [Implemented; Linux verified]
 │   │   ├── Stopped-core pinned DAT installation / four-mode core load proof / digest guards / orphan recovery [Implemented; Linux verified]
-│   │   └── Controlled online and running-core Geo updates / remaining full settings [Pending; next P1 task]
+│   │   ├── geo_online.rs / committed-source inspection / 128 MiB direct download / optional content pin [Implemented; Linux verified]
+│   │   ├── Stopped-core online MMDB/DAT update / staged validation / four-mode DAT load proof / digest guards [Implemented; Linux verified]
+│   │   ├── Running-core Geo replacement / verified reload or restart / rollback and crash recovery [Pending; next P1 task]
+│   │   ├── Online Geo managed/system proxy route choice and TLS retry parity [Pending; P1]
+│   │   └── Remaining full settings and native TUN [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
 │   ├── Profile snapshots/watches and active UID     [Implemented]
@@ -283,7 +286,8 @@ mihomo-server/
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
 │   ├── Geo/Provider inventory / metadata states / refresh and retry [Implemented; Linux verified]
 │   ├── Explicit MMDB/DAT checks / aggregate diagnostics / compatibility warnings / stale-result clearing [Implemented; Linux verified]
-│   ├── Pinned MMDB/DAT update inspection / stopped-state install / DAT core load proof / MMDB metadata-only choice [Implemented; Linux verified]
+│   ├── Pinned MMDB/DAT bundle inspection / stopped-state install / DAT core load proof / MMDB metadata-only choice [Implemented; Linux verified]
+│   ├── Configured-source Geo inspection / stopped-core online update / fresh-hash retry [Implemented; Linux verified]
 │   ├── Geo field editor incl. geosite matcher / per-URL inheritance / saved-configured-actual readback / retry [Implemented; Linux verified]
 │   ├── Remaining full settings/resource lifecycle UI [Pending; P1]
 │   └── Backup UI [Deferred; outside active scope]
@@ -4240,6 +4244,60 @@ validation and stopped/running-core recovery. Remaining full settings/native TUN
 are P1; P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd installation
 remain incomplete. Deferred work stays deferred. Git submission is left to the
 external host script.
+
+## Increment: stopped-core online Geo updates from committed sources (P1)
+
+Completed the next P1 slice of controlled Geo lifecycle. Authenticated
+`geo_online_info` reads an explicitly committed `geox-url` leaf for one allowlisted
+Geo filename, returning only its source SHA-256 fingerprint and a confined current
+file SHA-256 (or null). No URL, query string, credentials, path override or arbitrary
+source is returned or accepted by the update command. `update_geo_online` requires
+a stopped/reaped core plus both inspected fingerprints; an optional download SHA-256
+pins the body. A source/config or current-file change requires reinspection.
+
+`geo_online.rs` fetches directly without ambient HTTP proxy, redirects or URL
+credentials, with 10-second connection and 20-second request limits. It streams at
+most 128 MiB to a private scratch file with SHA-256; HTTP errors, empty bodies,
+oversize content and mismatched optional pins fail before staging. The actor then
+reuses no-follow bounded `.geo-seed` copy, MMDB strict/explicit metadata-only
+validation or DAT known-schema/CN/nonempty checks, four Mihomo loader/matcher
+probes, final current-file digest guard and atomic publication. The response uses
+the existing receipt, including `core_load_verified: true` for DAT. Downloads and
+probes are cancellable on service shutdown, and a failed update leaves the old
+resource, process state and runtime revision unchanged. The fixed staging namespace
+retains startup orphan recovery. The update never starts or reloads the core.
+
+The Web resource panel provides separate online source inspection and explicit
+stopped-core update controls for the five supported filenames, including optional
+body digest input. A failed/ambiguous update discards its inspected snapshot and
+requires a fresh read. The MMDB metadata-only choice remains separate from DAT
+load verification. `docs/RUNNING.md` records the API and operational limits;
+`docs/UPSTREAM.md` records provenance.
+
+Verification:
+
+- Workspace compilation and Web production build succeed. Workspace tests report
+  **374 passed, 85 opt-in ignored**. Unit tests cover committed-source
+  allowlists/privacy, direct bounded fetch, redirect/size/pin rejection and
+  downloaded MMDB publication with stale-current protection. The authenticated
+  management route rejects unauthorized or path/URL-extended online commands.
+- An explicitly enabled real-core workflow serves local GeoIP/GeoSite DAT bytes,
+  rejects stale source and body hashes, malformed data and invalid Go regexp while
+  preserving the old file, then installs valid files, starts Mihomo and rejects an
+  online update while it runs. Existing pinned-bundle DAT checks remain covered.
+- Full Chromium regression reports **30 passed, 4 optional bundle upgrade/repair
+  workflows skipped**. It covers source inspection, stopped-phase gating, local
+  digest validation, failed update/reinspection and receipt display. The existing
+  actual-node HTTPS 204 check uses private `data` copies and leaves originals
+  unchanged.
+
+The complete architecture tree above is synchronized and the Linux MVP remains
+runnable. Next: P1 running-core Geo replacement with verified activation, rollback
+and interruption recovery. Proxy-aware Geo download routing, remaining full
+settings/native TUN remain P1; P2 rules/
+provider/delay, P3 i18n/signals and P4 actual systemd installation remain
+incomplete. Deferred work stays deferred. Git submission is left to the external
+host script.
 
 ## MVP completion boundary
 

@@ -244,7 +244,8 @@ test("resource inventory reads metadata, refreshes changes and retries without e
     await panel.getByRole("button", { name: "刷新资源清单" }).click();
     await expect(country).toContainText("空文件");
     await expect(country.getByRole("status")).toHaveCount(0);
-    await expect(country.getByRole("button")).toHaveCount(0);
+    await expect(country.getByRole("button", { name: "校验 Country.mmdb", exact: true })).toHaveCount(0);
+    await expect(country.getByRole("button", { name: "读取 Country.mmdb 在线来源", exact: true })).toBeVisible();
     await expect(panel.getByRole("alert")).toHaveCount(0);
     await expect(panel).toContainText("尚未验证内容格式");
     await page.unroute("**/api/commands");
@@ -384,6 +385,52 @@ test("pinned DAT install requires a fresh stopped-core inspection and shows core
   await expect(panel.getByRole("status")).toContainText("DAT 结构及隔离内核规则加载通过");
   await expect(panel.getByRole("status")).toContainText(seedHash);
   expect(reads).toBe(3); expect(installs).toBe(2);
+  await page.unroute("**/api/commands"); await page.getByRole("button", { name: "退出登录" }).click();
+});
+
+test("online Geo update uses inspected source and file digests with stopped-core retry", async ({ page }) => {
+  let phase: (value: string) => void = () => { throw new Error("socket not ready"); };
+  let reads = 0, updates = 0;
+  const sourceHash = "a".repeat(64), oldHash = "b".repeat(64), newHash = "c".repeat(64);
+  await page.routeWebSocket("**/api/events", socket => {
+    phase = value => socket.send(JSON.stringify({ type: "status", data: { phase: value, generation: 0, selection_pending: [] } }));
+    socket.onMessage(message => {
+      if (JSON.parse(String(message)).type === "authenticate") {
+        socket.send(JSON.stringify({ type: "ready" })); phase("running");
+      }
+    });
+  });
+  await page.route("**/api/commands", async route => {
+    const body = route.request().postDataJSON();
+    if (body.command === "resources") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data_dir: directory, bundle_dir: null, config_revision: "one", geo: [{ section: "geo", name: "geosite.dat", state: "available", path: "geosite.dat", provider_type: null, bytes: 42, conflict: false }], providers: [] }) });
+    } else if (body.command === "geo_online_info") {
+      reads++; expect(body.name).toBe("geosite.dat");
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ name: body.name, current_sha256: oldHash, source_sha256: sourceHash }) });
+    } else if (body.command === "update_geo_online") {
+      updates++; expect(body).toEqual({ command: "update_geo_online", name: "geosite.dat", expected_current_sha256: oldHash, expected_source_sha256: sourceHash, expected_download_sha256: newHash, accept_metadata_only: false });
+      await route.fulfill({ status: updates === 1 ? 422 : 200, contentType: "application/json", body: JSON.stringify(updates === 1 ? { error: { message: "Geo download SHA-256 differs from expected pin" } } : { changed: true, durable: true, cleanup_pending: false, core_load_verified: true, validation: { verified: true, sha256: newHash, format: "dat" } }) });
+    } else await route.continue();
+  });
+  await page.goto(`${base}/settings`); await page.getByLabel("管理令牌").fill(token); await page.getByRole("button", { name: "连接服务" }).click();
+  const panel = page.getByRole("region", { name: "运行资源清单", exact: true });
+  const read = panel.getByRole("button", { name: "读取 geosite.dat 在线来源", exact: true });
+  await read.click();
+  const update = panel.getByRole("button", { name: "更新 geosite.dat 在线资源", exact: true });
+  await expect(update).toBeDisabled();
+  await expect(panel).toContainText(sourceHash);
+  phase("stopped"); await expect(update).toHaveCount(0);
+  await read.click();
+  await panel.getByRole("textbox", { name: "可选下载 SHA-256" }).fill("bad");
+  await update.click(); await expect(panel.getByRole("alert")).toContainText("64 位十六进制");
+  expect(updates).toBe(0);
+  await panel.getByRole("textbox", { name: "可选下载 SHA-256" }).fill(newHash);
+  await update.click(); await expect(panel.getByRole("alert")).toContainText("differs from expected pin");
+  await expect(update).toHaveCount(0);
+  await read.click(); await panel.getByRole("textbox", { name: "可选下载 SHA-256" }).fill(newHash);
+  await update.click(); await expect(panel.getByRole("status")).toContainText("已安装在线资源");
+  await expect(panel.getByRole("status")).toContainText(newHash);
+  expect(reads).toBe(3); expect(updates).toBe(2);
   await page.unroute("**/api/commands"); await page.getByRole("button", { name: "退出登录" }).click();
 });
 

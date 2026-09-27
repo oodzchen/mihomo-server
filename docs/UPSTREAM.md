@@ -162,6 +162,24 @@ file/authentication/malformed-input checks and Web diagnostic/retry tests are ne
 service tests. Core refresh APIs/Web rule views remain P2 work; controlled DAT
 installation and Geo updates remain P1 follow-up.
 
+## Explicit stopped-core Geo online updates
+
+This increment adds original service code in `service/src/geo_online.rs`; it copies
+no upstream source and adds no dependency. It builds on the retained Geo URL names
+and typed `GeoUrls` authority from the pinned Clash Verge Rev configuration flow,
+and reuses the service's existing TLS builder, actor serialization, Geo seed staging,
+MMDB/DAT validation and Mihomo `-t` probe. Unlike upstream automatic Geo updates,
+the authenticated service exposes a two-step inspected source/current fingerprint
+and explicit stopped-core download/install. The URL stays in the committed private
+configuration; responses omit it. Redirects and ambient proxy routing are disabled
+for this first direct-download slice. A bounded streamed candidate becomes a
+private, dynamically pinned seed before the unchanged validation/publication path.
+
+The local HTTP fixture verifies failure preservation and valid DAT installation
+against a real Mihomo, and unit fixtures cover MMDB publication. Running-core
+replacement, reload/restart rollback and crash recovery across that live switch
+remain the next P1 task.
+
 ## Stopped-core DAT bundle installation and isolated core load check
 
 This increment reuses the pinned Clash Verge Rev resource identities and the

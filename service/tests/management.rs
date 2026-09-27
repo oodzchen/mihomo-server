@@ -270,6 +270,19 @@ async fn resource_inventory_authenticates_tracks_committed_config_and_redacts_so
             let (status, _) = response(&app, request(&token, "/api/commands", Some(command))?).await?;
             assert!(!status.is_success());
         }
+        for command in [
+            json!({"command":"geo_online_info", "name":"geosite.dat"}),
+            json!({"command":"update_geo_online", "name":"geosite.dat", "expected_current_sha256":null, "expected_source_sha256":"0".repeat(64)}),
+        ] {
+            assert_eq!(response(&app, request("wrong", "/api/commands", Some(command.clone()))?).await?.0, StatusCode::UNAUTHORIZED);
+            assert!(!response(&app, request(&token, "/api/commands", Some(command))?).await?.0.is_success());
+        }
+        for command in [
+            json!({"command":"geo_online_info", "name":"geosite.dat", "url":"https://override.invalid"}),
+            json!({"command":"update_geo_online", "name":"geosite.dat", "expected_current_sha256":null, "expected_source_sha256":"0".repeat(64), "path":"/etc/passwd"}),
+        ] {
+            assert!(!response(&app, request(&token, "/api/commands", Some(command))?).await?.0.is_success());
+        }
 
         let (status, _) = response(&app, request("wrong", "/api/commands", Some(payload.clone()))?).await?;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
