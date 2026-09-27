@@ -8,7 +8,8 @@
 # 1. 实时动态 Loading 动画 (Spinner + 当前操作说明 + 耗时计时器)
 # 2. 长命令输出与大文本折叠显示 (避免终端平铺刷屏，超长输出仅保留首尾若干行)
 # 3. 原始数据 100% 实时原样落盘至日志文件 (保证看门狗与限额检测正常工作)
-# 4. 美化 Codex 答复、指令执行和状态展示
+# 4. 健壮的状态机：准确识别多行复合命令、精准匹配 succeeded/exited 状态行、识别 apply patch
+# 5. 美化 Codex 答复、指令执行和代码补丁展示
 # ==============================================================================
 
 import os
@@ -32,6 +33,10 @@ CLR_CYAN    = "\033[1;36m"
 CLR_GRAY    = "\033[90m"
 
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+# 正则匹配真实命令状态行，例如: " succeeded in 2072ms:" 或 " exited 101 in 4572ms:"
+STATUS_RE = re.compile(r"^\s*(succeeded|exited\s+\d+)\s+in\s+.*:", re.IGNORECASE)
+
 
 class TerminalRenderer:
     def __init__(self, raw_log_path=None, is_tty=True):
@@ -104,19 +109,50 @@ class TerminalRenderer:
 
 
 def clean_command_str(raw_cmd):
-    """去除 wrapper 路径，提取真实执行命令"""
+    """去除 wrapper 路径，提取清晰可读的真实命令摘要"""
     raw_cmd = raw_cmd.strip()
+    if not raw_cmd:
+        return ""
+
     # 匹配 /usr/bin/zsh -lc '...' in /dir
-    m = re.search(r"/(?:usr/)?bin/(?:ba|z)?sh\s+-lc\s+([\"'].*[\"'])(?:\s+in\s+.*)?$", raw_cmd)
+    m = re.search(r"/(?:usr/)?bin/(?:ba|z)?sh\s+-lc\s+(.*)", raw_cmd, re.DOTALL)
     if m:
         inner = m.group(1).strip()
+        inner = re.sub(r"\s+in\s+/[^\n]*$", "", inner).strip()
         if (inner.startswith("'") and inner.endswith("'")) or (inner.startswith('"') and inner.endswith('"')):
-            inner = inner[1:-1]
-        return inner
+            inner = inner[1:-1].strip()
+        elif inner.startswith("'") or inner.startswith('"'):
+            inner = inner[1:].strip()
+            if inner.endswith("'") or inner.endswith('"'):
+                inner = inner[:-1].strip()
+
+        lines = [l.strip() for l in inner.splitlines() if l.strip()]
+        if not lines:
+            return inner
+        first = lines[0]
+        if len(lines) > 1:
+            last = lines[-1]
+            if any(k in last for k in ["cargo", "npm", "python", "test"]):
+                return f"{first} ➜ {last}"
+            return f"{first} (...共 {len(lines)} 行)"
+        return first
+
     # 匹配 ... in /dir
-    m2 = re.search(r"^(.*?)\s+in\s+/[^/\s].*$", raw_cmd)
+    m2 = re.search(r"^(.*?)\s+in\s+/[^/\s].*$", raw_cmd, re.DOTALL)
     if m2:
-        return m2.group(1).strip()
+        inner = m2.group(1).strip()
+        lines = [l.strip() for l in inner.splitlines() if l.strip()]
+        if lines:
+            if len(lines) > 1:
+                return f"{lines[0]} (...共 {len(lines)} 行)"
+            return lines[0]
+        return inner
+
+    lines = [l.strip() for l in raw_cmd.splitlines() if l.strip()]
+    if lines:
+        if len(lines) > 1:
+            return f"{lines[0]} (...共 {len(lines)} 行)"
+        return lines[0]
     return raw_cmd
 
 
@@ -124,11 +160,11 @@ def fold_output_lines(lines, max_display=6):
     """对超长输出进行折叠"""
     if len(lines) <= max_display:
         return [f"    {CLR_DIM}{line}{CLR_RESET}" for line in lines]
-    
+
     first_lines = lines[:2]
     last_lines = lines[-2:]
     folded_count = len(lines) - 4
-    
+
     result = [f"    {CLR_DIM}{l}{CLR_RESET}" for l in first_lines]
     result.append(f"    {CLR_YELLOW}{CLR_DIM}┄┄┄ [已折叠 {folded_count} 行长输出，完整内容详见日志] ┄┄┄{CLR_RESET}")
     result.extend([f"    {CLR_DIM}{l}{CLR_RESET}" for l in last_lines])
@@ -143,6 +179,7 @@ def main():
 
     # 处理中断信号：标记中断，但不立即强杀，以便读取并冲刷 Codex 的 turn interrupted 退出输出
     is_interrupted = False
+
     def sig_handler(sig, frame):
         nonlocal is_interrupted
         is_interrupted = True
@@ -157,9 +194,10 @@ def main():
     header_lines = []
     user_prompt_lines = []
     codex_msg_lines = []
-    current_cmd = ""
+    current_cmd_lines = []
     cmd_status = ""
     cmd_output_lines = []
+    patch_lines = []
 
     captured_session_id = None
     captured_model_name = "Codex"
@@ -196,20 +234,49 @@ def main():
                 renderer.print_block(block)
             codex_msg_lines = []
 
+    def flush_patch_block():
+        nonlocal patch_lines
+        if patch_lines:
+            files = []
+            for l in patch_lines:
+                l_str = l.strip()
+                if l_str.startswith("+++ b/"):
+                    files.append(l_str[6:].strip())
+                elif l_str.startswith("/") and not l_str.startswith("//") and not l_str.startswith("---") and not l_str.startswith("+++") and " " not in l_str:
+                    parts = l_str.split("/")
+                    if any(k in parts for k in ["service", "crates", "web"]):
+                        idx = min([parts.index(k) for k in ["service", "crates", "web"] if k in parts])
+                        files.append("/".join(parts[idx:]))
+                    elif "." in os.path.basename(l_str):
+                        files.append(os.path.basename(l_str))
+            seen = set()
+            uniq_files = [f for f in files if not (f in seen or seen.add(f))]
+            file_summary = ", ".join(uniq_files) if uniq_files else "代码文件"
+            line_count = len(patch_lines)
+            block = f"\n{CLR_MAGENTA}🔧 [代码补丁]{CLR_RESET} {CLR_BOLD}更新 {file_summary}{CLR_RESET} {CLR_DIM}(补丁差异共 {line_count} 行已折叠){CLR_RESET}\n"
+            renderer.print_block(block)
+            patch_lines = []
+
     def flush_exec_block():
-        nonlocal current_cmd, cmd_status, cmd_output_lines
-        if current_cmd:
-            cmd_display = clean_command_str(current_cmd)
+        nonlocal current_cmd_lines, cmd_status, cmd_output_lines
+        if current_cmd_lines:
+            raw_full = "\n".join(current_cmd_lines)
+            cmd_display = clean_command_str(raw_full)
             duration_match = re.search(r"in\s+(\d+(?:\.\d+)?(?:ms|s)):", cmd_status)
             dur_str = f" ({duration_match.group(1)})" if duration_match else ""
 
-            is_success = "succeeded" in cmd_status.lower()
+            is_success = bool(re.search(r"\bsucceeded\b|\bexited\s+0\b", cmd_status, re.IGNORECASE))
+            is_failed = bool(re.search(r"\bexited\s+([1-9]\d*)\b", cmd_status, re.IGNORECASE))
+
             if is_success:
                 icon = f"{CLR_GREEN}✔ [命令成功]{CLR_RESET}"
                 header = f"{icon} {CLR_BOLD}{cmd_display}{CLR_RESET}{CLR_DIM}{dur_str}{CLR_RESET}"
-            else:
+            elif is_failed:
                 icon = f"{CLR_RED}✖ [命令异常]{CLR_RESET}"
                 header = f"{icon} {CLR_BOLD}{cmd_display}{CLR_RESET}{CLR_RED}{dur_str}{CLR_RESET}"
+            else:
+                icon = f"{CLR_BLUE}• [执行操作]{CLR_RESET}"
+                header = f"{icon} {CLR_BOLD}{cmd_display}{CLR_RESET}{CLR_DIM}{dur_str}{CLR_RESET}"
 
             out_text = "\n".join(fold_output_lines(cmd_output_lines, max_display=6))
             if out_text:
@@ -218,9 +285,15 @@ def main():
                 block = f"{header}\n"
             renderer.print_block(block)
 
-            current_cmd = ""
+            current_cmd_lines = []
             cmd_status = ""
             cmd_output_lines = []
+
+    def flush_all_blocks():
+        flush_user_prompt()
+        flush_codex_msg()
+        flush_exec_block()
+        flush_patch_block()
 
     try:
         renderer.set_status("正在与 Codex 建立连接...")
@@ -241,9 +314,7 @@ def main():
             if "turn interrupted" in stripped.lower():
                 turn_interrupted = True
                 is_interrupted = True
-                flush_user_prompt()
-                flush_codex_msg()
-                flush_exec_block()
+                flush_all_blocks()
                 renderer.print_block(
                     f"\n{CLR_YELLOW}⚡ [Codex 原生退出]{CLR_RESET} {CLR_BOLD}turn interrupted (会话已被人工中断){CLR_RESET}\n"
                 )
@@ -266,8 +337,12 @@ def main():
                     renderer.set_status("Codex 正在生成分析与答复...")
                     continue
                 elif stripped == "exec":
-                    state = "EXEC_CMD"
+                    state = "EXEC"
                     renderer.set_status("准备执行系统命令...")
+                    continue
+                elif stripped == "apply patch" or stripped.startswith("apply patch"):
+                    state = "PATCH"
+                    renderer.set_status("准备应用代码补丁...")
                     continue
                 else:
                     if stripped:
@@ -302,25 +377,25 @@ def main():
 
             # 检测段落切换标签
             if stripped == "user":
-                flush_user_prompt()
-                flush_codex_msg()
-                flush_exec_block()
+                flush_all_blocks()
                 state = "USER"
                 user_prompt_lines = []
                 renderer.set_status("正在接收处理指令...")
                 continue
             elif stripped == "codex":
-                flush_user_prompt()
-                flush_exec_block()
+                flush_all_blocks()
                 state = "CODEX"
                 renderer.set_status("Codex 正在思考与生成...")
                 continue
             elif stripped == "exec":
-                flush_user_prompt()
-                flush_codex_msg()
-                flush_exec_block()
-                state = "EXEC_CMD"
+                flush_all_blocks()
+                state = "EXEC"
                 renderer.set_status("正在准备执行终端操作...")
+                continue
+            elif stripped == "apply patch" or stripped.startswith("apply patch"):
+                flush_all_blocks()
+                state = "PATCH"
+                renderer.set_status("正在应用代码补丁 (Patch)...")
                 continue
 
             # 用户输入折叠
@@ -335,19 +410,25 @@ def main():
                 renderer.set_status("Codex 正在组织回复...")
                 continue
 
-            # 命令执行状态
-            if state == "EXEC_CMD":
-                current_cmd = stripped
-                short_cmd = clean_command_str(current_cmd)
-                if len(short_cmd) > 40:
-                    short_cmd = short_cmd[:37] + "..."
-                renderer.set_status(f"正在执行: {short_cmd}")
-                state = "EXEC_STATUS"
+            # 补丁处理
+            if state == "PATCH":
+                patch_lines.append(stripped)
                 continue
 
-            if state == "EXEC_STATUS":
-                cmd_status = stripped
-                state = "EXEC_OUTPUT"
+            # 命令执行处理
+            if state == "EXEC":
+                # 检查是否匹配到真实状态行
+                if STATUS_RE.match(stripped):
+                    cmd_status = stripped.strip()
+                    state = "EXEC_OUTPUT"
+                else:
+                    current_cmd_lines.append(stripped)
+                    # 动态更新当前操作提示
+                    if current_cmd_lines:
+                        short_cmd = clean_command_str(current_cmd_lines[0])
+                        if len(short_cmd) > 40:
+                            short_cmd = short_cmd[:37] + "..."
+                        renderer.set_status(f"正在执行: {short_cmd}")
                 continue
 
             if state == "EXEC_OUTPUT":
@@ -361,9 +442,7 @@ def main():
                 continue
 
         # 循环结束，冲刷未输出内容
-        flush_user_prompt()
-        flush_codex_msg()
-        flush_exec_block()
+        flush_all_blocks()
 
         total_sec = int(time.time() - renderer.start_time)
         if turn_interrupted or is_interrupted:
