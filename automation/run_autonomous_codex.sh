@@ -43,6 +43,9 @@ COMPLETION_FLAG="${COMPLETION_FLAG:-===ALL_TASKS_COMPLETED_SUCCESSFULLY===}" # �
 LOG_DIR="${SCRIPT_DIR}/logs"
 mkdir -p "$LOG_DIR"
 SESSION_FILE="${SCRIPT_DIR}/.session_id"
+MAX_RETAINED_LOGS="${MAX_RETAINED_LOGS:-5}"        # 最多保留的历史轮次全量日志数 (默认最近 5 轮，避免膨胀)
+MAX_LOG_DIR_MB="${MAX_LOG_DIR_MB:-15}"             # logs 目录空间占用上限 (MB)
+AUTO_COMPRESS_LOGS="${AUTO_COMPRESS_LOGS:-1}"      # 是否在轮次完成后自动 gzip 压缩全量日志 (0=关闭, 1=开启)
 
 # 文档与上游代码路径
 DOC_HEADLESS="${PROJECT_ROOT}/headless.md"
@@ -596,6 +599,60 @@ wait_with_countdown() {
 }
 
 # ------------------------------------------------------------------------------
+# 日志生命周期治理 (解决日志过度膨胀，自动压缩并滚动淘汰，保留关键摘要)
+# ------------------------------------------------------------------------------
+cleanup_old_logs() {
+    local log_dir="$1"
+    local max_count="$2"
+    local max_mb="$3"
+
+    [ ! -d "$log_dir" ] && return 0
+
+    # 1. 查找所有全量日志文件 (*.log, *.log.gz)，按时间由旧到新排序
+    # 注意：永久保留所有的 *_last_msg.txt 摘要文件，这些文件仅几 KB 且包含核心交付记录
+    local all_logs=()
+    while IFS= read -r -d $'\0' file; do
+        all_logs+=("$file")
+    done < <(find "$log_dir" -maxdepth 1 -type f \( -name "*.log" -o -name "*.log.gz" \) -printf '%T@ %p\0' | sort -z -n | cut -z -d' ' -f2-)
+
+    local total_count="${#all_logs[@]}"
+    if [ "$total_count" -gt "$max_count" ]; then
+        local excess=$(( total_count - max_count ))
+        for (( i=0; i<excess; i++ )); do
+            local victim="${all_logs[$i]}"
+            rm -f "$victim"
+        done
+    fi
+
+    # 2. 如果总目录大小依然超出配额，继续从旧到新清理全量日志直到满足配额
+    local current_kb
+    current_kb=$(du -s "$log_dir" 2>/dev/null | awk '{print $1}')
+    local limit_kb=$(( max_mb * 1024 ))
+    if [ -n "$current_kb" ] && [ "$current_kb" -gt "$limit_kb" ]; then
+        while IFS= read -r -d $'\0' file; do
+            rm -f "$file"
+            current_kb=$(du -s "$log_dir" 2>/dev/null | awk '{print $1}')
+            [ "$current_kb" -le "$limit_kb" ] && break
+        done < <(find "$log_dir" -maxdepth 1 -type f \( -name "*.log" -o -name "*.log.gz" \) -printf '%T@ %p\0' | sort -z -n | cut -z -d' ' -f2-)
+    fi
+}
+
+manage_turn_log_completion() {
+    local turn_log="$1"
+    if [ -z "$turn_log" ] || [ ! -f "$turn_log" ]; then
+        return 0
+    fi
+
+    # 1. 自动执行 gzip 压缩（通常可减少 85%~95% 存储占用）
+    if [ "$AUTO_COMPRESS_LOGS" -eq 1 ] && command -v gzip >/dev/null 2>&1; then
+        gzip -9 -f "$turn_log" 2>/dev/null || true
+    fi
+
+    # 2. 执行滚动清理，维持最近 MAX_RETAINED_LOGS 份完整日志，且总大小不超过 MAX_LOG_DIR_MB
+    cleanup_old_logs "$LOG_DIR" "$MAX_RETAINED_LOGS" "$MAX_LOG_DIR_MB"
+}
+
+# ------------------------------------------------------------------------------
 # 宿主自动化 Git 提交函数 (解决沙箱 .git 只读限制，严格满足 AGENTS.md 规范)
 # ------------------------------------------------------------------------------
 auto_commit_subtask_changes() {
@@ -930,6 +987,16 @@ main() {
                 "$CODEX_BIN" app-server daemon restart >/dev/null 2>&1 || true
                 shift
                 ;;
+            --clean-logs)
+                log_info "正在清理过期的历史全量日志 (*.log, *.log.gz)，保留最近 1 轮日志与全部交付摘要文件..."
+                cleanup_old_logs "$LOG_DIR" 1 "$MAX_LOG_DIR_MB"
+                log_success "日志清理完成！当前 logs 目录占用: $(du -sh "$LOG_DIR" 2>/dev/null | awk '{print $1}')"
+                exit 0
+                ;;
+            --max-logs)
+                MAX_RETAINED_LOGS="$2"
+                shift 2
+                ;;
             --flag)
                 COMPLETION_FLAG="$2"
                 shift 2
@@ -941,6 +1008,8 @@ main() {
                 echo "  --session <ID>         指定要恢复或分叉的 Codex 会话 UUID"
                 echo "  --fork [ID]            从指定或最近的会话分叉出新会话（避免与已打开的交互终端冲突）"
                 echo "  --restart-daemon       重启本地 Codex daemon 并清理所有残留会话锁"
+                echo "  --clean-logs           清理过期的历史全量日志，仅保留最近日志与交付摘要文件"
+                echo "  --max-logs <数量>      设置最多保留的历史全量日志数 (默认: 5)"
                 echo "  --upstream <目录>      指定上游代码库路径 (默认: ../clash-verge-rev)"
                 echo "  --timeout <秒>         设置单次请求无响应超时时限 (默认: 600 秒)"
                 echo "  --cooldown <秒>        设置遭遇 5 小时 Limit 时的等待时限 (默认: 18000 秒)"
@@ -959,7 +1028,7 @@ main() {
     log_info "工作区目录: $PROJECT_ROOT"
     log_info "上游源码库: $UPSTREAM_DIR $([ -d "$UPSTREAM_DIR" ] && echo -e "${CLR_GREEN}[有效目录，已开放沙箱跨库读取]${CLR_RESET}" || echo -e "${CLR_YELLOW}[未找到该目录]${CLR_RESET}")"
     log_info "Codex 路径: $CODEX_BIN"
-    log_info "运行配置: 沙箱=$SANDBOX_MODE | 自动审批=$APPROVAL_POLICY | 无响应超时=${INACTIVITY_TIMEOUT}s | 5小时冷却=${RATE_LIMIT_COOLDOWN}s"
+    log_info "运行配置: 沙箱=$SANDBOX_MODE | 自动审批=$APPROVAL_POLICY | 无响应超时=${INACTIVITY_TIMEOUT}s | 5小时冷却=${RATE_LIMIT_COOLDOWN}s | 日志保留=${MAX_RETAINED_LOGS}轮"
     log_info "计划完成标志: $COMPLETION_FLAG"
     log_info "提示: 任何时候均可按 Ctrl+C 安全中断退出。"
 
@@ -1140,9 +1209,15 @@ main() {
             log_success "成功检测到全部任务完成标志: ${CLR_BOLD}${COMPLETION_FLAG}${CLR_RESET}"
             log_success "所有在 ./headless.md 与 ./docs/ARCHITECTURE.md 中规划的架构目标与功能已全部交付并验证完成！"
             log_info "总执行轮次: $turn_count"
-            log_info "最终日志文件: $LAST_LOG_FILE"
+            manage_turn_log_completion "$LAST_LOG_FILE"
+            log_info "最终日志文件: ${LAST_LOG_FILE}.gz"
             exit 0
         fi
+
+        # ----------------------------------------------------------------------
+        # 分支 G: 日志生命周期治理 (自动 gzip 压缩全量日志，滚动淘汰旧日志以释放磁盘)
+        # ----------------------------------------------------------------------
+        manage_turn_log_completion "$LAST_LOG_FILE"
 
         # 正常轮次推进
         consecutive_timeouts=0
