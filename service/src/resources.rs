@@ -30,6 +30,10 @@ pub struct Resources {
     hash: String,
 }
 impl Resources {
+    pub fn directory(&self) -> &Path {
+        &self.root
+    }
+
     pub fn open(directory: &Path) -> Result<Self> {
         ensure!(cfg!(target_os = "linux"), "bundled resources currently require Linux");
         let root = directory.canonicalize().context("open resource directory")?;

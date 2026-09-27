@@ -11,6 +11,7 @@ import {
 } from "./network-settings";
 import { ProfileDnsPanel } from "./profile-dns";
 import { useProxyAccess } from "./proxy-access";
+import { ResourcesPanel } from "./resources";
 
 type Settings = { schema_version: number; runtime: Runtime };
 const fields = [
@@ -481,6 +482,7 @@ export function SettingsPage({
         </p>
       </section>
       <div className="settings-side">
+        <ResourcesPanel token={token} status={status} connection={connection} logout={logout} />
         <ProfileDnsPanel
           key={`${token}:${status.active_profile ?? ""}`}
           token={token}

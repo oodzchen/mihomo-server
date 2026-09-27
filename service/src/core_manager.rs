@@ -392,6 +392,7 @@ enum CommandMessage {
         reply: oneshot::Sender<Result<DnsOverrideOutcome>>,
     },
     ReadSettings(oneshot::Sender<Result<ServiceSettings>>),
+    ReadResources(oneshot::Sender<Result<crate::resource_inventory::Inventory>>),
     SetSettings {
         runtime: RuntimeSettings,
         reply: oneshot::Sender<Result<ServiceSettings>>,
@@ -1259,6 +1260,16 @@ impl CoreManager {
         result.await.context("settings read cancelled during shutdown")?
     }
 
+    pub async fn resource_inventory(&self) -> Result<crate::resource_inventory::Inventory> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::ReadResources(reply))
+            .await
+            .context("core manager stopped")?;
+        result.await.context("resource read cancelled during shutdown")?
+    }
+
     pub async fn profile_dns(&self, uid: String) -> Result<DnsOverrideState> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let (reply, result) = oneshot::channel();
@@ -1785,6 +1796,7 @@ impl Actor {
                             CommandMessage::ReadEnhancement { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::DeleteProfile { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadConfig(reply) => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
+                            CommandMessage::ReadResources(reply) => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadSettings(reply) | CommandMessage::SetSettings { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::Control(request) => { let _ = request.reply.send(Err(anyhow::anyhow!(message))); }
                         }
@@ -1930,6 +1942,21 @@ impl Actor {
                         }
                         CommandMessage::ReadConfig(reply) => {
                             let _ = reply.send(self.store.read_current());
+                        }
+                        CommandMessage::ReadResources(reply) => {
+                            if !reply.is_closed() {
+                                let revision = self.store.state().current.clone().map(|revision| revision.file);
+                                let config = if revision.is_some() { self.store.read_current() } else { Ok(Mapping::new()) };
+                                let result = match config {
+                                    Ok(config) => {
+                                        let data = self.options.data_dir.clone();
+                                        let bundle = self.options.resources.as_ref().map(|resources| resources.directory().to_path_buf());
+                                        tokio::task::spawn_blocking(move || crate::resource_inventory::inspect(data, bundle, revision, config)).await.context("resource inventory worker failed").and_then(|result| result)
+                                    },
+                                    Err(error) => Err(error),
+                                };
+                                let _ = reply.send(result);
+                            }
                         }
                         CommandMessage::ImportProfileYaml { yaml, name, reply } => {
                             let result = self.profile_store.import_local_with_defaults(&name, &yaml);

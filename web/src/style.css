@@ -807,3 +807,8 @@ footer {
 .proxy-browser-settings p { margin: 8px 0; }
 .proxy-browser-settings code { overflow-wrap: anywhere; }
 @media (max-width: 640px) { .proxy-details { grid-template-columns: 1fr; } .proxy-ports { min-width: 490px; } }
+/* Resource names and managed paths can be longer than the settings sidebar. */
+.resource-list { padding-left: 1.2rem; }
+.resource-list li { margin-bottom: 1rem; overflow-wrap: anywhere; }
+.resource-list p { margin: 0.3rem 0; }
+.settings-side code { overflow-wrap: anywhere; }

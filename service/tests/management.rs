@@ -25,6 +25,57 @@ use tower::ServiceExt as _;
 struct Directory(PathBuf);
 
 #[tokio::test]
+async fn resource_inventory_authenticates_tracks_committed_config_and_redacts_sources() -> Result<()> {
+    let directory = Directory::new()?;
+    let manager = directory.manager()?;
+    let app = router(HttpState::new(Management::new(
+        manager.clone(),
+        directory.authentication()?,
+    )));
+    let token = directory.token()?;
+    let result = async {
+        let payload = json!({"command":"resources"});
+        let (status, _) = response(&app, request("wrong", "/api/commands", Some(payload.clone()))?).await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, empty) = response(&app, request(&token, "/api/commands", Some(payload.clone()))?).await?;
+        assert!(status.is_success());
+        assert!(empty["config_revision"].is_null());
+        assert_eq!(empty["geo"].as_array().unwrap().len(), 6);
+        assert_eq!(empty["providers"], json!([]));
+        std::fs::create_dir(directory.0.join("providers"))?;
+        std::fs::write(directory.0.join("providers/one.yaml"), "payload: []")?;
+        manager.apply_config(serde_yaml_ng::from_str("mode: direct\nrule-providers:\n  local: {type: file, path: ./providers/one.yaml, behavior: classical}\nproxy-providers:\n  remote: {type: http, path: providers/one.yaml, url: 'https://secret.invalid/private-token', header: {Authorization: [private-header]}}\n")?).await?;
+        let before = manager.status();
+        let (status, value) = response(&app, request(&token, "/api/commands", Some(payload.clone()))?).await?;
+        assert!(status.is_success(), "{value}");
+        assert_eq!(value["config_revision"], json!(before.config_revision));
+        assert_eq!(value["data_dir"], directory.0.to_string_lossy().as_ref());
+        assert!(value["bundle_dir"].is_null());
+        for provider in value["providers"].as_array().unwrap() {
+            assert_eq!(provider["path"], "providers/one.yaml");
+            assert_eq!(provider["state"], "available");
+            assert_eq!(provider["conflict"], true);
+        }
+        let encoded = value.to_string();
+        for secret in ["secret.invalid", "private-token", "private-header", "payload"] { assert!(!encoded.contains(secret)); }
+        assert_eq!(manager.status().config_revision, before.config_revision);
+        assert_eq!(manager.status().generation, before.generation);
+        let (status, _) = response(&app, request(&token, "/api/commands", Some(json!({"command":"resources", "path":"/etc/passwd"})))?).await?;
+        assert!(!status.is_success());
+        std::fs::remove_file(directory.0.join("providers/one.yaml"))?;
+        let (_, missing) = response(&app, request(&token, "/api/commands", Some(payload.clone()))?).await?;
+        assert_eq!(missing["providers"][0]["state"], "missing");
+        manager.apply_config(serde_yaml_ng::from_str("mode: direct")?).await?;
+        let (_, replaced) = response(&app, request(&token, "/api/commands", Some(payload))?).await?;
+        assert_eq!(replaced["providers"], json!([]));
+        assert_ne!(replaced["config_revision"], value["config_revision"]);
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
 async fn core_release_commands_authenticate_reject_source_overrides_and_require_managed_resources() -> Result<()> {
     let directory = Directory::new()?;
     let manager = directory.manager()?;

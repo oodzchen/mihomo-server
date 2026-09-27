@@ -53,11 +53,12 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Current task:** synchronize this priority change and withdraw the unshipped
-backup automation scaffold. **Next implementation task (P1):** inventory current
-Geo/provider resource handling against upstream, then implement explicit resource
-path/readback and validation with isolated real-data tests. Continue full settings
-and resource lifecycle work before starting P2.
+**Latest completed task (P1):** authenticated, committed-runtime Geo/provider
+resource inventory with confined metadata inspection, shared-path diagnostics and
+Web readback. **Next implementation task (P1):** integrate provider path validation
+and shared-cache conflict handling into configuration candidates. Geo installation,
+updates/content validation, full settings and resource lifecycle remain pending;
+finish this priority before starting P2.
 
 ## Complete target architecture
 
@@ -124,7 +125,7 @@ mihomo-server/
 │       ├── Backup manifest / bounded entries / inspection, validation, runtime policy and restore receipt models [Implemented; upstream ZIP adaptation]
 │       ├── Opaque restore plan / durable catalog-settings journal / runtime commit recovery [Implemented; Linux verified]
 │       ├── Retained backup metadata / list / create-delete receipt models [Implemented]
-│       └── Full resource settings                       [Pending; P1]
+│       ├── Full resource settings                       [Pending; P1]
 │       └── Automatic retention models               [Deferred; outside active scope]
 ├── service/                                         [Partially implemented]
 │   ├── Persistent foreground entry point            [Implemented]
@@ -138,7 +139,9 @@ mihomo-server/
 │   ├── Raw/enhanced candidate phases / single TUN derivation [Implemented; Linux validation]
 │   ├── DNS conflict commands / scoped confirmation / coordinated auto-disable [Implemented; Linux verified]
 │   ├── Final candidate LAN/group normalization after authority [Implemented; Linux verified]
-│   ├── Geo/provider resources / full settings       [Pending]
+│   ├── Geo/provider resources / full settings       [Partially implemented; P1]
+│   │   ├── Committed resource inventory / confined metadata / shared-path diagnostics [Implemented; Linux verified]
+│   │   └── Candidate path policy / Geo lifecycle / full settings [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
 │   ├── Profile snapshots/watches and active UID     [Implemented]
@@ -250,7 +253,8 @@ mihomo-server/
 │   ├── DNS/TUN editor / lossless nested inheritance / readback [Implemented; Linux verified]
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
-│   └── Full settings/resource UI [Pending; P1]
+│   ├── Geo/Provider inventory / metadata states / refresh and retry [Implemented; Linux verified]
+│   ├── Full settings/resource lifecycle UI [Pending; P1]
 │   └── Backup UI [Deferred; outside active scope]
 ├── Release and deployment                           [Partially implemented]
 │   ├── Linux x86_64 bundle: Rust + independent Mihomo + Web [Implemented]
@@ -262,7 +266,7 @@ mihomo-server/
 │   ├── Actual Linux systemd installation / lifecycle verification [Pending; P4; template exists]
 │   ├── Linux Geo resource packaging               [Pending; P4]
 │   ├── Other platforms / containers / Alpha bundle seeds [Deferred]
-│   └── Linux package license inventory              [Pending; P4]
+│   ├── Linux package license inventory              [Pending; P4]
 │   └── External publication                      [Deferred]
 └── Documentation and provenance                     [Implemented; maintained]
     ├── headless.md
@@ -3209,6 +3213,59 @@ writes/commits occur; the host script owns the commit.
 Next task: P1 Geo/provider resource inventory, explicit paths/readback and
 validation, followed by full authoritative settings and resource lifecycle.
 The active priorities and the complete original design are not yet completed.
+
+## Latest increment: committed Geo/provider resource inventory (P1)
+
+The prior priority update is complete. This increment implements the first P1
+resource-management slice: the authenticated `resources` command and a settings
+page panel report the six upstream Geo filenames and explicit file/cache paths
+from the committed `proxy-providers` / `rule-providers` configuration. The actor
+captures the runtime revision and config together; reads also work while stopped
+or before a runtime is committed. Bundle and writable Mihomo data roots are
+reported separately. Provider lists use deterministic section/name ordering.
+
+Metadata inspection identifies available, missing, empty, non-file, unsafe and
+unreadable entries; inline resources, implicit core-managed cache paths and invalid
+declarations are distinguished. Paths normalize relative to Mihomo's data root;
+absolute paths inside that root are accepted. Parent traversal/external paths are
+not inspected. Linux descriptor-relative `O_PATH`/`O_NOFOLLOW` walks reject links
+without opening FIFO/device contents or following a raced parent directory outside
+the root. Shared normalized paths, including collisions with Geo filenames, are
+flagged without rewriting configuration. Reports omit provider URLs, headers,
+inline payloads and file contents. Work is bounded to 512 providers, 512-byte names,
+4096-byte paths and 64 path components.
+
+The Web panel clears stale state on connection/revision changes, cancels abandoned
+requests, handles authentication expiry and offers manual refresh/retry. It states
+that file metadata is not content-format validation and that missing Geo files are
+not universally required. No downloads, Geo replacement, provider refresh/reload,
+candidate rejection, cache-conflict repair or new authoritative settings fields
+are delivered here. Existing configuration acceptance remains unchanged. The
+current development MVP runs with the built service and Web assets; the earlier
+retained-backups release bundle does not contain this increment.
+
+Validation:
+
+- `cargo check --workspace --locked --offline` and formatting/diff checks passed.
+- `cargo test --workspace --locked --offline -- --test-threads=1`: 325 passed,
+  zero failed, 76 opt-in cases ignored. The first parallel attempt hit an existing
+  Alpha activation test's transient `Text file busy` executable probe; the complete
+  serial rerun passed without changing unrelated upgrade code.
+- The opt-in `resource_inventory_live` integration test passed with real Mihomo
+  and private temporary copies of actual subscription nodes and Geo data. The
+  original source SHA-256 remained unchanged. Local proxy/rule providers loaded,
+  Geo metadata matched, and HTTPS proxy traffic returned 204 before and after a
+  core restart.
+- `npm run build` passed, and the new Playwright resource inventory workflow passed
+  against the built Web/service: missing → available → empty metadata, refresh,
+  read failure and retry. The complete existing browser suite was not rerun.
+
+No sandbox Git commit occurs; the host script owns the commit.
+
+Next task: P1 provider candidate path validation and upstream-compatible shared
+cache conflict handling, then Geo lifecycle and remaining settings management.
+P2 rules/provider operations/delay views, P3 i18n/signals and P4 installed systemd
+deployment remain pending; all previously deferred features remain deferred.
 
 ## MVP completion boundary
 

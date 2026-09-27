@@ -2355,7 +2355,44 @@ at 128 storage entries after a bounded descriptor scan. Capacity exhaustion
 returns 507 `backup_storage_full`; delete a selected backup before creating another.
 Existing archives are never automatically pruned. These are fixed storage bounds,
 not a configurable retention schedule or a quota on administrator-created files.
-Automatic retention/settings/scheduling and backup UI remain pending.
+Automatic retention/settings/scheduling and backup UI remain deferred under the
+current core-feature priorities.
+
+## Read committed Geo and provider resource metadata
+
+Send the authenticated command:
+
+```json
+{"command":"resources"}
+```
+
+The settings page also displays this inventory and provides refresh/retry. The
+response contains `data_dir`, optional `bundle_dir`, optional `config_revision`,
+`geo` and `providers`. Provider declarations come from the committed runtime,
+including enhancements and manual edits, rather than the raw subscription.
+Before the first commit, provider entries are empty; Geo files can still be read.
+Explicit paths resolve relative to the same data directory passed to Mihomo with
+`-d`. The bundle directory is separate and is not an implicit provider-file root.
+
+Each entry reports its section, name, recognized provider type, normalized relative
+path when safe, metadata state, optional byte count and a shared-path `conflict`
+flag. States are `available`, `missing`, `empty`, `unsafe_path`, `not_file`,
+`unreadable`, `inline`, `core_managed` or `invalid_declaration`. HTTP providers
+without an explicit path are `core_managed`; this command does not guess Mihomo's
+internal cache filename. Geo discovery includes `Country.mmdb`, `ASN.mmdb`,
+`geoip.dat`, `geosite.dat`, `geoip.metadb` and `GeoSite.dat` (case-sensitive).
+
+The inventory never returns provider URLs/authentication headers, inline payloads
+or file contents. It inspects only metadata inside the data root, without following
+symlinks. It is bounded to 512 provider declarations and rejects malformed sections
+or oversized provider names. Unsupported/unsafe paths are diagnostic entries;
+this command does not change whether Mihomo accepts the configuration.
+
+`available` means a nonempty regular file's metadata was observed; it does not prove
+that its content format is valid or that a running core has loaded it. Missing Geo
+files may be normal when rules do not require them. The filesystem can change after
+a read; refresh after a core download or external file change. Geo installation,
+updates/content validation and Provider refresh/reload APIs remain future work.
 
 All local operations share the existing single backup admission slot with
 export/inspect/rehearsal/restore. Busy requests return 409 `backup_busy`. A download

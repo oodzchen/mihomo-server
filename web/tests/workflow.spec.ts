@@ -196,6 +196,40 @@ test.afterAll(async () => {
   }
 });
 
+test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
+  await page.goto(`${base}/settings`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  const panel = page.getByRole("region", { name: "运行资源清单", exact: true });
+  await expect(panel).toContainText("Geo 文件");
+  await expect(panel).toContainText("当前已提交配置没有 Provider 声明。");
+  await expect(panel).toContainText("尚无已提交配置");
+  const country = panel.locator("li").filter({ has: page.getByText("Country.mmdb", { exact: true }) });
+  await expect(country).toContainText("文件缺失");
+  await writeFile(join(directory, "Country.mmdb"), "metadata fixture");
+  try {
+    await panel.getByRole("button", { name: "刷新资源清单" }).click();
+    await expect(country).toContainText("文件存在");
+    await expect(country).toContainText("16 字节");
+    let failed = false;
+    await page.route("**/api/commands", async route => {
+      if (route.request().postDataJSON().command === "resources" && !failed) {
+        failed = true;
+        await route.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture resource failure" } }) });
+      } else await route.continue();
+    });
+    await panel.getByRole("button", { name: "刷新资源清单" }).click();
+    await expect(panel.getByRole("alert")).toContainText("fixture resource failure");
+    await writeFile(join(directory, "Country.mmdb"), "");
+    await panel.getByRole("button", { name: "刷新资源清单" }).click();
+    await expect(country).toContainText("空文件");
+    await expect(panel.getByRole("alert")).toHaveCount(0);
+    await expect(panel).toContainText("尚未验证内容格式");
+    await page.unroute("**/api/commands");
+    await page.getByRole("button", { name: "退出登录" }).click();
+  } finally { await rm(join(directory, "Country.mmdb"), { force: true }); }
+});
+
 test("browser repairs failed startup, saves selection/config, restores after service restart and logs out", async ({
   page,
 }) => {

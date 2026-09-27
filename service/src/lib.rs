@@ -5,6 +5,7 @@ pub mod core_upgrade;
 pub mod management;
 mod proxy_access;
 pub mod remote;
+pub mod resource_inventory;
 pub mod resources;
 pub mod script;
 mod selections;

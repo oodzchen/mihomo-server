@@ -48,6 +48,17 @@ round-trip through upstream-format YAML, while transient uploaded content is
 not persisted. Pure configuration tests are reused from upstream rather than
 reimplementing the algorithms or inventing a new processing order.
 
+## Geo/provider resource inventory reference
+
+The P1 inventory adapts the resource identities and provider sections from
+`src-tauri/src/core/runtime_bundle.rs` (`GEO_ASSETS`, provider path collection) and
+consults `src-tauri/src/utils/init.rs::init_resources` at the pinned Clash Verge Rev
+commit `b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b`. The destination is the new
+`service/src/resource_inventory.rs`, wired through the existing actor/management
+command and `web/src/resources.tsx`. Its metadata-only Linux descriptor walk and
+response models are new service code; upstream's desktop resource copying, remote
+provider bundling and cache-conflict rewriting are not migrated by this increment.
+
 ## Mihomo plugin
 
 - Repository: https://github.com/clash-verge-rev/tauri-plugin-mihomo
