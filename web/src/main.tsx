@@ -578,6 +578,9 @@ function ProfileEditor({
   const [auto, setAuto] = useState(item.option?.allow_auto_update ?? true);
   const [selfProxy, setSelfProxy] = useState(item.option?.self_proxy ?? false);
   const [withProxy, setWithProxy] = useState(item.option?.with_proxy ?? false);
+  const [invalidCerts, setInvalidCerts] = useState(
+    item.option?.danger_accept_invalid_certs ?? false,
+  );
   async function save(event: FormEvent) {
     event.preventDefault();
     const patch: Record<string, unknown> = {};
@@ -597,6 +600,8 @@ function ProfileEditor({
         options.self_proxy = selfProxy;
       if (withProxy !== (item.option?.with_proxy ?? false))
         options.with_proxy = withProxy;
+      if (invalidCerts !== (item.option?.danger_accept_invalid_certs ?? false))
+        options.danger_accept_invalid_certs = invalidCerts;
       if (Object.keys(options).length) patch.options = options;
     }
     if (!Object.keys(patch).length) {
@@ -707,6 +712,18 @@ function ProfileEditor({
               />
               订阅刷新使用服务系统代理
             </label>
+            <label className="check-label">
+              <input
+                type="checkbox"
+                disabled={busy}
+                checked={invalidCerts}
+                onChange={(event) => setInvalidCerts(event.target.checked)}
+              />
+              订阅刷新允许无效 TLS 证书
+            </label>
+            <p className="muted">
+              开启后不校验 HTTPS 服务器身份，仅对该订阅的下载生效。
+            </p>
             <p className="muted">
               托管内核模式优先，需要运行中的 HTTP 或 Mixed 入口。
               系统代理读取服务环境，未配置时直连。自动更新设置会保存，定时更新尚未接入。
@@ -1165,6 +1182,7 @@ function ProfilePage({
     [remoteName, setRemoteName] = useState(""),
     [remoteSelfProxy, setRemoteSelfProxy] = useState(false),
     [remoteWithProxy, setRemoteWithProxy] = useState(false),
+    [remoteInvalidCerts, setRemoteInvalidCerts] = useState(false),
     [error, setError] = useState("");
   const [rawEditing, setRawEditing] = useState<string>();
   const [editing, setEditing] = useState<Profile | null>(null);
@@ -1243,7 +1261,11 @@ function ProfilePage({
     event.preventDefault();
     const item = await perform<Profile>("import_remote_profile", {
       url: remoteUrl.trim(),
-      options: { self_proxy: remoteSelfProxy, with_proxy: remoteWithProxy },
+      options: {
+        self_proxy: remoteSelfProxy,
+        with_proxy: remoteWithProxy,
+        danger_accept_invalid_certs: remoteInvalidCerts,
+      },
       ...(remoteName.trim() ? { name: remoteName.trim() } : {}),
     });
     if (item) {
@@ -1483,6 +1505,18 @@ function ProfilePage({
             />
             使用服务系统代理下载
           </label>
+          <label className="check-label">
+            <input
+              type="checkbox"
+              disabled={busy}
+              checked={remoteInvalidCerts}
+              onChange={(event) => setRemoteInvalidCerts(event.target.checked)}
+            />
+            下载允许无效 TLS 证书
+          </label>
+          <p className="muted">
+            默认校验证书。开启后不校验 HTTPS 服务器身份，仅对该订阅生效。
+          </p>
           <p className="muted">
             托管内核模式优先，需要运行中的 HTTP 或 Mixed 入口。
             系统代理读取服务环境，未配置时直连；代理连接失败会报错。

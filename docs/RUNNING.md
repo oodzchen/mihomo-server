@@ -666,7 +666,7 @@ core validation happens on activation.
 
 Direct and managed-core transport disable implicit environment proxies; all modes
 follow at most ten redirects and
-uses reqwest's verified platform TLS. No service bearer token is sent to providers.
+uses verified platform TLS with one static Mozilla/WebPKI root retry for TLS trust errors (details below). No service bearer token is sent to providers.
 Request/body errors omit subscription URLs. Authenticated profile queries expose
 stored subscription metadata, including its URL, using the existing private file
 and HTTP boundaries. `self_proxy: true` selects the managed core's actual Mixed
@@ -676,8 +676,7 @@ HTTP-compatible ingress or incompatible bind address returns an error without
 falling back to direct access. Direct downloads can work while the core is stopped.
 `with_proxy: true` enables service system proxy discovery when self_proxy is false.
 Linux uses the service process environment; browser/desktop proxy settings are not
-consulted. TLS certificate bypass and linked-enhancement download options remain
-unsupported. Desktop TLS root fallback remains pending.
+consulted. `danger_accept_invalid_certs: true` explicitly disables certificate and hostname verification for that subscription only; the default remains verified. Linked-enhancement download options remain unsupported.
 
 Usage accepts `subscription-userinfo` and storage-provider prefixes ending in a
 hyphen, preserving upload/download/total/expire fields. Valid HTTP(S) profile home
@@ -720,7 +719,7 @@ Only `uid` is accepted; local/unknown profiles fail before any provider request.
 The request reuses saved URL/user agent/timeout/update options. Manual refresh is
 allowed even with allow_auto_update false. Saved self_proxy selects the managed
 core; saved with_proxy enables system discovery when self_proxy is false.
-Unsupported TLS-bypass options fail explicitly. Linked
+The saved certificate option also applies to refresh. Linked
 sequences/YAML merge/scripts are supported and applied to active updates. Refresh
 uses the same direct, system or managed-proxy transport,
 shared four-download admission, body limits and shutdown cancellation as import.
@@ -799,7 +798,7 @@ descriptions at most 4 KiB, URLs valid HTTP(S) at most 8 KiB, user agents at mos
 1 KiB without control characters and timeouts 1..120 seconds. update_interval is
 an unsigned count of minutes; zero is retained as disabled update metadata.
 URL/options are remote-only. Supported option fields merge into saved options;
-unsupported TLS-bypass/enhancement fields and UID/type/file/selected/
+unsupported enhancement fields and UID/type/file/selected/
 extra/updated changes are rejected. The dedicated raw subscription editor edits
 the source; the configuration editor edits the separate runtime YAML.
 
@@ -1581,7 +1580,7 @@ in-flight proxy downloads. Shutdown cancels active and queued requests. Network
 work remains outside the lifecycle actor. A metadata/raw/URL change during refresh
 invalidates the old result through the existing source guard; successful results
 continue through the original transactional import/refresh recovery workflows.
-SOCKS-only ingress, TLS fallback/bypass and scheduled updates are separate pending
+SOCKS-only ingress and scheduled updates are separate pending
 increments. System proxy discovery is described below.
 
 
@@ -1638,5 +1637,39 @@ desktop gsettings session, use PAC/WPAD or invoke an external discovery process.
 TLS verification defaults, download/redirect/body/concurrency bounds, cancellation,
 source guards and import/refresh recovery remain shared across all modes. A system
 proxy download survives unrelated managed-core stop/reload; service shutdown still
-cancels active and queued requests. Socks transport, TLS fallback/bypass and
+cancels active and queued requests. Socks transport and
 scheduling remain pending.
+
+
+## Subscription TLS verification and fallback
+
+HTTP(S) imports accept `options: {"danger_accept_invalid_certs": false}`. To edit
+an existing remote subscription use `edit_profile` with
+`patch: {"options": {"danger_accept_invalid_certs": false}}`. Omitted/null options
+retain saved values on metadata edits; explicit false restores verification.
+Strings such as `"true"` are rejected. Refresh uses the saved option, including
+after restart, and changing it during a download rejects the stale result.
+The Web import and metadata editor expose separate explicit checkboxes, initially
+unchecked, describing the effect on HTTPS server identity verification.
+
+Verified downloads use the platform certificate verifier first, honoring the
+service's platform trust store (including Linux SSL_CERT_FILE/SSL_CERT_DIR).
+For TLS/certificate/root/revocation errors they retry once with the locked static
+Mozilla roots, still verifying certificate validity and the hostname. Root fallback
+does not trust self-signed certificates automatically. TLS protocol-version errors
+fail with a TLS 1.2/1.3 message and do not retry or enable an older protocol.
+Network, HTTP status, body size and YAML errors do not trigger a root retry.
+
+`danger_accept_invalid_certs: true` disables both certificate-chain and hostname
+verification for that subscription's download and redirects. It does not change
+the management listener, core controller or other subscriptions. This mode has
+one attempt, keeps TLS 1.2/1.3, and retains HTTP status/YAML validation, body limits,
+redirect limits, bounded admission, stale guards and cancellation. Use an appropriate
+platform CA when server identity should remain verified.
+
+Both attempts share the existing 1..120-second total timeout (default 20 seconds),
+including redirects and body reads. Managed routes and credentials are resolved
+once; system discovery remains explicitly opt-in. No attempt changes the chosen
+transport mode or falls back to direct access on proxy failure. URLs, URL tokens,
+proxy credentials and the management bearer token are excluded from download
+errors; the management token is never forwarded to origins or proxies.

@@ -1,5 +1,6 @@
 //! Direct, system or managed HTTP proxy subscription downloads. Store writes remain owned by the lifecycle actor.
 mod environment;
+mod tls;
 
 use anyhow::{Context as _, Result, ensure};
 use headless_core::config::{
@@ -17,6 +18,7 @@ use std::{
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteOptions {
+    pub danger_accept_invalid_certs: Option<bool>,
     pub with_proxy: Option<bool>,
     pub self_proxy: Option<bool>,
     pub user_agent: Option<String>,
@@ -31,11 +33,8 @@ impl RemoteOptions {
         let Some(option) = option else {
             return Ok(Self::default());
         };
-        ensure!(
-            option.danger_accept_invalid_certs != Some(true),
-            "TLS bypass is not supported yet"
-        );
         Ok(Self {
+            danger_accept_invalid_certs: option.danger_accept_invalid_certs,
             with_proxy: option.with_proxy,
             self_proxy: option.self_proxy,
             user_agent: option.user_agent.as_ref().map(ToString::to_string),
@@ -143,7 +142,53 @@ pub(crate) async fn download_via(
         options.self_proxy != Some(true) || proxy.is_some(),
         "self_proxy requires a running managed proxy"
     );
+    let response = tokio::time::timeout(Duration::from_secs(seconds), async {
+        match fetch(&url, agent, seconds, &options, proxy.as_ref(), tls::RootMode::Platform).await {
+            Ok(response) => Ok(response),
+            Err(error) if options.danger_accept_invalid_certs != Some(true) && tls::should_retry(&error) => {
+                fetch(&url, agent, seconds, &options, proxy.as_ref(), tls::RootMode::Static)
+                    .await
+                    .context("static webpki roots fallback failed after platform TLS verifier failed")
+            }
+            Err(error) => Err(error),
+        }
+    })
+    .await
+    .context("subscription download timed out")??;
+    from_response(
+        &url,
+        name,
+        &response.headers,
+        &response.body,
+        PrfOption {
+            danger_accept_invalid_certs: options.danger_accept_invalid_certs,
+            with_proxy: options.with_proxy,
+            self_proxy: options.self_proxy,
+            user_agent: options.user_agent.map(Into::into),
+            timeout_seconds: options.timeout_seconds,
+            update_interval: options.update_interval,
+            allow_auto_update: options.allow_auto_update,
+            ..PrfOption::default()
+        },
+    )
+}
+
+struct Downloaded {
+    headers: Vec<(String, String)>,
+    body: String,
+}
+
+async fn fetch(
+    url: &url::Url,
+    agent: &str,
+    seconds: u64,
+    options: &RemoteOptions,
+    proxy: Option<&ManagedProxy>,
+    root_mode: tls::RootMode,
+) -> Result<Downloaded> {
     let mut builder = reqwest::Client::builder()
+        .tls_backend_rustls()
+        .min_tls_version(reqwest::tls::Version::TLS_1_2)
         .user_agent(agent)
         .redirect(reqwest::redirect::Policy::limited(10))
         .timeout(Duration::from_secs(seconds))
@@ -151,6 +196,7 @@ pub(crate) async fn download_via(
         .tcp_keepalive(Duration::from_secs(60))
         .pool_max_idle_per_host(0)
         .pool_idle_timeout(None);
+    builder = tls::configure(builder, root_mode, options.danger_accept_invalid_certs == Some(true))?;
     if options.with_proxy == Some(true) && options.self_proxy != Some(true) {
         if environment::bypass_all()? {
             builder = builder.no_proxy();
@@ -162,8 +208,8 @@ pub(crate) async fn download_via(
     }
     if let Some(route) = proxy {
         let mut proxy = reqwest::Proxy::all(format!("http://{}", route.address))?;
-        if let Some((user, password)) = route.authentication {
-            proxy = proxy.basic_auth(&user, &password);
+        if let Some((user, password)) = &route.authentication {
+            proxy = proxy.basic_auth(user, password);
         }
         builder = builder.proxy(proxy);
     }
@@ -172,8 +218,7 @@ pub(crate) async fn download_via(
         .get(url.clone())
         .send()
         .await
-        .map_err(|error| error.without_url())
-        .context("failed to fetch remote profile")?;
+        .map_err(|error| tls::transport_error(error, "failed to fetch remote profile"))?;
     ensure!(
         response.status().is_success(),
         "failed to fetch remote profile with status {}",
@@ -194,28 +239,13 @@ pub(crate) async fn download_via(
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|error| error.without_url())
-        .context("failed to read remote profile")?
+        .map_err(|error| tls::transport_error(error, "failed to read remote profile"))?
     {
         ensure!(chunk.len() <= MAX_CONFIG_BYTES - bytes.len(), "profile exceeds 8 MiB");
         bytes.extend_from_slice(&chunk);
     }
     let body = String::from_utf8(bytes).context("remote profile must be UTF-8")?;
-    from_response(
-        &url,
-        name,
-        &headers,
-        &body,
-        PrfOption {
-            with_proxy: options.with_proxy,
-            self_proxy: options.self_proxy,
-            user_agent: options.user_agent.map(Into::into),
-            timeout_seconds: options.timeout_seconds,
-            update_interval: options.update_interval,
-            allow_auto_update: options.allow_auto_update,
-            ..PrfOption::default()
-        },
-    )
+    Ok(Downloaded { headers, body })
 }
 
 #[cfg(test)]

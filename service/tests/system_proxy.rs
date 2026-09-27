@@ -620,3 +620,157 @@ async fn managed_proxy_wins_over_system_and_system_refresh_survives_core_stop() 
     let cleanup = service.shutdown().await;
     result.and(cleanup)
 }
+
+#[path = "support/tls.rs"]
+#[allow(dead_code)] // Shared fixture's validator is used by tls_profiles instead.
+mod tls;
+
+// A fixed-destination CONNECT tunnel records headers but never sees decrypted HTTPS.
+struct Tunnel {
+    base: String,
+    headers: Arc<Mutex<Vec<String>>>,
+    task: JoinHandle<()>,
+}
+impl Tunnel {
+    async fn new(target: &str) -> Result<Self> {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let target = url::Url::parse(target)?;
+        let address = format!("{}:{}", target.host_str().unwrap(), target.port().unwrap());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let base = format!("http://{}", listener.local_addr()?);
+        let headers = Arc::new(Mutex::new(Vec::new()));
+        let shared = Arc::clone(&headers);
+        let task = tokio::spawn(async move {
+            let mut tasks = JoinSet::new();
+            loop {
+                tokio::select! {
+                    connection = listener.accept() => {
+                        let Ok((mut socket, _)) = connection else { break; };
+                        let address = address.clone(); let headers = Arc::clone(&shared);
+                        tasks.spawn(async move {
+                            let mut request = Vec::new();
+                            while request.len() <= 16 * 1024 && !request.ends_with(b"\r\n\r\n") {
+                                match socket.read_u8().await { Ok(byte) => request.push(byte), Err(_) => return }
+                            }
+                            let request = String::from_utf8_lossy(&request).to_string();
+                            let valid = request.starts_with("CONNECT ") && request.lines().any(|line| line.split_once(':').is_some_and(|(name, value)| name.eq_ignore_ascii_case("proxy-authorization") && value.trim() == "Basic dXNlcjpwYXNz"));
+                            headers.lock().unwrap().push(request);
+                            if !valid { let _ = socket.write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n").await; return; }
+                            let Ok(mut upstream) = tokio::net::TcpStream::connect(address).await else { return; };
+                            let _ = socket.write_all(b"HTTP/1.1 200 Connection established\r\n\r\n").await;
+                            let _ = tokio::io::copy_bidirectional(&mut socket, &mut upstream).await;
+                        });
+                    }
+                    _ = tasks.join_next(), if !tasks.is_empty() => {}
+                }
+            }
+        });
+        Ok(Self { base, headers, task })
+    }
+}
+impl Drop for Tunnel {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+#[tokio::test]
+async fn https_system_proxy_preserves_authenticated_connect_route_across_tls_retry() -> Result<()> {
+    let dir = Directory::new()?;
+    let origin = tls::Fixture::new().await?;
+    let proxy = Tunnel::new(&origin.url).await?;
+    let values = environment(&[("HTTPS_PROXY", proxy.base.replacen("http://", "http://user:pass@", 1))]);
+    let mut service = Service::start(&dir, &values, false).await?;
+    let result = async {
+        let catalog = service.api(json!({"command":"profiles"})).await?;
+        let (status, error) = service.request(import(&origin.url, json!({"with_proxy":true}))).await?;
+        assert!(!status.is_success());
+        assert!(error.to_string().contains("static webpki roots fallback failed"));
+        assert!(!error.to_string().contains("private-test-token"));
+        assert_eq!(proxy.headers.lock().unwrap().len(), 2);
+        assert_eq!(origin.state.connections.load(Ordering::SeqCst), 2);
+        assert_eq!(service.api(json!({"command":"profiles"})).await?, catalog);
+        let item = service
+            .api(import(
+                &origin.url,
+                json!({"with_proxy":true,"danger_accept_invalid_certs":true}),
+            ))
+            .await?;
+        assert_eq!(item["option"]["danger_accept_invalid_certs"], true);
+        assert_eq!(proxy.headers.lock().unwrap().len(), 3);
+        assert_eq!(origin.state.count(), 1);
+        assert!(
+            !origin.state.requests.lock().unwrap()[0]
+                .to_ascii_lowercase()
+                .contains("authorization:")
+        );
+        service
+            .api(json!({"command":"refresh_profile","uid":item["uid"]}))
+            .await?;
+        assert_eq!(proxy.headers.lock().unwrap().len(), 4);
+        assert_eq!(origin.state.count(), 2);
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let cleanup = service.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
+#[ignore = "requires real Mihomo and local TLS/proxy sockets"]
+async fn https_managed_proxy_retains_route_priority_auth_and_core_stop_cancellation() -> Result<()> {
+    let dir = Directory::new()?;
+    let origin = tls::Fixture::new().await?;
+    let system = Tunnel::new(&origin.url).await?;
+    let values = environment(&[("HTTPS_PROXY", system.base.clone())]);
+    let mut service = Service::start(&dir, &values, true).await?;
+    let result = async {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
+        let yaml = format!("mode: direct\nmixed-port: {port}\nauthentication: ['fixture:private:password']\ndns: {{enable: false}}\nrules: ['MATCH,DIRECT']");
+        service.api(json!({"command":"apply_config","yaml":yaml})).await?;
+        service.api(json!({"command":"start"})).await?;
+        let (status, error) = service.request(import(&origin.url, json!({"self_proxy":true,"with_proxy":true}))).await?;
+        assert!(!status.is_success()); assert!(error.to_string().contains("static webpki roots fallback failed"));
+        assert_eq!(origin.state.connections.load(Ordering::SeqCst), 2);
+        let item = service.api(import(&origin.url, json!({"self_proxy":true,"with_proxy":true,"danger_accept_invalid_certs":true}))).await?;
+        assert_eq!(origin.state.count(), 1);
+        assert_eq!(system.headers.lock().unwrap().len(), 0);
+        assert!(!origin.state.requests.lock().unwrap()[0].to_ascii_lowercase().contains("authorization:"));
+        origin.state.hold.store(true, Ordering::SeqCst);
+        let mut refresh = Box::pin(service.request(json!({"command":"refresh_profile","uid":item["uid"]})));
+        tokio::select! {
+            result = &mut refresh => { result?; anyhow::bail!("unexpected early refresh") },
+            result = origin.state.wait(2) => result?,
+        }
+        service.api(json!({"command":"stop"})).await?;
+        assert!(!timeout(Duration::from_secs(2), refresh).await??.0.is_success());
+        assert_eq!(system.headers.lock().unwrap().len(), 0);
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = service.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
+async fn platform_custom_ca_stays_verified_without_static_retry_or_bypass() -> Result<()> {
+    let dir = Directory::new()?;
+    let origin = tls::Fixture::trusted_name().await?;
+    let empty = dir.0.join("empty-ca-directory");
+    fs::create_dir(&empty)?;
+    let values = environment(&[
+        ("SSL_CERT_FILE", origin.certificate().to_string_lossy().into_owned()),
+        ("SSL_CERT_DIR", empty.to_string_lossy().into_owned()),
+    ]);
+    let mut service = Service::start(&dir, &values, false).await?;
+    let result = async {
+        let (status, item) = service.request(import(&origin.url, json!({}))).await?;
+        ensure!(status.is_success(), "local CA fixture failed: {item}");
+        assert!(item["option"]["danger_accept_invalid_certs"].is_null());
+        assert_eq!(origin.state.connections.load(Ordering::SeqCst), 1);
+        assert_eq!(origin.state.count(), 1);
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let cleanup = service.shutdown().await;
+    result.and(cleanup)
+}

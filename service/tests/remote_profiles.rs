@@ -682,7 +682,10 @@ async fn remote_options_reject_unsupported_modes_and_invalid_inputs_before_netwo
         danger_accept_invalid_certs: Some(true),
         ..Default::default()
     };
-    assert!(RemoteOptions::from_profile(Some(&option)).is_err());
+    assert_eq!(
+        RemoteOptions::from_profile(Some(&option))?.danger_accept_invalid_certs,
+        Some(true)
+    );
     let options = RemoteOptions::from_profile(Some(&PrfOption {
         self_proxy: Some(true),
         with_proxy: Some(true),
@@ -702,7 +705,7 @@ async fn remote_options_reject_unsupported_modes_and_invalid_inputs_before_netwo
     for options in [
         json!({"with_proxy":"true"}),
         json!({"self_proxy":"true"}),
-        json!({"danger_accept_invalid_certs":true}),
+        json!({"danger_accept_invalid_certs":"true"}),
         json!({"merge":"m1"}),
     ] {
         assert!(serde_json::from_value::<RemoteOptions>(options).is_err());

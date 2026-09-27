@@ -108,7 +108,8 @@ mihomo-server/
 │   │   ├── Managed core proxy / live route / auth / lifecycle cancellation [Implemented; Linux verified]
 │   │   ├── Service system proxy / environment / bypass / auth [Implemented; Linux verified]
 │   │   ├── Native Windows/macOS proxy discovery runtime validation [Pending; library code retained]
-│   │   └── SOCKS, TLS fallback/bypass and scheduling [Pending]
+│   │   ├── TLS platform/static roots / explicit certificate option [Migrated + adaptation; Linux verified]
+│   │   └── SOCKS/PAC and scheduling                 [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
@@ -142,6 +143,7 @@ mihomo-server/
 │   │   ├── Remote URL import, usage display, saved auxiliary defaults [Implemented]
 │   │   ├── Manual remote refresh / usage updates  [Implemented]
 │   │   ├── Managed/system proxy import / saved mode editor / failed drafts [Implemented; Linux verified]
+│   │   ├── Explicit subscription TLS option / saved edits / failed drafts [Implemented; Linux verified]
 │   │   ├── Metadata editor / confirmed cascade deletion [Implemented; Linux verified]
 │   │   ├── Linked YAML merge editor / detach       [Implemented]
 │   │   ├── Linked rules/proxies/groups editor / detach [Implemented]
@@ -189,7 +191,7 @@ repair, local profiles, runtime editing, nodes, logs and realtime metrics.
 Direct, managed and system-proxy remote import and manual refresh preserve downloaded YAML, upstream metadata
 and profile identity. Active refresh uses validated application and recoverable
 commit; linked sequence, YAML merge and script editing feed selection and refresh generation.
-Scheduling, TLS modes and the remaining enhancement workflows are incomplete. Local profile imports,
+Scheduling and the remaining enhancement workflows are incomplete. TLS root fallback and explicit per-subscription bypass are connected. Local profile imports,
 selection and restoration now feed the runtime validation/application flow. Runtime YAML imports,
 upstream merge overlays, validation, application, persistence, and interrupted
 application recovery work through the manager; `--import-config` exposes the
@@ -1598,7 +1600,7 @@ resources, upgrades, backups/WebDAV, advanced pages, revision garbage collection
 and additional platforms remain pending. The Linux MVP remains runnable; the
 complete project is not done.
 
-## Latest increment: service system-proxy subscription downloads
+## Previous increment: service system-proxy subscription downloads
 
 Delivery step 7 now supports with_proxy on import, strict saved metadata patches
 and manual refresh. Only with_proxy true and self_proxy false enables system
@@ -1667,6 +1669,62 @@ and recovery. SOCKS/PAC, scheduled updates, full DNS/hosts/TUN settings, resourc
 upgrades, backups/WebDAV, advanced pages, immutable-file garbage collection and
 additional platform runtime/deployment checks remain pending. The Linux MVP remains
 runnable; the complete project is not done.
+
+## Latest increment: subscription TLS roots and explicit certificate options
+
+Delivery step 7 now follows upstream platform-first TLS verification with one
+static Mozilla/WebPKI root retry for TLS trust/revocation errors. Protocol-version
+errors do not retry and report TLS 1.2/1.3. Default verification rejects untrusted
+and wrong-hostname certificates; static roots retain both certificate and hostname
+verification. Explicit danger_accept_invalid_certs true disables both checks only
+for that subscription and its redirects and never triggers a root retry.
+
+The strict import/metadata schemas, upstream PrfOption, saved refresh options and
+Web import/editor checkboxes now support the certificate flag. Explicit false
+restores verification; omitted/null metadata retains saved values. Editing the
+flag during refresh rejects the old result, preserves raw bytes and catalog, and
+leaves auxiliary links intact. Values survive service restart. Failed import drafts
+remain visible so retry requires an explicit setting change.
+
+Both attempts share one overall download deadline, bounded admission, redirects,
+body/YAML/status limits and shutdown cancellation. The managed route/credentials
+remain fixed across retry, self_proxy still wins over system discovery and direct,
+and TLS failures cannot switch transport mode. Reqwest's public API builds verified
+static roots from the already locked DER bundle without older TLS backend injection.
+TLS errors omit URLs and credentials while retaining their cause classification.
+
+Verification: local HTTPS fixtures cover default failure/two handshakes, explicit
+bypass with wrong hostname, one total timeout, protocol-version alert/no retry,
+HTTP/body/size/YAML limits, HTTP-to-HTTPS redirect, platform custom CA, authenticated
+system CONNECT across retry, saved edits/restart, stale refresh and cancellation.
+Real Mihomo additionally covers authenticated managed HTTPS, priority over system
+proxy, and cancellation on core stop. All 211 regular Rust tests and all 58
+real-Mihomo integration tests pass. Cargo check --workspace, Rust formatting,
+warning-free all-target Clippy, TypeScript/Vite and changed-file Prettier pass.
+The fresh target/mihomo-server-linux-x86_64-tls bundle builds successfully and its
+checksums and bundled provenance/deployment documents match.
+
+Actual-node smoke copies saved data into a temporary service and uses an unrelated
+platform CA plus an empty SSL_CERT_DIR. The first of 56 traffic candidates returns
+HTTPS 204 after node readback. Verified system-proxy subscription HTTPS then succeeds
+via static roots and reaches YAML validation, correctly rejecting the empty 204
+body without changing the catalog. Bypass is not enabled. Original data hashes
+remain unchanged, and no node details, tokens or credentials are printed. The same
+static-root/real-node smoke also passes with the release bundle binary.
+All 21 Chromium workflows pass against the fresh release bundle, including strict
+HTTPS rejection, retained failed drafts, explicit bypass import, saved flag/auxiliary
+links across service restart, restoring strict validation and successful explicit
+refresh after re-enabling the flag. This also re-verifies the previous MVP workflows.
+HTTPS fixtures require OpenSSL in the development/test environment, not at runtime.
+Fixture service/core and script-worker process counts are zero after cleanup.
+
+Git handoff: no sandbox Git writes or commits; the external host script owns the
+commit. The Linux MVP remains runnable and the full project is incomplete.
+Next Delivery step 7 subtask: scheduled remote updates with bounded admission,
+saved options, transactional refresh and shutdown cancellation. SOCKS/PAC, full
+DNS/hosts/native TUN settings, resources, upgrades, backups/WebDAV, advanced pages,
+immutable-file garbage collection and additional platform/deployment validation
+remain pending.
 
 ## MVP completion boundary
 

@@ -1066,3 +1066,38 @@ pending across core stop then succeeds. Provider/proxy requests never carry the
 management token. Browser import/edit choices preserve failed drafts and explicit
 false mode switches. Linux desktop gsettings, PAC/WPAD, SOCKS, TLS fallback/bypass,
 scheduling and other-platform runtime verification remain separate work.
+
+
+## Subscription TLS verification and static-root fallback
+
+Source: `src-tauri/src/utils/network.rs` at pinned commit
+`b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b`: `TlsRootMode`,
+`should_retry_with_static_webpki_roots`, `is_legacy_tls_protocol_error`,
+`context_reqwest_error`, `build_client`, and `get`. Destination:
+`service/src/remote/tls.rs` and `service/src/remote.rs`. This increment supersedes
+previous TLS-fallback/bypass pending notes above; other pending workflows remain.
+
+Retained behavior: platform verifier first, one static-root retry for the same
+TLS/certificate/revocation keyword classification, protocol-version errors excluded,
+explicit per-subscription certificate and hostname bypass with no root retry,
+TLS 1.2/1.3 and proxy priority. Reqwest's current public `tls_certs_only` API uses
+the already locked `webpki-root-certs` 1.0.9 DER Mozilla root bundle, corresponding
+to upstream's WebPKI trust anchors, instead of injecting an older preconfigured
+Rustls/ring client. The normal platform verifier remains unchanged; no extra
+production cryptography provider or package version is introduced.
+
+Service adaptations: both attempts consume one total timeout; the managed route
+and private credentials are borrowed across attempts, and system proxy discovery
+is still opt-in. URL-stripped transport errors preserve TLS error chains and the
+legacy-protocol diagnostic. HTTP/body/YAML failures never relax verification.
+Strict import/edit schemas persist the existing PrfOption boolean without touching
+linked enhancements. Refresh's full-option guard supersedes old downloads when
+this option changes. Web controls explain the effect and retain failed drafts.
+
+Ephemeral private OpenSSL certificates plus Rustls/Tokio HTTPS servers exercise
+untrusted/wrong-name failure, static retry, explicit bypass, total deadline,
+protocol-version alerts, body/status/size failures, HTTP-to-HTTPS redirects,
+platform custom CA, authenticated CONNECT routing, persistence, stale refresh and
+shutdown. These fixtures use only loopback addresses and delete their keys; real
+Mihomo integration additionally verifies managed priority and stop cancellation.
+Rustls and tokio-rustls test dependencies reuse already locked versions.

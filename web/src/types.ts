@@ -28,6 +28,7 @@ export interface Profile {
     allow_auto_update?: boolean;
     self_proxy?: boolean;
     with_proxy?: boolean;
+    danger_accept_invalid_certs?: boolean;
   };
   extra?: { upload: number; download: number; total: number; expire: number };
   selected?: { name?: string; now?: string }[];

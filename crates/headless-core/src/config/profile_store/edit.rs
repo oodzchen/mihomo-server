@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteOptionsPatch {
+    pub danger_accept_invalid_certs: Option<bool>,
     pub with_proxy: Option<bool>,
     pub self_proxy: Option<bool>,
     pub user_agent: Option<String>,
@@ -75,6 +76,7 @@ impl ProfileStore {
             item.option = PrfOption::merge(
                 item.option.as_ref(),
                 Some(&PrfOption {
+                    danger_accept_invalid_certs: option.danger_accept_invalid_certs,
                     with_proxy: option.with_proxy,
                     self_proxy: option.self_proxy,
                     user_agent: option.user_agent.map(Into::into),

@@ -1,8 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { createServer as createHttpServer, type Server } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 
@@ -11,6 +12,8 @@ let subscription: Server, subscriptionUrl: string;
 let subscriptionBody = "proxies: []\nmode: direct\n";
 let subscriptionUsage = "upload=1024; download=2048; total=4096; expire=0";
 let subscriptionRequests = 0;
+let tlsSubscription: Server, tlsSubscriptionUrl: string;
+let tlsSubscriptionRequests = 0;
 const errors: string[] = [];
 async function start() {
   const fixtureEnv = { ...process.env, MIHOMO_SERVER_DATA_DIR: directory };
@@ -115,6 +118,51 @@ test.beforeAll(async () => {
     throw new Error("No provider address");
   subscriptionUrl = `http://127.0.0.1:${provider.port}`;
   directory = await mkdtemp(join(tmpdir(), "ms-browser-"));
+  execFileSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-days",
+      "1",
+      "-subj",
+      "/CN=fixture.invalid",
+      "-addext",
+      "subjectAltName=DNS:fixture.invalid",
+      "-out",
+      join(directory, "tls.pem"),
+      "-keyout",
+      join(directory, "tls.key"),
+    ],
+    { stdio: "ignore" },
+  );
+  tlsSubscription = createHttpsServer(
+    {
+      cert: await readFile(join(directory, "tls.pem")),
+      key: await readFile(join(directory, "tls.key")),
+    },
+    (request, response) => {
+      tlsSubscriptionRequests += 1;
+      if (
+        request.headers.authorization ||
+        request.headers["proxy-authorization"]
+      )
+        throw new Error("Authentication forwarded to HTTPS provider");
+      response.writeHead(200, { "Subscription-Userinfo": subscriptionUsage });
+      response.end("proxies: []\nmode: direct\n");
+    },
+  );
+  tlsSubscription.on("tlsClientError", () => {}); // Expected strict-verifier failures.
+  await new Promise<void>((resolve) =>
+    tlsSubscription.listen(0, "127.0.0.1", resolve),
+  );
+  const tlsProvider = tlsSubscription.address();
+  if (!tlsProvider || typeof tlsProvider === "string")
+    throw new Error("No TLS provider address");
+  tlsSubscriptionUrl = `https://127.0.0.1:${tlsProvider.port}/subscription?token=private-browser-token`;
   const listener = createServer();
   await new Promise<void>((resolve) =>
     listener.listen(0, "127.0.0.1", resolve),
@@ -132,6 +180,9 @@ test.afterAll(async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
     await new Promise<void>((resolve) => subscription.close(() => resolve()));
+    await new Promise<void>((resolve) =>
+      tlsSubscription.close(() => resolve()),
+    );
   }
 });
 
@@ -2841,5 +2892,92 @@ test("service system proxy import and refresh work while the core is stopped and
   await expect(
     page.getByRole("heading", { name: "Keep system draft", exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+});
+
+test("HTTPS certificate option is explicit, keeps failed drafts and persists across restart and refresh", async ({
+  page,
+}) => {
+  const request = async (
+    command: string,
+    fields: Record<string, unknown> = {},
+  ) =>
+    fetch(`${base}/api/commands`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ command, ...fields }),
+    });
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await request(command, fields);
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  await api("stop");
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务", exact: true }).click();
+  await expect(
+    page.getByLabel("下载允许无效 TLS 证书", { exact: true }),
+  ).not.toBeChecked();
+  await page.getByLabel("订阅链接", { exact: true }).fill(tlsSubscriptionUrl);
+  await page.getByLabel("远程订阅名称（可选）").fill("TLS subscription");
+  await page.getByRole("button", { name: "下载并导入", exact: true }).click();
+  await expect(
+    page.getByText(/static webpki roots fallback failed/),
+  ).toBeVisible();
+  await expect(page.getByLabel("订阅链接", { exact: true })).toHaveValue(
+    tlsSubscriptionUrl,
+  );
+  await expect(page.getByLabel("远程订阅名称（可选）")).toHaveValue(
+    "TLS subscription",
+  );
+  expect(tlsSubscriptionRequests).toBe(0);
+  await page.getByLabel("下载允许无效 TLS 证书", { exact: true }).check();
+  await page.getByRole("button", { name: "下载并导入", exact: true }).click();
+  const card = page.locator("article.profile").filter({
+    has: page.getByRole("heading", { name: "TLS subscription", exact: true }),
+  });
+  await expect(card).toBeVisible();
+  const item = (await api("profiles")).items.find(
+    (p: { name: string }) => p.name === "TLS subscription",
+  );
+  expect(item.option.danger_accept_invalid_certs).toBe(true);
+  expect(tlsSubscriptionRequests).toBe(1);
+  const raw = await readFile(join(directory, "profiles", item.file));
+  await stop();
+  await start();
+  await expect(page.getByText("已连接", { exact: true })).toBeVisible({
+    timeout: 15000,
+  });
+  await api("stop");
+  await card
+    .getByRole("button", { name: "编辑订阅 TLS subscription", exact: true })
+    .click();
+  await expect(
+    page.getByLabel("订阅刷新允许无效 TLS 证书", { exact: true }),
+  ).toBeChecked();
+  await page.getByLabel("订阅刷新允许无效 TLS 证书", { exact: true }).uncheck();
+  await page.getByRole("button", { name: "保存订阅信息", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "保存订阅信息", exact: true }),
+  ).toHaveCount(0);
+  const saved = (await api("profiles")).items.find(
+    (p: { uid: string }) => p.uid === item.uid,
+  );
+  expect(saved.option.danger_accept_invalid_certs).toBe(false);
+  for (const key of ["merge", "script", "rules", "proxies", "groups"])
+    expect(saved.option[key]).toBe(item.option[key]);
+  expect((await request("refresh_profile", { uid: item.uid })).ok).toBe(false);
+  expect(tlsSubscriptionRequests).toBe(1);
+  expect(await readFile(join(directory, "profiles", item.file))).toEqual(raw);
+  await api("edit_profile", {
+    uid: item.uid,
+    patch: { options: { danger_accept_invalid_certs: true } },
+  });
+  await api("refresh_profile", { uid: item.uid });
+  expect(tlsSubscriptionRequests).toBe(2);
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
 });

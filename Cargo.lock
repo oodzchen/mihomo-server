@@ -1594,15 +1594,18 @@ dependencies = [
  "percent-encoding",
  "reqwest",
  "ring",
+ "rustls",
  "serde",
  "serde_json",
  "serde_yaml_ng",
  "smartstring",
  "tokio",
+ "tokio-rustls",
  "tokio-tungstenite 0.29.0",
  "tower",
  "tower-http",
  "url",
+ "webpki-root-certs",
 ]
 
 [[package]]
@@ -2230,6 +2233,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "aws-lc-rs",
+ "log",
  "once_cell",
  "rustls-pki-types",
  "rustls-webpki",
