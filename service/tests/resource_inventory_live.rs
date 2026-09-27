@@ -204,6 +204,16 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
             }
         }
         ensure!(successful, "no HTTPS 204 response through the tested live nodes");
+        let geo_runtime: headless_core::config::settings::RuntimeSettings = serde_yaml_ng::from_str("geodata-mode: false\ngeodata-loader: standard\ngeo-auto-update: false\ngeo-update-interval: 48\ngeox-url: {geoip: 'http://127.0.0.1:1/geoip', geosite: 'http://127.0.0.1:1/geosite', mmdb: 'http://127.0.0.1:1/mmdb', asn: 'http://127.0.0.1:1/asn'}")?;
+        manager.set_settings(geo_runtime.clone()).await?;
+        let geo_readback = manager.geo_settings().await?;
+        ensure!(geo_readback.running && geo_readback.error.is_none(), "Geo actual readback unavailable");
+        for field in &geo_readback.fields {
+            assert!(!field.setting.is_null() && !field.configured.is_null() && !field.actual.is_null(), "{} missing Geo readback", field.key);
+            assert_eq!(field.configured, field.actual, "{} differs in actual core", field.key);
+            assert!(!field.mismatch);
+        }
+        assert_eq!(manager.settings().await?.runtime, geo_runtime);
         let before_check = manager.status();
         let validation = manager.validate_geo("geoip.metadb".into()).await?;
         assert_eq!(validation.format, "mmdb");
@@ -257,6 +267,9 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
             manager.runtime_config().await?["proxy-providers"]["remote_two"]["path"],
             two
         );
+        let restored_geo = manager.geo_settings().await?;
+        ensure!(restored_geo.running && restored_geo.error.is_none(), "Geo readback unavailable after restart");
+        assert!(restored_geo.fields.iter().all(|field| !field.mismatch && field.setting == field.configured && field.configured == field.actual));
         ensure!(
             client
                 .get("https://cp.cloudflare.com/generate_204")

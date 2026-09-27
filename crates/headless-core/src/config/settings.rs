@@ -13,6 +13,8 @@ use serde_yaml_ng::Mapping;
 
 use super::runtime::{Revision, sync_directory, unique_id, write_new};
 
+mod geo;
+pub use geo::{GeoUrls, GeodataLoader};
 mod network;
 pub use network::{DnsMode, DnsSettings, TunSettings, TunStack};
 
@@ -63,6 +65,16 @@ pub struct RuntimeSettings {
     pub dns: Option<DnsSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tun: Option<TunSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geodata_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geodata_loader: Option<GeodataLoader>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geo_auto_update: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geo_update_interval: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geox_url: Option<GeoUrls>,
 }
 
 impl RuntimeSettings {
@@ -91,6 +103,13 @@ impl RuntimeSettings {
             cfg!(target_os = "linux") || self.tproxy_port.is_none(),
             "tproxy-port is supported only on Linux"
         );
+        ensure!(
+            self.geo_update_interval.is_none_or(|hours| (1..=8760).contains(&hours)),
+            "geo-update-interval must be 1–8760 hours"
+        );
+        if let Some(urls) = &self.geox_url {
+            urls.validate()?;
+        }
         if let Some(tun) = &self.tun {
             tun.validate()?;
         }
@@ -101,14 +120,14 @@ impl RuntimeSettings {
         self.validate()?;
         let mut config = super::runtime::generate(config, &Mapping::new())?;
         let mut values = self.owned_fields()?;
-        // DNS/TUN ownership is shallow and per key, preserving subscription fields.
-        for section in ["dns", "tun"] {
+        // Nested network/Geo ownership is per key, preserving subscription fields.
+        for section in ["dns", "tun", "geox-url"] {
             if let Some(value) = values.remove(section) {
                 let mut nested = config
                     .remove(section)
                     .and_then(|v| v.as_mapping().cloned())
                     .unwrap_or_default();
-                nested.extend(value.as_mapping().context("invalid network settings mapping")?.clone());
+                nested.extend(value.as_mapping().context("invalid nested settings mapping")?.clone());
                 config.insert(section.into(), nested.into());
             }
         }
@@ -123,7 +142,7 @@ impl RuntimeSettings {
             .as_mapping()
             .context("invalid runtime settings mapping")?
             .clone();
-        for section in ["dns", "tun"] {
+        for section in ["dns", "tun", "geox-url"] {
             if let Some(nested) = values.get_mut(section).and_then(|v| v.as_mapping_mut()) {
                 if section == "dns" {
                     nested.retain(|_, value| match value {
@@ -143,7 +162,7 @@ impl RuntimeSettings {
         Ok(values)
     }
 
-    /// Report changed owned leaves rather than attributing an entire DNS/TUN map.
+    /// Report changed owned leaves rather than attributing an entire nested map.
     pub fn overridden_fields(&self, before: &Mapping, after: &Mapping) -> Result<Vec<String>> {
         let mut changed = Vec::new();
         for (key, value) in self.owned_fields()? {
@@ -201,7 +220,12 @@ impl ServiceSettings {
                 .all(|uid| !uid.trim().is_empty() && uid.len() <= 256 && !uid.chars().any(char::is_control)),
             "invalid profile DNS UID"
         );
-        self.runtime.validate()
+        self.runtime.validate()?;
+        ensure!(
+            serde_yaml_ng::to_string(self)?.len() <= MAX_SETTINGS_BYTES,
+            "settings exceed 64 KiB"
+        );
+        Ok(())
     }
 }
 

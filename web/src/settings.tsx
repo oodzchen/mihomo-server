@@ -11,6 +11,7 @@ import {
 } from "./network-settings";
 import { ProfileDnsPanel } from "./profile-dns";
 import { useProxyAccess } from "./proxy-access";
+import { GEO_KEYS, GeoFields, GeoReadback, geoDraft, geoRuntime, validateGeo } from "./geo-settings";
 import { ResourcesPanel } from "./resources";
 
 type Settings = { schema_version: number; runtime: Runtime };
@@ -62,6 +63,7 @@ function options(
 function toDraft(settings: Settings): Draft {
   return Object.fromEntries([
     ...Object.entries(networkDraft(settings.runtime)),
+    ...Object.entries(geoDraft(settings.runtime)),
     ...fields.map((field) => [
       field.key,
       settings.runtime[field.key] == null
@@ -71,7 +73,7 @@ function toDraft(settings: Settings): Draft {
   ]);
 }
 function runtime(draft: Draft): Runtime {
-  const result: Runtime = networkRuntime(draft);
+  const result: Runtime = { ...networkRuntime(draft), ...geoRuntime(draft) };
   for (const field of fields) {
     const value = draft[field.key];
     if (value === "") continue;
@@ -97,7 +99,9 @@ function decode(value: unknown): Settings {
     Array.isArray(settings.runtime)
   )
     throw new Error("无法编辑此设置版本，请检查服务版本。");
+  validateGeo(settings.runtime);
   for (const [key, value] of Object.entries(settings.runtime)) {
+    if (GEO_KEYS.has(key)) continue;
     if (key === "dns" || key === "tun") {
       validateNetwork(key, value);
       continue;
@@ -395,6 +399,10 @@ export function SettingsPage({
             <button type="button" className="port-refresh" onClick={access.refresh} disabled={connection !== "已连接"}>
               刷新端口信息
             </button>
+            <GeoFields draft={draft} disabled={disabled} change={(key, value) => {
+              setDraft(previous => ({ ...previous, [key]: value }));
+              setError(""); setNotice(""); setConfirmation(undefined);
+            }} />
             <NetworkFields
               draft={draft}
               disabled={disabled}
@@ -482,6 +490,7 @@ export function SettingsPage({
         </p>
       </section>
       <div className="settings-side">
+        <GeoReadback token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
         <ResourcesPanel token={token} status={status} connection={connection} logout={logout} />
         <ProfileDnsPanel
           key={`${token}:${status.active_profile ?? ""}`}
@@ -519,6 +528,7 @@ export function SettingsPage({
           ) : (
             <p className="muted">尚未读取到设置。</p>
           )}
+          {saved && <pre className="network-snapshot" aria-label="已保存 Geo 设置">{JSON.stringify(Object.fromEntries([...GEO_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
           {saved && (
             <pre className="network-snapshot" aria-label="已保存网络设置">
               {JSON.stringify(

@@ -53,12 +53,12 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** explicit stopped-core MMDB installation from
-pinned bundle seeds, with current/candidate digest guards, atomic publication,
-interrupted-staging cleanup and Web actions. **Next implementation task (P1):**
-authoritative Geo runtime settings/readback, a prerequisite for controlled online
-updates. DAT validation, running-core Geo update/rollback and cross-revision
-provider cache ownership remain pending; finish P1 before starting P2.
+**Latest completed task (P1):** authoritative Geo runtime fields, per-URL
+inheritance, bounded validation and settings transactions, with Web editing and
+saved/configured/actual core readback. **Next implementation task (P1):** provider
+cache ownership across configuration revisions. DAT validation, controlled online
+and running-core Geo update/rollback, and other remaining full settings still
+belong to P1; finish this priority before starting P2.
 
 ## Complete target architecture
 
@@ -90,7 +90,7 @@ mihomo-server/
 │       ├── Profile catalog, files, local import     [Implemented; upstream schema]
 │       ├── Versioned settings store / explicit runtime fields [Implemented; Linux verified]
 │       ├── Settings/runtime journal / interrupted-update recovery [Implemented; Linux verified]
-│       ├── Full service settings and resource paths  [Pending]
+│       ├── Full service settings and resource paths  [Partially implemented; network/Geo authority and provider paths delivered]
 │       ├── Profile selection / current mirror      [Implemented]
 │       ├── Source controller removal / original YAML preservation [Implemented; Linux verified]
 │       ├── Remote URL/YAML/header processing        [Migrated + adaptation]
@@ -110,17 +110,18 @@ mihomo-server/
 │       ├── Transactional global editing / pointer recovery [Implemented]
 │       ├── Explicit runtime settings authority       [Implemented; Linux verified]
 │       ├── Typed DNS/TUN subset / shallow authority  [Implemented; Linux verified]
+│       ├── Typed Geo fields / per-URL authority / bounds / schema-one recovery [Implemented; Linux verified]
 │       ├── Pure TUN/DNS derivation / IPv6 range repair [Migrated + staged adaptation; Linux validation]
 │       ├── Provider DNS digest / profile preference / session confirmation [Migrated + adaptation; Linux verified]
 │       ├── Deleted-profile DNS preference / confirmation cleanup [Implemented; recoverable]
 │       ├── Hosts / native TUN integration            [Pending]
 │       ├── Final LAN bind / group cleanup / field order [Migrated + staged adaptation; Linux verified]
-│       ├── Full authoritative settings               [Pending]
+│       ├── Remaining authoritative settings          [Pending; P1]
 │       ├── Runtime YAML + overlay generation        [Implemented; upstream merge reused]
 │       ├── Profile enhancement generation          [Partially implemented; sequences/settings/TUN/DNS/global/profile/final stages]
 │       ├── Per-profile node selection records       [Implemented; upstream schema]
 │       ├── Provider path authority / normalized destinations / SHA-256 cache allocation [Migrated + service adaptation; Linux verified]
-│       ├── Geo lifecycle / resource settings         [Pending; P1]
+│       ├── Remaining Geo lifecycle / resource settings [Pending; P1; typed runtime fields delivered]
 │       ├── Proxy/rule/provider operation models      [Pending; P2 service integration; client models retained]
 │       ├── Immutable revision / orphan file garbage collection [Pending]
 │       ├── Timed update metadata / saved refresh source [Migrated + service scheduler]
@@ -148,7 +149,8 @@ mihomo-server/
 │   │   ├── Pinned Geo seed schema / bounded staging / no-overwrite bootstrap / orphan recovery [Implemented; Linux verified]
 │   │   ├── Read-only MMDB verification / pinned parser / metadata-only compatibility outcome [Implemented; Linux verified]
 │   │   ├── Stopped-core pinned MMDB replacement / digest guards / atomic commit / orphan recovery [Implemented; Linux verified]
-│   │   └── DAT validation / online and running-core Geo updates / full settings [Pending; P1]
+│   │   ├── Geo actor settings/config/core comparison / bounded readback / URL model aliases [Implemented; Linux verified]
+│   │   └── DAT validation / controlled online and running-core Geo updates / remaining full settings [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
 │   ├── Profile snapshots/watches and active UID     [Implemented]
@@ -263,6 +265,7 @@ mihomo-server/
 │   ├── Geo/Provider inventory / metadata states / refresh and retry [Implemented; Linux verified]
 │   ├── Explicit MMDB checks / errors and compatibility warnings / stale-result clearing [Implemented; Linux verified]
 │   ├── Pinned MMDB update inspection / stopped-state install / explicit metadata-only acceptance [Implemented; Linux verified]
+│   ├── Geo field editor / per-URL inheritance / saved-configured-actual readback / retry [Implemented; Linux verified]
 │   ├── Remaining full settings/resource lifecycle UI [Pending; P1]
 │   └── Backup UI [Deferred; outside active scope]
 ├── Release and deployment                           [Partially implemented]
@@ -3558,6 +3561,95 @@ Next task: authoritative Geo settings and readback within P1. This enables
 configuration-controlled Geo mode/URL/automatic-update behavior before adding
 online update transactions. DAT validation and provider cache ownership remain
 named P1 work; the usable MVP is preserved.
+
+
+## P1 increment: authoritative Geo settings and actual core readback
+
+The stopped-core bundle installation increment is complete and retained. This
+increment adds Geo settings to the existing schema-one runtime store rather than
+creating another settings file or publication path:
+
+- `geodata-mode`: optional bool (false selects MMDB, true selects DAT).
+- `geodata-loader`: optional standard/memconservative enum.
+- `geo-auto-update`: optional bool; false remains an explicit owned value.
+- `geo-update-interval`: optional integer, 1–8760 hours (service policy).
+- `geox-url`: optional geoip/geosite/mmdb/asn URL leaves. Each supplied URL must
+  be a nonempty HTTP(S) address with a host, no user credentials/fragment/whitespace,
+  and at most 8192 bytes. Loopback/private HTTP URLs are supported; query strings
+  are allowed. Validation errors do not echo URL values.
+
+Absent/null leaves inherit independently. An empty geox-url map owns no leaves;
+provided URLs shallowly override only their own entries, preserving other source
+and enhancement keys. Explicit fields enter the initial generation and are enforced
+again after scripts/manual overlays. Owned-leaf warnings identify discarded
+`geox-url.<leaf>` changes. Saved source YAML remains unchanged. Removing authority
+regenerates an active subscription; for standalone runtime edits, existing values
+remain until explicitly edited, matching the established settings semantics.
+
+`set_settings` continues using the actor-owned generation/probe/application/settings
+journal/runtime commit transaction. Failed core probes do not change settings,
+committed revision or the running PID. Stopped updates stay stopped, and old
+schema-one files with no Geo fields remain valid. The aggregate serialized settings
+size is now checked before starting a journal, preventing a valid individual Geo
+URL combined with large network settings from leaving an oversized unrecoverable
+transaction. The existing 64-KiB publication limit is retained.
+
+Authenticated `geo_settings` runs in the same actor. It returns eight named leaves
+with saved setting, committed configured value, actual core value and mismatch.
+A configured omission remains distinct from a known core default. Actual readback
+uses the retained client GET /configs with a three-second bound; stopped cores
+return unknown actual values and a running read failure reports a fixed error
+without inventing values. The client now accepts native `geoip`/`geosite` response
+keys and retained `geo-ip`/`geo-site` aliases while preserving camelCase output.
+
+The Web settings editor supports every delivered Geo field and preserves existing
+network/scalar settings during full replacements. Per-URL inheritance has its own
+container toggle. Saving includes confirmed settings readback. The Geo comparison
+panel refreshes on settings/lifecycle/revision changes, distinguishes inherited
+fields and actual mismatches, and clears stale results on failure/disconnect.
+Unknown settings remain protected from being silently dropped by the editor.
+
+**Scope boundary:** this configures Mihomo's native automatic-update behavior;
+it does not add a service-managed download/stage/update/rollback transaction.
+Enabling it lets Mihomo mutate resources itself. Switching modes does not prove
+DAT/MMDB resources or record schemas are valid, and settings GET /configs does
+not prove that a rule has loaded a database. Geosite matcher selection, general
+DAT validation, controlled live/online Geo updates and other full settings remain
+pending. The previously delivered offline pinned installer is unchanged.
+
+Validation:
+
+- `cargo check --workspace --locked --offline`, the service build and formatting
+  checks passed. Workspace tests passed: 351 regular tests, zero failures and 77
+  opt-in tests skipped by default; the two relevant real-core tests below were
+  explicitly enabled and passed separately.
+- Three Geo authority/schema tests plus aggregate-size protection cover per-leaf
+  preservation, explicit false, empty maps, enums/URL bounds and secret-free errors,
+  schema-one restart and interrupted settings recovery. Client alias and service
+  comparison tests cover real field keys, defaults, mismatches and unavailable cores.
+- Authenticated HTTP integration covers preconfiguration saved values, authority
+  across subscription/merge generation, unowned URL preservation, invalid-input
+  rejection with unchanged state, inheritance restoration and unchanged raw YAML.
+- The explicit real-Mihomo settings integration passed: initial/final script
+  authority, failed -t probe rollback with unchanged PID/revision, stopped saves,
+  service restart and matching actual core values.
+- The actual-node resource integration passed using private copies of data: all
+  eight saved/configured/actual leaves matched, including native geoip/geosite
+  URLs; MetaDB validation/install and HTTPS proxy 204 remained usable after restart,
+  with original node/Geo source hashes unchanged. Automatic update stayed disabled
+  and no test Geo URL was fetched.
+- TypeScript/Vite build and the full Playwright suite passed (25 workflows,
+  four optional checks skipped). The Geo editor saves through the real service,
+  rejects bad drafts locally and restores
+  inheritance; explicit response fixtures exercise read failures and mismatch
+  rendering. Existing settings editor and DNS/TUN inheritance workflows also
+  passed in their complete setup sequence.
+
+The complete tree is updated above. No dependencies, Git commits, backup expansion
+or P2/P3/P4 work are added. Next task: P1 durable provider cache ownership across
+revisions, preserving working node traffic and source data while preventing stale
+cache reuse across changed provider sources. Remaining P1 Geo formats/controlled
+updates/settings are still pending before advancing to P2.
 
 ## MVP completion boundary
 

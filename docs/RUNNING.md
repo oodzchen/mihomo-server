@@ -1225,8 +1225,9 @@ runtime:
   log-level: info
 ```
 
-Supported fields are the example above plus `redir-port` (non-Windows) and
-`tproxy-port` (Linux). Ports are integers 0–65535; zero disables that listener.
+Supported scalar fields are the example above plus `redir-port` (non-Windows) and
+`tproxy-port` (Linux). DNS/TUN and the Geo fields described below are also supported.
+Ports are integers 0–65535; zero disables that listener.
 Mode accepts `rule`, `global`, `direct`; log-level accepts `silent`, `error`,
 `warning`, `info`, `debug`. Missing/null fields inherit the source configuration.
 Explicit fields enter before global/profile enhancements and win in the final
@@ -2479,6 +2480,63 @@ never starts/restarts it or changes the configuration revision. Browser disconne
 or request cancellation after work begins cannot undo a committed file; inspect
 again after an ambiguous response. External file writers must honor the same data
 lock. Live/online updates, DAT handling and automatic runtime rollback are pending.
+
+
+## Authoritative Geo settings and readback
+
+The existing `set_settings` full-replacement command now accepts these optional
+Geo fields alongside the delivered ports, mode, DNS and TUN fields:
+
+```json
+{
+  "command": "set_settings",
+  "runtime": {
+    "geodata-mode": false,
+    "geodata-loader": "memconservative",
+    "geo-auto-update": false,
+    "geo-update-interval": 24,
+    "geox-url": {"mmdb": "https://example.org/country.mmdb"}
+  }
+}
+```
+
+Use an address for your own deployed resource instead of the example. Include
+other settings you want to retain: this command replaces the full runtime settings
+object. The Web editor does so automatically. Schema version remains 1.
+
+Mode false uses MMDB; true selects DAT. Loaders are standard/memconservative.
+Interval is 1–8760 hours; false boolean settings are explicit. Each of geoip,
+geosite, mmdb and asn download URLs inherits independently if absent/null. An empty
+geox-url object has no authority. URLs must be HTTP(S), nonempty and at most 8192
+bytes, with a host and no whitespace/control characters, user credentials or
+fragment. Query strings and loopback HTTP are allowed. The complete saved settings
+must fit 64 KiB, checked before a transaction is started.
+
+Geo fields are applied before enhancements and enforced again after them, including
+scripts, manual overlays and standalone configuration edits. Other geox-url source
+keys are retained. Removing fields restores active-subscription inheritance;
+standalone runtime configurations retain current values until edited, following
+existing settings semantics. Original subscription files are preserved. Probe/
+application failure uses the existing settings/runtime rollback and recovery.
+
+Read the comparison through the authenticated command:
+
+```json
+{"command":"geo_settings"}
+```
+
+It returns config_revision, running, optional error and eight fields. Each has key,
+setting, configured, actual and mismatch. Null setting means inheritance, null
+configured means not specified in the committed YAML, and null actual means unknown.
+A known core default for an unspecified field is not a mismatch. Stopped cores do
+not attempt core readback. Running readback is bounded to three seconds; failure
+keeps committed values and reports actual values as unknown. The settings page
+provides editing and refresh/retry for this same comparison.
+
+Enabling geo-auto-update configures Mihomo's native downloading and filesystem
+updates; service-managed online staging/rollback remains pending. The settings
+comparison does not prove file validity, required DAT availability or rule loading.
+Offline pinned MMDB installation remains a separate, explicit stopped-core action.
 
 ## Provider candidate paths and shared HTTP caches
 

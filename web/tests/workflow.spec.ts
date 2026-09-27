@@ -307,6 +307,79 @@ test("Geo bundle update requests guard hashes, require fresh inspection and reta
   await page.getByRole("button", { name: "退出登录" }).click();
 });
 
+test("Geo settings editor saves inherited URL leaves and reads core values with retry", async ({ page }) => {
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  const original = await api("settings");
+  await page.goto(`${base}/settings`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  const form = page.getByRole("region", { name: "服务设置编辑器", exact: true });
+  const readback = page.getByRole("region", { name: "Geo 设置读回", exact: true });
+  try {
+    await page.getByRole("combobox", { name: "Geo 数据模式", exact: true }).selectOption("false");
+    await page.getByRole("combobox", { name: "Geo 加载器", exact: true }).selectOption("standard");
+    await page.getByRole("combobox", { name: "Geo 自动更新", exact: true }).selectOption("false");
+    await page.getByRole("textbox", { name: "Geo 更新间隔（小时）", exact: true }).fill("0");
+    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+    await expect(form.getByRole("alert")).toContainText("1–8760");
+    expect(await api("settings")).toEqual(original);
+    await page.getByRole("textbox", { name: "Geo 更新间隔（小时）", exact: true }).fill("48");
+    await page.getByRole("checkbox", { name: "管理 Geo 下载地址", exact: true }).check();
+    await page.getByRole("textbox", { name: "MMDB 下载地址", exact: true }).fill("file:///etc/passwd");
+    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+    await expect(form.getByRole("alert")).toContainText("HTTP(S)");
+    expect(await api("settings")).toEqual(original);
+    await page.getByRole("textbox", { name: "MMDB 下载地址", exact: true }).fill("http://127.0.0.1:1/browser-mmdb");
+    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+    await expect(form.getByRole("status")).toContainText("保存结果已核对");
+    const saved = await api("settings");
+    expect(saved.runtime["geodata-mode"]).toBe(false);
+    expect(saved.runtime["geo-auto-update"]).toBe(false);
+    expect(saved.runtime["geodata-loader"]).toBe("standard");
+    expect(saved.runtime["geo-update-interval"]).toBe(48);
+    expect(saved.runtime["geox-url"]).toEqual({ mmdb: "http://127.0.0.1:1/browser-mmdb" });
+    const mmdb = readback.locator("li").filter({ has: page.getByText("geox-url.mmdb", { exact: true }) });
+    await expect(mmdb).toContainText("服务设置：http://127.0.0.1:1/browser-mmdb");
+    await expect(readback).toContainText("内核未运行，实际值未确认");
+    await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "MMDB 下载地址", exact: true })).toHaveValue("http://127.0.0.1:1/browser-mmdb");
+    let fail = true;
+    await page.route("**/api/commands", async route => {
+      if (route.request().postDataJSON().command === "geo_settings") {
+        if (fail) await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture Geo read failed" } }) });
+        else await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ config_revision: "fixture.yaml", running: true, error: null, fields: [{ key: "geox-url.mmdb", setting: "http://127.0.0.1:1/browser-mmdb", configured: "http://127.0.0.1:1/browser-mmdb", actual: "http://127.0.0.1:1/old", mismatch: true }] }) });
+      } else await route.continue();
+    });
+    await readback.getByRole("button", { name: "刷新 Geo 设置读回" }).click();
+    await expect(readback.getByRole("alert")).toContainText("fixture Geo read failed");
+    await expect(mmdb).toHaveCount(0);
+    fail = false;
+    await readback.getByRole("button", { name: "刷新 Geo 设置读回" }).click();
+    await expect(readback).toContainText("配置值与内核实际值不一致");
+    await expect(mmdb).toContainText("内核实际值：http://127.0.0.1:1/old");
+    await page.unroute("**/api/commands");
+    await readback.getByRole("button", { name: "刷新 Geo 设置读回" }).click();
+    await expect(readback).toContainText("内核未运行，实际值未确认");
+    await expect(readback).not.toContainText("配置值与内核实际值不一致");
+    await page.getByRole("combobox", { name: "Geo 数据模式", exact: true }).selectOption("");
+    await page.getByRole("combobox", { name: "Geo 自动更新", exact: true }).selectOption("");
+    await page.getByRole("combobox", { name: "Geo 加载器", exact: true }).selectOption("");
+    await page.getByRole("textbox", { name: "Geo 更新间隔（小时）", exact: true }).fill("");
+    await page.getByRole("checkbox", { name: "管理 Geo 下载地址", exact: true }).uncheck();
+    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+    await expect(form.getByRole("status")).toContainText("保存结果已核对");
+    expect((await api("settings")).runtime).toEqual(original.runtime);
+    await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  } finally {
+    await page.unroute("**/api/commands");
+    await api("set_settings", { runtime: original.runtime });
+  }
+});
+
 test("browser repairs failed startup, saves selection/config, restores after service restart and logs out", async ({
   page,
 }) => {

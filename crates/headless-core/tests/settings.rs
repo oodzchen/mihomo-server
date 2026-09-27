@@ -268,3 +268,136 @@ fn dns_page_empty_and_false_values_inherit_while_tun_false_and_empty_lists_are_o
     assert_eq!(SettingsStore::open(&dir.0)?.snapshot(), settings);
     Ok(())
 }
+
+#[test]
+fn geo_authority_is_per_url_leaf_false_is_explicit_and_empty_maps_inherit() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    let base = parse(
+        "geodata-mode: true\ngeodata-loader: memconservative\ngeo-auto-update: true\ngeo-update-interval: 24\ngeox-url: {geoip: 'https://source.invalid/ip', geosite: 'https://source.invalid/site', mmdb: 'https://source.invalid/db', future: preserved}\ncustom: unchanged",
+    )?;
+    let runtime: RuntimeSettings = serde_yaml_ng::from_str(
+        "geodata-mode: false\ngeodata-loader: standard\ngeo-auto-update: false\ngeo-update-interval: 48\ngeox-url: {mmdb: 'http://127.0.0.1/db'}",
+    )?;
+    let initial = runtime.prepare(base.clone())?;
+    assert_eq!(initial["geodata-mode"].as_bool(), Some(false));
+    assert_eq!(initial["geo-auto-update"].as_bool(), Some(false));
+    assert_eq!(initial["geo-update-interval"].as_u64(), Some(48));
+    assert_eq!(initial["geox-url"]["geoip"], base["geox-url"]["geoip"]);
+    assert_eq!(initial["geox-url"]["future"].as_str(), Some("preserved"));
+    let enhanced = parse(
+        "geodata-mode: true\ngeo-auto-update: true\ngeox-url: {mmdb: 'https://enhancement.invalid/db', geosite: 'https://enhancement.invalid/site', future: retained}",
+    )?;
+    let final_config = runtime.enforce(enhanced.clone())?;
+    assert_eq!(final_config["geox-url"]["mmdb"].as_str(), Some("http://127.0.0.1/db"));
+    assert_eq!(final_config["geox-url"]["geosite"], enhanced["geox-url"]["geosite"]);
+    assert!(
+        runtime
+            .overridden_fields(&enhanced, &final_config)?
+            .contains(&"geox-url.mmdb".into())
+    );
+    assert_eq!(
+        serde_yaml_ng::from_str::<RuntimeSettings>("geox-url: {}")?.enforce(base.clone())?,
+        base
+    );
+    assert_eq!(RuntimeSettings::default().enforce(final_config.clone())?, final_config);
+    Ok(())
+}
+
+#[test]
+fn geo_settings_validate_intervals_urls_and_enums_without_echoing_secrets() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    for yaml in [
+        "geodata-loader: invalid",
+        "geodata-mode: string",
+        "geo-auto-update: string",
+        "geo-update-interval: -1",
+        "geox-url: {unknown: 'https://example.org'}",
+    ] {
+        assert!(serde_yaml_ng::from_str::<RuntimeSettings>(yaml).is_err());
+    }
+    for yaml in [
+        "geo-update-interval: 0",
+        "geo-update-interval: 8761",
+        "geox-url: {mmdb: ''}",
+        "geox-url: {mmdb: 'file:///etc/passwd'}",
+        "geox-url: {mmdb: 'https://secret:private@example.org/db'}",
+        "geox-url: {mmdb: 'https://example.org/db#'}",
+        "geox-url: {mmdb: ' https://example.org/db'}",
+        "geox-url: {mmdb: 'https://example.org/db path'}",
+    ] {
+        let runtime = serde_yaml_ng::from_str::<RuntimeSettings>(yaml)?;
+        let error = runtime.validate().unwrap_err().to_string();
+        assert!(!error.contains("secret") && !error.contains("private") && !error.contains("passwd"));
+    }
+    let huge = format!("https://example.org/{}", "a".repeat(8192));
+    let runtime: RuntimeSettings = serde_json::from_value(serde_json::json!({"geox-url":{"mmdb":huge}}))?;
+    assert!(runtime.validate().is_err());
+    for hours in [1, 8760] {
+        let runtime: RuntimeSettings = serde_json::from_value(
+            serde_json::json!({"geo-update-interval":hours,"geox-url":{"mmdb":"https://example.org/db?token=private"}}),
+        )?;
+        runtime.validate()?;
+    }
+    Ok(())
+}
+
+#[test]
+fn geo_fields_persist_in_schema_one_and_follow_settings_transaction_recovery() -> Result<()> {
+    for committed in [false, true] {
+        let dir = Directory::new()?;
+        let mut runtime = RuntimeStore::open(&dir.0)?;
+        let prior = runtime.stage(parse("mode: direct")?)?;
+        runtime.begin(prior)?;
+        runtime.commit()?;
+        let mut store = SettingsStore::open(&dir.0)?;
+        let original = store.snapshot();
+        let mut candidate = original.clone();
+        candidate.runtime = serde_yaml_ng::from_str(
+            "geodata-mode: false\ngeo-auto-update: false\ngeo-update-interval: 48\ngeodata-loader: standard\ngeox-url: {geoip: 'http://127.0.0.1/ip', geosite: 'https://example.org/site', mmdb: 'https://example.org/db', asn: 'https://example.org/asn'}",
+        )?;
+        let next = runtime.stage(candidate.runtime.enforce(parse("mode: direct")?)?)?;
+        runtime.begin(next.clone())?;
+        store.begin(candidate.clone(), next)?;
+        store.publish()?;
+        if committed {
+            runtime.commit()?;
+        }
+        drop(store);
+        drop(runtime);
+        let runtime = RuntimeStore::open(&dir.0)?;
+        let mut store = SettingsStore::open(&dir.0)?;
+        store.recover(runtime.state().current.as_ref())?;
+        assert_eq!(store.snapshot(), if committed { candidate } else { original });
+        assert!(!dir.0.join("settings-transaction.yaml").exists());
+    }
+    Ok(())
+}
+
+#[test]
+fn oversized_combined_settings_are_rejected_before_a_transaction_journal_is_written() -> Result<()> {
+    let dir = Directory::new()?;
+    let store = SettingsStore::open(&dir.0)?;
+    let original = store.snapshot();
+    let mut candidate = original.clone();
+    candidate.runtime.geox_url = Some(serde_json::from_value(
+        serde_json::json!({"mmdb":format!("https://example.org/{}", "a".repeat(8000))}),
+    )?);
+    candidate.runtime.dns = Some(serde_json::from_value(
+        serde_json::json!({"nameserver":["x".repeat(MAX_SETTINGS_BYTES-1000)]}),
+    )?);
+    assert!(candidate.runtime.validate().is_ok());
+    assert!(candidate.validate().is_err());
+    assert!(
+        store
+            .begin(
+                candidate,
+                headless_core::config::runtime::Revision {
+                    file: "candidate.yaml".into()
+                }
+            )
+            .is_err()
+    );
+    assert_eq!(SettingsStore::open(&dir.0)?.snapshot(), original);
+    assert!(!dir.0.join("settings-transaction.yaml").exists());
+    Ok(())
+}

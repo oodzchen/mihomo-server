@@ -52,6 +52,7 @@ pub enum ManagementCommand {
     Config {},
     Settings {},
     Resources {},
+    GeoSettings {},
     #[cfg(unix)]
     GeoSeed {
         name: String,
@@ -276,6 +277,7 @@ impl Management {
                     .await?,
             )?,
             ManagementCommand::ValidateGeo { name } => serde_json::to_value(self.manager.validate_geo(name).await?)?,
+            ManagementCommand::GeoSettings {} => serde_json::to_value(self.manager.geo_settings().await?)?,
             ManagementCommand::Resources {} => serde_json::to_value(self.manager.resource_inventory().await?)?,
             ManagementCommand::ProxyAccess {} => crate::proxy_access::inspect(&self.manager).await?,
             ManagementCommand::SetSettings { runtime } => {

@@ -730,3 +730,68 @@ async fn finalization_waits_for_all_scripts_and_restored_settings_authority() ->
     result?;
     cleanup
 }
+
+#[tokio::test]
+#[ignore = "requires real Mihomo and bounded script worker"]
+async fn geo_settings_enforce_scripts_rollback_failed_probe_and_survive_service_restart() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    let dir = Directory::new()?;
+    let manager = CoreManager::spawn(dir.options()?)?;
+    let runtime: RuntimeSettings = serde_yaml_ng::from_str(
+        "geodata-mode: false\ngeodata-loader: standard\ngeo-auto-update: false\ngeo-update-interval: 48\ngeox-url: {geoip: 'http://127.0.0.1:1/ip', geosite: 'http://127.0.0.1:1/site', mmdb: 'http://127.0.0.1:1/db', asn: 'http://127.0.0.1:1/asn'}",
+    )?;
+    let result = async {
+        manager.set_settings(runtime.clone()).await?;
+        let source = "mode: direct\nmixed-port: 0\ngeodata-mode: false\ngeo-auto-update: false\ngeo-update-interval: 24\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']";
+        let profile = manager.import_profile_yaml(source.into(), "geo".into()).await?;
+        let uid = profile.uid.unwrap().to_string();
+        manager.select_profile(uid.clone()).await?;
+        manager.set_profile_script(uid.clone(), Some("function main(c) { c['geo-input']=c['geodata-mode']; if(c['geo-update-interval']===49) c.rules=['INVALID,DIRECT']; c['geodata-mode']=true; c['geo-auto-update']=true; c['geox-url']=c['geox-url']||{}; c['geox-url'].mmdb='http://127.0.0.1:1/script'; return c; }".into())).await?;
+        let config = manager.runtime_config().await?;
+        assert_eq!(config["geo-input"].as_bool(), Some(false));
+        assert_eq!(config["geodata-mode"].as_bool(), Some(false));
+        assert_eq!(config["geo-auto-update"].as_bool(), Some(false));
+        assert_eq!(config["geox-url"]["mmdb"].as_str(), Some("http://127.0.0.1:1/db"));
+        manager.start().await?;
+        let readback = manager.geo_settings().await?;
+        assert!(readback.running && readback.error.is_none());
+        assert!(readback.fields.iter().all(|f| !f.mismatch && f.setting == f.configured && f.configured == f.actual));
+        let before = manager.status(); let saved = manager.settings().await?;
+        let mut invalid = runtime.clone(); invalid.geo_update_interval = Some(49);
+        assert!(manager.set_settings(invalid).await.is_err());
+        assert_eq!(manager.settings().await?, saved);
+        assert_eq!(manager.status().config_revision, before.config_revision);
+        assert_eq!(manager.status().pid, before.pid);
+        assert_eq!(manager.runtime_config().await?, config);
+        assert_eq!(manager.profile_raw(uid.clone()).await?.yaml, source);
+        manager.stop().await?;
+        manager.set_settings(RuntimeSettings::default()).await?;
+        assert_eq!(manager.runtime_config().await?["geodata-mode"].as_bool(), Some(true));
+        assert_eq!(manager.runtime_config().await?["geox-url"]["mmdb"].as_str(), Some("http://127.0.0.1:1/script"));
+        let saved = manager.set_settings(runtime.clone()).await?;
+        assert_eq!(manager.status().phase, CorePhase::Stopped);
+        assert!(manager.geo_settings().await?.fields.iter().all(|f| f.actual.is_null()));
+        assert_eq!(manager.profile_raw(uid).await?.yaml, source);
+        Ok::<_, anyhow::Error>(saved)
+    }.await;
+    let cleanup = manager.shutdown().await;
+    let saved = result?;
+    cleanup?;
+    let restored = CoreManager::spawn(dir.options()?)?;
+    let result = async {
+        restored.start().await?;
+        assert_eq!(restored.settings().await?, saved);
+        let actual = restored.geo_settings().await?;
+        assert!(actual.running && actual.error.is_none());
+        assert!(
+            actual
+                .fields
+                .iter()
+                .all(|f| !f.mismatch && f.setting == f.configured && f.configured == f.actual)
+        );
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let cleanup = restored.shutdown().await;
+    result.and(cleanup)
+}

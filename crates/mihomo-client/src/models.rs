@@ -341,9 +341,11 @@ impl Display for LogLevel {
 #[serde(default)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "kebab-case"))]
 pub struct GeoXUrl {
+    #[serde(rename(deserialize = "geoip"), alias = "geo-ip")]
     pub geo_ip: String,
     pub mmdb: String,
     pub asn: String,
+    #[serde(rename(deserialize = "geosite"), alias = "geo-site")]
     pub geo_site: String,
 }
 
@@ -954,3 +956,18 @@ pub type WsConnectionId = Uuid;
 
 #[derive(Default, Clone)]
 pub struct ConnectionManager(pub Arc<ClashMap<WsConnectionId, WsWriteKind>>);
+
+#[cfg(test)]
+mod geo_url_tests {
+    #[test]
+    fn geoip_geosite_core_keys_and_legacy_aliases_preserve_browser_serialization() {
+        for (ip, site) in [("geoip", "geosite"), ("geo-ip", "geo-site")] {
+            let value: super::GeoXUrl = serde_json::from_value(serde_json::json!({ip:"https://example.org/ip",site:"https://example.org/site","mmdb":"https://example.org/db","asn":"https://example.org/asn"})).unwrap();
+            assert_eq!(value.geo_ip, "https://example.org/ip");
+            assert_eq!(value.geo_site, "https://example.org/site");
+            let encoded = serde_json::to_value(value).unwrap();
+            assert_eq!(encoded["geoIp"], "https://example.org/ip");
+            assert_eq!(encoded["geoSite"], "https://example.org/site");
+        }
+    }
+}

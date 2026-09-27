@@ -127,6 +127,26 @@ and explicit metadata-only acceptance. There are no new dependencies. Online cor
 `update_geo`/`upgrade_geo`, DAT validation, multi-file Geo transactions and runtime
 rollback after failed activation are still pending.
 
+## Authoritative Geo runtime settings and comparison
+
+Original service adaptation. The retained Mihomo BaseConfig/GeoXUrl client models
+provide the response field names; upstream `setting-clash.tsx` exposes a separate
+Geo update action, which is not copied or invoked here. Configuration mode, loader
+values, download keys and the interval's hour unit are verified against the
+[official Mihomo general configuration](https://wiki.metacubex.one/en/config/general/).
+The service's 1–8760-hour, 8192-byte URL and aggregate settings bounds are explicit
+service policies rather than claimed upstream validation limits.
+
+`headless-core/config/settings/geo.rs` supplies optional typed fields and per-URL
+ownership, reusing existing settings transactions and script-stage enforcement.
+`service/geo_settings.rs` supplies actor-serialized saved/configured/actual comparison
+using retained GET /configs. Client model changes accept native geoip/geosite keys,
+retain older geo-ip/geo-site aliases and keep existing camelCase serialization.
+Web editing/readback and aggregate pre-journal size validation are service code.
+No new dependencies or upstream source copying occur. Native automatic updating
+is configurable; service-controlled online update transactions, DAT validation and
+geosite matcher settings remain pending.
+
 ## Mihomo plugin
 
 - Repository: https://github.com/clash-verge-rev/tauri-plugin-mihomo
