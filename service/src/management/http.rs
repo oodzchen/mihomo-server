@@ -1,0 +1,193 @@
+//! A small, explicit HTTP surface; mutations reuse the serialized manager.
+use super::assets::WebAssets;
+use super::websocket;
+use super::{Management, ManagementCommand, RequestCredentials};
+use axum::{
+    Json, Router,
+    extract::{DefaultBodyLimit, Request, State, rejection::JsonRejection},
+    http::{HeaderMap, StatusCode, header},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+};
+use serde_json::json;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
+/// Includes the JSON envelope. Domain YAML limits still apply independently.
+pub const MAX_REQUEST_BYTES: usize = 9 * 1024 * 1024;
+pub const MAX_WEBSOCKETS: u32 = 32;
+
+#[derive(Clone)]
+pub struct HttpState {
+    pub(super) management: Arc<Management>,
+    accepting: Arc<AtomicBool>,
+    pub(super) closing: tokio::sync::watch::Sender<bool>,
+    pub(super) sessions: Arc<tokio::sync::Semaphore>,
+    pub(super) assets: Option<WebAssets>,
+}
+
+impl HttpState {
+    pub fn new(management: Management) -> Self {
+        Self {
+            management: Arc::new(management),
+            accepting: Arc::new(AtomicBool::new(true)),
+            closing: tokio::sync::watch::channel(false).0,
+            sessions: Arc::new(tokio::sync::Semaphore::new(MAX_WEBSOCKETS as usize)),
+            assets: None,
+        }
+    }
+
+    pub fn with_web_assets(mut self, directory: &std::path::Path) -> anyhow::Result<Self> {
+        self.assets = Some(WebAssets::open(directory)?);
+        Ok(self)
+    }
+
+    /// Close command admission before requesting core shutdown.
+    pub fn close(&self) {
+        self.accepting.store(false, Ordering::SeqCst);
+        self.closing.send_replace(true);
+    }
+
+    /// Axum's HTTP graceful shutdown does not await upgraded socket tasks.
+    pub async fn drain_websockets(&self) {
+        if let Ok(permits) = Arc::clone(&self.sessions).acquire_many_owned(MAX_WEBSOCKETS).await {
+            drop(permits);
+        }
+    }
+}
+
+pub fn router(state: HttpState) -> Router {
+    Router::new()
+        .route("/api/commands", post(command))
+        .route("/api/status", get(status))
+        .route("/api/logs", get(logs))
+        .route("/api/profiles", get(profiles))
+        .route("/api/config", get(config))
+        .route("/api/proxies", get(proxies))
+        .route("/api/events", get(websocket::events))
+        .route("/api/streams/{feed}", get(websocket::stream))
+        .fallback(super::assets::serve)
+        .method_not_allowed_fallback(|| async {
+            error(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "method_not_allowed",
+                "method is not allowed",
+            )
+        })
+        .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
+        .layer(middleware::from_fn_with_state(state.clone(), authenticate))
+        .with_state(state)
+}
+
+fn credentials(headers: &HeaderMap) -> Result<RequestCredentials<'_>, &'static str> {
+    fn single(headers: &HeaderMap, name: header::HeaderName) -> Result<Option<&str>, &'static str> {
+        let mut values = headers.get_all(name).iter();
+        let first = values.next();
+        if values.next().is_some() {
+            return Err("duplicate credential header");
+        }
+        first
+            .map(|value| value.to_str().map_err(|_| "invalid credential header"))
+            .transpose()
+    }
+    Ok(RequestCredentials {
+        host: single(headers, header::HOST)?.unwrap_or(""),
+        origin: single(headers, header::ORIGIN)?,
+        authorization: single(headers, header::AUTHORIZATION)?,
+    })
+}
+
+async fn authenticate(State(state): State<HttpState>, request: Request, next: Next) -> Response {
+    let mut response = if !state.accepting.load(Ordering::SeqCst) {
+        error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "shutting_down",
+            "service is shutting down",
+        )
+    } else {
+        match credentials(request.headers()) {
+            Err(message) => error(StatusCode::BAD_REQUEST, "invalid_headers", message),
+            Ok(credentials)
+                if if websocket::is_route(request.uri().path()) || !super::assets::is_api(request.uri().path()) {
+                    state
+                        .management
+                        .authentication
+                        .authorize_origin(credentials.host, credentials.origin)
+                        .is_err()
+                        || credentials
+                            .authorization
+                            .is_some_and(|_| state.management.authorize(credentials).is_err())
+                } else {
+                    state.management.authorize(credentials).is_err()
+                } =>
+            {
+                let mut response = error(StatusCode::UNAUTHORIZED, "unauthorized", "authentication required");
+                response
+                    .headers_mut()
+                    .insert(header::WWW_AUTHENTICATE, "Bearer".parse().unwrap());
+                response
+            }
+            Ok(_) if super::assets::is_api(request.uri().path()) && request.uri().query().is_some() => error(
+                StatusCode::BAD_REQUEST,
+                "invalid_query",
+                "query parameters are not supported",
+            ),
+            Ok(_) => next.run(request).await,
+        }
+    };
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    response
+        .headers_mut()
+        .insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
+    response
+}
+
+pub fn error(status: StatusCode, code: &str, message: &str) -> Response {
+    (status, Json(json!({"error": {"code": code, "message": message}}))).into_response()
+}
+
+async fn execute(state: HttpState, headers: HeaderMap, command: ManagementCommand) -> Response {
+    let credentials = match credentials(&headers) {
+        Ok(credentials) => credentials,
+        Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_headers", message),
+    };
+    match state.management.execute(credentials, command).await {
+        Ok(value) => Json(value).into_response(),
+        // Validation/application errors preserve their actionable domain context.
+        // A failed operation can already have attempted recovery; inspect status.
+        Err(cause) => error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "operation_failed",
+            &format!("{cause:#}"),
+        ),
+    }
+}
+
+async fn command(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    body: Result<Json<ManagementCommand>, JsonRejection>,
+) -> Response {
+    match body {
+        Ok(Json(command)) => execute(state, headers, command).await,
+        Err(rejection) => error(rejection.status(), "invalid_request", &rejection.body_text()),
+    }
+}
+
+macro_rules! read_route {
+    ($function:ident, $command:ident) => {
+        async fn $function(State(state): State<HttpState>, headers: HeaderMap) -> Response {
+            execute(state, headers, ManagementCommand::$command {}).await
+        }
+    };
+}
+read_route!(status, Status);
+read_route!(logs, Logs);
+read_route!(profiles, Profiles);
+read_route!(config, Config);
+read_route!(proxies, Proxies);

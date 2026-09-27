@@ -1,0 +1,29 @@
+[workspace]
+members = ["crates/clash-verge-draft", "crates/clash-verge-limiter", "crates/headless-core", "crates/mihomo-client", "service"]
+default-members = ["service"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98.1"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace.dependencies]
+clash-verge-draft = { path = "crates/clash-verge-draft" }
+clash-verge-limiter = { path = "crates/clash-verge-limiter" }
+headless-core = { path = "crates/headless-core" }
+mihomo-client = { path = "crates/mihomo-client" }
+anyhow = "1.0.104"
+parking_lot = { version = "0.12.5", features = ["hardware-lock-elision"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+criterion = { version = "0.8.2", features = ["async_tokio"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_yaml_ng = "0.10.0"
+smartstring = { version = "1.0.1", features = ["serde"] }
+serde_json = "1.0.151"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"

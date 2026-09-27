@@ -1,0 +1,17 @@
+[Unit]
+Description=Headless Mihomo management service
+After=network.target
+
+[Service]
+Type=simple
+Environment=MIHOMO_SERVER_DATA_DIR=%h/.local/share/mihomo-server
+ExecStart=%h/.local/opt/mihomo-server/launch
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=default.target

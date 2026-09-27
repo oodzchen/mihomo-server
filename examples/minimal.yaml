@@ -1,0 +1,18 @@
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+ipv6: false
+external-controller: ""
+profile:
+  store-selected: false
+dns:
+  enable: false
+tun:
+  enable: false
+proxy-groups:
+  - name: Main
+    type: select
+    proxies: [DIRECT, REJECT]
+rules:
+  - MATCH,Main
