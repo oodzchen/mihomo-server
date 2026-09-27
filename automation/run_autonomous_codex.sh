@@ -674,7 +674,7 @@ auto_commit_subtask_changes() {
 
     log_info "检测到本轮产生未提交代码改动，正在由宿主执行自动 Git 提交..."
 
-    # 提取结构化提交信息
+    # 提取结构化提交信息 (强制英文 Conventional Commit，彻底过滤测试流水表述)
     local commit_msg
     commit_msg=$(python3 - "$last_msg_file" "$turn_num" <<'PYEOF'
 import re, os, sys
@@ -692,31 +692,70 @@ def build_commit():
             pass
 
     if not lines:
-        return f"chore(turn-{turn}): complete autonomous subtask\n\nTurn #{turn} automated commit by host runner."
+        return f"feat(core): implement autonomous subtask {turn}"
 
+    content = "\n".join(lines)
+    test_filter = re.compile(
+        r"(?i)(验证通过|验证结果|测试通过|测试结果|测试未改动|测试进程|tests?\s+passed|verified|"
+        r"cargo\s+check|cargo\s+test|npm\s+test|clippy|playwright|browser\s+flows?|https\s+请求返回|"
+        r"architecture\.md|已同步|未能提交|已尝试提交|改动保留在工作区|```)"
+    )
+
+    # 1. 优先提取显式声明的 COMMIT_START ... COMMIT_END 块
+    m_block = re.search(r"COMMIT_START\s*\n(.*?)\n\s*COMMIT_END", content, re.DOTALL | re.I)
+    if m_block:
+        block_lines = [l.strip() for l in m_block.group(1).splitlines() if l.strip()]
+        clean_lines = [l for l in block_lines if not test_filter.search(l)]
+        if clean_lines:
+            return "\n".join(clean_lines)
+
+    # 2. 回退处理：如果没有显式块，提取并规范化第一行为英文 Conventional Commit
     first = lines[0]
-    # 清理 markdown 粗体、斜体、代码、标题和链接
-    clean_title = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", first)
-    clean_title = re.sub(r"\*\*|__|[*`#]", "", clean_title)
-    clean_title = re.sub(r"^[：:]+|[：:]+$", "", clean_title).strip()
+    first = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", first)
+    first = re.sub(r"\*\*|__|[*`#]", "", first)
+    first = re.sub(r"^[：:]+|[：:]+$", "", first).strip()
+    first = re.sub(r"^(本轮|当前|本次)?(已完成|完成了|完成)[：:\s]*", "", first).strip()
+    first = re.sub(r"^(feat|fix|refactor|chore|docs|test|style)[:\s]+", "", first, flags=re.I).strip()
 
-    # 规范化 commit 标题
-    if not re.match(r"^(feat|fix|refactor|chore|docs|test|style)\b", clean_title, re.I):
-        if len(clean_title) > 65:
-            clean_title = clean_title[:62] + "..."
-        subject = f"feat: {clean_title}"
+    lower_first = first.lower()
+    if "tls" in lower_first or "证书" in lower_first or "信任根" in lower_first:
+        subject = "feat(remote): support TLS root certificate fallbacks and security options"
+    elif "with_proxy" in lower_first:
+        subject = "feat(service): add with_proxy subscription downloads via system proxy"
+    elif "self_proxy" in lower_first:
+        subject = "feat(service): add self_proxy subscription downloads via managed core"
+    elif "cascade_delete" in lower_first or "级联删除" in lower_first:
+        subject = "feat(profile): implement auxiliary profile cascade deletion"
+    elif "import" in lower_first or "辅助项" in lower_first or "订阅" in lower_first:
+        subject = "feat(profile): auto-create auxiliary profiles on subscription import"
+    elif "merge" in lower_first or "script" in lower_first:
+        subject = "feat(profile): support global merge and script enhancement"
+    elif "dns" in lower_first or "tun" in lower_first:
+        subject = "feat(config): support dns and tun configuration management"
+    elif re.match(r"^[a-zA-Z0-9_\-\(\): ]+$", first):
+        if not re.match(r"^(feat|fix|refactor|chore|docs|test)\b", first, re.I):
+            subject = f"feat: {first[:65]}"
+        else:
+            subject = first
     else:
-        subject = clean_title
+        en_words = re.findall(r"[a-zA-Z0-9_\-]+", first)
+        if en_words:
+            subject = f"feat: support {' '.join(en_words[:3])}"
+        else:
+            subject = f"feat(core): implement autonomous subtask {turn}"
 
+    # 3. 提取额外英文说明列表，彻底过滤任何测试相关的表述
     body_lines = []
     for l in lines[1:8]:
-        if "```" in l or "ARCHITECTURE.md" in l or "已同步" in l or "未能提交" in l or "已尝试提交" in l:
-            break
-        body_lines.append(l)
+        if test_filter.search(l):
+            continue
+        # 仅保留纯英文的列表项说明
+        if l.startswith(("-", "*", "•")) and re.match(r"^[-*•]\s*[a-zA-Z]", l):
+            body_lines.append(l)
 
-    body = "\n".join(body_lines).strip()
-    footer = f"\n\nTurn #{turn} autonomous subtask completion.\nAutomated commit by host runner."
-    return subject + ("\n\n" + body if body else "") + footer
+    if body_lines:
+        return subject + "\n\n" + "\n".join(body_lines)
+    return subject
 
 print(build_commit())
 PYEOF
@@ -762,10 +801,17 @@ generate_initial_prompt() {
 4. 【强制要求 - 同步进度】：在完成该小任务并验证后，必须立即编辑 ./docs/ARCHITECTURE.md 文档：
    - 更新 ## Complete target architecture 中的状态标签（例如将 [Pending] 变更为 [Partially implemented] 或 [Implemented]）。
    - 更新文档底部的迁移状态与进度记录，说明本次变更、验证结果和下一步计划。
-5. 【重要 - 关于 Git 自动提交】：
-   - Linux Codex 沙箱环境按安全设计将 .git 目录挂载为只读，因此在沙箱内部执行 git add / git commit 会报错 "Read-only file system" 或无法创建 index.lock。
-   - 请【绝对不要】在沙箱内尝试执行 git 提交命令。
-   - 外部自动化宿主运行脚本 (automation/run_autonomous_codex.sh) 会在每轮子任务完成并验证通过后，自动代你在宿主机上将代码改动原子提交到 Git 并记录提交信息。你只需专注于编写代码、跑通测试验证、并同步更新 ./docs/ARCHITECTURE.md 即可！
+5. 【重要 - 关于 Git 自动提交与英文格式规范】：
+   - Linux Codex 沙箱环境按安全设计将 .git 目录挂载为只读，因此在沙箱内部执行 git add / git commit 会报错 "Read-only file system"。请【绝对不要】在沙箱内尝试执行 git 提交命令。
+   - 外部自动化宿主运行脚本 (automation/run_autonomous_codex.sh) 会在每轮子任务完成并验证通过后，自动代你在宿主机上将代码改动原子提交到 Git。
+   - 【规范化英文提交要求】：为保证 Git 提交历史的一致性与专业性，请务必在你的最终答复最开头提供一段标准的英文 Conventional Commit 块，格式如下：
+     COMMIT_START
+     <type>(<scope>): <concise English summary of the change>
+
+     - <key implementation detail 1 in English>
+     - <key implementation detail 2 in English>
+     COMMIT_END
+     （注意：严禁在 COMMIT 信息块中包含“验证通过/Tests passed/cargo check/browser tests”等测试流水表述，只陈述实际代码与功能改动本身！）
 6. 【重要 - 完成判定与标志输出】：
    当且仅当 ./headless.md 和 ./docs/ARCHITECTURE.md 中所要求的所有架构组件（核心库、Axum API、WebSocket、Web UI 适配、生命周期管理、配置增强与事务、单服务打包部署与测试验证）全部完整实现并通过验证时，在本次最终回答的最末尾单独输出一行特定标记字符串：
    $COMPLETION_FLAG
@@ -785,7 +831,14 @@ $extra_warning
 3. 【上游参考】：若需要参考上游原始实现，可直接查阅 ../clash-verge-rev 目录中的源码。
 4. 运行 \`cargo check --workspace\` 及相关测试，验证修改的正确性。
 5. 【强制要求 - 同步进度】：完成该小任务后，必须同步更新 ./docs/ARCHITECTURE.md 文件中的架构树状态与进度总结。
-6. 【关于 Git 提交】：.git 在沙箱内为只读挂载，请勿在沙箱内执行 git commit；每轮完成后外部宿主脚本会自动代你提交。你只需专注于代码实现、验证测试以及同步更新 ./docs/ARCHITECTURE.md。
+6. 【重要 - 关于 Git 提交与英文格式规范】：
+   - .git 在沙箱内为只读挂载，请勿在沙箱内执行 git commit；每轮完成后外部宿主脚本会自动代你提交。
+   - 请务必在最终答复最开头声明标准的英文 Conventional Commit 块（严禁包含“验证通过/Tests passed/cargo test”等测试流水表述）：
+     COMMIT_START
+     <type>(<scope>): <concise English summary of code change>
+
+     - <key technical change in English>
+     COMMIT_END
 7. 【重要 - 完成判定】：
    如果且仅如果整个项目的目标与功能已全部完成并验证通过，请在最后输出特定完成标志：
    $COMPLETION_FLAG
