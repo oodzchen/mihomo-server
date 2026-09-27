@@ -392,6 +392,10 @@ enum CommandMessage {
         confirmation: Option<String>,
         reply: oneshot::Sender<Result<DnsOverrideOutcome>>,
     },
+    ValidateGeo {
+        name: String,
+        reply: oneshot::Sender<Result<crate::geo_validation::Validation>>,
+    },
     ReadSettings(oneshot::Sender<Result<ServiceSettings>>),
     ReadResources(oneshot::Sender<Result<crate::resource_inventory::Inventory>>),
     SetSettings {
@@ -1261,6 +1265,16 @@ impl CoreManager {
         result.await.context("settings read cancelled during shutdown")?
     }
 
+    pub async fn validate_geo(&self, name: String) -> Result<crate::geo_validation::Validation> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::ValidateGeo { name, reply })
+            .await
+            .context("core manager stopped")?;
+        result.await.context("Geo validation cancelled during shutdown")?
+    }
+
     pub async fn resource_inventory(&self) -> Result<crate::resource_inventory::Inventory> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let (reply, result) = oneshot::channel();
@@ -1797,6 +1811,7 @@ impl Actor {
                             CommandMessage::ReadEnhancement { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::DeleteProfile { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadConfig(reply) => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
+                            CommandMessage::ValidateGeo { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadResources(reply) => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadSettings(reply) | CommandMessage::SetSettings { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::Control(request) => { let _ = request.reply.send(Err(anyhow::anyhow!(message))); }
@@ -1943,6 +1958,14 @@ impl Actor {
                         }
                         CommandMessage::ReadConfig(reply) => {
                             let _ = reply.send(self.store.read_current());
+                        }
+                        CommandMessage::ValidateGeo { name, reply } => {
+                            if !reply.is_closed() {
+                                let data = self.options.data_dir.clone();
+                                let result = tokio::task::spawn_blocking(move || crate::geo_validation::validate(&data, &name))
+                                    .await.context("Geo validation worker failed").and_then(|result| result);
+                                let _ = reply.send(result);
+                            }
                         }
                         CommandMessage::ReadResources(reply) => {
                             if !reply.is_closed() {

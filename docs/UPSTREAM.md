@@ -90,6 +90,26 @@ packager accepts explicitly pinned existing seed files and copies only named Geo
 assets. Tauri paths, logging and automatic overwrite are omitted. The code checks
 content integrity; generic Geo-format validation and updates remain future work.
 
+## Explicit MMDB validation and compatibility diagnostics
+
+Original service adaptation; no new clash-verge-rev source is copied. Upstream
+`src-tauri/src/core/validate.rs` references Geo resources in validation, while the
+retained Mihomo client has `update_geo`/`upgrade_geo`. This increment adds a
+separate read-only service operation rather than exposing those mutating calls.
+
+The pinned `maxminddb` 0.32.0 dependency supplies the format parser and strict
+verification; see its [Reader documentation](https://docs.rs/maxminddb/0.32.0/maxminddb/struct.Reader.html#method.verify).
+Default features are disabled (no mmap/unsafe string decoding). Cargo.lock also
+pins its `ipnetwork` dependency. The service confines and bounds the snapshot,
+serializes checks in the actor, suppresses record-bearing parser errors and returns
+a SHA-256 plus fixed status fields. Missing metadata descriptions are reported as
+unverified compatibility warnings, based on the real local Geo file and Mihomo
+traffic test, rather than silently bypassed or considered fully verified.
+
+Web checks and strict/metadata-only outcome tests are service code. No general
+DAT parser, country/ASN schema validator, upload/update/rollback flow or upstream
+Geo auto-update behavior is claimed migrated by this increment.
+
 ## Mihomo plugin
 
 - Repository: https://github.com/clash-verge-rev/tauri-plugin-mihomo

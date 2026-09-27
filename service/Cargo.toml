@@ -23,6 +23,7 @@ tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.6.11", features = ["fs"] }
 percent-encoding = "2.3.2"
 ring = "=0.17.14"
+maxminddb = { version = "=0.32.0", default-features = false }
 flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
 zip = { version = "=8.6.0", default-features = false }
 futures-util = "0.3"

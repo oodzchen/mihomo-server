@@ -204,6 +204,17 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
             }
         }
         ensure!(successful, "no HTTPS 204 response through the tested live nodes");
+        let before_check = manager.status();
+        let validation = manager.validate_geo("geoip.metadb".into()).await?;
+        assert_eq!(validation.format, "mmdb");
+        assert_eq!(validation.verified, validation.warning.is_none());
+        if let Some(warning) = validation.warning {
+            assert_eq!(warning, "empty_description_structure_unverified");
+        }
+        assert_eq!(validation.bytes, fs::metadata(directory.0.join("geoip.metadb"))?.len());
+        assert_eq!(validation.sha256, hex(&fs::read(directory.0.join("geoip.metadb"))?));
+        assert_eq!(manager.status().pid, before_check.pid);
+        assert_eq!(manager.status().config_revision, before_check.config_revision);
         let installed = fs::read(directory.0.join("geoip.metadb"))?;
         fs::write(bundle.join("geo/geoip.metadb"), "bundle changed after initialization")?;
         assert!(resources.initialize_geo(&directory.0)?.is_empty());

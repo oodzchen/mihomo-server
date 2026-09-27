@@ -2392,9 +2392,39 @@ this command does not change whether Mihomo accepts the configuration.
 that its content format is valid or that a running core has loaded it. Missing Geo
 files may be normal when rules do not require them. The filesystem can change after
 a read; refresh after a core download or external file change. Geo installation,
-updates/format-specific validation and Provider refresh/reload APIs remain future
-work. Optional bundle Geo seeds can now initialize missing files under pinned
+controlled updates, DAT validation and Provider refresh/reload APIs remain future
+work. MMDB checks are available explicitly as described below. Optional bundle Geo seeds can now initialize missing files under pinned
 size/SHA-256 checks; see [Geo deployment inputs](DEPLOYMENT.md#include-existing-geo-files-for-first-use-initialization).
+
+
+## Validate a Geo MMDB snapshot
+
+The Resources panel offers explicit checks for existing `Country.mmdb`, `ASN.mmdb`
+and `geoip.metadb`. The authenticated equivalent is:
+
+```json
+{"command":"validate_geo","name":"geoip.metadb"}
+```
+
+Only those three case-sensitive names are accepted, with no custom path/URL.
+The command works while the core is stopped or running and reads a bounded local
+snapshot without modifying files, configuration, or the core. Empty/special/link
+files, inputs above 128 MiB/two million nodes and invalid databases are rejected.
+A completed report contains `name`, `format: "mmdb"`, `bytes`, `sha256`,
+`ip_version`, `node_count`, `build_epoch`, `verified` and `warning`.
+
+`verified: true` means the strict parser checked metadata, tree, separator and
+referenced records. It does not prove country/ASN schema compatibility, rule
+coverage, freshness or Mihomo readback. `verified: false` with
+`warning: "empty_description_structure_unverified"` means metadata can be read,
+but the strict verifier stopped before checking the tree/data because the
+metadata description is empty. Real Mihomo MetaDB files can have that condition;
+it is not a declaration of corruption or a successful full validation. Other
+verification failures return 422 with a fixed diagnostic, without database records.
+
+Results identify the snapshot by SHA-256. Refresh clears them; external file
+changes/core automatic updates require a fresh check. This increment exposes no
+Geo download, upload, replacement, or DAT validation command.
 
 ## Provider candidate paths and shared HTTP caches
 

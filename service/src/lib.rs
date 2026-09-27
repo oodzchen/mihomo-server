@@ -4,6 +4,7 @@ pub mod core_release;
 pub mod core_upgrade;
 #[cfg(unix)]
 mod geo_resources;
+pub mod geo_validation;
 pub mod management;
 mod proxy_access;
 pub mod remote;

@@ -211,6 +211,26 @@ test("resource inventory reads metadata, refreshes changes and retries without e
     await panel.getByRole("button", { name: "刷新资源清单" }).click();
     await expect(country).toContainText("文件存在");
     await expect(country).toContainText("16 字节");
+    await country.getByRole("button", { name: "校验 Country.mmdb", exact: true }).click();
+    await expect(country.getByRole("alert")).toContainText("invalid MMDB");
+    expect(await readFile(join(directory, "Country.mmdb"), "utf8")).toBe("metadata fixture");
+    await page.route("**/api/commands", async route => {
+      if (route.request().postDataJSON().command === "validate_geo") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ verified: true, warning: null, sha256: "a".repeat(64), bytes: 16, ip_version: 4, node_count: 1 }) });
+      } else await route.continue();
+    });
+    await country.getByRole("button", { name: "校验 Country.mmdb", exact: true }).click();
+    await expect(country.getByRole("status")).toContainText("MMDB 结构校验通过");
+    await page.unroute("**/api/commands");
+    await page.route("**/api/commands", async route => {
+      if (route.request().postDataJSON().command === "validate_geo") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ verified: false, warning: "empty_description_structure_unverified", sha256: "a".repeat(64), bytes: 16, ip_version: 4, node_count: 1 }) });
+      } else await route.continue();
+    });
+    await country.getByRole("button", { name: "校验 Country.mmdb", exact: true }).click();
+    await expect(country.getByRole("status")).toContainText("完整结构未验证");
+    await expect(country).not.toContainText("MMDB 结构校验通过");
+    await page.unroute("**/api/commands");
     let failed = false;
     await page.route("**/api/commands", async route => {
       if (route.request().postDataJSON().command === "resources" && !failed) {
@@ -223,6 +243,8 @@ test("resource inventory reads metadata, refreshes changes and retries without e
     await writeFile(join(directory, "Country.mmdb"), "");
     await panel.getByRole("button", { name: "刷新资源清单" }).click();
     await expect(country).toContainText("空文件");
+    await expect(country.getByRole("status")).toHaveCount(0);
+    await expect(country.getByRole("button")).toHaveCount(0);
     await expect(panel.getByRole("alert")).toHaveCount(0);
     await expect(panel).toContainText("尚未验证内容格式");
     await page.unroute("**/api/commands");

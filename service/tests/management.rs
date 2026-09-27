@@ -114,6 +114,22 @@ async fn resource_inventory_authenticates_tracks_committed_config_and_redacts_so
         assert!(empty["config_revision"].is_null());
         assert_eq!(empty["geo"].as_array().unwrap().len(), 6);
         assert_eq!(empty["providers"], json!([]));
+        let geo = json!({"command":"validate_geo", "name":"Country.mmdb"});
+        let (status, _) = response(&app, request("wrong", "/api/commands", Some(geo.clone()))?).await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        std::fs::write(directory.0.join("Country.mmdb"), "invalid MMDB")?;
+        let before_check = manager.status();
+        let (status, invalid) = response(&app, request(&token, "/api/commands", Some(geo))?).await?;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(invalid.to_string().contains("invalid MMDB"));
+        assert_eq!(std::fs::read(directory.0.join("Country.mmdb"))?, b"invalid MMDB");
+        assert_eq!(manager.status().generation, before_check.generation);
+        assert_eq!(manager.status().config_revision, before_check.config_revision);
+        for payload in [json!({"command":"validate_geo", "name":"../Country.mmdb"}), json!({"command":"validate_geo", "name":"geoip.dat"}), json!({"command":"validate_geo", "name":"Country.mmdb", "path":"/etc/passwd"})] {
+            let (status, _) = response(&app, request(&token, "/api/commands", Some(payload))?).await?;
+            assert!(!status.is_success());
+        }
+
         std::fs::create_dir(directory.0.join("providers"))?;
         std::fs::write(directory.0.join("providers/one.yaml"), "payload: []")?;
         manager.apply_config(serde_yaml_ng::from_str("mode: direct\nrule-providers:\n  local: {type: http, path: ./providers/one.yaml, behavior: classical, url: 'https://secret.invalid/private-token'}\nproxy-providers:\n  remote: {type: http, path: providers/one.yaml, url: 'https://secret.invalid/private-token', header: {Authorization: [private-header]}}\n")?).await?;

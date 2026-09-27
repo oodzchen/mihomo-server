@@ -52,6 +52,9 @@ pub enum ManagementCommand {
     Config {},
     Settings {},
     Resources {},
+    ValidateGeo {
+        name: String,
+    },
     ProxyAccess {},
     ProfileDns {
         uid: String,
@@ -242,6 +245,7 @@ impl Management {
             ManagementCommand::Logs {} => serde_json::to_value(self.manager.logs())?,
             ManagementCommand::Profiles {} => serde_json::to_value(self.manager.profiles())?,
             ManagementCommand::Settings {} => serde_json::to_value(self.manager.settings().await?)?,
+            ManagementCommand::ValidateGeo { name } => serde_json::to_value(self.manager.validate_geo(name).await?)?,
             ManagementCommand::Resources {} => serde_json::to_value(self.manager.resource_inventory().await?)?,
             ManagementCommand::ProxyAccess {} => crate::proxy_access::inspect(&self.manager).await?,
             ManagementCommand::SetSettings { runtime } => {

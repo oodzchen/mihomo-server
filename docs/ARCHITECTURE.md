@@ -53,11 +53,13 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** optional integrity-pinned Geo bundle seeds and
-no-overwrite first-use initialization under the data lock, with existing provider
-path authority/inventory retained. **Next implementation task (P1):** Geo format
-validation and controlled updates. Full settings and cross-revision provider cache
-ownership remain pending; finish this priority before starting P2.
+**Latest completed task (P1):** authenticated, actor-serialized read-only MMDB
+validation and resource-page actions, with snapshot SHA-256 and explicit strict
+verification/metadata-only compatibility outcomes. Optional Geo seeds and provider
+path authority remain delivered. **Next implementation task (P1):** controlled Geo
+replacement/update and recovery, including remaining DAT format validation. Full
+settings and cross-revision provider cache ownership remain pending; finish this
+priority before starting P2.
 
 ## Complete target architecture
 
@@ -145,7 +147,8 @@ mihomo-server/
 │   │   ├── Final candidate provider normalization / conflict allocation / preserved source YAML [Implemented; Linux verified]
 │   │   ├── Probe/start/reload resource-path checks / service-file protection [Implemented; Linux verified]
 │   │   ├── Pinned Geo seed schema / bounded staging / no-overwrite bootstrap / orphan recovery [Implemented; Linux verified]
-│   │   └── Geo format validation / controlled updates / full settings [Pending; P1]
+│   │   ├── Read-only MMDB verification / pinned parser / metadata-only compatibility outcome [Implemented; Linux verified]
+│   │   └── DAT validation / controlled Geo updates / full settings [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
 │   ├── Profile snapshots/watches and active UID     [Implemented]
@@ -258,6 +261,7 @@ mihomo-server/
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
 │   ├── Geo/Provider inventory / metadata states / refresh and retry [Implemented; Linux verified]
+│   ├── Explicit MMDB checks / errors and compatibility warnings / stale-result clearing [Implemented; Linux verified]
 │   ├── Full settings/resource lifecycle UI [Pending; P1]
 │   └── Backup UI [Deferred; outside active scope]
 ├── Release and deployment                           [Partially implemented]
@@ -3404,6 +3408,73 @@ full settings and cross-revision provider cache ownership. P2 operations/views,
 P3 i18n/signals, P4 actual systemd installation and all deferred expansions remain
 unfinished. Optional local Geo packaging supports this P1 slice and does not
 complete the full P4 deployment/release scope.
+
+
+## P1 increment: explicit MMDB verification and compatibility diagnostics
+
+The previous Geo-seed increment is complete and retained. This increment adds
+`service/src/geo_validation.rs`, the authenticated `validate_geo` command and
+resource-page validation buttons for `Country.mmdb`, `ASN.mmdb` and
+`geoip.metadb`. These are service adaptations, not a copied upstream command.
+
+The lifecycle actor serializes validation with service mutations; filesystem and
+parser work runs on a blocking worker. A fixed filename whitelist and descriptor
+opens (`O_NOFOLLOW`, `O_NONBLOCK`, real data directory) reject arbitrary paths,
+links and special files before reading. Inputs are nonempty regular files bounded
+to 128 MiB and two million search nodes. File size/change timestamps are checked
+around the bounded snapshot read. The report contains only filename, format,
+bytes, SHA-256, IP version, node count, build epoch, `verified` and a fixed optional
+warning; parser diagnostics/records never enter responses. Validation neither
+changes runtime revisions/PID nor downloads or publishes files.
+
+Pinned `maxminddb` 0.32.0 verifies metadata, search-tree structure, separator and
+referenced data records with its bounded verifier. Invalid input returns 422.
+Structural verification does not establish country/ASN record-schema compatibility,
+rule coverage, freshness, or that the running core has loaded this exact snapshot.
+External writers and Mihomo auto-updates can change the file after the read;
+the SHA-256 identifies the verified snapshot, not a durable resource receipt.
+
+**Real-data compatibility finding:** the current `data/geoip.metadb` has an empty
+metadata description. Mihomo can use it, but the strict MaxMind verifier stops
+before tree/data verification on that metadata condition. This exact condition
+returns `verified: false` and `empty_description_structure_unverified`, displayed
+as metadata-readable with full structure unverified. This is never a successful
+structural check and never inferred to mean Mihomo cannot read the database. Other
+verification errors remain failures. No Geo bytes or metadata are patched to
+silence this difference. DAT validation and controlled update/recovery are pending.
+
+The Web actions distinguish success, invalid-file errors and the compatibility
+warning. Refresh, runtime revision/lifecycle changes, disconnect, logout and
+unmount invalidate/abort pending browser requests and clear old results. The
+metadata-only inventory remains inexpensive; opening the page does not trigger
+full-file checks automatically.
+
+Validation:
+
+- `cargo check --workspace --locked --offline` and the service build passed;
+  the regular workspace suite passed 339 tests, with 76 opt-ins ignored.
+- Three MMDB boundary tests cover valid snapshots, corrupt tree/record/separator,
+  missing descriptions, links/FIFO, empty/oversized files and filename policy.
+  Authenticated command tests cover authorization, rejected overrides, invalid
+  databases and unchanged runtime state.
+- The actual-node opt-in test passed using private copies of the real Geo and
+  subscription data. It received the expected metadata-only warning and matching
+  SHA-256, retained PID/revision, exercised the Mihomo Geo loader, and returned
+  HTTPS 204 through actual nodes before/after restart. Source data was unchanged.
+- Web TypeScript/Vite build passed. The targeted Playwright resource workflow
+  passed against the real service: invalid-file errors, success rendering,
+  metadata-only warning rendering, refresh/retry and stale-result clearing.
+  Success/warning rendering uses explicit API fixtures; actual Geo readback is
+  exercised separately by the real-Mihomo Rust integration.
+
+The complete architecture tree above now distinguishes delivered MMDB diagnostics
+from pending DAT validation/update/settings. P2 operations, P3 i18n/signals and P4
+actual systemd installation remain pending; backup expansion remains deferred.
+No Git writes occur in the sandbox; the host owns the Conventional Commit.
+
+Next task: controlled Geo replacement/update and recovery within P1, followed by
+remaining full settings and provider cache ownership. Preserve the usable MVP and
+complete these priorities before expanding other capabilities.
 
 ## MVP completion boundary
 
