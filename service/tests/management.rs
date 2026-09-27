@@ -25,6 +25,78 @@ use tower::ServiceExt as _;
 struct Directory(PathBuf);
 
 #[tokio::test]
+async fn provider_candidate_policy_preserves_sources_and_rejects_unsafe_edits_before_probe() -> Result<()> {
+    let directory = Directory::new()?;
+    let manager = directory.manager()?;
+    std::fs::write(
+        directory.0.join("validator.py"),
+        "#!/usr/bin/python3\nimport sys,pathlib\nif '-t' not in sys.argv: sys.exit(1)\np=pathlib.Path(sys.argv[sys.argv.index('-d')+1])\n(p/'probe-marker').write_text('probe')\nsys.exit(1 if 'reject-validator' in pathlib.Path(sys.argv[sys.argv.index('-f')+1]).read_text() else 0)\n",
+    )?;
+    let app = router(HttpState::new(Management::new(
+        manager.clone(),
+        directory.authentication()?,
+    )));
+    let token = directory.token()?;
+    let result = async {
+        let raw = "mode: direct\nproxy-providers:\n  one: {type: http, path: ./providers/shared.yaml, url: 'https://one.invalid/private-one'}\n  two: {type: http, path: providers/shared.yaml, url: 'https://two.invalid/private-two'}\n";
+        let profile = manager.import_profile_yaml(raw.into(), "source".into()).await?;
+        let uid = profile.uid.unwrap().to_string();
+        manager.select_profile(uid.clone()).await?;
+        assert!(directory.0.join("probe-marker").exists());
+        let config = manager.runtime_config().await?;
+        let one = config["proxy-providers"]["one"]["path"].clone();
+        let two = config["proxy-providers"]["two"]["path"].clone();
+        assert_ne!(one, two);
+        assert!(one.as_str().unwrap().starts_with("providers/cvr-"));
+        assert_eq!(manager.profile_raw(uid.clone()).await?.yaml, raw);
+        manager.set_settings(serde_yaml_ng::from_str("ipv6: false")?).await?;
+        assert_eq!(manager.runtime_config().await?["proxy-providers"]["one"]["path"], one);
+        assert_eq!(manager.runtime_config().await?["proxy-providers"]["two"]["path"], two);
+        let committed = manager.runtime_config().await?;
+        let before = manager.status().config_revision;
+        let settings = manager.settings().await?;
+        let catalog = serde_json::to_value(manager.profiles())?;
+        std::fs::remove_file(directory.0.join("probe-marker"))?;
+        std::fs::create_dir(directory.0.join("providers"))?;
+        symlink("/etc", directory.0.join("providers/escape"))?;
+        for path in ["../outside.yaml", "settings.yaml", "profiles/source.yaml", "Country.mmdb", "validator.py", "providers/escape/not-created.yaml"] {
+            let yaml = format!("proxy-providers: {{bad: {{type: http, path: {path}, url: 'https://fixture.invalid/private-url'}}}}");
+            let (status, error) = response(&app, request(&token, "/api/commands", Some(json!({"command":"edit_config", "yaml":yaml})))?).await?;
+            assert!(!status.is_success());
+            assert!(!error.to_string().contains("private-url"));
+            assert_eq!(manager.status().config_revision, before);
+            assert!(!directory.0.join("probe-marker").exists());
+        }
+        assert!(manager.set_profile_merge(uid.clone(), Some("proxy-providers: {one: {path: ../unsafe.yaml}}".into())).await.is_err());
+        assert!(!directory.0.join("probe-marker").exists());
+        assert_eq!(manager.status().config_revision, before);
+        assert_eq!(serde_json::to_value(manager.profiles())?, catalog);
+        let inactive = manager.import_profile_yaml("mode: direct".into(), "inactive".into()).await?.uid.unwrap().to_string();
+        let catalog = serde_json::to_value(manager.profiles())?;
+        let original = manager.profile_raw(inactive.clone()).await?;
+        assert!(manager.set_profile_raw(inactive.clone(), original.revision.clone(), "proxy-providers: {bad: {type: http, path: ../outside, url: 'https://fixture.invalid'}}".into()).await.is_err());
+        assert_eq!(manager.profile_raw(inactive).await?.yaml, original.yaml);
+        assert!(!directory.0.join("probe-marker").exists());
+        assert!(manager.edit_config(serde_yaml_ng::from_str("mode: direct\nmarker: reject-validator\nproxy-providers:\n  a: {type: http, path: providers/test.yaml, url: 'https://one.invalid'}\n  b: {type: http, path: providers/test.yaml, url: 'https://two.invalid'}")?).await.is_err());
+        assert!(directory.0.join("probe-marker").exists());
+        assert_eq!(manager.runtime_config().await?, committed);
+        assert_eq!(manager.status().config_revision, before);
+        assert_eq!(manager.settings().await?, settings);
+        assert_eq!(manager.profile_raw(uid).await?.yaml, raw);
+        assert_eq!(serde_json::to_value(manager.profiles())?, catalog);
+        std::fs::remove_file(directory.0.join("probe-marker"))?;
+        symlink("/etc/passwd", directory.0.join(one.as_str().unwrap()))?;
+        assert!(manager.start().await.is_err());
+        assert!(!directory.0.join("probe-marker").exists());
+        assert_eq!(manager.status().config_revision, before);
+        assert!(manager.status().pid.is_none());
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
 async fn resource_inventory_authenticates_tracks_committed_config_and_redacts_sources() -> Result<()> {
     let directory = Directory::new()?;
     let manager = directory.manager()?;
@@ -44,7 +116,7 @@ async fn resource_inventory_authenticates_tracks_committed_config_and_redacts_so
         assert_eq!(empty["providers"], json!([]));
         std::fs::create_dir(directory.0.join("providers"))?;
         std::fs::write(directory.0.join("providers/one.yaml"), "payload: []")?;
-        manager.apply_config(serde_yaml_ng::from_str("mode: direct\nrule-providers:\n  local: {type: file, path: ./providers/one.yaml, behavior: classical}\nproxy-providers:\n  remote: {type: http, path: providers/one.yaml, url: 'https://secret.invalid/private-token', header: {Authorization: [private-header]}}\n")?).await?;
+        manager.apply_config(serde_yaml_ng::from_str("mode: direct\nrule-providers:\n  local: {type: http, path: ./providers/one.yaml, behavior: classical, url: 'https://secret.invalid/private-token'}\nproxy-providers:\n  remote: {type: http, path: providers/one.yaml, url: 'https://secret.invalid/private-token', header: {Authorization: [private-header]}}\n")?).await?;
         let before = manager.status();
         let (status, value) = response(&app, request(&token, "/api/commands", Some(payload.clone()))?).await?;
         assert!(status.is_success(), "{value}");

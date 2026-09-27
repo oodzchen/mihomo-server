@@ -5,6 +5,7 @@ mod prfitem;
 pub mod profile_store;
 mod profiles;
 pub mod remote;
+pub mod resource_paths;
 pub mod runtime;
 pub mod settings;
 

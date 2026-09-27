@@ -7,6 +7,12 @@ use serde_yaml_ng::{Mapping, Value};
 use std::{fs, os::unix::fs::DirBuilderExt as _, path::PathBuf, time::Duration};
 
 struct Directory(PathBuf);
+struct Server(tokio::task::JoinHandle<()>);
+impl Drop for Server {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
 impl Drop for Directory {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
@@ -41,6 +47,22 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
         directory.0.join("providers/nodes.yaml"),
         serde_yaml_ng::to_string(&provider)?,
     )?;
+    let provider_yaml = serde_yaml_ng::to_string(&provider)?;
+    let app = axum::Router::new()
+        .route(
+            "/one",
+            axum::routing::get(|axum::extract::State(yaml): axum::extract::State<String>| async move { yaml }),
+        )
+        .route(
+            "/two",
+            axum::routing::get(|axum::extract::State(yaml): axum::extract::State<String>| async move { yaml }),
+        )
+        .with_state(provider_yaml);
+    let provider_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let provider_url = format!("http://{}", provider_listener.local_addr()?);
+    let _server = Server(tokio::spawn(async move {
+        let _ = axum::serve(provider_listener, app).await;
+    }));
     fs::write(
         directory.0.join("providers/rules.yaml"),
         "payload: ['DOMAIN,example.org']\n",
@@ -54,7 +76,7 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
     let port = listener.local_addr()?.port();
     drop(listener);
     let config = format!(
-        "mixed-port: {port}\nallow-lan: false\nmode: rule\ndns: {{enable: false}}\ntun: {{enable: false}}\nproxy-providers:\n  nodes: {{type: file, path: providers/nodes.yaml}}\nrule-providers:\n  local: {{type: file, behavior: classical, path: providers/rules.yaml}}\nproxy-groups:\n  - {{name: verification, type: select, use: [nodes]}}\nrules: ['RULE-SET,local,verification', 'MATCH,verification']\n"
+        "mixed-port: {port}\nallow-lan: false\nmode: rule\ndns: {{enable: false}}\ntun: {{enable: false}}\nproxy-providers:\n  nodes: {{type: file, path: providers/nodes.yaml}}\n  remote_one: {{type: http, path: ./providers/shared.yaml, url: '{provider_url}/one'}}\n  remote_two: {{type: http, path: providers/shared.yaml, url: '{provider_url}/two'}}\nrule-providers:\n  local: {{type: file, behavior: classical, path: providers/rules.yaml}}\nproxy-groups:\n  - {{name: verification, type: select, use: [nodes]}}\nrules: ['RULE-SET,local,verification', 'MATCH,verification']\n"
     );
     let config_path = directory.0.join("bootstrap.yaml");
     fs::write(&config_path, &config)?;
@@ -64,20 +86,42 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
     let manager = CoreManager::spawn(options)?;
     let result = async {
         let profile = manager
-            .import_profile_yaml(config, "isolated live providers".into())
+            .import_profile_yaml(config.clone(), "isolated live providers".into())
             .await?;
-        manager
-            .select_profile(profile.uid.context("import did not assign UID")?.to_string())
-            .await?;
+        let uid = profile.uid.context("import did not assign UID")?.to_string();
+        manager.select_profile(uid.clone()).await?;
         manager.start().await?;
         let inventory = manager.resource_inventory().await?;
         assert_eq!(inventory.config_revision, manager.status().config_revision);
-        assert_eq!(inventory.providers.len(), 2);
+        assert_eq!(inventory.providers.len(), 4);
         for provider in &inventory.providers {
             assert_eq!(provider.state, mihomo_server::resource_inventory::FileState::Available);
             assert!(!provider.conflict);
             assert!(provider.bytes.unwrap() > 0);
         }
+        let committed = manager.runtime_config().await?;
+        let one = committed["proxy-providers"]["remote_one"]["path"].as_str().unwrap();
+        let two = committed["proxy-providers"]["remote_two"]["path"].as_str().unwrap();
+        assert_ne!(one, two);
+        assert!(one.starts_with("providers/cvr-") && two.starts_with("providers/cvr-"));
+        assert!(directory.0.join(one).is_file() && directory.0.join(two).is_file());
+        assert!(!directory.0.join("providers/shared.yaml").exists());
+        assert_eq!(manager.profile_raw(uid.clone()).await?.yaml, config);
+        let providers = manager.client().get_proxy_providers().await?;
+        assert_eq!(providers.providers["remote_one"].proxies.len(), names.len());
+        assert_eq!(providers.providers["remote_two"].proxies.len(), names.len());
+        let before = manager.status();
+        assert!(
+            manager
+                .apply_overlay(serde_yaml_ng::from_str(
+                    "proxy-providers: {remote_one: {path: ../outside.yaml}}"
+                )?)
+                .await
+                .is_err()
+        );
+        assert_eq!(manager.status().config_revision, before.config_revision);
+        assert_eq!(manager.status().pid, before.pid);
+        assert_eq!(manager.profile_raw(uid).await?.yaml, config);
         if directory.0.join("geoip.metadb").is_file() {
             let geo = inventory
                 .geo
@@ -125,7 +169,15 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
         }
         ensure!(successful, "no HTTPS 204 response through the tested live nodes");
         manager.restart().await?;
-        assert_eq!(manager.resource_inventory().await?.providers.len(), 2);
+        assert_eq!(manager.resource_inventory().await?.providers.len(), 4);
+        assert_eq!(
+            manager.runtime_config().await?["proxy-providers"]["remote_one"]["path"],
+            one
+        );
+        assert_eq!(
+            manager.runtime_config().await?["proxy-providers"]["remote_two"]["path"],
+            two
+        );
         ensure!(
             client
                 .get("https://cp.cloudflare.com/generate_204")

@@ -2377,8 +2377,14 @@ impl Actor {
         );
         let raw = runtime::parse_profile(&yaml)?;
         // Upstream first validates original YAML even for an inactive profile.
+        // Normalize only its probe copy; the submitted source is preserved.
         // An immutable validation revision changes no runtime manifest or catalog.
-        let validation = self.store.stage(raw.clone())?;
+        let validation_config = headless_core::config::resource_paths::prepare(
+            raw.clone(),
+            &self.options.data_dir,
+            &crate::validation::protected_paths(&self.options.data_dir, &self.options.config, &self.options.binary),
+        )?;
+        let validation = self.store.stage(validation_config)?;
         crate::validation::validate(
             &self.options.binary,
             &self.options.data_dir,
@@ -2472,6 +2478,11 @@ impl Actor {
         };
         let config = self.enforce_runtime_settings(config, &runtime)?;
         let config = headless_core::enhance::finalize::finalize(config);
+        let config = headless_core::config::resource_paths::prepare(
+            config,
+            &self.options.data_dir,
+            &crate::validation::protected_paths(&self.options.data_dir, &self.options.config, &self.options.binary),
+        )?;
         let revision = self.store.stage(config)?;
         let path = self.store.path(&revision)?;
         crate::validation::validate(
@@ -2659,6 +2670,7 @@ impl Actor {
     async fn reload(&mut self, path: &Path) -> Result<()> {
         let path = tokio::fs::canonicalize(path).await?;
         check_config(&path).await?;
+        crate::validation::resource_paths(&self.options.data_dir, &path, &self.options.binary).await?;
         tokio::select! {
             biased;
             _ = closing(&mut self.shutdown) => bail!("reload cancelled during shutdown"),
@@ -3334,6 +3346,7 @@ impl Actor {
             "previous core must be stopped before another is spawned"
         );
         check_config(&self.options.config).await?;
+        crate::validation::resource_paths(&self.options.data_dir, &self.options.config, &self.options.binary).await?;
         if self.store.state().pending.is_none() {
             crate::validation::validate(
                 &self.options.binary,

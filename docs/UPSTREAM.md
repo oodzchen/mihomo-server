@@ -59,6 +59,24 @@ command and `web/src/resources.tsx`. Its metadata-only Linux descriptor walk and
 response models are new service code; upstream's desktop resource copying, remote
 provider bundling and cache-conflict rewriting are not migrated by this increment.
 
+## Provider candidate paths and cache owner allocation
+
+`crates/headless-core/src/config/resource_paths.rs` adapts
+`src-tauri/src/core/runtime_bundle.rs::{resolve_provider_path_conflicts,
+allocate_provider_destination, normalized_destination}` from pinned commit
+`b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b`. It preserves ordered path/URL owner grouping,
+SHA-256 of normalized destination + NUL + URL, `cvr-` filenames, extension retention,
+collision suffixes and same-URL cache reuse. Ring replaces upstream sha2 using the
+existing workspace dependency. The Linux metadata walk/Geo names move from the
+previous service inventory into this shared configuration module.
+
+The service adaptation uses the managed Mihomo `-d` root, protects service/Geo
+resources and custom core files, rejects local/HTTP collisions and unsafe filesystem
+entries, bounds inputs, and checks probes/start/reload without mutating committed
+revisions. Upstream Tauri logging, IPC bundle asset copying and remote-provider
+transfer are omitted. The actor normalizes generated candidates and raw-edit probe
+copies while preserving source YAML; it does not migrate or prune old cache files.
+
 ## Mihomo plugin
 
 - Repository: https://github.com/clash-verge-rev/tauri-plugin-mihomo

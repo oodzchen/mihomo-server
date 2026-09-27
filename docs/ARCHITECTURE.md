@@ -53,12 +53,12 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** authenticated, committed-runtime Geo/provider
-resource inventory with confined metadata inspection, shared-path diagnostics and
-Web readback. **Next implementation task (P1):** integrate provider path validation
-and shared-cache conflict handling into configuration candidates. Geo installation,
-updates/content validation, full settings and resource lifecycle remain pending;
-finish this priority before starting P2.
+**Latest completed task (P1):** provider candidate path authority and deterministic
+HTTP cache conflict allocation, with confined inventory/readback and probe/start/
+reload checks. **Next implementation task (P1):** controlled Geo resource
+installation, content validation and first-use initialization. Geo updates, full
+settings and remaining resource lifecycle work are still pending; finish this
+priority before starting P2.
 
 ## Complete target architecture
 
@@ -119,7 +119,9 @@ mihomo-server/
 │       ├── Runtime YAML + overlay generation        [Implemented; upstream merge reused]
 │       ├── Profile enhancement generation          [Partially implemented; sequences/settings/TUN/DNS/global/profile/final stages]
 │       ├── Per-profile node selection records       [Implemented; upstream schema]
-│       ├── Geo/provider resources and proxy views   [Pending]
+│       ├── Provider path authority / normalized destinations / SHA-256 cache allocation [Migrated + service adaptation; Linux verified]
+│       ├── Geo lifecycle / resource settings         [Pending; P1]
+│       ├── Proxy/rule/provider operation models      [Pending; P2 service integration; client models retained]
 │       ├── Immutable revision / orphan file garbage collection [Pending]
 │       ├── Timed update metadata / saved refresh source [Migrated + service scheduler]
 │       ├── Backup manifest / bounded entries / inspection, validation, runtime policy and restore receipt models [Implemented; upstream ZIP adaptation]
@@ -141,7 +143,9 @@ mihomo-server/
 │   ├── Final candidate LAN/group normalization after authority [Implemented; Linux verified]
 │   ├── Geo/provider resources / full settings       [Partially implemented; P1]
 │   │   ├── Committed resource inventory / confined metadata / shared-path diagnostics [Implemented; Linux verified]
-│   │   └── Candidate path policy / Geo lifecycle / full settings [Pending; P1]
+│   │   ├── Final candidate provider normalization / conflict allocation / preserved source YAML [Implemented; Linux verified]
+│   │   ├── Probe/start/reload resource-path checks / service-file protection [Implemented; Linux verified]
+│   │   └── Geo lifecycle / full settings              [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
 │   ├── Profile snapshots/watches and active UID     [Implemented]
@@ -3266,6 +3270,72 @@ Next task: P1 provider candidate path validation and upstream-compatible shared
 cache conflict handling, then Geo lifecycle and remaining settings management.
 P2 rules/provider operations/delay views, P3 i18n/signals and P4 installed systemd
 deployment remain pending; all previously deferred features remain deferred.
+
+## Latest increment: provider candidate path authority and cache allocation (P1)
+
+The previous authenticated inventory slice is complete. This increment adds
+`headless-core::config::resource_paths`, adapting upstream's provider cache owner
+grouping and `cvr-<sha256>[-n].<extension>` allocation. Explicit destinations normalize
+against Mihomo's data root. Every URL in a multiple-source HTTP conflict receives
+its own deterministic path; ordering cannot choose the winner. Same-URL HTTP caches
+and shared local files remain supported. URL identity follows upstream exactly;
+headers are not part of that identity. HTTP/local collisions are rejected, and
+allocation avoids all declared destinations. Original paths/URLs remain in raw
+subscriptions; only generated candidate paths change. No cache is deleted or moved.
+This resolves simultaneous declarations; durable cache ownership across different
+runtime revisions and implicit Mihomo cache identities remain resource-lifecycle
+work, rather than being claimed as completed here.
+
+The service applies this after runtime authority/finalization and before staging a
+candidate or starting the Mihomo validator. Raw-profile edit validation uses a
+normalized disposable revision, preserving the submitted source. Common probes,
+core starts and hot reloads recheck paths without rewriting immutable committed
+revisions. Invalid paths reject bootstrap/select/import application, manual edits,
+overlays, enhancements and settings regeneration through the same actor stage.
+Stored but inactive imports remain unapplied until selected. Legacy commits with
+multiple HTTP sources sharing a path must be reapplied; startup does not silently
+rewrite their revision.
+
+The guard rejects traversal/external paths, links (including dangling/parent links),
+nonregular files and hard-linked HTTP cache files. Reserved service roots/files,
+Geo filenames, hidden paths and profile journal names are protected, as are the
+current configuration/core executable and custom core directories below the data
+root. Paths reject control characters, backslashes and colons, with the existing
+4096-byte/64-component/512-provider bounds. Missing files remain Mihomo's validation
+responsibility; inline resources and HTTP implicit cache paths are retained. Linux
+metadata walks are shared with the inventory using pinned `O_PATH` descriptors.
+These are preflight checks, not a filesystem sandbox around Mihomo: a trusted local
+administrator can change files after a check, and Mihomo may create/download caches
+during a valid probe even if a later configuration transaction fails. Runtime,
+settings/catalog commits and source YAML retain their existing rollback semantics.
+
+Validation:
+
+- `cargo check --workspace --locked --offline`, `cargo build -p mihomo-server`,
+  formatting and diff checks passed.
+- `cargo test --workspace --locked --offline -- --test-threads=1`: 331 passed,
+  zero failed, 76 opt-in tests ignored. Five new configuration tests cover allocation
+  stability/order/collision suffixes, same-source/local sharing, bounded declarations,
+  traversal/link/FIFO/hard-link/protected-path checks and later filesystem changes.
+  The actor test verifies source preservation, settings regeneration, failed
+  enhancement/raw/candidate edits, probe rejection and safe failed startup.
+- The opt-in `resource_inventory_live` test passed with real Mihomo and private
+  copies of actual nodes/Geo data. Two loopback HTTP subscriptions declared the same
+  path; separate downloaded caches and both live provider node counts were verified.
+  An unsafe overlay left PID/revision/source YAML intact. Proxy HTTPS returned 204
+  before and after core restart, and the original node source SHA-256 was unchanged.
+- The Playwright resource inventory refresh/retry workflow passed against the newly
+  built service and existing Web assets. No Web source changed; the complete browser
+  suite and ignored unrelated core integration tests were not rerun.
+
+No sandbox Git commit occurs; the host script owns the commit.
+
+Next task: P1 controlled Geo installation/content validation/initialization, then
+Geo updates, full settings and remaining resource management. Provider refresh/
+reload commands, rules/delay Web views (P2), i18n/signals (P3), actual Linux systemd
+installation (P4) and previously deferred work are not completed by this increment.
+The service remains a runnable development MVP; older release bundles do not yet
+contain these P1 changes.
 
 ## MVP completion boundary
 

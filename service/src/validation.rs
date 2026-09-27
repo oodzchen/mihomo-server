@@ -1,4 +1,8 @@
-use std::{path::Path, process::Stdio, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::Duration,
+};
 
 use anyhow::{Context as _, Result, bail, ensure};
 use tokio::{
@@ -10,6 +14,22 @@ use tokio::{
 };
 
 const OUTPUT_LIMIT: usize = 64 * 1024;
+
+pub(crate) fn protected_paths(data_dir: &Path, config: &Path, binary: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![config.to_path_buf(), binary.to_path_buf()];
+    if let Some(parent) = binary
+        .parent()
+        .filter(|parent| parent.starts_with(data_dir) && *parent != data_dir)
+    {
+        paths.push(parent.to_path_buf());
+    }
+    paths
+}
+
+pub(crate) async fn resource_paths(data_dir: &Path, config: &Path, binary: &Path) -> Result<()> {
+    let contents: serde_yaml_ng::Mapping = serde_yaml_ng::from_slice(&tokio::fs::read(config).await?)?;
+    headless_core::config::resource_paths::validate(&contents, data_dir, &protected_paths(data_dir, config, binary))
+}
 
 pub(crate) async fn probe_version(
     binary: &Path,
@@ -62,6 +82,7 @@ pub(crate) async fn validate(
     deadline: Duration,
 ) -> Result<()> {
     ensure!(!*shutdown.borrow(), "validation cancelled during shutdown");
+    resource_paths(data_dir, config, binary).await?;
     let mut command = Command::new(binary);
     crate::shutdown::bind_child_lifetime(&mut command);
     let mut child = command

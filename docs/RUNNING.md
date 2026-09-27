@@ -2394,6 +2394,44 @@ files may be normal when rules do not require them. The filesystem can change af
 a read; refresh after a core download or external file change. Geo installation,
 updates/content validation and Provider refresh/reload APIs remain future work.
 
+## Provider candidate paths and shared HTTP caches
+
+Applying a configuration or selecting a subscription now normalizes explicit
+provider paths relative to Mihomo's data directory, after enhancements and service
+settings. Absolute paths inside that directory also normalize to relative paths.
+Only the generated candidate changes: original subscription paths, URLs and YAML
+remain available in the raw editor. Inactive imports are not applied or probed.
+
+If multiple HTTP URLs declare the same normalized cache path, all those URLs get
+separate stable `cvr-<sha256>[-n]` filenames in the same directory, retaining the
+extension. The digest uses destination, a NUL separator and URL, matching upstream.
+An allocation avoids other declared paths. The same URL may keep sharing a cache
+(headers are not part of the identity), and file providers may share a local file.
+An HTTP cache may not share a destination with a local file provider. HTTP providers
+with no explicit path continue using Mihomo-managed caches.
+This allocation covers providers declared together; durable cache ownership across
+configuration revisions and implicit cache identities remain future resource work.
+
+Provider files belong in a non-service-owned location such as `providers/` below
+the data root. External paths, parent traversal, control characters, backslashes,
+colons, links, special files and hard-linked HTTP caches are rejected before a
+Mihomo probe. Reserved roots include `config`, `profiles`, `core`, `run`, `backups`
+and `restore-candidates`; service token/settings/catalog/cache/journal files, Geo
+filenames, hidden components and the `profile-` journal namespace are protected.
+The current configuration, core executable and its custom directory inside the
+data root are protected too. No source file is automatically copied from elsewhere;
+place local provider inputs in the managed data directory explicitly.
+
+Paths are rechecked before probes, core starts and reloads. Legacy committed
+configurations with conflicting HTTP sources must be reapplied through selection
+or the configuration editor to create a normalized revision; startup will report
+the conflict instead of rewriting the old revision. Invalid candidates preserve the
+previous committed runtime, settings and profile files. Old caches are retained,
+and new deterministic caches may require a fresh download. Mihomo may write caches
+while probing a valid candidate even if its later application fails; provider cache
+updates are not part of the settings/catalog rollback journal. These checks do not
+sandbox Mihomo against subsequent file changes by a local administrator.
+
 All local operations share the existing single backup admission slot with
 export/inspect/rehearsal/restore. Busy requests return 409 `backup_busy`. A download
 holds admission until its body reaches EOF or disconnects. The actor serializes

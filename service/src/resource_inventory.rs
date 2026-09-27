@@ -5,19 +5,11 @@ use serde::Serialize;
 use serde_yaml_ng::{Mapping, Value};
 use std::{
     collections::HashMap,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
-// Same discovery names as upstream core/runtime_bundle.rs (Linux is case-sensitive).
-pub const GEO_ASSETS: &[&str] = &[
-    "Country.mmdb",
-    "ASN.mmdb",
-    "geoip.dat",
-    "geosite.dat",
-    "geoip.metadb",
-    "GeoSite.dat",
-];
-const MAX_PROVIDERS: usize = 512;
+pub use headless_core::config::resource_paths::GEO_ASSETS;
+use headless_core::config::resource_paths::{MAX_PROVIDERS, metadata_below, relative_path};
 
 #[derive(Debug, Serialize)]
 pub struct Inventory {
@@ -161,72 +153,6 @@ fn inspect_path(root: &Path, raw: &str, resource: &mut Resource) {
             }
         }
     }
-}
-
-fn relative_path(root: &Path, raw: &str) -> Option<PathBuf> {
-    if raw.is_empty() || raw.len() > 4096 || raw.contains('\0') {
-        return None;
-    }
-    let path = Path::new(raw);
-    let relative = if path.is_absolute() {
-        path.strip_prefix(root).ok()?
-    } else {
-        path
-    };
-    let mut result = PathBuf::new();
-    let mut count = 0;
-    for component in relative.components() {
-        match component {
-            Component::Normal(part) => {
-                result.push(part);
-                count += 1;
-            }
-            Component::CurDir => {}
-            _ => return None,
-        }
-    }
-    (count > 0 && count <= 64).then_some(result)
-}
-
-/// Walk pinned directory descriptors without following links, including parent links.
-/// O_PATH permits metadata inspection without reading files, blocking on FIFOs or
-/// triggering downloads. A swapped directory cannot redirect this walk outside root.
-#[cfg(target_os = "linux")]
-fn metadata_below(root: &Path, relative: &Path) -> std::io::Result<std::fs::Metadata> {
-    use std::{
-        ffi::CString,
-        os::{
-            fd::{AsRawFd, FromRawFd},
-            unix::ffi::OsStrExt,
-        },
-    };
-    let components: Vec<_> = relative.components().collect();
-    let mut directory = std::fs::File::open(root)?;
-    for (index, component) in components.iter().enumerate() {
-        let name = CString::new(component.as_os_str().as_bytes())?;
-        let flags = libc::O_PATH
-            | libc::O_NOFOLLOW
-            | libc::O_CLOEXEC
-            | if index + 1 < components.len() {
-                libc::O_DIRECTORY
-            } else {
-                0
-            };
-        let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags) };
-        if fd < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        directory = unsafe { std::fs::File::from_raw_fd(fd) };
-    }
-    directory.metadata()
-}
-
-#[cfg(not(target_os = "linux"))]
-fn metadata_below(_root: &Path, _relative: &Path) -> std::io::Result<std::fs::Metadata> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "resource inventory requires Linux",
-    ))
 }
 
 #[cfg(all(test, target_os = "linux"))]
