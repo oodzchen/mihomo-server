@@ -792,6 +792,7 @@ fn detaching_merge_preserves_shared_links_and_current_profile_protection() -> Re
     catalog.items.as_mut().unwrap()[1].option = store.get_item(uid)?.option.clone();
     fs::write(directory.0.join("profiles.yaml"), serde_yaml_ng::to_string(&catalog)?)?;
     let mut store = ProfileStore::open(&directory.0)?;
+    store.set_current(Some(uid))?;
     assert!(store.delete_profile(uid, None).is_err());
     let plan = store.prepare_merge(uid, None)?;
     store.begin_merge(plan, None)?;
@@ -808,6 +809,7 @@ fn detaching_merge_preserves_shared_links_and_current_profile_protection() -> Re
     store.recover_merge(None)?;
     assert!(store.get_item(&merge).is_err());
     assert_eq!(store.snapshot().items.unwrap().len(), 2);
+    store.set_current(None)?;
     store.delete_profile(uid, None)?;
     Ok(())
 }

@@ -79,6 +79,13 @@ impl Default for CoreStatus {
     }
 }
 
+fn same_proxy_snapshot(before: &CoreStatus, after: &CoreStatus) -> bool {
+    after.phase == CorePhase::Running
+        && before.generation == after.generation
+        && before.pid == after.pid
+        && before.config_revision == after.config_revision
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CoreLog {
     pub stream: &'static str,
@@ -379,11 +386,13 @@ impl CoreManager {
         let store = RuntimeStore::open(&options.data_dir)?;
         let mut settings_store = SettingsStore::open(&options.data_dir)?;
         settings_store.recover(store.state().current.as_ref())?;
-        let settings = settings_store.snapshot();
         let mut profile_store = ProfileStore::open(&options.data_dir)?;
+        profile_store.recover_import()?;
         profile_store.recover_refresh(store.state().current.as_ref())?;
         profile_store.recover_enhancement(store.state().current.as_ref())?;
-        profile_store.recover_delete()?;
+        profile_store.recover_delete_with_settings(&mut settings_store)?;
+        settings_store.prune_profile_dns(&profile_store.snapshot())?;
+        let settings = settings_store.snapshot();
         profile_store.set_current(store.state().active_profile.as_deref())?;
         profile_store.ensure_global_defaults()?;
         let (profile_state, profiles) = watch::channel(profile_store.snapshot());
@@ -672,7 +681,7 @@ impl CoreManager {
         let profile = tokio::select! {
             biased;
             _ = closing(&mut shutdown) => bail!("remote import cancelled during shutdown"),
-            result = crate::remote::download(&url, name.as_deref(), options) => result?,
+            result = self.download_remote(&url, name.as_deref(), options) => result?,
         };
         let (reply, result) = oneshot::channel();
         tokio::select! {
@@ -710,7 +719,7 @@ impl CoreManager {
         let profile = tokio::select! {
             biased;
             _ = closing(&mut shutdown) => bail!("remote refresh cancelled during shutdown"),
-            result = crate::remote::download(url, None, options) => result?,
+            result = self.download_remote(url, None, options) => result?,
         };
         let (reply, result) = oneshot::channel();
         tokio::select! {
@@ -721,6 +730,51 @@ impl CoreManager {
             }) => sent.context("core manager stopped")?,
         }
         result.await.context("remote refresh cancelled during shutdown")?
+    }
+
+    /// Resolve after admission, then cancel if the child or committed configuration changes.
+    async fn download_remote(
+        &self,
+        url: &str,
+        name: Option<&str>,
+        options: crate::remote::RemoteOptions,
+    ) -> Result<headless_core::config::remote::RemoteProfile> {
+        if options.self_proxy != Some(true) {
+            return crate::remote::download(url, name, options).await;
+        }
+        let mut state = self.state.clone();
+        let snapshot = state.borrow_and_update().clone();
+        ensure!(
+            snapshot.phase == CorePhase::Running,
+            "self_proxy requires a running managed core"
+        );
+        let route = timeout(Duration::from_secs(3), async {
+            let runtime = self.runtime_config().await?;
+            let core = self.client.get_base_config().await?;
+            ensure!(
+                same_proxy_snapshot(&snapshot, &self.status()),
+                "managed proxy changed during route resolution; retry"
+            );
+            crate::proxy_access::verify_ports(&runtime, &core)?;
+            crate::remote::ManagedProxy::from_core(&core, &runtime)
+        })
+        .await
+        .context("managed proxy query timed out")??;
+        let changed = async {
+            loop {
+                if !same_proxy_snapshot(&snapshot, &state.borrow_and_update()) {
+                    break;
+                }
+                if state.changed().await.is_err() {
+                    break;
+                }
+            }
+        };
+        tokio::select! {
+            biased;
+            _ = changed => bail!("managed proxy changed during download; retry"),
+            result = crate::remote::download_via(url, name, options, Some(route)) => result,
+        }
     }
 
     pub async fn runtime_config(&self) -> Result<Mapping> {
@@ -1228,10 +1282,11 @@ impl Actor {
                 _ = closing(&mut self.shutdown) => break,
                 request = self.receiver.recv() => {
                     let Some(request) = request else { break; };
-                    if let Err(error) = self.profile_store.recover_refresh(self.store.state().current.as_ref())
+                    if let Err(error) = self.profile_store.recover_import()
+                        .and_then(|()| self.profile_store.recover_refresh(self.store.state().current.as_ref()))
                         .and_then(|()| self.profile_store.recover_enhancement(self.store.state().current.as_ref()))
-                        .and_then(|()| self.profile_store.recover_delete())
-                        .and_then(|()| self.settings_store.recover(self.store.state().current.as_ref())) {
+                        .and_then(|()| self.settings_store.recover(self.store.state().current.as_ref()))
+                        .and_then(|()| self.profile_store.recover_delete_with_settings(&mut self.settings_store)) {
                         let message = format!("configuration recovery failed: {error:#}");
                         self.status.send_modify(|state| state.error = Some(message.clone()));
                         match request {
@@ -1253,6 +1308,7 @@ impl Actor {
                         continue;
                     }
                     self.settings = self.settings_store.snapshot();
+                    self.dns_confirmations.retain(|uid, _| self.profile_store.get_item(uid).is_ok());
                     match request {
                         CommandMessage::ReadProfileRaw { uid, reply } => { let _ = reply.send(self.profile_store.read_raw(&uid)); }
                         CommandMessage::SetProfileRaw { uid, revision, yaml, reply } => {
@@ -1307,7 +1363,9 @@ impl Actor {
                         }
                         CommandMessage::DeleteProfile { uid, reply } => {
                             if !reply.is_closed() {
-                                let result = self.profile_store.delete_profile(&uid, self.store.state().active_profile.as_deref());
+                                let result = self.profile_store.delete_profile_with_settings(&uid, self.store.state().active_profile.as_deref(), &mut self.settings_store);
+                                self.settings = self.settings_store.snapshot();
+                                if self.profile_store.get_item(&uid).is_err() { self.dns_confirmations.remove(&uid); }
                                 self.profile_state.send_replace(self.profile_store.snapshot());
                                 let _ = reply.send(result.map(|()| self.profile_store.snapshot()));
                             }
@@ -1324,7 +1382,7 @@ impl Actor {
                         }
                         CommandMessage::ImportRemote { profile, reply } => {
                             if !reply.is_closed() {
-                                let result = self.profile_store.import_remote(*profile);
+                                let result = self.profile_store.import_remote_with_defaults(*profile);
                                 self.profile_state.send_replace(self.profile_store.snapshot());
                                 let _ = reply.send(result);
                             }
@@ -1333,7 +1391,7 @@ impl Actor {
                             let _ = reply.send(self.store.read_current());
                         }
                         CommandMessage::ImportProfileYaml { yaml, name, reply } => {
-                            let result = self.profile_store.import_local(&name, &yaml);
+                            let result = self.profile_store.import_local_with_defaults(&name, &yaml);
                             if let Err(error) = &result {
                                 self.status.send_modify(|state| state.error = Some(format!("{error:#}")));
                             }
@@ -1462,7 +1520,7 @@ impl Actor {
                 .unwrap_or("Local File")
                 .to_owned()
         });
-        self.profile_store.import_local(&name, &yaml)
+        self.profile_store.import_local_with_defaults(&name, &yaml)
     }
 
     async fn set_enhancement(&mut self, uid: &str, kind: ProfileEnhancement, yaml: Option<String>) -> Result<PrfItem> {

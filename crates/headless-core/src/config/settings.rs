@@ -252,6 +252,37 @@ impl SettingsStore {
         self.settings.clone()
     }
 
+    /// Catalog-committed deletion does not change runtime settings or its revision.
+    pub fn remove_profile_dns(&mut self, uid: &str) -> Result<()> {
+        ensure!(
+            !self.root.join("settings-transaction.yaml").try_exists()?,
+            "settings recovery is pending"
+        );
+        let mut candidate = self.snapshot();
+        if candidate.profile_dns.remove(uid).is_some() {
+            self.replace(candidate)?;
+        }
+        Ok(())
+    }
+
+    /// Remove preferences left by deletions predating coordinated cleanup.
+    pub fn prune_profile_dns(&mut self, profiles: &super::IProfiles) -> Result<()> {
+        ensure!(
+            !self.root.join("settings-transaction.yaml").try_exists()?,
+            "settings recovery is pending"
+        );
+        let mut candidate = self.snapshot();
+        candidate.profile_dns.retain(|uid, _| {
+            profiles.items.iter().flatten().any(|item| {
+                item.uid.as_deref() == Some(uid.as_str()) && matches!(item.itype.as_deref(), Some("local" | "remote"))
+            })
+        });
+        if candidate != self.settings {
+            self.replace(candidate)?;
+        }
+        Ok(())
+    }
+
     pub fn begin(&self, candidate: ServiceSettings, runtime_revision: Revision) -> Result<()> {
         candidate.validate()?;
         ensure!(

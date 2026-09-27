@@ -93,6 +93,7 @@ impl ProfileStore {
         ensure!(
             !journal_path.try_exists()?
                 && !self.data_dir.join("profile-merge.yaml").try_exists()?
+                && !self.data_dir.join("profile-import.yaml").try_exists()?
                 && !self.data_dir.join("profile-delete.yaml").try_exists()?,
             "profile refresh recovery is pending"
         );

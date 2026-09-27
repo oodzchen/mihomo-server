@@ -375,9 +375,9 @@ no proxy, ten redirects, existing reqwest TLS defaults, upstream-style user agen
 keepalive/no idle pooling and the actual from_url default of 20 seconds. Reqwest
 0.13.5 was already locked and used by the client/tests; it is now a regular service
 dependency. URL/percent-encoding versions already locked are also used by the
-HTTP-independent core helper. TLS static-root fallback, system/core proxy modes,
-invalid-certificate bypass and auxiliary enhancement creation are not copied or
-silently simulated; unsupported options are rejected and those paths remain pending.
+HTTP-independent core helper. TLS static-root fallback, system proxy mode and invalid-certificate bypass
+remain pending. Managed core proxy mode and auxiliary defaults are implemented
+in the later increments documented below; unsupported options remain rejected.
 The service adds timeout/concurrency/body limits, strict HTTP(S) validation and
 transport error URL removal. Live third-party HTTPS/provider checks remain pending.
 
@@ -965,3 +965,69 @@ reconciled without another mutation. Dirty reload/close requires explicit discar
 owned reads cancel on unmount and authentication expiry logs out. Remote refresh
 intentionally replaces manual edits. Cascade deletion, stale preference cleanup,
 raw revision garbage collection and automatic backups remain pending.
+
+
+## Auxiliary cascade deletion and deleted DNS preferences
+
+Adapted from pinned upstream `src-tauri/src/config/profiles.rs::plan_delete_item`
+and `src-tauri/src/cmd/profile.rs::delete_profile`. Deletion now removes the base
+and its exclusive merge/script/rules/proxies/groups rows in one catalog rename.
+The service deliberately protects active/current profiles, shared links, reserved
+Merge/Script/Rules/Proxies/Groups rows and files referenced by survivors. It does
+not automatically select a fallback profile. Missing auxiliary rows are tolerated
+for repair; wrong-type or nested auxiliary rows are rejected.
+
+The private deletion journal adds schema version 2 and up to five auxiliary
+UID/file pairs. Version 1 single-file journals remain readable. Recovery aborts
+uncommitted plans, or cleans persisted DNS preferences and files after catalog
+commit. The journal remains until both cleanup phases finish. Settings cleanup
+is atomic and leaves runtime settings/revision unchanged; session confirmations
+are removed in the actor. Startup also prunes preferences from older deletions
+after recovering runtime/settings/catalog journals. Original immutable revisions
+and orphan auxiliary files remain subject to separately pending garbage collection.
+
+## Automatic auxiliary defaults during service imports
+
+Adapted from pinned `src-tauri/src/config/prfitem.rs::from_local/from_url`,
+`from_merge/from_script/from_rules/from_proxies/from_groups`, and the five
+`ITEM_*` templates in `src-tauri/src/utils/tmpl.rs`. New service imports create
+only missing per-profile links: an empty comment-only Merge, the identity Script,
+and three empty prepend/append/delete sequences. Existing valid shared/reserved
+links and remote download metadata remain intact. Newly linked identity scripts
+make the global script run once; legacy unlinked/cleared profile stages retain
+upstream global fallback and double execution.
+
+Unlike upstream's separate auxiliary appends, the service allocates files and
+records a bounded private profile-import.yaml journal before writing content.
+One catalog rename publishes the base and all newly owned auxiliaries. Startup
+and command admission either retain the exact committed rows/content or abort
+and remove only allocated, unreferenced files. Reused links are fingerprinted;
+unsafe paths, symlinks, mismatched hashes and partial catalogs fail explicitly.
+Import remains separate from activation and does not alter runtime/PID. Local
+file, YAML, remote and CLI paths share this workflow. Existing catalogs are not
+backfilled. Low-level ProfileStore import_local/import_remote primitives remain
+available for legacy catalog migration; service calls use the *_with_defaults
+transactional methods. Retired immutable revisions remain pending garbage collection.
+
+
+## Managed-core subscription proxy transport
+
+Adapted from pinned `src-tauri/src/config/prfitem.rs::from_url` (self_proxy priority
+over with_proxy), and `src-tauri/src/utils/network.rs::create_client`'s localhost
+HTTP proxy branch. The new service uses the actual running core's Mixed/HTTP
+listener rather than the desktop desired-port singleton, verifies committed ports,
+and supports proxy authentication from the private committed runtime snapshot.
+Mihomo's public config response exposes authentication usernames, not passwords;
+these are compared before private credentials are attached to the loopback proxy.
+
+No arbitrary client-supplied proxy URL or implicit environment proxy is accepted.
+A lifecycle/configuration snapshot guards route resolution and cancels stale
+in-flight requests. Network tasks stay outside the lifecycle actor and retain the
+existing semaphore, bounded body/time/redirect behavior, shutdown cancellation and
+source metadata compare-and-swap guards. Persisted self_proxy and strict metadata
+patches are exposed in import and edit UI. Missing/false retains direct behavior;
+core unavailability returns an explicit error without direct fallback. System
+proxy discovery, SOCKS-only transport, TLS fallback/bypass and scheduling remain
+pending. Real-Mihomo integration exercises an authenticated ingress and controlled
+HTTP upstream tunnel, so a synthetic subscription hostname succeeds only through
+that proxy chain; origin/upstream headers are checked for credential separation.

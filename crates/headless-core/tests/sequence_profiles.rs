@@ -205,6 +205,7 @@ fn sequence_detach_preserves_shared_links_and_refuses_unsafe_content() -> Result
         catalog.items.as_mut().unwrap()[1].option = store.get_item(uid)?.option.clone();
         fs::write(directory.0.join("profiles.yaml"), serde_yaml_ng::to_string(&catalog)?)?;
         let mut store = ProfileStore::open(&directory.0)?;
+        store.set_current(Some(uid))?;
         assert!(store.delete_profile(uid, None).is_err());
         save(&mut store, uid, kind, None)?;
         assert!(store.get_item(&auxiliary).is_ok());

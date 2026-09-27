@@ -393,7 +393,7 @@ async fn authenticated_metadata_edit_and_delete_reject_ownership_fields_and_prot
             )
             .await?;
             assert!(status.is_success());
-            assert_eq!(catalog["items"].as_array().unwrap().len(), 3);
+            assert_eq!(catalog["items"].as_array().unwrap().len(), 8);
             assert_eq!(catalog["current"], first_uid);
             assert_eq!(manager.status().config_revision, revision);
             assert!(
@@ -451,7 +451,7 @@ async fn authenticated_merge_commands_keep_raw_content_and_reject_implicit_clear
             )?,
         )
         .await?;
-        assert!(content["uid"].is_null());
+        assert_eq!(content["uid"].as_str(), base.option.as_ref().unwrap().merge.as_deref());
         for payload in [
             json!({"command":"set_profile_merge","uid":uid}),
             json!({"command":"set_profile_merge","uid":uid,"yaml":null}),
@@ -465,7 +465,10 @@ async fn authenticated_merge_commands_keep_raw_content_and_reject_implicit_clear
                     .0
                     .is_success()
             );
-            assert!(manager.profile_merge(uid.into()).await?.uid.is_none());
+            assert_eq!(
+                manager.profile_merge(uid.into()).await?.uid.as_deref(),
+                base.option.as_ref().unwrap().merge.as_deref()
+            );
         }
         let (status, item) = response(
             &app,
@@ -481,7 +484,7 @@ async fn authenticated_merge_commands_keep_raw_content_and_reject_implicit_clear
         assert!(status.is_success());
         assert_eq!(item["uid"], uid);
         assert_eq!(item["file"], base.file.as_deref().unwrap());
-        assert_eq!(manager.profiles().items.unwrap().len(), 4);
+        assert_eq!(manager.profiles().items.unwrap().len(), 8);
         assert!(manager.status().config_revision.is_none());
         let (_, content) = response(
             &app,
@@ -610,7 +613,7 @@ async fn sequence_commands_authenticate_strict_types_preserve_raw_and_clear_expl
                 .uid
                 .is_none()
         );
-        assert_eq!(manager.profiles().items.unwrap().len(), 3);
+        assert_eq!(manager.profiles().items.unwrap().len(), 7);
         assert_eq!(
             std::fs::read_to_string(directory.0.join("profiles").join(base.file.as_deref().unwrap()))?,
             raw
@@ -638,7 +641,7 @@ async fn script_commands_are_authenticated_strict_and_keep_raw_when_execution_fa
             assert_eq!(response(&app,request("wrong","/api/commands",Some(payload))?).await?.0,StatusCode::UNAUTHORIZED);
         }
         for payload in [json!({"command":"set_profile_script","uid":uid}),json!({"command":"set_profile_script","uid":uid,"source":null}),json!({"command":"set_profile_script","uid":uid,"source":source,"file":"outside"}),json!({"command":"set_profile_script","uid":uid,"source":"function main(c) { throw 'failed'; }"}),json!({"command":"set_profile_script","uid":uid,"source":"function main(c) { c['external-controller']='0.0.0.0:9999'; return c; }"})] {
-            assert!(!response(&app,request(&token,"/api/commands",Some(payload))?).await?.0.is_success());assert!(manager.profile_script(uid.into()).await?.uid.is_none());
+            assert!(!response(&app,request(&token,"/api/commands",Some(payload))?).await?.0.is_success());assert_eq!(manager.profile_script(uid.into()).await?.uid.as_deref(),base.option.as_ref().unwrap().script.as_deref());
         }
         let (status,item)=response(&app,request(&token,"/api/commands",Some(json!({"command":"set_profile_script","uid":uid,"source":source})))?).await?;
         assert!(status.is_success(),"{item}");assert_eq!(item["file"],base.file.as_deref().unwrap());assert!(manager.status().config_revision.is_none());
@@ -648,7 +651,7 @@ async fn script_commands_are_authenticated_strict_and_keep_raw_when_execution_fa
         assert!(manager.set_profile_script(uid.into(),Some("function main(c) { console.warn('before error'); throw 'failed'; }".into())).await.is_err());
         assert_eq!(manager.status().config_revision,revision);assert!(manager.logs().iter().any(|log|log.stream=="script"&&log.message.contains("before error")));
         let(status,_)=response(&app,request(&token,"/api/commands",Some(json!({"command":"clear_profile_script","uid":uid})))?).await?;assert!(status.is_success());
-        assert_eq!(manager.runtime_config().await?["mode"].as_str(),Some("rule"));assert_eq!(manager.profiles().items.unwrap().len(),3);
+        assert_eq!(manager.runtime_config().await?["mode"].as_str(),Some("rule"));assert_eq!(manager.profiles().items.unwrap().len(),7);
         assert_eq!(std::fs::read_to_string(directory.0.join("profiles").join(base.file.as_deref().unwrap()))?,"mode: rule");
         Ok::<_,anyhow::Error>(())
     }.await;
@@ -881,7 +884,7 @@ async fn http_import_select_config_and_failed_start_share_the_manager() -> Resul
             assert_eq!(manager.status().config_revision, committed);
             assert_eq!(manager.status().active_profile.as_deref(), Some(uid));
         }
-        assert_eq!(manager.profiles().items.context("missing profiles")?.len(), 3);
+        assert_eq!(manager.profiles().items.context("missing profiles")?.len(), 8);
         assert_eq!(
             response(&app, request(&token, "/api/proxies", None)?).await?.0,
             StatusCode::UNPROCESSABLE_ENTITY

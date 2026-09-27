@@ -457,7 +457,7 @@ async fn linked_sequences_select_refresh_validate_rollback_restore_and_reject_st
                 restored.runtime_config().await?["rules"][0].as_str(),
                 Some("MATCH,Main")
             );
-            assert_eq!(restored.profiles().items.unwrap().len(), 3);
+            assert_eq!(restored.profiles().items.unwrap().len(), 5);
             assert_eq!(restored.status().active_profile.as_deref(), Some(uid.as_str()));
             assert_eq!(
                 restored.client().get_proxies().await?.proxies["Main"].now.as_deref(),
@@ -511,7 +511,10 @@ async fn sequence_candidate_restart_failure_restores_previous_catalog_and_runnin
         assert_eq!(serde_json::to_value(manager.profiles())?, catalog);
         assert_eq!(manager.status().config_revision, revision);
         assert_eq!(manager.status().phase, mihomo_server::core_manager::CorePhase::Running);
-        assert!(manager.profile_sequence(uid, SequenceKind::Rules).await?.uid.is_none());
+        assert_eq!(
+            manager.profile_sequence(uid, SequenceKind::Rules).await?.uid.as_deref(),
+            base.option.as_ref().unwrap().rules.as_deref()
+        );
         assert!(!directory.0.join("profile-merge.yaml").exists());
         Ok::<_, anyhow::Error>(())
     }
@@ -675,22 +678,20 @@ async fn serve(State(mut state): State<FixtureState>, request: Request) -> Respo
 #[tokio::test]
 async fn remote_options_reject_unsupported_modes_and_invalid_inputs_before_network() -> Result<()> {
     use headless_core::config::PrfOption;
-    for option in [
-        PrfOption {
-            with_proxy: Some(true),
-            ..Default::default()
-        },
-        PrfOption {
-            self_proxy: Some(true),
-            ..Default::default()
-        },
-        PrfOption {
-            danger_accept_invalid_certs: Some(true),
-            ..Default::default()
-        },
-    ] {
+    for option in [PrfOption {
+        danger_accept_invalid_certs: Some(true),
+        ..Default::default()
+    }] {
         assert!(RemoteOptions::from_profile(Some(&option)).is_err());
     }
+    let options = RemoteOptions::from_profile(Some(&PrfOption {
+        self_proxy: Some(true),
+        with_proxy: Some(true),
+        ..Default::default()
+    }))?;
+    assert_eq!(options.self_proxy, Some(true));
+    assert_eq!(options.with_proxy, Some(true));
+    assert!(download("http://127.0.0.1:1", None, options).await.is_err());
     assert_eq!(
         RemoteOptions::from_profile(Some(&PrfOption {
             allow_auto_update: Some(false),
@@ -700,8 +701,8 @@ async fn remote_options_reject_unsupported_modes_and_invalid_inputs_before_netwo
         Some(false)
     );
     for options in [
-        json!({"with_proxy":true}),
-        json!({"self_proxy":true}),
+        json!({"with_proxy":"true"}),
+        json!({"self_proxy":"true"}),
         json!({"danger_accept_invalid_certs":true}),
         json!({"merge":"m1"}),
     ] {
@@ -767,7 +768,7 @@ async fn manual_refresh_preserves_uid_nodes_and_recovers_active_validation_failu
         assert_eq!(item.extra.unwrap().download, 20);
         assert_eq!(manager.status().config_revision, prior_revision);
         assert_eq!(manager.status().pid, pid);
-        assert_eq!(manager.profiles().items.unwrap().len(), 4);
+        assert_eq!(manager.profiles().items.unwrap().len(), 14);
         manager.select_profile(uid.clone()).await?;
         manager.select_node("Main".into(), "REJECT".into()).await?;
         *fixture.state.content.lock().unwrap() = (YAML.into(), 30);
@@ -1043,7 +1044,7 @@ async fn metadata_edits_and_deletion_preserve_runtime_and_supersede_inflight_ref
             .clone()
             .unwrap();
         let catalog = manager.delete_profile(uid.clone()).await?;
-        assert_eq!(catalog.items.as_ref().unwrap().len(), 3);
+        assert_eq!(catalog.items.as_ref().unwrap().len(), 8);
         assert!(!directory.0.join("profiles").join(file.as_str()).exists());
         fixture.state.release.add_permits(1);
         assert!(timeout(Duration::from_secs(10), pending).await??.is_err());
@@ -1198,7 +1199,10 @@ async fn merge_transaction_rolls_back_when_candidate_reload_and_restart_fail() -
         assert_eq!(manager.status().phase, mihomo_server::core_manager::CorePhase::Running);
         assert_eq!(manager.status().config_revision, revision);
         assert_eq!(serde_json::to_value(manager.profiles())?, saved);
-        assert!(manager.profile_merge(uid).await?.uid.is_none());
+        assert_eq!(
+            manager.profile_merge(uid).await?.uid.as_deref(),
+            base.option.as_ref().unwrap().merge.as_deref()
+        );
         assert!(!directory.0.join("profile-merge.yaml").exists());
         Ok::<_, anyhow::Error>(())
     }
@@ -1296,7 +1300,7 @@ async fn authenticated_remote_import_retains_upstream_metadata_without_activatin
         assert_eq!(item["url"], fixture.url("/redirect?token=secret"));
         assert_eq!(item["home"], "https://example.test/account");
         assert!(manager.status().active_profile.is_none());
-        assert_eq!(manager.profiles().items.unwrap().len(), 3);
+        assert_eq!(manager.profiles().items.unwrap().len(), 8);
         {
             let requests = fixture.state.requests.lock().unwrap();
             assert_eq!(requests.len(), 2);
@@ -1316,7 +1320,7 @@ async fn authenticated_remote_import_retains_upstream_metadata_without_activatin
         let updated: Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 1024 * 1024).await?)?;
         assert_eq!(updated["uid"], item["uid"]);
         assert_ne!(updated["file"], item["file"]);
-        assert_eq!(manager.profiles().items.unwrap().len(), 3);
+        assert_eq!(manager.profiles().items.unwrap().len(), 8);
         let unknown = json!({"command": "refresh_profile", "uid": "missing"});
         assert!(
             !app.clone()
@@ -1388,7 +1392,7 @@ async fn failed_remote_downloads_preserve_catalog_runtime_and_redact_url_secrets
             }
             assert_eq!(serde_json::to_value(manager.profiles())?, prior);
             assert_eq!(manager.status().config_revision, revision);
-            assert_eq!(std::fs::read_dir(directory.0.join("profiles"))?.count(), 3);
+            assert_eq!(std::fs::read_dir(directory.0.join("profiles"))?.count(), 8);
         }
         Ok::<_, anyhow::Error>(())
     }
@@ -1522,7 +1526,7 @@ async fn global_stages_order_refresh_detach_and_failed_regeneration_preserve_com
         let base = manager.import_remote_profile(fixture.url("/refresh"), Some("global profile".into()), RemoteOptions::default()).await?;
         let uid = base.uid.as_deref().unwrap().to_owned();
         manager.select_profile(uid.clone()).await?;
-        assert_eq!(manager.runtime_config().await?["pipeline"].as_str(), Some("global;global;"));
+        assert_eq!(manager.runtime_config().await?["pipeline"].as_str(), Some("global;"));
         manager.set_profile_sequence(uid.clone(), SequenceKind::Rules, Some("prepend: ['DOMAIN,sequence.test,DIRECT']\nappend: []\ndelete: []".into())).await?;
         manager.set_profile_merge(uid.clone(), Some("mode: rule".into())).await?;
         let profile_script = "function main(c,name) { if(c.pipeline !== 'global;' || c.rules[0] !== 'DOMAIN,sequence.test,DIRECT') throw 'order'; c.pipeline+='profile:'+c.mode; c.mode='rule'; return c; }";
@@ -1604,7 +1608,7 @@ async fn global_edit_transactions_apply_refresh_rollback_reset_and_restore_nodes
         let uid = base.uid.as_deref().unwrap().to_owned();
         manager.select_profile(uid.clone()).await?;
         manager.select_node("Main".into(), "REJECT".into()).await?;
-        assert_eq!(manager.runtime_config().await?["trace"].as_str(), Some("GG"));
+        assert_eq!(manager.runtime_config().await?["trace"].as_str(), Some("G"));
         assert_eq!(manager.runtime_config().await?["mode"].as_str(), Some("direct"));
         manager.set_profile_merge(uid.clone(), Some("mode: rule".into())).await?;
         manager.set_profile_script(uid.clone(), Some("function main(c) { c.trace+='P'; c.mode='rule'; return c; }".into())).await?;
@@ -1648,7 +1652,7 @@ async fn global_edit_transactions_apply_refresh_rollback_reset_and_restore_nodes
         manager.set_global_merge(None).await?;
         assert_eq!(manager.global_merge().await?.yaml.as_deref(), Some(DEFAULT_GLOBAL_MERGE));
         assert_eq!(manager.global_script().await?.source.as_deref(), Some(DEFAULT_GLOBAL_SCRIPT));
-        assert_eq!(manager.profiles().items.unwrap().len(), 3);
+        assert_eq!(manager.profiles().items.unwrap().len(), 6);
         assert_eq!(manager.status().active_profile.as_deref(), Some(uid.as_str()));
         let raw = std::fs::read(directory.0.join("profiles").join(manager.profiles().items.unwrap().into_iter().find(|row| row.uid.as_deref() == Some(uid.as_str())).unwrap().file.unwrap().to_string()))?;
         assert_eq!(raw, YAML.as_bytes());

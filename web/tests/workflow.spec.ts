@@ -560,10 +560,11 @@ test("linked merge preserves raw subscriptions, rejects invalid updates and surv
   const overlay = "# browser merge\nMODE: rule\n";
   await page.getByLabel("合并增强 YAML").fill(overlay);
   await page.getByRole("button", { name: "保存增强", exact: true }).click();
+  await expect(page.getByLabel("合并增强 YAML")).toHaveCount(0);
   await expect(replacement).toContainText("已关联合并增强");
   await expect(page.locator("article.profile")).toHaveCount(1);
   const saved = await api("profiles");
-  expect(saved.items).toHaveLength(4);
+  expect(saved.items).toHaveLength(8);
   const mergeUid = saved.items.find((item: { uid: string }) => item.uid === uid)
     .option.merge;
   const linked = saved.items.find(
@@ -603,7 +604,7 @@ test("linked merge preserves raw subscriptions, rejects invalid updates and surv
   await page.getByLabel("合并增强 YAML").fill("mode: global\n");
   await page.getByRole("button", { name: "保存增强", exact: true }).click();
   await expect(page.getByLabel("合并增强 YAML")).toHaveCount(0);
-  expect((await api("profiles")).items).toHaveLength(4);
+  expect((await api("profiles")).items).toHaveLength(8);
   await stop();
   await start();
   await expect(page.getByText("已连接", { exact: true })).toBeVisible({
@@ -620,7 +621,7 @@ test("linked merge preserves raw subscriptions, rejects invalid updates and surv
   await expect(page.getByLabel("合并增强 YAML")).toHaveValue("mode: global\n");
   await page.getByRole("button", { name: "移除增强", exact: true }).click();
   await expect(replacement.getByText("已关联合并增强")).toHaveCount(0);
-  expect((await api("profiles")).items).toHaveLength(3);
+  expect((await api("profiles")).items).toHaveLength(7);
   expect((await api("status")).active_profile).toBe(uid);
   expect(await readFile(join(directory, "profiles", item.file), "utf8")).toBe(
     raw,
@@ -663,7 +664,8 @@ test("linked sequence editor saves each type, rejects invalid rules and restores
     join(directory, "profiles", baseItem.file),
     "utf8",
   );
-  const empty = "prepend: []\nappend: []\ndelete: []\n";
+  const empty = (kind: string) =>
+    `# Profile Enhancement ${kind[0].toUpperCase()}${kind.slice(1)} Template for Clash Verge\n\nprepend: []\n\nappend: []\n\ndelete: []\n`;
   const rules =
     "# browser sequences\nprepend: ['DOMAIN,sequence.test,REJECT']\nappend: []\ndelete: []\n";
   for (const [kind, yaml] of [
@@ -684,7 +686,7 @@ test("linked sequence editor saves each type, rejects invalid rules and restores
       await page.getByLabel("序列增强类型").selectOption(kind);
       await expect(page.getByLabel("序列增强类型")).toHaveValue(kind);
     }
-    await expect(page.getByLabel("序列增强 YAML")).toHaveValue(empty);
+    await expect(page.getByLabel("序列增强 YAML")).toHaveValue(empty(kind));
     await page.getByLabel("序列增强 YAML").fill(yaml);
     await page
       .getByRole("button", { name: "保存序列增强", exact: true })
@@ -693,7 +695,7 @@ test("linked sequence editor saves each type, rejects invalid rules and restores
   }
   await expect(profile).toContainText("已关联序列增强");
   await expect(page.locator("article.profile")).toHaveCount(1);
-  expect((await api("profiles")).items).toHaveLength(6);
+  expect((await api("profiles")).items).toHaveLength(7);
   expect(
     await readFile(join(directory, "profiles", baseItem.file), "utf8"),
   ).toBe(raw);
@@ -778,7 +780,7 @@ test("linked sequence editor saves each type, rejects invalid rules and restores
       return current.selected ?? [];
     })
     .toEqual([]);
-  expect((await api("profiles")).items).toHaveLength(3);
+  expect((await api("profiles")).items).toHaveLength(4);
   expect((await api("status")).active_profile).toBe(uid);
   expect(
     await readFile(join(directory, "profiles", baseItem.file), "utf8"),
@@ -822,6 +824,7 @@ test("script editor validates failures, preserves raw content and restores after
     .click();
   await page.getByLabel("脚本增强 JavaScript").fill(source);
   await page.getByRole("button", { name: "保存脚本增强", exact: true }).click();
+  await expect(page.getByLabel("脚本增强 JavaScript")).toHaveCount(0);
   await expect(profile).toContainText("已关联脚本增强");
   await expect(page.locator("article.profile")).toHaveCount(1);
   expect((await api("profiles")).items).toHaveLength(4);
@@ -2286,11 +2289,16 @@ test("raw subscription editor preserves failed drafts, reconciles lost responses
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
 });
 
-test("proxy connection information follows actual ports, settings saves and stopped cores", async ({ page }) => {
+test("proxy connection information follows actual ports, settings saves and stopped cores", async ({
+  page,
+}) => {
   const api = async (command: string, fields: Record<string, unknown> = {}) => {
     const response = await fetch(`${base}/api/commands`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ command, ...fields }),
     });
     expect(response.ok).toBe(true);
@@ -2298,34 +2306,49 @@ test("proxy connection information follows actual ports, settings saves and stop
   };
   const freePort = async () => {
     const listener = createServer();
-    await new Promise<void>(resolve => listener.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) =>
+      listener.listen(0, "127.0.0.1", resolve),
+    );
     const address = listener.address();
-    if (!address || typeof address === "string") throw new Error("No test port");
-    await new Promise<void>(resolve => listener.close(() => resolve()));
+    if (!address || typeof address === "string")
+      throw new Error("No test port");
+    await new Promise<void>((resolve) => listener.close(() => resolve()));
     return address.port;
   };
   const first = await freePort();
   const second = await freePort();
   await api("set_settings", { runtime: {} });
-  const profile = await api("import_profile", { name: "HTTP connection test", yaml: `port: ${first}\nmode: direct\nallow-lan: false\ndns: {enable: false}\ntun: {enable: false}\n` });
+  const profile = await api("import_profile", {
+    name: "HTTP connection test",
+    yaml: `port: ${first}\nmode: direct\nallow-lan: false\ndns: {enable: false}\ntun: {enable: false}\n`,
+  });
   await api("select_profile", { uid: profile.uid });
   await api("start");
   await page.goto(base);
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务", exact: true }).click();
   const panel = page.getByRole("region", { name: "代理连接信息", exact: true });
-  const httpRow = panel.getByRole("row").filter({ has: page.getByRole("rowheader", { name: "HTTP", exact: true }) });
+  const httpRow = panel.getByRole("row").filter({
+    has: page.getByRole("rowheader", { name: "HTTP", exact: true }),
+  });
   await expect(httpRow).toContainText(String(first));
   await expect(httpRow.getByRole("cell").nth(1)).toHaveText(String(first));
-  await expect(panel.getByText(`127.0.0.1:${first}`, { exact: true })).toBeVisible();
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /设置/ }).click();
+  await expect(
+    panel.getByText(`127.0.0.1:${first}`, { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "主导航" })
+    .getByRole("link", { name: /设置/ })
+    .click();
   await expect(panel).toHaveCount(0);
   const input = page.getByRole("textbox", { name: "HTTP 端口", exact: true });
   const portHint = page.locator("#port-hint-port");
   await expect(input).toHaveValue("");
   await expect(input).toHaveAttribute("placeholder", `继承当前端口 ${first}`);
   await expect(portHint).toHaveText(`当前端口：${first} · 继承订阅 / 配置`);
-  await expect(page.locator("#port-hint-mixed-port")).toContainText("禁用（0）");
+  await expect(page.locator("#port-hint-mixed-port")).toContainText(
+    "禁用（0）",
+  );
   await input.fill(String(second));
   // A draft must not overwrite the displayed runtime or imply it is already live.
   await expect(portHint).toContainText(`当前端口：${first}`);
@@ -2335,34 +2358,382 @@ test("proxy connection information follows actual ports, settings saves and stop
   expect((await api("settings")).runtime).toEqual({});
   await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
   await expect(portHint).toHaveText(`当前端口：${second} · 服务设置`);
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /概览/ }).click();
-  await expect(panel.getByText(`127.0.0.1:${second}`, { exact: true })).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "主导航" })
+    .getByRole("link", { name: /概览/ })
+    .click();
+  await expect(
+    panel.getByText(`127.0.0.1:${second}`, { exact: true }),
+  ).toBeVisible();
   const snapshot = await api("proxy_access");
   const failPort = async (route: import("@playwright/test").Route) => {
     if (route.request().postDataJSON()?.command === "proxy_access") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...snapshot, ports: snapshot.ports.map((port: { key: string }) => port.key === "port" ? { ...port, actual: 0 } : port) }) });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...snapshot,
+          ports: snapshot.ports.map((port: { key: string }) =>
+            port.key === "port" ? { ...port, actual: 0 } : port,
+          ),
+        }),
+      });
     } else await route.continue();
   };
   await page.route("**/api/commands", failPort);
   await panel.getByRole("button", { name: "刷新连接信息" }).click();
-  await expect(panel.getByRole("alert")).toContainText("配置端口与内核实际端口不一致");
+  await expect(panel.getByRole("alert")).toContainText(
+    "配置端口与内核实际端口不一致",
+  );
   await expect(httpRow.getByRole("cell").nth(1)).toHaveText("未监听");
-  await expect(panel.getByText(`127.0.0.1:${second}`, { exact: true })).toHaveCount(0);
+  await expect(
+    panel.getByText(`127.0.0.1:${second}`, { exact: true }),
+  ).toHaveCount(0);
   await page.unroute("**/api/commands", failPort);
   await api("stop");
   await expect(panel).toContainText("内核未运行");
   await expect(httpRow.getByRole("cell").nth(0)).toHaveText(String(second));
   await expect(httpRow.getByRole("cell").nth(1)).toHaveText("未确认");
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /设置/ }).click();
+  await page
+    .getByRole("navigation", { name: "主导航" })
+    .getByRole("link", { name: /设置/ })
+    .click();
   await expect(panel).toHaveCount(0);
-  await expect(portHint).toHaveText(`配置端口：${second} · 服务设置 · 内核未运行`);
+  await expect(portHint).toHaveText(
+    `配置端口：${second} · 服务设置 · 内核未运行`,
+  );
   await expect(input).toHaveValue(String(second));
   await api("start");
   await expect(portHint).toHaveText(`当前端口：${second} · 服务设置`);
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /概览/ }).click();
-  await expect(panel.getByText(`127.0.0.1:${second}`, { exact: true })).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "主导航" })
+    .getByRole("link", { name: /概览/ })
+    .click();
+  await expect(
+    panel.getByText(`127.0.0.1:${second}`, { exact: true }),
+  ).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(panel).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
   await page.getByRole("button", { name: "退出登录" }).click();
+});
+
+test("deleting a linked subscription cascades auxiliaries and DNS preferences while preserving the running profile", async ({
+  page,
+}) => {
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await fetch(`${base}/api/commands`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ command, ...fields }),
+    });
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  const catalog = async () => {
+    const response = await fetch(`${base}/api/profiles`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  const status = async () => {
+    const response = await fetch(`${base}/api/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  await api("set_settings", { runtime: { "mixed-port": 0, port: 0 } });
+  const yaml =
+    "mode: direct\nmixed-port: 0\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']";
+  const deleted = await api("import_profile", {
+    name: "Cascade deletion",
+    yaml,
+  });
+  const retained = await api("import_profile", {
+    name: "Cascade retained",
+    yaml,
+  });
+  await api("select_profile", { uid: deleted.uid });
+  await api("set_profile_dns", { uid: deleted.uid, enabled: false });
+  await api("set_profile_merge", { uid: deleted.uid, yaml: "mode: direct" });
+  await api("set_profile_script", {
+    uid: deleted.uid,
+    source: "function main(c) { return c; }",
+  });
+  for (const kind of ["rules", "proxies", "groups"]) {
+    await api("set_profile_sequence", {
+      uid: deleted.uid,
+      kind,
+      yaml: "prepend: []\nappend: []\ndelete: []",
+    });
+  }
+  const previous = await catalog();
+  const baseItem = previous.items.find(
+    (item: { uid: string }) => item.uid === deleted.uid,
+  );
+  const auxiliaries = ["merge", "script", "rules", "proxies", "groups"].map(
+    (key) => baseItem.option[key],
+  );
+  const removed = previous.items.filter(
+    (item: { uid: string }) =>
+      item.uid === deleted.uid || auxiliaries.includes(item.uid),
+  );
+  expect(removed).toHaveLength(6);
+  await api("select_profile", { uid: retained.uid });
+  await api("set_profile_dns", { uid: retained.uid, enabled: false });
+  const before = await status();
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务", exact: true }).click();
+  const card = page.locator("article.profile").filter({
+    has: page.getByRole("heading", { name: "Cascade deletion", exact: true }),
+  });
+  await card
+    .getByRole("button", { name: "删除订阅 Cascade deletion", exact: true })
+    .click();
+  await expect(card).toContainText("共享辅助配置会保留");
+  await card
+    .getByRole("button", { name: "确认删除 Cascade deletion", exact: true })
+    .click();
+  await expect(card).toHaveCount(0);
+  const after = await catalog();
+  for (const item of removed) {
+    expect(
+      after.items.some((row: { uid: string }) => row.uid === item.uid),
+    ).toBe(false);
+    await expect(
+      readFile(join(directory, "profiles", item.file)),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  }
+  const settings = await api("settings");
+  expect(settings.profile_dns[deleted.uid]).toBeUndefined();
+  expect(settings.profile_dns[retained.uid]).toEqual({ enabled: false });
+  expect(
+    after.items.some((item: { uid: string }) => item.uid === "Merge"),
+  ).toBe(true);
+  expect(
+    after.items.some((item: { uid: string }) => item.uid === "Script"),
+  ).toBe(true);
+  expect((await status()).pid).toBe(before.pid);
+  expect((await status()).config_revision).toBe(before.config_revision);
+  await expect(
+    page.getByRole("button", {
+      name: "删除订阅 Cascade retained",
+      exact: true,
+    }),
+  ).toBeDisabled();
+  await stop();
+  await start();
+  await expect(page.getByText("已连接", { exact: true })).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(card).toHaveCount(0);
+  expect((await api("settings")).profile_dns[deleted.uid]).toBeUndefined();
+  await expect(
+    page.getByRole("button", {
+      name: "删除订阅 Cascade retained",
+      exact: true,
+    }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+});
+
+test("local and remote imports create owned defaults, preserve links across refresh and survive restart", async ({
+  page,
+}) => {
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await fetch(`${base}/api/commands`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ command, ...fields }),
+    });
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务", exact: true }).click();
+  const before = await api("status");
+  const raw =
+    "# automatic browser import\nmode: direct\nmixed-port: 0\ndns: {enable: false}\nrules: ['MATCH,DIRECT']";
+  const local = await api("import_profile", {
+    name: "Automatic defaults",
+    yaml: raw,
+  });
+  const remote = await api("import_remote_profile", {
+    name: "Automatic remote defaults",
+    url: `${subscriptionUrl}/ok?defaults=1`,
+  });
+  const snapshot = await api("profiles");
+  const owned = async (baseItem: {
+    uid: string;
+    option: Record<string, string>;
+  }) => {
+    const ids: string[] = [];
+    for (const kind of ["merge", "script", "rules", "proxies", "groups"]) {
+      const uid = baseItem.option[kind];
+      expect(typeof uid).toBe("string");
+      ids.push(uid);
+      expect(["Merge", "Script", "Rules", "Proxies", "Groups"]).not.toContain(
+        uid,
+      );
+      const item = snapshot.items.find(
+        (row: { uid: string }) => row.uid === uid,
+      );
+      expect(item.type).toBe(kind);
+      const source = await readFile(
+        join(directory, "profiles", item.file),
+        "utf8",
+      );
+      if (kind === "merge") expect(source).not.toContain("store-selected");
+      else if (kind === "script") expect(source).toContain("return config;");
+      else
+        for (const key of ["prepend", "append", "delete"])
+          expect(source).toContain(`${key}: []`);
+    }
+    return ids;
+  };
+  const localIds = await owned(local);
+  const remoteIds = await owned(remote);
+  expect(localIds.every((uid) => !remoteIds.includes(uid))).toBe(true);
+  expect((await api("profile_raw", { uid: local.uid })).yaml).toBe(raw);
+  expect((await api("status")).pid).toBe(before.pid);
+  expect((await api("status")).config_revision).toBe(before.config_revision);
+  await api("refresh_profile", { uid: remote.uid });
+  expect(
+    (await api("profiles")).items.find(
+      (row: { uid: string }) => row.uid === remote.uid,
+    ).option,
+  ).toEqual(remote.option);
+  const card = page.locator("article.profile").filter({
+    has: page.getByRole("heading", {
+      name: "Automatic defaults",
+      exact: true,
+    }),
+  });
+  await expect(card).toBeVisible();
+  await card
+    .getByRole("button", { name: "合并增强 Automatic defaults", exact: true })
+    .click();
+  await expect(page.getByLabel("合并增强 YAML")).toHaveValue(
+    "# Profile Enhancement Merge Template for Clash Verge\n\n",
+  );
+  await page.getByRole("button", { name: "取消增强编辑", exact: true }).click();
+  await stop();
+  await start();
+  await expect(page.getByText("已连接", { exact: true })).toBeVisible({
+    timeout: 15000,
+  });
+  const restored = await api("profiles");
+  for (const item of [local, remote])
+    expect(
+      restored.items.find((row: { uid: string }) => row.uid === item.uid)
+        .option,
+    ).toEqual(item.option);
+  expect((await api("profile_raw", { uid: local.uid })).yaml).toBe(raw);
+  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+});
+
+test("managed proxy downloads persist the mode, keep failed drafts and allow explicit direct refresh", async ({
+  page,
+}) => {
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await fetch(`${base}/api/commands`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ command, ...fields }),
+    });
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  const listener = createServer();
+  await new Promise<void>((resolve) =>
+    listener.listen(0, "127.0.0.1", resolve),
+  );
+  const port = (listener.address() as { port: number }).port;
+  await new Promise<void>((resolve, reject) =>
+    listener.close((error) => (error ? reject(error) : resolve())),
+  );
+  await api("set_settings", {
+    runtime: { "mixed-port": port, port: 0, mode: "direct" },
+  });
+  await api("start");
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务", exact: true }).click();
+  const url = `${subscriptionUrl}/ok?self_proxy=1`;
+  await page.getByLabel("订阅链接", { exact: true }).fill(url);
+  await page.getByLabel("远程订阅名称（可选）").fill("Managed download");
+  await page.getByLabel("通过托管内核代理下载", { exact: true }).check();
+  await page.getByRole("button", { name: "下载并导入", exact: true }).click();
+  const card = page.locator("article.profile").filter({
+    has: page.getByRole("heading", { name: "Managed download", exact: true }),
+  });
+  await expect(card).toBeVisible();
+  const item = (await api("profiles")).items.find(
+    (p: { name: string }) => p.name === "Managed download",
+  );
+  expect(item.option.self_proxy).toBe(true);
+  await stop();
+  await start();
+  await expect(page.getByText("已连接", { exact: true })).toBeVisible({
+    timeout: 15000,
+  });
+  expect(
+    (await api("profiles")).items.find(
+      (p: { uid: string }) => p.uid === item.uid,
+    ).option.self_proxy,
+  ).toBe(true);
+  await api("stop");
+  const requests = subscriptionRequests;
+  await page.getByLabel("订阅链接", { exact: true }).fill(url);
+  await page.getByLabel("远程订阅名称（可选）").fill("Keep proxy draft");
+  await page.getByRole("button", { name: "下载并导入", exact: true }).click();
+  await expect(
+    page.getByText(/self_proxy requires a running managed core/),
+  ).toBeVisible();
+  await expect(page.getByLabel("订阅链接", { exact: true })).toHaveValue(url);
+  await expect(page.getByLabel("远程订阅名称（可选）")).toHaveValue(
+    "Keep proxy draft",
+  );
+  await expect(
+    page.getByLabel("通过托管内核代理下载", { exact: true }),
+  ).toBeChecked();
+  expect(subscriptionRequests).toBe(requests);
+  await card
+    .getByRole("button", { name: "编辑订阅 Managed download", exact: true })
+    .click();
+  await page.getByLabel("订阅刷新通过托管内核代理", { exact: true }).uncheck();
+  await page.getByRole("button", { name: "保存订阅信息", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "保存订阅信息", exact: true }),
+  ).toHaveCount(0);
+  expect(
+    (await api("profiles")).items.find(
+      (p: { uid: string }) => p.uid === item.uid,
+    ).option.self_proxy,
+  ).toBe(false);
+  await api("refresh_profile", { uid: item.uid });
+  expect(subscriptionRequests).toBe(requests + 1);
+  await page.getByLabel("通过托管内核代理下载", { exact: true }).uncheck();
+  await page.getByRole("button", { name: "下载并导入", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Keep proxy draft", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "退出登录", exact: true }).click();
 });

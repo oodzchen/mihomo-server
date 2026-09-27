@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteOptionsPatch {
+    pub with_proxy: Option<bool>,
+    pub self_proxy: Option<bool>,
     pub user_agent: Option<String>,
     pub timeout_seconds: Option<u64>,
     pub update_interval: Option<u64>,
@@ -26,6 +28,7 @@ impl ProfileStore {
     pub fn edit_profile(&mut self, uid: &str, patch: ProfilePatch) -> Result<PrfItem> {
         ensure!(
             !self.data_dir.join("profile-refresh.yaml").try_exists()?
+                && !self.data_dir.join("profile-import.yaml").try_exists()?
                 && !self.data_dir.join("profile-delete.yaml").try_exists()?
                 && !self.data_dir.join("profile-merge.yaml").try_exists()?,
             "profile recovery is pending"
@@ -72,6 +75,8 @@ impl ProfileStore {
             item.option = PrfOption::merge(
                 item.option.as_ref(),
                 Some(&PrfOption {
+                    with_proxy: option.with_proxy,
+                    self_proxy: option.self_proxy,
                     user_agent: option.user_agent.map(Into::into),
                     timeout_seconds: option.timeout_seconds,
                     update_interval: option.update_interval,

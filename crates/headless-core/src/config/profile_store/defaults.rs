@@ -11,7 +11,12 @@ impl ProfileStore {
     /// Idempotent initialization. Publish both rows in one catalog rename; never
     /// overwrite source files or initialize against an unrecovered catalog.
     pub fn ensure_global_defaults(&mut self) -> Result<()> {
-        for journal in ["profile-refresh.yaml", "profile-merge.yaml", "profile-delete.yaml"] {
+        for journal in [
+            "profile-import.yaml",
+            "profile-refresh.yaml",
+            "profile-merge.yaml",
+            "profile-delete.yaml",
+        ] {
             ensure!(
                 !self.data_dir.join(journal).try_exists()?,
                 "profile recovery is pending"

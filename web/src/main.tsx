@@ -492,7 +492,12 @@ function Overview({
           <strong>{bytes(memory?.inuse)}</strong>
         </div>
       </div>
-      <ProxyAccessPanel token={token} status={status} connection={connection} logout={logout} />
+      <ProxyAccessPanel
+        token={token}
+        status={status}
+        connection={connection}
+        logout={logout}
+      />
       <div className="two-column">
         <section className="panel">
           <div className="panel-title">
@@ -571,6 +576,8 @@ function ProfileEditor({
     String(item.option?.update_interval ?? 0),
   );
   const [auto, setAuto] = useState(item.option?.allow_auto_update ?? true);
+  const [selfProxy, setSelfProxy] = useState(item.option?.self_proxy ?? false);
+  const [withProxy, setWithProxy] = useState(item.option?.with_proxy ?? false);
   async function save(event: FormEvent) {
     event.preventDefault();
     const patch: Record<string, unknown> = {};
@@ -586,6 +593,9 @@ function ProfileEditor({
         options.update_interval = Number(interval);
       if (auto !== (item.option?.allow_auto_update ?? true))
         options.allow_auto_update = auto;
+      if (selfProxy !== (item.option?.self_proxy ?? false))
+        options.self_proxy = selfProxy;
+      if (withProxy !== (item.option?.with_proxy ?? false)) options.with_proxy = withProxy;
       if (Object.keys(options).length) patch.options = options;
     }
     if (!Object.keys(patch).length) {
@@ -678,7 +688,23 @@ function ProfileEditor({
               />
               允许自动更新
             </label>
-            <p className="muted">自动更新设置会保存，定时更新尚未接入。</p>
+            <label className="check-label">
+              <input
+                type="checkbox"
+                disabled={busy}
+                checked={selfProxy}
+                onChange={(event) => setSelfProxy(event.target.checked)}
+              />
+              订阅刷新通过托管内核代理
+            </label>
+            <label className="check-label">
+              <input type="checkbox" disabled={busy} checked={withProxy} onChange={(event) => setWithProxy(event.target.checked)} />
+              订阅刷新使用服务系统代理
+            </label>
+            <p className="muted">
+              托管内核模式优先，需要运行中的 HTTP 或 Mixed 入口。
+              系统代理读取服务环境，未配置时直连。自动更新设置会保存，定时更新尚未接入。
+            </p>
           </>
         )}
         <div className="form-actions">
@@ -1131,6 +1157,8 @@ function ProfilePage({
     [yaml, setYaml] = useState(""),
     [remoteUrl, setRemoteUrl] = useState(""),
     [remoteName, setRemoteName] = useState(""),
+    [remoteSelfProxy, setRemoteSelfProxy] = useState(false),
+    [remoteWithProxy, setRemoteWithProxy] = useState(false),
     [error, setError] = useState("");
   const [rawEditing, setRawEditing] = useState<string>();
   const [editing, setEditing] = useState<Profile | null>(null);
@@ -1209,6 +1237,7 @@ function ProfilePage({
     event.preventDefault();
     const item = await perform<Profile>("import_remote_profile", {
       url: remoteUrl.trim(),
+      options: { self_proxy: remoteSelfProxy, with_proxy: remoteWithProxy },
       ...(remoteName.trim() ? { name: remoteName.trim() } : {}),
     });
     if (item) {
@@ -1254,7 +1283,9 @@ function ProfilePage({
               )}
               {deleting === item.uid && (
                 <div className="delete-confirmation">
-                  <p>删除此订阅及其缓存文件？</p>
+                  <p>
+                    删除此订阅、独占的辅助配置和 DNS 偏好？共享辅助配置会保留。
+                  </p>
                   <div className="form-actions">
                     <button
                       disabled={busy}
@@ -1403,7 +1434,7 @@ function ProfilePage({
       <section className="panel">
         <h2>下载远程订阅</h2>
         <p className="muted">
-          由服务直连下载并保存
+          由服务下载并保存
           YAML。刷新当前订阅时会校验并应用新配置，失败时保留原配置。
         </p>
         <form onSubmit={importRemote}>
@@ -1428,6 +1459,23 @@ function ProfilePage({
               onChange={(event) => setRemoteName(event.target.value)}
             />
           </label>
+          <label className="check-label">
+            <input
+              type="checkbox"
+              disabled={busy}
+              checked={remoteSelfProxy}
+              onChange={(event) => setRemoteSelfProxy(event.target.checked)}
+            />
+            通过托管内核代理下载
+          </label>
+          <label className="check-label">
+            <input type="checkbox" disabled={busy} checked={remoteWithProxy} onChange={(event) => setRemoteWithProxy(event.target.checked)} />
+            使用服务系统代理下载
+          </label>
+          <p className="muted">
+            托管内核模式优先，需要运行中的 HTTP 或 Mixed 入口。
+            系统代理读取服务环境，未配置时直连；代理连接失败会报错。
+          </p>
           <button className="primary" disabled={busy || !remoteUrl.trim()}>
             下载并导入
           </button>

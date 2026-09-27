@@ -50,14 +50,15 @@ mihomo-server/
 │       ├── Source controller removal / original YAML preservation [Implemented; Linux verified]
 │       ├── Remote URL/YAML/header processing        [Migrated + adaptation]
 │       ├── Remote raw-content import and metadata  [Implemented]
-│       ├── Manual remote refresh + recovery journal [Implemented; direct only]
+│       ├── Manual remote refresh + recovery journal [Implemented; direct/self_proxy]
 │       ├── Metadata edit / noncurrent deletion     [Implemented; local/remote]
 │       ├── Linked YAML merge storage / recovery    [Implemented; upstream schema]
 │       ├── Linked rules/proxies/groups storage     [Implemented; upstream schema]
 │       ├── Linked script storage / source / recovery [Implemented; upstream schema]
 │       ├── Boa main(config, name), casing, console  [Migrated + worker adaptation]
 │       ├── Raw read/edit / version guard / coordinated recovery [Implemented; Linux verified]
-│       ├── Auxiliary cascade deletion                [Pending]
+│       ├── Auxiliary cascade deletion / shared/reserved protection [Implemented; Linux verified]
+│       ├── New-import auxiliary defaults / atomic catalog / recovery [Implemented; Linux verified]
 │       ├── Enhancement: fields, merges, sequences   [Migrated]
 │       ├── Reserved global Merge/Script defaults     [Implemented; upstream templates]
 │       ├── Global/profile execution order and fallback [Migrated + staged adaptation]
@@ -66,13 +67,15 @@ mihomo-server/
 │       ├── Typed DNS/TUN subset / shallow authority  [Implemented; Linux verified]
 │       ├── Pure TUN/DNS derivation / IPv6 range repair [Migrated + staged adaptation; Linux validation]
 │       ├── Provider DNS digest / profile preference / session confirmation [Migrated + adaptation; Linux verified]
-│       ├── Hosts / native TUN integration / deleted-profile preference cleanup [Pending]
+│       ├── Deleted-profile DNS preference / confirmation cleanup [Implemented; recoverable]
+│       ├── Hosts / native TUN integration            [Pending]
 │       ├── Final LAN bind / group cleanup / field order [Migrated + staged adaptation; Linux verified]
 │       ├── Full authoritative settings               [Pending]
 │       ├── Runtime YAML + overlay generation        [Implemented; upstream merge reused]
 │       ├── Profile enhancement generation          [Partially implemented; sequences/settings/TUN/DNS/global/profile/final stages]
 │       ├── Per-profile node selection records       [Implemented; upstream schema]
 │       ├── Geo/provider resources and proxy views   [Pending]
+│       ├── Immutable revision / orphan file garbage collection [Pending]
 │       └── Timed updates, core upgrades, backups     [Pending]
 ├── service/                                         [Partially implemented]
 │   ├── Persistent foreground entry point            [Implemented]
@@ -90,7 +93,8 @@ mihomo-server/
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
 │   ├── Profile snapshots/watches and active UID     [Implemented]
-│   ├── Actor metadata edits / protected deletion / cleanup recovery [Implemented]
+│   ├── Local/file/remote imports with owned defaults / startup recovery [Implemented; Linux verified]
+│   ├── Actor metadata edits / protected cascade / settings/file cleanup recovery [Implemented; Linux verified]
 │   ├── Actor raw YAML read/edit / original and enhanced validation / coordinated commit [Implemented; Linux verified]
 │   ├── Actor linked merge edits / detach / commit recovery [Implemented; Linux verified]
 │   ├── Actor linked sequence edits / detach / commit recovery [Implemented; Linux verified]
@@ -98,10 +102,11 @@ mihomo-server/
 │   ├── Global/profile staged generation on select/refresh/edit [Implemented; Linux verified]
 │   ├── Global read/set/reset, validation/apply/recovery [Implemented; Linux verified]
 │   ├── Disposable script worker / limits / cancellation / reap [Implemented; Linux only]
-│   ├── Remote HTTP(S) download + actor-backed import [Implemented; direct only]
+│   ├── Remote HTTP(S) download + actor-backed import [Implemented; direct/self_proxy]
 │   │   ├── Bounded download size/concurrency, timeout/cancel [Implemented]
 │   │   ├── Manual refresh / stale-download guard / journal recovery [Implemented; Linux]
-│   │   └── Proxy modes, TLS fallback and scheduling [Pending]
+│   │   ├── Managed core proxy / live route / auth / lifecycle cancellation [Implemented; Linux verified]
+│   │   └── System proxy, TLS fallback/bypass and scheduling [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
@@ -132,15 +137,17 @@ mihomo-server/
 │   ├── HTTP commands, WebSocket events/feed adapters [Implemented; MVP allowlist]
 │   │   └── Broader command and feed views           [Pending]
 │   ├── Local profiles, config editor, core state    [Implemented; MVP]
-│   │   ├── Remote URL import, usage display         [Implemented]
+│   │   ├── Remote URL import, usage display, saved auxiliary defaults [Implemented]
 │   │   ├── Manual remote refresh / usage updates  [Implemented]
-│   │   ├── Metadata editor / noncurrent deletion  [Implemented]
+│   │   ├── Managed proxy import / saved mode editor / failed drafts [Implemented; Linux verified]
+│   │   ├── Metadata editor / confirmed cascade deletion [Implemented; Linux verified]
 │   │   ├── Linked YAML merge editor / detach       [Implemented]
 │   │   ├── Linked rules/proxies/groups editor / detach [Implemented]
 │   │   ├── Linked script editor / detach / failure logs [Implemented; Linux]
 │   │   ├── Global Merge/Script editor / reset / diagnostics [Implemented; Linux verified]
 │   │   └── Raw subscription editor / conflicts / independent readback [Implemented; Linux verified]
 │   ├── Proxy selection, unfix and bounded logs      [Implemented; MVP]
+│   ├── Proxy connection information / actual ports / save verification [Implemented; Linux verified]
 │   ├── Traffic, memory and connection-count overview [Implemented; MVP]
 │   ├── Rules and full connection/provider views     [Pending]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
@@ -177,10 +184,10 @@ shutdown. It can start with `examples/minimal.yaml`; see
 before core startup and while the core is stopped or failed. A minimal React UI
 is available when `--web-dir ./web/dist` supplies built assets, including failed-core
 repair, local profiles, runtime editing, nodes, logs and realtime metrics.
-Direct remote import and manual refresh preserve downloaded YAML, upstream metadata
+Direct and managed-proxy remote import and manual refresh preserve downloaded YAML, upstream metadata
 and profile identity. Active refresh uses validated application and recoverable
 commit; linked sequence, YAML merge and script editing feed selection and refresh generation.
-Scheduling, proxy modes and the remaining enhancement workflows are incomplete. Local profile imports,
+Scheduling, system proxy/TLS modes and the remaining enhancement workflows are incomplete. Local profile imports,
 selection and restoration now feed the runtime validation/application flow. Runtime YAML imports,
 upstream merge overlays, validation, application, persistence, and interrupted
 application recovery work through the manager; `--import-config` exposes the
@@ -204,8 +211,10 @@ and noncurrent deletion are connected. Linked merge, sequence and script items c
 replaced and detached; selection and active refresh apply their saved content.
 Global Merge/Script defaults initialize after journal recovery, preserving existing
 rows and source files. Raw read/edit uses versioned immutable source publication
-and coordinated active-runtime recovery. Cascade deletion, scheduled updates and
-automatic per-profile auxiliary creation remain pending. Generation applies rules, proxies
+and coordinated active-runtime recovery. Noncurrent cascade deletion protects
+shared/reserved auxiliaries and files and cleans deleted DNS preferences. New service
+imports initialize owned upstream defaults through a recoverable single catalog
+commit. Scheduled updates and additional remote download modes remain pending. Generation applies rules, proxies
 and groups sequences, global merge/script, then profile merge/script. Unlinked
 profile stages reuse reserved defaults, including the upstream double application
 of globals. Authenticated global read/set/reset commands now coordinate catalog
@@ -1348,7 +1357,7 @@ scheduling, proxy/TLS modes, upgrades/backups/WebDAV, advanced pages and additio
 platforms remain pending. The Linux MVP remains runnable; the complete project
 is not done.
 
-## Latest increment: original subscription YAML read/edit and recovery
+## Previous increment: original subscription YAML read/edit and recovery
 
 Delivery step 7 adds authenticated profile_raw/set_profile_raw commands and actor
 read/edit operations for local/remote base profiles. Reads return exact uid,
@@ -1408,6 +1417,184 @@ fallback-filter settings, privileged native TUN, resources, scheduling, proxy/TL
 modes, upgrades/backups/WebDAV, advanced pages, revision garbage collection and
 additional platforms remain pending. The Linux MVP remains runnable; the complete
 project is not done.
+
+## Previous increment: auxiliary cascade deletion and DNS preference cleanup
+
+Delivery step 7 extends noncurrent local/remote deletion to exclusive linked
+merge/script/rules/proxies/groups auxiliary rows. One catalog rename removes the
+base and planned auxiliaries. Shared links, reserved Merge/Script/Rules/Proxies/
+Groups rows and any files referenced by surviving catalog rows are protected.
+Active/current deletion remains rejected even when stopped; there is no implicit
+fallback selection. Missing auxiliary rows/files are tolerated for repair, while
+wrong-type/nested auxiliaries and incoming links to the base are rejected.
+
+The private schema-2 deletion journal records up to five auxiliary UID/file pairs;
+schema-1 plans still recover. Publication checks the staged plan against current
+links and file pointers. Uncommitted recovery preserves rows, content and DNS
+preferences. Committed recovery atomically removes the deleted preference before
+cleaning unreferenced files, and retains the journal through any cleanup failure.
+Startup and command admission retry settings/file cleanup. Existing runtime
+settings, revision, active UID and running PID are unchanged. Actor confirmations
+are removed only after catalog commit. Startup also prunes preferences left by
+older deletions after recovering all relevant journals.
+
+The Profiles page confirmation describes removal of exclusive auxiliary configs
+and DNS preferences, and preservation of shared configurations. Existing readback
+and profile watches report committed deletion even when cleanup must be retried.
+Garbage collection of old immutable source/runtime/auxiliary revisions and unlinked
+orphan files remains a separate pending task.
+
+Verification: all 179 regular Rust tests pass, including nine new store tests for
+five-kind cascade, shared/reserved protection, catalog/settings write failures,
+interruption recovery, partial cleanup, forged plans, legacy journals, stale
+preferences and symlink/path safety. All 52 real-Mihomo integration tests pass;
+the two added actor workflows also pass after extending coverage to an enabled
+provider DNS preference/session confirmation. They verify unchanged runtime/PID,
+active/stopped protection, recovery before the next command and restart persistence.
+All 17 Chromium workflows pass against the fresh
+`target/mihomo-server-linux-x86_64-cascade-delete` release bundle, including the
+new confirmed cascade/file/preference/restart workflow. Cargo check, Rust format,
+warning-free Clippy, TypeScript/Vite and changed-file Prettier checks pass. The
+full frontend formatting check still reports pre-existing style differences in
+unmodified proxy-access.tsx, settings.tsx and style.css. Bundle checksums and
+provenance match, and fixture processes have been cleaned up.
+
+Actual-node smoke verification uses an isolated copy of the existing data catalog,
+source files and GeoIP data. It loads the saved subscription with 58 source nodes
+(56 traffic candidates), selects a real node through the management API, confirms
+the selected node via Mihomo readback, and receives HTTP 204 from an HTTPS request
+through the generated HTTP proxy listener on the first candidate. Original data
+files remain byte-for-byte unchanged; no credentials or node endpoints are printed.
+
+Commit status: the worktree changes and progress documents are complete, but
+`git add` fails creating `.git/index.lock` because this environment mounts `.git`
+as a read-only filesystem. No commit was created; the changes remain in the
+worktree for submission when Git metadata is writable.
+
+Next Delivery step 7 subtask: automatic per-profile auxiliary creation with upstream
+defaults and safe import/recovery. Full DNS policy/hosts/fallback-filter settings,
+privileged native TUN, resource settings, scheduled/proxy/TLS updates, core upgrades,
+backups/WebDAV, advanced pages, revision garbage collection and additional platforms
+remain pending. The Linux MVP remains runnable; the complete project is not done.
+
+## Previous increment: automatic import auxiliary defaults and recovery
+
+Delivery step 7 now routes service local-file/YAML, remote and CLI imports through
+one workflow that creates missing ordinary merge/script/rules/proxies/groups rows
+using upstream defaults. Every profile owns distinct initial auxiliaries. Supplied
+valid shared/reserved links and remote metadata are preserved. Empty Merge does
+not contain the reserved global store-selected setting; Script is the upstream
+identity template. New profiles execute global Script once followed by their
+identity Script. Cleared or legacy missing links retain reserved fallback.
+
+A private bounded profile-import.yaml journal records allocated UID/file pairs,
+content hashes and reused-link fingerprints before content writes. One atomic
+catalog rename publishes all rows. Startup and command admission recover imports
+before global initialization and other mutations: committed exact rows/content
+survive, uncommitted partial files are removed, reused files remain, and unsafe or
+conflicting plans fail with retryable recovery state. Imports preserve exact local
+raw text, remain separate from activation and leave active UID/runtime/PID unchanged.
+Refresh/raw/metadata updates keep saved links; cascade deletion removes their
+exclusive current files. Existing catalogs retain their prior link/fallback behavior.
+Low-level raw import primitives remain available for legacy catalog migration;
+service entrypoints use the new transactional default-import methods.
+
+Verification: all 188 regular Rust tests and all 54 real-Mihomo integration tests
+pass. Nine new store tests cover exact templates/raw content, separate ownership,
+shared/reserved reuse, remote metadata, partial-file interruption, failed catalog
+writes, filename collisions, changed reused links, pending admission, forged plans,
+corrupt content, partial catalogs and symlink-safe retry. Two new actor workflows
+verify unchanged core/runtime on import, once-only global execution, explicit
+clear/fallback, startup recovery before global initialization and restart behavior.
+Existing service tests now assert preserved initial links and the new catalog
+shape while retaining clear, failed-update rollback and legacy fallback coverage.
+
+All 18 Chromium workflows pass against the fresh
+`target/mihomo-server-linux-x86_64-import-defaults` bundle. The new workflow verifies
+local/remote owned templates, distinct UIDs, unchanged runtime/PID, refresh link
+preservation, initial editor content and restart persistence. Existing enhancement
+workflows now wait for save completion instead of using an already-present link
+indicator, and verify the full upstream sequence templates. Cargo check, Rust
+format, warning-free Clippy, TypeScript/Vite and changed-test Prettier checks pass.
+Bundle checksums and bundled provenance/deployment docs match the source. Fixture
+services, cores and script workers are cleaned up.
+
+Actual-node verification imports the existing saved raw node data through the new
+service workflow in an isolated temporary data directory. All five auxiliary links
+are created, the selected real node is confirmed through Mihomo readback, and an
+HTTPS request through the generated HTTP proxy returns 204 on the first candidate.
+There are 58 source nodes and 56 traffic candidates. Original data files remain
+byte-for-byte unchanged and no node credentials or management token are printed.
+
+Commit status: `git add` again fails creating `.git/index.lock` because Git metadata
+is mounted read-only. No commit was created; the verified worktree changes remain
+available. The pre-existing run_autonomous_codex.sh modification was not changed or
+included in the staging request.
+
+Next Delivery step 7 subtask: remote subscription downloads through the managed
+core proxy (self_proxy), preserving bounded download/admission, cancellation,
+refresh stale guards and recovery. System proxy/TLS modes, scheduled updates,
+full DNS/hosts/TUN settings, resources, core upgrades, backups/WebDAV, advanced pages,
+revision garbage collection and additional platforms remain pending. The Linux
+MVP remains runnable; the complete project is not done.
+
+## Latest increment: managed-core proxy subscription downloads
+
+Delivery step 7 now supports self_proxy on remote import, saved remote metadata
+patches and manual refresh. Missing/false retains direct transport. Persisted
+upstream self_proxy wins over with_proxy; system proxy and invalid-certificate
+bypass remain explicitly unsupported. UI import/edit checkboxes save the mode,
+keep failed import drafts and allow an explicit return to direct mode.
+
+After semaphore admission the service reads the private controller and committed
+runtime under a stable running PID/generation/configuration snapshot. A bounded
+three-second route query verifies actual listener ports against the committed
+configuration, prefers Mixed then HTTP, and supports loopback IPv4/IPv6 bindings.
+Missing ingress, stopped cores, incompatible custom bindings or route/auth changes
+fail explicitly without direct fallback. Mihomo reports usernames only; credentials
+come from the private committed runtime and the reported usernames are checked.
+The opaque route is neither serialized nor logged; no proxy URL is caller supplied.
+
+Network work remains outside the lifecycle actor. Existing size/concurrency,
+timeout/redirect/TLS limits, URL-redacted errors and shutdown cancellation remain.
+Explicit routing overrides environment proxy/NO_PROXY choices. Core stop/restart,
+child replacement or committed configuration change cancels pending proxy downloads
+and releases admission. Existing source UID/file/URL/full-option guards prevent
+stale refresh publication, including download-mode changes. Successful downloads
+use the original recoverable import/defaults and refresh transactions.
+
+Verification: 191 regular Rust tests and 56 real-Mihomo integration tests pass.
+Three route/validation tests and two real-core workflows cover listener priority,
+loopback bindings, authentication mismatch/redaction, private password use, a
+controlled HTTP upstream tunnel to a synthetic hostname unavailable directly,
+Mixed-to-HTTP port switching, response-size/status/timeout failures, mode/restart persistence,
+refresh metadata conflicts, stop/config-change cancellation and absent ingress.
+Provider/upstream headers contain no management or inbound proxy credentials.
+Cargo check, Rust format, warning-free all-target Clippy and TypeScript/Vite pass.
+All 19 Chromium workflows pass against the fresh
+`target/mihomo-server-linux-x86_64-self-proxy` release bundle. The new workflow
+verifies proxy import, saved mode/restart persistence, stopped-core rejection with
+no provider request, retained URL/name/mode drafts, metadata switch to direct and
+successful stopped-core direct refresh/import. Changed-file Prettier, bundle
+checksums and bundled provenance/deployment document comparisons pass. Fixture
+services, cores and script workers are cleaned up.
+
+Actual-node verification again imports the saved source into an isolated temporary
+service, confirms all five auxiliary defaults and real selected-node readback, and
+gets HTTPS 204 through the proxy on the first candidate among 56 traffic nodes.
+Original data remains byte-for-byte unchanged; secrets are never printed.
+
+Commit status: `git add crates service web docs` fails creating .git/index.lock
+because Git metadata is mounted read-only. No commit was created; the completed
+worktree changes remain available. The pre-existing run_autonomous_codex.sh
+modification remains untouched and was excluded from the staging request.
+
+Next Delivery step 7 subtask: system-proxy remote subscription transport
+(with_proxy), with explicit server semantics and the same bounds/cancellation/
+refresh recovery. TLS fallback/bypass, scheduled updates, full DNS/hosts/TUN settings,
+resources, upgrades, backups/WebDAV, advanced pages, revision garbage collection
+and additional platforms remain pending. The Linux MVP remains runnable; the
+complete project is not done.
 
 ## MVP completion boundary
 

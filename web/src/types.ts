@@ -26,6 +26,8 @@ export interface Profile {
     timeout_seconds?: number;
     update_interval?: number;
     allow_auto_update?: boolean;
+    self_proxy?: boolean;
+    with_proxy?: boolean;
   };
   extra?: { upload: number; download: number; total: number; expire: number };
   selected?: { name?: string; now?: string }[];

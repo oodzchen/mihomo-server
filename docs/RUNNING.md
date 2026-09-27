@@ -631,8 +631,8 @@ the example provides a port-7890 DIRECT/REJECT configuration.
 ## Remote subscription import
 
 In the browser's Profiles page, enter an HTTP(S) subscription URL and optional
-name, then choose “下载并导入”. The server downloads it directly and saves the
-raw YAML; select its UID separately to validate/apply. Import does not switch the
+name, optionally enable “通过托管内核代理下载”, then choose “下载并导入”.
+The server downloads and saves the raw YAML; select its UID separately to validate/apply. Import does not switch the
 current profile or start the core. The list distinguishes remote profiles and
 shows reported usage. The manual refresh button updates an existing remote profile
 without changing its UID; the workflow is described below.
@@ -645,6 +645,7 @@ without changing its UID; the workflow is described below.
   "url": "https://provider.example/subscription?token=YOUR_SUBSCRIPTION_TOKEN",
   "name": "Optional display name",
   "options": {
+    "self_proxy": false,
     "timeout_seconds": 20,
     "user_agent": "clash-verge/v0.1.0",
     "update_interval": 120,
@@ -666,10 +667,13 @@ The transport disables environment proxies, follows at most ten redirects and
 uses reqwest's verified platform TLS. No service bearer token is sent to providers.
 Request/body errors omit subscription URLs. Authenticated profile queries expose
 stored subscription metadata, including its URL, using the existing private file
-and HTTP boundaries. Proxy modes (`with_proxy`, `self_proxy`), TLS certificate
-bypass and linked-enhancement options are rejected as unknown options in this
-increment. Desktop TLS root fallback and external HTTPS/provider validation remain
-pending. The initial path can work while the core is stopped or failed.
+and HTTP boundaries. `self_proxy: true` selects the managed core's actual Mixed
+listener, or its HTTP listener when Mixed is disabled. The core must be running;
+listener ports must match the committed runtime snapshot. A stopped core, missing
+HTTP-compatible ingress or incompatible bind address returns an error without
+falling back to direct access. Direct downloads can work while the core is stopped.
+System proxy (`with_proxy`), TLS certificate bypass and linked-enhancement download
+options remain unsupported. Desktop TLS root fallback remains pending.
 
 Usage accepts `subscription-userinfo` and storage-provider prefixes ending in a
 hyphen, preserving upload/download/total/expire fields. Valid HTTP(S) profile home
@@ -710,9 +714,10 @@ Choose “刷新订阅” on an existing remote profile, or send the authenticat
 
 Only `uid` is accepted; local/unknown profiles fail before any provider request.
 The request reuses saved URL/user agent/timeout/update options. Manual refresh is
-allowed even with allow_auto_update false. Unsupported saved proxy/TLS-bypass or
-unsupported transport options fail explicitly. Linked sequences/YAML merge/scripts
-are supported and applied to active updates. Refresh uses the same direct transport,
+allowed even with allow_auto_update false. Saved self_proxy selects the managed
+core; unsupported saved system-proxy/TLS-bypass options fail explicitly. Linked
+sequences/YAML merge/scripts are supported and applied to active updates. Refresh
+uses the same direct or managed-proxy transport,
 shared four-download admission, body limits and shutdown cancellation as import.
 No automatic scheduler runs yet.
 
@@ -755,7 +760,7 @@ tests verify actual button actions, usage updates and restart restoration.
 ## Profile metadata editing and deletion
 
 Select “编辑” on a local/remote profile. Save a title/description, and for remote
-items optionally change URL, user agent, timeout, update interval or auto-update
+items optionally change URL, user agent, timeout, download mode, update interval or auto-update
 metadata. This saves catalog metadata only: UID, raw content, usage/home/download
 timestamp and node records remain unchanged; no network or core reload happens.
 Changed URL/options take effect on the next explicit refresh. The previous usage
@@ -772,6 +777,7 @@ Authenticated commands use these strict shapes:
     "desc": "Optional description",
     "url": "https://provider.example/new-subscription",
     "options": {
+      "self_proxy": true,
       "user_agent": "clash-verge/v0.1.0",
       "timeout_seconds": 20,
       "update_interval": 120,
@@ -787,9 +793,9 @@ descriptions at most 4 KiB, URLs valid HTTP(S) at most 8 KiB, user agents at mos
 1 KiB without control characters and timeouts 1..120 seconds. update_interval is
 an unsigned count of minutes; zero is retained as disabled update metadata.
 URL/options are remote-only. Supported option fields merge into saved options;
-unsupported proxy/TLS-bypass/enhancement fields and UID/type/file/selected/extra/
-updated changes are rejected. Raw subscription editing remains pending; the
-existing configuration editor edits the separate runtime YAML.
+unsupported system-proxy/TLS-bypass/enhancement fields and UID/type/file/selected/
+extra/updated changes are rejected. The dedicated raw subscription editor edits
+the source; the configuration editor edits the separate runtime YAML.
 
 ```json
 { "command": "delete_profile", "uid": "YOUR_NONCURRENT_PROFILE_UID" }
@@ -799,19 +805,27 @@ The browser offers inline confirmation and cancellation. API callers submit the
 single explicit delete command; there is no force override. The actor rejects
 canonical active UID deletion even if stopped, and also protects the compatibility
 current mirror. Select another subscription before deleting the previous one.
-Ordinary noncurrent local/remote deletion removes its catalog entry, node records
-and current raw cache file, without changing active UID/runtime/PID. Shared files
-remain while another catalog item references them. Missing raw files are tolerated;
-unsafe file names, symlinks/directories, linked profiles and enhancement references
-are rejected. Auxiliary cascade deletion awaits the enhancement ownership model.
+Noncurrent local/remote deletion removes its catalog entry, node records, current
+raw file and exclusive linked merge/script/rules/proxies/groups rows and files.
+It also removes that UID's saved DNS preference and session confirmation, without
+changing active UID/runtime/PID or runtime settings. Shared auxiliary rows, all
+reserved defaults and files referenced by surviving rows remain. Missing files
+and missing auxiliary rows are tolerated; unsafe filenames, symlinks/directories,
+wrong-type/nested auxiliaries and incoming enhancement links to the base are
+rejected. Unlinked orphan files and older immutable revisions are not collected.
 
-Deletion stages a private profile-delete.yaml journal. Catalog rename commits
-removal, then unreferenced current raw content is removed and directories synced.
+Deletion stages a private profile-delete.yaml journal (version 2 with auxiliary
+UID/file pairs; version 1 plans still recover). One catalog rename commits all row
+removals. Atomic settings cleanup then removes the deleted DNS preference before
+unreferenced current raw/auxiliary files are removed and directories synced.
 Catalog save failures preserve referenced content. An interruption before catalog
 commit leaves the UID/file; recovery clears the plan. An interruption after commit
 leaves the UID absent and recovery finishes cleanup. Cleanup failure is observable
 as a committed deletion with pending cleanup; the journal is retained for startup
-or the next actor command. As with other stores, a post-rename directory-sync error
+or the next actor command. A failed settings cleanup retains the journal and
+files, and later commands retry recovery before proceeding. Startup prunes old
+preferences whose UID no longer denotes a local/remote profile, preserving runtime
+settings and preferences for existing profiles. As with other stores, a post-rename directory-sync error
 can occur after the catalog logically committed; read the returned/current catalog
 rather than assuming every error means no change. Old unreferenced refresh and
 runtime revisions remain pending garbage collection.
@@ -1510,3 +1524,56 @@ succeeds. Version changes require explicit Reload before editing the new base;
 checking a different source does not silently make an old draft eligible to
 overwrite it. Dirty Reload/Close requires explicit discard. Page navigation
 discards drafts and cancels owned reads; expired authentication logs out.
+
+
+New service imports initialize auxiliary defaults
+------------------------------------------------
+
+Every local file/YAML or remote subscription imported through the service or CLI
+now receives five owned auxiliary links when no existing link is supplied: empty
+Merge, identity Script, empty Rules, Proxies and Groups sequences. The comment-only
+Merge intentionally omits the reserved global store-selected setting. The ordinary
+Script uses the exact upstream identity template. The editors open these saved
+files immediately; explicit clear still detaches a link and uses the existing
+reserved fallback. Global scripts therefore run once for a newly imported profile,
+and again at the profile stage if its Script link is explicitly cleared.
+
+Import atomically publishes the base plus missing auxiliary rows after writing all
+private files. A private profile-import.yaml intent journal precedes those writes,
+so startup/command recovery removes partially written, uncommitted files. Published
+imports retain exact rows and content; shared/reserved reused links are verified
+and preserved. Unexpected file contents or catalog conflicts retain the journal
+and report a recovery error. Import does not activate the profile or change the
+running core. Refresh/raw edit/metadata edit preserve the owned links.
+
+Existing saved catalogs retain their current links, including legacy missing-link
+fallback. Automatic defaults apply to new service imports. Old immutable revisions
+and unlinked orphan files remain outside import cleanup.
+
+
+Remote downloads through the managed proxy
+-----------------------------------------
+
+Use `options: {"self_proxy": true}` with `import_remote_profile`, or change a saved
+remote profile using `edit_profile` with `patch: {"options": {"self_proxy": true}}`.
+Manual refresh uses the saved mode. Missing or false preserves direct transport;
+an explicit false patch turns proxy mode off. The Profiles page provides both
+choices and preserves failed import drafts. Persisted upstream profiles with both
+self_proxy and with_proxy enabled prefer self_proxy, matching upstream precedence.
+
+Proxy routing is resolved after bounded download admission, from the private core
+controller and committed runtime. It prefers Mixed then HTTP, supports loopback
+IPv4/IPv6 bindings, and rejects custom non-loopback bindings. Proxy credentials
+come from private runtime authentication, checked against the usernames the core
+reports. They are sent only to the local proxy; service management credentials are
+never attached. Environment proxies and NO_PROXY do not override the explicit route.
+Route resolution is limited to three seconds. Existing request/body timeouts,
+redirect limits, 8 MiB maximum and download concurrency admission still apply.
+
+Core stop/restart, process replacement or committed configuration changes cancel
+in-flight proxy downloads. Shutdown cancels active and queued requests. Network
+work remains outside the lifecycle actor. A metadata/raw/URL change during refresh
+invalidates the old result through the existing source guard; successful results
+continue through the original transactional import/refresh recovery workflows.
+SOCKS-only ingress, system proxies, TLS fallback/bypass and scheduled updates are
+separate pending increments.

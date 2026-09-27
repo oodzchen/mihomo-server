@@ -20,6 +20,7 @@ use super::{
 mod defaults;
 mod delete;
 mod edit;
+mod import;
 mod merge;
 mod refresh;
 mod sequence;
@@ -30,6 +31,7 @@ pub use merge::{
 pub use sequence::SequenceKind;
 
 pub use edit::{ProfilePatch, RemoteOptionsPatch};
+pub use import::ImportPlan;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RawContent {
@@ -192,6 +194,11 @@ impl ProfileStore {
 
     /// Import raw local YAML. Activation is a separate validated service operation.
     pub fn import_local(&mut self, name: &str, yaml: &str) -> Result<PrfItem> {
+        let item = Self::local_item(name, yaml)?;
+        self.persist_import(item, yaml)
+    }
+
+    fn local_item(name: &str, yaml: &str) -> Result<PrfItem> {
         ensure!(
             !name.trim().is_empty() && name.len() <= 256,
             "profile name must be 1..256 bytes"
@@ -211,17 +218,23 @@ impl ProfileStore {
             )?),
             ..PrfItem::default()
         };
-        self.persist_import(item, yaml)
+        Ok(item)
     }
 
     /// Remote content retains upstream metadata; import does not activate it.
     pub fn import_remote(&mut self, profile: RemoteProfile) -> Result<PrfItem> {
+        let yaml = validate_yaml(&profile.yaml)?.to_owned();
+        let item = Self::remote_item(profile)?;
+        self.persist_import(item, &yaml)
+    }
+
+    fn remote_item(profile: RemoteProfile) -> Result<PrfItem> {
         ensure!(
             !profile.name.trim().is_empty() && profile.name.len() <= 256,
             "profile name must be 1..256 bytes"
         );
         let url = subscription_url(&profile.url)?;
-        let yaml = validate_yaml(&profile.yaml)?;
+        validate_yaml(&profile.yaml)?;
         let uid = format!("R{}", unique_id()?);
         let item = PrfItem {
             file: Some(format!("{uid}.yaml").into()),
@@ -238,10 +251,11 @@ impl ProfileStore {
             )?),
             ..PrfItem::default()
         };
-        self.persist_import(item, yaml)
+        Ok(item)
     }
 
     fn persist_import(&mut self, item: PrfItem, yaml: &str) -> Result<PrfItem> {
+        self.ensure_import_admission()?;
         let path = self
             .data_dir
             .join("profiles")
