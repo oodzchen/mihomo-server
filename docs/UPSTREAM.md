@@ -1409,3 +1409,32 @@ restart. The official Alpha wrapper is separately exercised with real-node traff
 including force, unchanged-version no-op and unknown-core repair. Other platforms,
 Alpha bundle seeds and cached-candidate garbage collection remain pending.
 No dependency is added.
+
+
+## Bounded local backup export and service backup models
+
+Source: `src-tauri/src/core/backup.rs::create_backup` and
+`src-tauri/src/feat/backup.rs::LocalBackupFile`, pinned commit
+b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b. Destinations:
+crates/headless-core/src/backup.rs, service/src/backup.rs, core_manager.rs and
+management/http.rs. Retained behaviors are a Stored ZIP container, raw profile
+contents and configuration export, with application-specific credentials excluded.
+Service metadata retains filename/content length but replaces host paths and
+human-local timestamps with portable schema/digest/Unix-time metadata.
+
+The actor-owned snapshot exports service settings and runtime configuration in
+place of desktop clash/verge/DNS files. It includes referenced global/linked/raw
+profile files and saved selections, adds a schema-1 per-entry SHA-256 manifest and
+excludes runtime auth/socket/lock, journals, binaries, resource caches and orphan
+files. It is explicitly a service backup; upstream desktop restore is not promised.
+The authenticated empty-body POST endpoint returns binary content with bounded
+size/count/work, descriptor-safe reads and body-owned single admission. No caller
+path or retained temporary archive is introduced. Restore/retention/schedule,
+WebDAV clients and UI remain pending; upstream insecure WebDAV TLS is not copied.
+
+Pinned zip 8.6.0 matches the source crate, with default features disabled for Stored
+archives; typed-path 0.12.3 is locked transitively. futures-util moves from dev-only
+to a production dependency for bounded download streaming. Source schemas and
+lifecycle APIs remain Tauri-free. Tests cover ZIP/digest/raw-record preservation,
+source/path bounds, links/FIFO/modes, cancellation, HTTP controls, download
+admission/drop and running/stopped/restart snapshots with real Mihomo.

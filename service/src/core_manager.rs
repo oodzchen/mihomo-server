@@ -322,6 +322,10 @@ enum ProfileEnhancement {
 }
 
 enum CommandMessage {
+    ExportBackup {
+        permit: tokio::sync::OwnedSemaphorePermit,
+        reply: oneshot::Sender<Result<crate::backup::BackupDownload>>,
+    },
     InstalledCoreVersion(oneshot::Sender<Result<String>>),
     CheckCoreUpgrade {
         version: String,
@@ -419,6 +423,7 @@ enum CommandMessage {
 
 #[derive(Clone)]
 pub struct CoreManager {
+    backup_admission: Arc<tokio::sync::Semaphore>,
     core_release_admission: Arc<tokio::sync::Semaphore>,
     core_downloads: Option<Arc<crate::core_release::CoreDownloads>>,
     remote_admission: Arc<tokio::sync::Semaphore>,
@@ -505,6 +510,7 @@ impl CoreManager {
         });
         let (scheduler_finished, scheduler_completion) = watch::channel(false);
         let manager = Self {
+            backup_admission: Arc::new(tokio::sync::Semaphore::new(1)),
             core_release_admission: Arc::new(tokio::sync::Semaphore::new(1)),
             core_downloads,
             scheduler_completion,
@@ -1112,6 +1118,20 @@ impl CoreManager {
             .await
     }
 
+    /// The permit is retained by the download body until completion/disconnect.
+    pub async fn export_backup(&self) -> Result<crate::backup::BackupDownload> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let permit = Arc::clone(&self.backup_admission)
+            .try_acquire_owned()
+            .context("backup export already in progress")?;
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::ExportBackup { permit, reply })
+            .await
+            .context("core manager stopped")?;
+        result.await.context("backup export cancelled during shutdown")?
+    }
+
     pub async fn runtime_config(&self) -> Result<Mapping> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let (reply, result) = oneshot::channel();
@@ -1632,6 +1652,7 @@ impl Actor {
                         let message = format!("configuration recovery failed: {error:#}");
                         self.status.send_modify(|state| state.error = Some(message.clone()));
                         match request {
+                            CommandMessage::ExportBackup {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::InstalledCoreVersion(reply) => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::CheckCoreUpgrade {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
                             CommandMessage::UpgradePreparedCore {reply, ..} => {let _ = reply.send(Err(anyhow::anyhow!(message)));}
@@ -1658,6 +1679,12 @@ impl Actor {
                     self.settings = self.settings_store.snapshot();
                     self.dns_confirmations.retain(|uid, _| self.profile_store.get_item(uid).is_ok());
                     match request {
+                        CommandMessage::ExportBackup {permit, reply} => {
+                            if !reply.is_closed() {
+                                let result = self.export_backup(permit).await;
+                                let _ = reply.send(result);
+                            }
+                        }
                         CommandMessage::InstalledCoreVersion(reply) => {
                             if !reply.is_closed() {let result = self.installed_version().await;let _ = reply.send(result);}
                         }
@@ -2541,6 +2568,46 @@ impl Actor {
             }
             Err(error) => Err(error),
         }
+    }
+
+    #[cfg(unix)]
+    async fn export_backup(
+        &mut self,
+        permit: tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<crate::backup::BackupDownload> {
+        let state = self.store.state();
+        ensure!(state.pending.is_none(), "backup requires a committed runtime snapshot");
+        let snapshot = crate::backup::export::Snapshot {
+            data_dir: self.options.data_dir.clone(),
+            runtime_path: self.options.config.clone(),
+            profiles: self.profile_store.snapshot(),
+            settings: self.settings.clone(),
+            runtime_revision: state.current.map(|r| r.file),
+            active_profile: state.active_profile,
+        };
+        let cancellation = self.shutdown.clone();
+        let mut worker = tokio::task::spawn_blocking(move || crate::backup::export::build(snapshot, cancellation));
+        let (metadata, bytes) = tokio::select! {biased;
+            _ = closing(&mut self.shutdown) => {
+                // A blocking reader must finish before releasing directory ownership.
+                let _ = worker.await;
+                bail!("backup export cancelled during shutdown");
+            },
+            result = &mut worker => result.context("backup worker failed")??,
+        };
+        ensure!(!*self.shutdown.borrow(), "backup export cancelled during shutdown");
+        Ok(crate::backup::BackupDownload {
+            metadata,
+            bytes,
+            permit,
+        })
+    }
+    #[cfg(not(unix))]
+    async fn export_backup(
+        &mut self,
+        _permit: tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<crate::backup::BackupDownload> {
+        bail!("backup export is not yet supported on this platform")
     }
 
     async fn check_upgrade(&mut self, version: &str, force: bool) -> Result<Option<CoreUpgradeReport>> {

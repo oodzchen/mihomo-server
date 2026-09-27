@@ -4,6 +4,7 @@ use super::websocket;
 use super::{Management, ManagementCommand, RequestCredentials};
 use axum::{
     Json, Router,
+    body::{Body, Bytes},
     extract::{DefaultBodyLimit, Request, State, rejection::JsonRejection},
     http::{HeaderMap, StatusCode, header},
     middleware::{self, Next},
@@ -62,6 +63,7 @@ impl HttpState {
 pub fn router(state: HttpState) -> Router {
     Router::new()
         .route("/api/commands", post(command))
+        .route("/api/backup", post(backup))
         .route("/api/status", get(status))
         .route("/api/logs", get(logs))
         .route("/api/profiles", get(profiles))
@@ -149,6 +151,52 @@ async fn authenticate(State(state): State<HttpState>, request: Request, next: Ne
 
 pub fn error(status: StatusCode, code: &str, message: &str) -> Response {
     (status, Json(json!({"error": {"code": code, "message": message}}))).into_response()
+}
+
+async fn backup(State(state): State<HttpState>, body: Bytes) -> Response {
+    if !body.is_empty() {
+        return error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_backup_request",
+            "backup request must be empty",
+        );
+    }
+    let download = match state.management.manager.export_backup().await {
+        Ok(download) => download,
+        Err(_) => {
+            return error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "backup_export_failed",
+                "backup export unavailable; check source files and retry",
+            );
+        }
+    };
+    let metadata = download.metadata;
+    let stream = futures_util::stream::unfold(
+        (Bytes::from(download.bytes), download.permit),
+        |(mut bytes, permit)| async move {
+            if bytes.is_empty() {
+                return None;
+            }
+            let chunk = bytes.split_to(bytes.len().min(64 * 1024));
+            Some((Ok::<_, std::convert::Infallible>(chunk), (bytes, permit)))
+        },
+    );
+    let mut response = Body::from_stream(stream).into_response();
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, "application/zip".parse().unwrap());
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        format!("attachment; filename=\"{}\"", metadata.filename)
+            .parse()
+            .unwrap(),
+    );
+    headers.insert(
+        header::CONTENT_LENGTH,
+        metadata.content_length.to_string().parse().unwrap(),
+    );
+    headers.insert("x-backup-sha256", metadata.sha256.parse().unwrap());
+    response
 }
 
 async fn execute(state: HttpState, headers: HeaderMap, command: ManagementCommand) -> Response {

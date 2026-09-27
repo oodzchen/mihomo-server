@@ -2070,3 +2070,37 @@ executable, together with `MIHOMO_TEST_BUNDLE`. Without that explicit local fixt
 Alpha executable browser cases are skipped; default tests make no mutable network
 downloads. Official-wrapper discovery/force/no-op/repair are verified separately
 with an isolated real-node subscription and original-data hash checks.
+
+
+## Export a local service backup
+
+Send an authenticated **POST with an empty body** to `/api/backup`. Use your client
+library's bearer-auth support and save the binary response as a local `.zip` file.
+Unlike `/api/commands`, this route returns ZIP bytes, not JSON. It rejects query
+parameters and nonempty bodies; filenames, sources and destinations are never
+request fields. The response includes `Content-Disposition`, `Content-Length` and
+`X-Backup-SHA256`. Check the SHA-256 against the saved file. Responses use no-store
+and nosniff; normal Host/Origin/bearer restrictions still apply.
+
+The schema-1 service ZIP contains `manifest.json`, `profiles.yaml`, `settings.yaml`,
+`runtime.yaml` and catalog-referenced files under `profiles/`. Manifest entries
+record relative names, byte lengths and SHA-256; the manifest also records service
+version, creation time and active profile/runtime revision. Subscription credentials,
+source comments, scripts and saved node selections are preserved. Management
+credentials, controller runtime files, locks, pending journals, binaries, Geo
+resources, upgrades and unrelated/orphan profile files are excluded. Export is
+read-only and works for running or stopped cores when valid runtime configuration
+is available. A failed source/configuration check returns a generic 422 JSON error;
+repair the source before retrying.
+
+One export is admitted through generation and streaming. An unfinished response
+keeps the slot; read it to EOF or close it before retrying. Limits are 1,024 entries,
+8 MiB per content file, 64 MiB content and 65 MiB archive. Unix sources must be
+owner-owned regular files without extra hard links or unsafe write/privilege modes;
+symlinks/FIFO/directory sources are rejected. Changes during export are detected.
+The cooperative worker budget is 15 seconds; shutdown checks cancel work and join
+it before releasing the data-directory lock. No archive is retained by the service.
+
+This is a `mihomo-server` backup format. Archive inspection, restore transactions,
+local retention/list/delete, scheduling, WebDAV and backup Web controls remain
+pending; the endpoint does not restore or accept desktop backup files.

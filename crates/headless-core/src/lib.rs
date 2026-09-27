@@ -2,6 +2,7 @@
 //!
 //! Extracted business logic remains independent of Tauri and HTTP frameworks.
 
+pub mod backup;
 pub mod config;
 pub mod enhance;
 

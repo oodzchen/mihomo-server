@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod core_manager;
 pub mod core_release;
 pub mod core_upgrade;

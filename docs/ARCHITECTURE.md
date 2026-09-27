@@ -77,7 +77,8 @@ mihomo-server/
 │       ├── Geo/provider resources and proxy views   [Pending]
 │       ├── Immutable revision / orphan file garbage collection [Pending]
 │       ├── Timed update metadata / saved refresh source [Migrated + service scheduler]
-│       └── Backup models / full upgrade resource settings [Pending]
+│       ├── Backup manifest / bounded entry / download metadata models [Implemented; upstream ZIP adaptation]
+│       └── Backup restore / retention models / full upgrade resource settings [Pending]
 ├── service/                                         [Partially implemented]
 │   ├── Persistent foreground entry point            [Implemented]
 │   ├── Binary/data/config/import args, directory lock [Implemented]
@@ -131,6 +132,10 @@ mihomo-server/
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
+│   ├── Local backup export                          [Partially implemented; Linux verified]
+│   │   ├── Actor snapshot / bounded ZIP / digest manifest [Implemented]
+│   │   ├── Authenticated binary download / single body-owned admission [Implemented]
+│   │   └── Local retention / restore / schedule / WebDAV / UI [Pending]
 │   ├── Full application context and domain events  [Pending]
 │   ├── Sole Mihomo lifecycle manager                [Implemented; Linux verified]
 │   │   ├── Start, readiness, stop, restart, recovery, reap
@@ -145,6 +150,7 @@ mihomo-server/
 │   │   ├── State, logs, profiles, config, proxies queries [Implemented]
 │   │   ├── Lifecycle, YAML import/edit/overlay, profile edit/delete/import/refresh, linked read/set/clear, global read/set/reset, settings read/replace, profile DNS read/set, raw profile read/edit and node selection [Implemented]
 │   │   ├── Stable core query / preparation / staging / activation / installation/version readback / force-no-op; Alpha query / compressed preparation / executable staging / activation / installation readback / force-no-op [Implemented; Linux x86_64]
+│   │   ├── Authenticated POST /api/backup ZIP export [Implemented; Linux verified]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -2391,7 +2397,7 @@ including reconnect/receipt readback and repair. Other targets, native
 TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage collection,
 SOCKS/PAC and platform/deployment work remain pending.
 
-## Latest increment: Alpha force/no-op orchestration and channel-aware Web controls
+## Previous increment: Alpha force/no-op orchestration and channel-aware Web controls
 
 Delivery step 7 adds authenticated `upgrade_alpha_core` with a required boolean
 `force`. Its stable counterpart, `upgrade_clash_core`, keeps its existing request
@@ -2459,6 +2465,82 @@ step 7 subtask: extract backup models and implement bounded local backup export
 with an authenticated API, before restore transactions, scheduling and WebDAV/UI.
 Other upgrade targets, native TUN/DNS/hosts/resources, advanced pages, garbage
 collection, SOCKS/PAC and platform/deployment work remain pending.
+
+## Latest increment: bounded local backup export and portable metadata
+
+Delivery step 7 adapts upstream `create_backup` ZIP/configuration export and local
+filename/length metadata into service-owned backup models. `headless-core::backup`
+defines schema-1 manifest, entry and download metadata with strict fields, safe
+relative paths, SHA-256 digests, required configuration entries and size/count
+validation. Host paths are not returned; the format is identified as
+`mihomo-server`, not a desktop restore bundle. Stored ZIP entries retain upstream's
+uncompressed container choice and profile raw bytes.
+
+Authenticated `POST /api/backup` accepts an empty body only and returns
+`application/zip`, an attachment filename, Content-Length and X-Backup-SHA256.
+The existing bearer/Host/Origin/query controls and no-store/nosniff headers apply.
+The actor finishes pending transaction recovery before fixing profiles, settings,
+active profile/runtime revision and source configuration. Its awaited blocking
+worker excludes competing actor writes while building a consistent snapshot;
+core proxy traffic keeps running. A download-owned semaphore permit admits one
+queued/building/streaming export and is released at EOF or disconnect. Failed
+source checks expose a generic HTTP error instead of host paths or file contents.
+
+The archive contains `manifest.json`, serialized `profiles.yaml` and
+`settings.yaml`, controller-boundary-validated `runtime.yaml` and catalog-referenced
+raw subscription/global/linked enhancement files under `profiles/`. Node records,
+source credentials/comments and enhancement contents are preserved as backup
+content. Management tokens, locks, live controller files/sockets, transaction
+journals, orphan profiles, binaries, Geo/provider caches and upgrades are excluded.
+Typed settings exclude desktop WebDAV credentials. No archive is persisted in the
+service data directory and no request controls a source/destination path.
+
+Bounds: 1,024 ZIP entries including the manifest, 8 MiB per content entry,
+64 MiB content and 65 MiB archive output. A 15-second cooperative worker budget
+and shutdown checks apply between bounded reads and ZIP writes; regular filesystem
+I/O cannot be forcibly preempted. Shutdown joins the worker before directory
+ownership is released. Unix descriptor-relative/no-follow reads pin the profile
+directory; unsafe ownership/write modes, links, shared files, nonregular files,
+oversized files and changed identities are rejected. Archive entries have mode
+0600. Export leaves lifecycle/configuration/catalog/node selection unchanged.
+
+Verification: `cargo check --workspace --locked --offline`, all 272 regular
+workspace Rust tests, all 72 real-Mihomo opt-in tests and the focused real backup
+regression pass. Warnings-denied Clippy, formatting and diff checks pass. New tests
+cover portable manifest roundtrip/strict fields/path/hash/required-file/count/size
+bounds, raw/selection preservation, ZIP mode/CRC/digests, links/hard links/FIFO/
+directories/unsafe permissions, sparse oversized/aggregate files, cancellation,
+invalid runtime controllers, HTTP auth/origin/method/query/body rejection,
+sanitized failures and the body-owned permit released on disconnect or EOF.
+Real-core snapshots preserve running PID/generation/config/records, stopped state
+and persisted readback after manager restart. Existing Alpha, subscription,
+lifecycle and settings regressions remain green.
+
+All 24 default browser workflows pass with the fresh production bundle; the two
+optional Alpha executable browser cases are explicitly skipped without their
+separate verified-binary fixture. Web source/assets are unchanged in this backend
+increment. Alpha activation/repair/crash behaviors remain covered by the 72
+real-core tests. The package passes every checksum; service binary matches the
+release build and deployment/provenance documents match their sources.
+
+An isolated copy of the actual 56-node subscription exports a 1,110,883-byte ZIP
+with 13 entries. Python ZIP CRC validation and every manifest length/SHA-256 pass;
+raw profiles/auxiliaries match the copied source bytes, runtime/settings/catalog
+match authenticated readback, and management credentials/controller/core files
+are absent. Running PID/generation/config/catalog/selected node remain unchanged;
+stopped and restarted service exports also pass. HTTPS proxy traffic returns 204
+before/after export and after restart. Original data hashes remain unchanged.
+The runnable `target/mihomo-server-linux-x86_64-backup-export` bundle keeps the
+working stable bootstrap and existing stable/Alpha upgrade workflows. Temporary
+services, cores, script workers, validators and real-data probes are terminated/
+reaped; the final owned-process audit reports zero.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The Linux MVP remains runnable; the full project is not complete. Next Delivery
+step 7 subtask: strict backup archive inspection/validation before implementing
+transactional restore and rollback. Local archive retention/list/delete, automatic
+backup scheduling, WebDAV and backup UI remain pending, together with other targets,
+native resources/settings, advanced pages, garbage collection and platform work.
 
 ## MVP completion boundary
 
