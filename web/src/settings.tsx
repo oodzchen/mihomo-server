@@ -12,6 +12,7 @@ import {
 import { ProfileDnsPanel } from "./profile-dns";
 import { useProxyAccess } from "./proxy-access";
 import { GEO_KEYS, GeoFields, GeoReadback, geoDraft, geoRuntime, validateGeo } from "./geo-settings";
+import { OUTBOUND_KEYS, OutboundFields, outboundDraft, outboundRuntime, validateOutbound } from "./outbound-settings";
 import { SettingsReadback } from "./settings-readback";
 import { ResourcesPanel } from "./resources";
 
@@ -70,6 +71,7 @@ function toDraft(settings: Settings): Draft {
   return Object.fromEntries([
     ...Object.entries(networkDraft(settings.runtime)),
     ...Object.entries(geoDraft(settings.runtime)),
+    ...Object.entries(outboundDraft(settings.runtime)),
     ...fields.map((field) => [
       field.key,
       settings.runtime[field.key] == null
@@ -79,7 +81,7 @@ function toDraft(settings: Settings): Draft {
   ]);
 }
 function runtime(draft: Draft): Runtime {
-  const result: Runtime = { ...networkRuntime(draft), ...geoRuntime(draft) };
+  const result: Runtime = { ...networkRuntime(draft), ...geoRuntime(draft), ...outboundRuntime(draft) };
   for (const field of fields) {
     const value = draft[field.key];
     if (value === "") continue;
@@ -112,6 +114,7 @@ function decode(value: unknown): Settings {
   validateGeo(settings.runtime);
   for (const [key, value] of Object.entries(settings.runtime)) {
     if (GEO_KEYS.has(key)) continue;
+    if (OUTBOUND_KEYS.has(key)) { validateOutbound(key, value); continue; }
     if (key === "dns" || key === "tun") {
       validateNetwork(key, value);
       continue;
@@ -415,6 +418,10 @@ export function SettingsPage({
               setDraft(previous => ({ ...previous, [key]: value }));
               setError(""); setNotice(""); setConfirmation(undefined);
             }} />
+            <OutboundFields draft={draft} disabled={disabled} onChange={(key, value) => {
+              setDraft(previous => ({ ...previous, [key]: value }));
+              setError(""); setNotice(""); setConfirmation(undefined);
+            }} />
             <NetworkFields
               draft={draft}
               disabled={disabled}
@@ -502,7 +509,7 @@ export function SettingsPage({
         </p>
       </section>
       <div className="settings-side">
-        <SettingsReadback label="连接设置读回" operation="connection_settings" hint="显示核心报告的设置，不保证已识别进程或改善连接速度。未指定项可能使用核心默认值。" token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
+        <SettingsReadback label="连接设置读回" operation="connection_settings" hint="显示核心报告的设置，不保证已识别进程或改善连接速度。未指定项可能使用核心默认值。路由标记可能以有符号 32 位整数读回，同一位模式视为一致。" token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
         <GeoReadback token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
         <ResourcesPanel token={token} status={status} connection={connection} logout={logout} />
         <ProfileDnsPanel
@@ -541,6 +548,7 @@ export function SettingsPage({
           ) : (
             <p className="muted">尚未读取到设置。</p>
           )}
+          {saved && <pre className="network-snapshot" aria-label="已保存出口设置">{JSON.stringify(Object.fromEntries([...OUTBOUND_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
           {saved && <pre className="network-snapshot" aria-label="已保存 Geo 设置">{JSON.stringify(Object.fromEntries([...GEO_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
           {saved && (
             <pre className="network-snapshot" aria-label="已保存网络设置">

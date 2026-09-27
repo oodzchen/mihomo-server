@@ -208,6 +208,37 @@ preserves signed values instead of pretending negative seconds disable all probe
 Core-reported configuration does not prove that an OS accepted each socket option.
 No upstream source is copied and no dependency is added.
 
+## Outbound interface and Linux routing-mark authority
+
+Inspected `src-tauri/src/config/clash.rs::IClash.interface_name`,
+`src/types/global.d.ts` and `src/components/profile/groups-editor-viewer.tsx`
+from the pinned Clash Verge Rev checkout: interface name is retained in the global
+configuration model; interface and mark fields are also available in profile group
+editing. The headless service's global typed ownership, transaction, Web editor and
+comparison are original adaptations, not a claim that the desktop global editor
+has this identical workflow. No source is copied and no dependency is added.
+
+The retained Mihomo BaseConfig fields are supplemented with optional String/i64
+connection readback leaves. Some versions expose the global mark as signed int32;
+comparison keeps the raw reported integer and compares valid signed/unsigned
+32-bit representations (4294967295/-1), without truncating out-of-range values.
+Service saves accept a strict optional interface string and Linux-only u32 mark;
+custom name deserialization prevents YAML number/boolean coercion. Syntax follows a bounded Linux primary-interface-name subset
+(up to 15 UTF-8 bytes, no slash/colon/whitespace/control characters or dot names),
+with empty string explicitly clearing the fixed name. Unicode control/whitespace
+rejection is a stricter service policy than the kernel's byte-level checks.
+Existence and route reachability are not inferred from syntax or GET /configs.
+
+Official references inspected on 2026-09-28:
+[general outbound settings](https://wiki.metacubex.one/en/config/general/),
+[Mihomo Linux interface binding](https://github.com/MetaCubeX/mihomo/blob/Meta/component/dialer/bind_linux.go),
+[Mihomo Linux marking](https://github.com/MetaCubeX/mihomo/blob/Meta/component/dialer/mark_linux.go),
+and [Linux dev_valid_name](https://github.com/torvalds/linux/blob/master/net/core/dev.c).
+The core applies default outbound interface/mark settings; per-proxy/provider
+options and host policy can affect individual routes. Nonzero mark readback is
+verified on Linux x86_64; no capability elevation, policy-route installation or
+per-socket marking proof is introduced.
+
 ## Mihomo plugin
 
 - Repository: https://github.com/clash-verge-rev/tauri-plugin-mihomo

@@ -78,6 +78,14 @@ pub struct RuntimeSettings {
     pub keep_alive_idle: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_keep_alive: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_interface_name"
+    )]
+    pub interface_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing_mark: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_level: Option<LogLevel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -96,6 +104,17 @@ pub struct RuntimeSettings {
     pub geo_update_interval: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geox_url: Option<GeoUrls>,
+}
+
+// YAML's String deserializer coerces numbers and booleans; owned names are strict.
+fn deserialize_optional_interface_name<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error> {
+    match Option::<serde_yaml_ng::Value>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(serde_yaml_ng::Value::String(name)) => Ok(Some(name)),
+        Some(_) => Err(serde::de::Error::custom("interface-name must be a string or null")),
+    }
 }
 
 impl RuntimeSettings {
@@ -128,6 +147,21 @@ impl RuntimeSettings {
             self.geo_update_interval.is_none_or(|hours| (1..=8760).contains(&hours)),
             "geo-update-interval must be 1–8760 hours"
         );
+        ensure!(
+            cfg!(target_os = "linux") || self.routing_mark.is_none(),
+            "routing-mark is supported only on Linux"
+        );
+        if let Some(name) = &self.interface_name {
+            ensure!(
+                name.len() <= 15
+                    && name != "."
+                    && name != ".."
+                    && !name
+                        .chars()
+                        .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '/' | ':')),
+                "interface-name must be empty or a valid Linux interface name of at most 15 UTF-8 bytes"
+            );
+        }
         if let Some(urls) = &self.geox_url {
             urls.validate()?;
         }

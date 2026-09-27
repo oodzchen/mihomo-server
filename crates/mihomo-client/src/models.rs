@@ -127,7 +127,7 @@ pub struct BaseConfig {
 }
 
 /// Presence-preserving projection of GET /configs. Older cores must not acquire
-/// invented false/off values through BaseConfig's legacy serde defaults.
+/// invented empty/zero/false/off values through BaseConfig's legacy serde defaults.
 #[derive(Debug, Deserialize, Default)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct ConnectionConfig {
@@ -136,6 +136,8 @@ pub struct ConnectionConfig {
     pub keep_alive_interval: Option<i64>,
     pub keep_alive_idle: Option<i64>,
     pub disable_keep_alive: Option<bool>,
+    pub interface_name: Option<String>,
+    pub routing_mark: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]

@@ -3,7 +3,7 @@ import { ApiError, command } from "./api";
 import type { CoreStatus } from "./types";
 
 type Snapshot = { config_revision: string | null; running: boolean; error: string | null; fields: { key: string; setting: unknown; configured: unknown; actual: unknown; mismatch: boolean }[] };
-const show = (value: unknown, absent: string) => value == null ? absent : typeof value === "string" ? value : JSON.stringify(value);
+const show = (value: unknown, absent: string) => value == null ? absent : typeof value === "string" ? (value === "" ? '""' : value) : JSON.stringify(value);
 export function SettingsReadback({ token, status, connection, logout, settingsKey, label, operation, hint, refreshLabel }: { token: string; status: CoreStatus; connection: string; logout: (reason?: string) => void; settingsKey?: string; label: string; operation: string; hint: string; refreshLabel?: string }) {
   const [value, setValue] = useState<Snapshot>();
   const [error, setError] = useState("");

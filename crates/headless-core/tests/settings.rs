@@ -34,6 +34,10 @@ fn interrupted_settings_update_follows_runtime_commit_at_each_publication_phase(
             candidate.runtime.keep_alive_interval = Some(0);
             candidate.runtime.keep_alive_idle = Some(-1);
             candidate.runtime.disable_keep_alive = Some(false);
+            candidate.runtime.interface_name = Some(String::new());
+            if cfg!(target_os = "linux") {
+                candidate.runtime.routing_mark = Some(u32::MAX);
+            }
             candidate.runtime.find_process_mode = Some(headless_core::config::settings::FindProcessMode::Off);
             candidate.profile_dns.insert(
                 "one".into(),
@@ -506,6 +510,80 @@ fn keep_alive_settings_preserve_signed_seconds_false_and_inheritance() -> Result
         "keep-alive-idle: true",
         "disable-keep-alive: 0",
         "disable-keep-alive: 'false'",
+    ] {
+        assert!(
+            serde_yaml_ng::from_str::<RuntimeSettings>(invalid).is_err(),
+            "{invalid}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn outbound_settings_validate_names_and_preserve_empty_zero_and_inheritance() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    let source = parse("interface-name: source0\nrouting-mark: 123\ncustom: retained")?;
+    assert_eq!(RuntimeSettings::default().enforce(source.clone())?, source);
+    let null: RuntimeSettings = serde_yaml_ng::from_str("interface-name: null\nrouting-mark: null")?;
+    assert_eq!(null.enforce(source.clone())?, source);
+    for name in ["", "lo", "eth0.2", "a-b_1", "abcdefghijklmno", "网卡接口名"] {
+        let runtime = RuntimeSettings {
+            interface_name: Some(name.into()),
+            ..Default::default()
+        };
+        assert_eq!(runtime.prepare(source.clone())?["interface-name"].as_str(), Some(name));
+        let final_config = runtime.enforce(source.clone())?;
+        assert_eq!(final_config["interface-name"].as_str(), Some(name));
+        assert_eq!(final_config["routing-mark"].as_u64(), Some(123));
+        assert_eq!(final_config["custom"], source["custom"]);
+        assert_eq!(
+            serde_yaml_ng::from_str::<RuntimeSettings>(&serde_yaml_ng::to_string(&runtime)?)?,
+            runtime
+        );
+    }
+    for name in [
+        ".",
+        "..",
+        "abcdefghijklmnop",
+        "网卡接口名字",
+        "eth 0",
+        "eth/0",
+        "eth:0",
+        "eth\n0",
+        "eth\0",
+        "eth\u{0085}0",
+    ] {
+        let runtime = RuntimeSettings {
+            interface_name: Some(name.into()),
+            ..Default::default()
+        };
+        assert!(runtime.validate().is_err(), "{name:?}");
+        assert!(runtime.enforce(source.clone()).is_err());
+    }
+    for mark in [0, 123, u32::MAX] {
+        let runtime = RuntimeSettings {
+            interface_name: Some(String::new()),
+            routing_mark: Some(mark),
+            ..Default::default()
+        };
+        if cfg!(target_os = "linux") {
+            let mut enhanced = runtime.prepare(source.clone())?;
+            enhanced.extend(source.clone());
+            let final_config = runtime.enforce(enhanced)?;
+            assert_eq!(final_config["interface-name"].as_str(), Some(""));
+            assert_eq!(final_config["routing-mark"].as_u64(), Some(u64::from(mark)));
+        } else {
+            assert!(runtime.validate().is_err());
+        }
+    }
+    for invalid in [
+        "interface-name: 123",
+        "interface-name: true",
+        "routing-mark: -1",
+        "routing-mark: 4294967296",
+        "routing-mark: 1.5",
+        "routing-mark: '1'",
+        "routing-mark: true",
     ] {
         assert!(
             serde_yaml_ng::from_str::<RuntimeSettings>(invalid).is_err(),

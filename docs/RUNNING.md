@@ -1227,6 +1227,8 @@ runtime:
   keep-alive-interval: 15
   keep-alive-idle: 30
   disable-keep-alive: false
+  interface-name: ""
+  routing-mark: 0
   log-level: info
 ```
 
@@ -1245,6 +1247,18 @@ Mihomo's Go keep-alive configuration, zero selects the Go default and negative
 leaves the corresponding socket option unchanged; old cores/platforms may differ.
 Null/omitted durations inherit configuration, rather than setting zero. The Web
 settings form supports these values and inheritance.
+`interface-name` is an optional string: null/omitted inherits, an explicit empty
+string clears the fixed interface, and a name requests that outbound interface.
+The service's Linux primary-name policy limits UTF-8 names to 15 bytes, excludes
+whitespace/control characters, slash/colon and `.`/`..`, and does not trim input.
+It checks syntax, not existence or interface reachability. `routing-mark` is an
+optional Linux-only unsigned integer (0–4294967295): zero clears the default mark,
+null/omitted inherits. Nonzero marks require suitable socket privileges and routing
+policy. Full-range readback is verified on Linux x86_64. Some core versions report a
+signed 32-bit mark (e.g. saved 4294967295 becomes actual -1); comparison preserves
+that raw actual value and treats equivalent signed/unsigned 32-bit marks as equal.
+Values outside the valid representation are not silently truncated. This does not
+prove kernel marking or extend the verification to 32-bit cores.
 Explicit fields enter before global/profile enhancements and win in the final
 candidate even if a script changes/removes them. Discarded override warnings appear
 in Logs under `settings`. Imports/runtime edits/overlays obey the same explicit
@@ -2500,7 +2514,8 @@ lock. Live/online updates, DAT handling and automatic runtime rollback are pendi
 ## Connection settings and TCP keep-alive readback
 
 Use `set_settings` to save optional `tcp-concurrent`, `find-process-mode`,
-`keep-alive-interval`, `keep-alive-idle` and `disable-keep-alive` along with any
+`keep-alive-interval`, `keep-alive-idle`, `disable-keep-alive`, `interface-name` and
+`routing-mark` along with any
 other runtime fields you want to retain; it replaces the entire runtime
 settings object. The Web editor preserves existing supported fields automatically.
 Owned values apply before enhancements and again after scripts/merges/overlays.
@@ -2515,13 +2530,13 @@ Read saved, committed and core-reported values through the authenticated command
 {"command":"connection_settings"}
 ```
 
-The response contains config_revision, running, optional error and five fields
+The response contains config_revision, running, optional error and seven fields
 in this order: tcp-concurrent, find-process-mode, keep-alive-interval,
-keep-alive-idle and disable-keep-alive. Each includes setting, configured, actual
+keep-alive-idle, disable-keep-alive, interface-name and routing-mark. Each includes setting, configured, actual
 and mismatch. Null setting means inheritance; null configured means unspecified;
 null actual means unknown. A core default for an unspecified value is not a
 mismatch. Native title-case mode names normalize to lower-case. Older cores that
-omit a field report null rather than fabricated zero/false/off. A stopped core is not
+omit a field report null rather than fabricated empty/zero/false/off. A stopped core is not
 queried; running readback has a three-second timeout and a fixed failure diagnostic.
 
 The Web comparison refreshes on settings/config/lifecycle changes and offers
@@ -2529,6 +2544,30 @@ refresh/retry, clearing stale rows on failure or disconnect. This reports settin
 not proof of process identification, process-rule effectiveness, improved latency
 or OS-level keep-alive application to individual sockets. Durations remain visible
 even when disable-keep-alive is true; turning the switch off restores their use.
+
+The Web **出口设置** section uses **管理出口网卡** to distinguish inherited and
+owned names. Unchecked inherits; checked plus an empty input explicitly clears
+the fixed interface. Named input is preserved exactly. The mark input uses blank
+for inheritance and `0` for an explicit cleared mark. Confirmed saves/reloads,
+failed drafts and full replacement preserve the distinction and all existing
+settings. The saved outbound snapshot and connection comparison show both fields.
+This controls defaults; per-proxy/provider options can override defaults, and
+readback alone does not prove the route used by every socket.
+
+For an isolated real-node check with the host's intended existing interface:
+
+```sh
+CARGO_HOME=/tmp/mihomo-server-cargo \
+MIHOMO_TEST_BINARY=/usr/bin/verge-mihomo \
+MIHOMO_REAL_PROFILE="$PWD/data/profiles/L18d904f7de21806e-2-0.yaml" \
+MIHOMO_REAL_INTERFACE=wlo1 \
+cargo test -p mihomo-server --test resource_inventory_live --locked --offline -- --ignored --test-threads=1
+```
+
+Replace `wlo1` with this host's actual interface. Omit MIHOMO_REAL_INTERFACE to
+check the explicit empty-name default. The test copies node/Geo data, applies
+routing-mark 0, verifies settings before/after core restart and checks HTTPS 204;
+it does not change host route tables or grant socket capabilities.
 
 ## Authoritative Geo settings and readback
 
