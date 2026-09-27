@@ -1,5 +1,16 @@
-//! Bounded, actor-consistent ZIP exports. No backup files are written to disk.
+//! Bounded ZIP export and read-only inspection. No backup files are written to disk.
 use headless_core::backup::BackupMetadata;
+
+#[path = "backup_inspect.rs"]
+pub(crate) mod inspect;
+
+pub(crate) fn hash(bytes: &[u8]) -> String {
+    ring::digest::digest(&ring::digest::SHA256, bytes)
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
 
 pub struct BackupDownload {
     pub metadata: BackupMetadata,
@@ -9,6 +20,7 @@ pub struct BackupDownload {
 
 #[cfg(unix)]
 pub(crate) mod export {
+    pub(crate) use super::hash;
     use anyhow::{Context as _, Result, ensure};
     use headless_core::{
         backup::{
@@ -124,13 +136,6 @@ pub(crate) mod export {
             "backup source changed during read"
         );
         Ok((bytes, before))
-    }
-    pub(crate) fn hash(bytes: &[u8]) -> String {
-        ring::digest::digest(&ring::digest::SHA256, bytes)
-            .as_ref()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect()
     }
     struct LimitedCursor(Cursor<Vec<u8>>);
     impl Write for LimitedCursor {

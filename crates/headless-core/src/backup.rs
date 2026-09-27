@@ -7,6 +7,25 @@ pub const MAX_ENTRIES: usize = 1024;
 pub const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_CONTENT_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_ARCHIVE_BYTES: usize = 65 * 1024 * 1024;
+pub const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
+
+/// Read-only validation results. No source paths, profile names or credentials.
+/// This establishes archive/configuration coherence, not executable restore readiness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackupInspection {
+    pub schema_version: u32,
+    pub source: String,
+    pub service_version: String,
+    pub created_at: u64,
+    pub archive_bytes: u64,
+    pub archive_sha256: String,
+    pub entry_count: usize,
+    pub content_bytes: u64,
+    pub profile_count: usize,
+    pub active_profile_present: bool,
+    pub runtime_revision_present: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -54,7 +73,9 @@ impl BackupManifest {
             "unsupported backup format"
         );
         ensure!(
-            !self.service_version.is_empty() && self.service_version.len() <= 64,
+            !self.service_version.trim().is_empty()
+                && self.service_version.len() <= 64
+                && !self.service_version.chars().any(char::is_control),
             "invalid backup service version"
         );
         if let Some(uid) = &self.active_profile {

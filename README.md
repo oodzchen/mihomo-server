@@ -40,6 +40,7 @@ Scheduled refresh and managed/system/direct proxy download routes are supported.
 The `/core` page now upgrades or repairs the managed core through stable and Alpha
 channels, with force/no-op, durable rollback and installation receipt readback.
 An authenticated `/api/backup` endpoint exports bounded service ZIP snapshots.
+`/api/backup/inspect` checks uploaded snapshots without extracting or applying them.
 The full settings/resource pipeline, backup restore/WebDAV, advanced pages and other
 platforms remain pending.
 

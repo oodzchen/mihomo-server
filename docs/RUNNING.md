@@ -2101,6 +2101,49 @@ symlinks/FIFO/directory sources are rejected. Changes during export are detected
 The cooperative worker budget is 15 seconds; shutdown checks cancel work and join
 it before releasing the data-directory lock. No archive is retained by the service.
 
-This is a `mihomo-server` backup format. Archive inspection, restore transactions,
-local retention/list/delete, scheduling, WebDAV and backup Web controls remain
-pending; the endpoint does not restore or accept desktop backup files.
+This is a `mihomo-server` backup format. Restore transactions, local retention/
+list/delete, scheduling, WebDAV and backup Web controls remain pending; these
+endpoints do not restore or accept desktop backup files.
+
+## Inspect a service backup before restoring
+
+Send an authenticated **POST** to `/api/backup/inspect`, with exactly one
+`Content-Type: application/zip` header and the exported ZIP as the raw request
+body. Use the same bearer/Host/Origin controls as export. Send no query parameters,
+Content-Encoding, JSON wrapper, multipart data or destination path. If supplying
+Content-Length, it must match the actual body. With your existing authenticated
+client, upload the file as binary data (curl's `--data-binary @backup.zip`).
+
+A successful response is JSON containing schema/source/service version, creation
+time, archive length/SHA-256, entry count, total content length, local/remote
+profile count and booleans indicating active-profile/runtime-revision metadata.
+It does not return profile names, URLs, credentials, YAML, script contents or host
+paths. Success verifies format, integrity and configuration references; it does
+not validate JavaScript execution, Mihomo compatibility or restore readiness.
+
+Only the service's schema-1, uncompressed Stored ZIP layout is accepted. The
+inspector verifies contiguous matching local/central records, unique safe names,
+private regular-file metadata, every ZIP CRC, manifest lengths/SHA-256 and exact
+entry coverage. Directory/link/encrypted/compressed entries, ZIP64/multi-disk
+variants, comments/extras, data descriptors, prefixes/trailers, overlapping ranges
+and local/header ambiguity are rejected. Configuration checks include strict
+catalog fields and UIDs, active/current coherence, linked types/files, settings
+profile references and runtime controller ownership. Raw subscription controller
+fields are preserved and normalized using the existing source parser. Linked
+YAML uses the existing validators; scripts receive only UTF-8/nonempty/size checks.
+No uploaded script runs and no archive is extracted, persisted or applied.
+
+Upload and worker each have a 15-second budget (the worker is cooperative between
+bounded operations; YAML parsing is not forcibly preempted). Export/download and
+inspection share one slot acquired before upload buffering. An unfinished export
+or upload produces 409 on inspection; finish/close it before retrying. Upload
+timeout returns 408; oversized/unreadable bodies return 413, invalid media 415,
+invalid length/query 400, failed archive checks generic 422, and shutdown 503.
+The slot is released on failed upload, timeout, disconnect or completed inspection.
+If a disconnected request already started a worker, that worker keeps the slot
+until it finishes/cancels. Status/settings/lifecycle commands remain independent.
+
+Limits remain 65 MiB upload, 64 MiB content, 8 MiB per content entry and 1,024 ZIP
+entries, with a 1 MiB manifest and the existing 64 KiB settings limit. Only this
+binary route uses the larger upload allowance; JSON commands retain their 9 MiB
+envelope limit. Transactional restore and rollback are the next backup increment.

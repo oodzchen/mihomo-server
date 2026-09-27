@@ -46,6 +46,10 @@ fn zip_export_preserves_referenced_content_selections_and_digests_without_runtim
     assert_eq!(metadata.content_length, bytes.len() as u64);
     assert_eq!(metadata.sha256, hash(&bytes));
     assert!(metadata.filename.starts_with("mihomo-server-backup-") && metadata.filename.ends_with(".zip"));
+    let report = super::inspect::run(&bytes, watch::channel(false).1, watch::channel(false).1)?;
+    assert_eq!(report.entry_count, 5);
+    assert_eq!(report.profile_count, 1);
+    assert_eq!(report.archive_sha256, metadata.sha256);
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes))?;
     assert_eq!(zip.len(), 5);
     let manifest: BackupManifest = serde_json::from_reader(zip.by_name("manifest.json")?)?;

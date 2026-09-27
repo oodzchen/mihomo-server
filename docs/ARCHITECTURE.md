@@ -77,7 +77,7 @@ mihomo-server/
 │       ├── Geo/provider resources and proxy views   [Pending]
 │       ├── Immutable revision / orphan file garbage collection [Pending]
 │       ├── Timed update metadata / saved refresh source [Migrated + service scheduler]
-│       ├── Backup manifest / bounded entry / download metadata models [Implemented; upstream ZIP adaptation]
+│       ├── Backup manifest / bounded entry / download and inspection models [Implemented; upstream ZIP adaptation]
 │       └── Backup restore / retention models / full upgrade resource settings [Pending]
 ├── service/                                         [Partially implemented]
 │   ├── Persistent foreground entry point            [Implemented]
@@ -132,9 +132,11 @@ mihomo-server/
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
-│   ├── Local backup export                          [Partially implemented; Linux verified]
+│   ├── Local backup export and inspection           [Partially implemented; Linux verified]
 │   │   ├── Actor snapshot / bounded ZIP / digest manifest [Implemented]
 │   │   ├── Authenticated binary download / single body-owned admission [Implemented]
+│   │   ├── Strict ZIP structure / CRC / SHA-256 / catalog and settings references [Implemented; Linux verified]
+│   │   ├── Authenticated read-only binary inspection / pre-upload shared admission [Implemented; Linux verified]
 │   │   └── Local retention / restore / schedule / WebDAV / UI [Pending]
 │   ├── Full application context and domain events  [Pending]
 │   ├── Sole Mihomo lifecycle manager                [Implemented; Linux verified]
@@ -151,6 +153,7 @@ mihomo-server/
 │   │   ├── Lifecycle, YAML import/edit/overlay, profile edit/delete/import/refresh, linked read/set/clear, global read/set/reset, settings read/replace, profile DNS read/set, raw profile read/edit and node selection [Implemented]
 │   │   ├── Stable core query / preparation / staging / activation / installation/version readback / force-no-op; Alpha query / compressed preparation / executable staging / activation / installation readback / force-no-op [Implemented; Linux x86_64]
 │   │   ├── Authenticated POST /api/backup ZIP export [Implemented; Linux verified]
+│   │   ├── Authenticated POST /api/backup/inspect validation report [Implemented; Linux verified]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -2541,6 +2544,86 @@ step 7 subtask: strict backup archive inspection/validation before implementing
 transactional restore and rollback. Local archive retention/list/delete, automatic
 backup scheduling, WebDAV and backup UI remain pending, together with other targets,
 native resources/settings, advanced pages, garbage collection and platform work.
+
+## Latest increment: strict read-only backup inspection
+
+Delivery step 7 now implements the validation phase ahead of service backup
+restoration. `headless-core::backup::BackupInspection` returns bounded format/time/
+count/digest metadata without source contents, names, URLs or host paths. Existing
+sequence validation is exposed for reuse; source subscription controller removal
+and script-source bounds retain the existing processing semantics.
+
+Authenticated `POST /api/backup/inspect` accepts an unencoded `application/zip`
+body and returns a JSON report. The existing bearer/Host/Origin/query boundary,
+no-store and nosniff headers apply. Before buffering any upload, it obtains the
+same single permit used by export generation/downloads; concurrent inspection
+returns 409. Failed uploads, timeout and disconnect release admission; a worker
+already running retains the permit until completion/cancellation. Inspection
+does not use the lifecycle actor queue, so status/settings/lifecycle operations
+continue independently. No files are extracted or retained, no uploaded scripts
+run, no Mihomo validation process starts and running state is not modified.
+
+Strict Stored ZIP32 preflight scans central records before library name indexing
+can hide duplicate paths. Every local/directory name, flag, timestamp, CRC and
+length must match; ranges must cover contiguous local records and the exact
+directory/footer. Safe relative UTF-8 names and private regular-file modes are
+required. Prefix/trailer bytes, comments/extras, overlaps, links/directories,
+encrypted/compressed entries, data descriptors, ZIP64 and multi-disk variants
+fail closed. The pinned zip reader checks CRC without allocating entry contents;
+manifest paths/counts/lengths/SHA-256 must cover every content entry exactly.
+
+Configuration validation checks strict catalog fields, unique bounded UIDs,
+known/reserved types, referenced profile files, linked enhancement types, current/
+active-profile coherence, settings profile references and service controller
+ownership. Raw source/merge/sequence YAML and UTF-8 script bounds use existing
+validators; shared same-type files are validated once. Success establishes
+archive integrity and configuration coherence, not JavaScript/Mihomo execution
+or transactional restore readiness.
+
+Limits: 65 MiB archive/upload, 64 MiB content, 8 MiB per content entry, 1,024 ZIP
+entries, 1 MiB manifest and the existing 64 KiB settings bound. The dedicated
+binary route accepts a valid 10 MiB archive while JSON commands retain their
+9 MiB envelope bound. Upload timeout is 15 seconds; worker processing has a
+separate 15-second cooperative budget and HTTP/manager shutdown checks. YAML
+parsing cannot be forcibly preempted. Errors are generic and exclude uploaded
+contents and host paths; request/media/size/shutdown boundaries have distinct
+HTTP statuses. Neither restore destination nor arbitrary source path is accepted.
+
+Verification: `cargo check --workspace --locked --offline`, all 281 regular
+workspace tests with `--test-threads=1`, all 72 real-Mihomo opt-in tests, focused
+inspection regressions, warnings-denied Clippy, formatting and diff checks pass.
+The initial parallel workspace run hit two existing core-upgrade unit assertion
+failures; both isolated reruns and the full serialized run pass. Their cause is
+not established. New coverage includes malformed/duplicate/ambiguous ZIP records,
+CRC/manifest tampering, valid hashes with broken domain references, Unicode and
+all linked types, cancellation/deadline, export compatibility, pre-body admission,
+disconnect/shutdown release, chunked size limits and separate binary/JSON limits.
+Real-core tests inspect running/stopped/restarted exports while preserving PID,
+generation, configuration, catalog and saved node selection.
+
+An isolated copy of the actual 56-node subscription exports a 1,110,883-byte,
+13-entry archive and passes authenticated inspection while running, stopped and
+after service restart. Python independently verifies CRC/length/SHA-256/raw bytes;
+trailing data and a freshly hashed but inconsistent current-profile catalog are
+rejected without state changes. Selected-node HTTPS proxy requests return 204
+before/after inspection and after restart; original data hashes are unchanged.
+The fresh runnable `target/mihomo-server-linux-x86_64-backup-inspection` bundle has
+12 valid checksums; its service binary matches the release build and bundled
+deployment/provenance documents match source. Web source/assets are unchanged.
+
+All 24 default browser workflows pass against the fresh production bundle; two
+optional Alpha executable cases are skipped without their separate verified
+binary fixture. Stable/Alpha activation/repair/recovery remain covered by the
+72 real-Mihomo tests. Isolated services, cores, workers and validators are
+terminated/reaped; the final owned-process audit reports zero.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The Linux MVP remains runnable; the full project is not complete. Next Delivery
+step 7 subtask: transactional backup restore with candidate runtime validation,
+durable publication/recovery and failure rollback. Local retention/list/delete,
+automatic schedules, WebDAV and backup UI remain pending, along with other core/
+release targets, native resources/settings, advanced pages, garbage collection,
+shared optional components and platform/service integrations.
 
 ## MVP completion boundary
 

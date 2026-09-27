@@ -64,6 +64,7 @@ pub fn router(state: HttpState) -> Router {
     Router::new()
         .route("/api/commands", post(command))
         .route("/api/backup", post(backup))
+        .route("/api/backup/inspect", post(inspect_backup))
         .route("/api/status", get(status))
         .route("/api/logs", get(logs))
         .route("/api/profiles", get(profiles))
@@ -197,6 +198,102 @@ async fn backup(State(state): State<HttpState>, body: Bytes) -> Response {
     );
     headers.insert("x-backup-sha256", metadata.sha256.parse().unwrap());
     response
+}
+
+async fn inspect_backup(State(state): State<HttpState>, request: Request) -> Response {
+    use headless_core::backup::MAX_ARCHIVE_BYTES;
+    let headers = request.headers();
+    if headers.get_all(header::CONTENT_TYPE).iter().count() != 1
+        || headers
+            .get(header::CONTENT_TYPE)
+            .is_none_or(|value| value != "application/zip")
+        || headers.contains_key(header::CONTENT_ENCODING)
+    {
+        return error(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "invalid_backup_media",
+            "send an unencoded application/zip body",
+        );
+    }
+    let lengths: Vec<_> = headers.get_all(header::CONTENT_LENGTH).iter().collect();
+    let length = match lengths.as_slice() {
+        [] => None,
+        [value] => match value.to_str().ok().and_then(|value| value.parse::<u64>().ok()) {
+            Some(length) => Some(length),
+            None => {
+                return error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_backup_length",
+                    "invalid upload length",
+                );
+            }
+        },
+        _ => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_backup_length",
+                "invalid upload length",
+            );
+        }
+    };
+    if length.is_some_and(|length| length > MAX_ARCHIVE_BYTES as u64) {
+        return error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "backup_too_large",
+            "backup archive exceeds 65 MiB",
+        );
+    }
+    let (permit, mut shutdown) = match state.management.manager.admit_backup_inspection() {
+        Ok(admission) => admission,
+        Err(_) => {
+            return error(
+                StatusCode::CONFLICT,
+                "backup_busy",
+                "backup operation unavailable; finish the current operation and retry",
+            );
+        }
+    };
+    let mut closing = state.closing.subscribe();
+    if *shutdown.borrow() || *closing.borrow() {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "shutting_down",
+            "service is shutting down",
+        );
+    }
+    // Manual bounded collection intentionally gives only this binary route 65 MiB;
+    // /api/commands continues to use its independent 9 MiB JSON envelope limit.
+    let bytes = tokio::select! {
+        _ = shutdown.changed() => return error(StatusCode::SERVICE_UNAVAILABLE, "shutting_down", "service is shutting down"),
+        _ = closing.changed() => return error(StatusCode::SERVICE_UNAVAILABLE, "shutting_down", "service is shutting down"),
+        result = tokio::time::timeout(std::time::Duration::from_secs(15), axum::body::to_bytes(request.into_body(), MAX_ARCHIVE_BYTES)) => match result {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(_)) => return error(StatusCode::PAYLOAD_TOO_LARGE, "invalid_backup_body", "upload is oversized or could not be read"),
+            Err(_) => return error(StatusCode::REQUEST_TIMEOUT, "backup_upload_timeout", "backup upload exceeded 15 seconds"),
+        }
+    };
+    if length.is_some_and(|length| length != bytes.len() as u64) {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid_backup_length",
+            "upload length mismatch",
+        );
+    }
+    let worker_shutdown = shutdown.clone();
+    let worker_closing = closing.clone();
+    let worker = tokio::task::spawn_blocking(move || {
+        // A dropped request cannot admit another large upload while this worker runs.
+        let _permit = permit;
+        crate::backup::inspect::run(&bytes, worker_shutdown, worker_closing)
+    });
+    tokio::select! {
+        _ = shutdown.changed() => error(StatusCode::SERVICE_UNAVAILABLE, "shutting_down", "service is shutting down"),
+        _ = closing.changed() => error(StatusCode::SERVICE_UNAVAILABLE, "shutting_down", "service is shutting down"),
+        result = worker => match result {
+            Ok(Ok(report)) => Json(report).into_response(),
+            _ => error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_backup_archive", "backup archive failed format, integrity or configuration checks"),
+        }
+    }
 }
 
 async fn execute(state: HttpState, headers: HeaderMap, command: ManagementCommand) -> Response {

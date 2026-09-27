@@ -1438,3 +1438,29 @@ to a production dependency for bounded download streaming. Source schemas and
 lifecycle APIs remain Tauri-free. Tests cover ZIP/digest/raw-record preservation,
 source/path bounds, links/FIFO/modes, cancellation, HTTP controls, download
 admission/drop and running/stopped/restart snapshots with real Mihomo.
+
+## Strict service backup inspection before restore
+
+Reference: `src-tauri/src/feat/backup.rs::restore_local_backup` and
+`restore_webdav_backup`, pinned commit b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b.
+Upstream opens ZipArchive and extracts into the application directory under the
+profile write lock. This increment supplies the validation phase needed before
+a service-owned restore transaction; it does not copy direct extraction or
+desktop/WebDAV configuration recovery.
+
+Destinations: headless-core/src/backup.rs (bounded inspection report),
+config/profile_store/sequence.rs (existing pure validation exposed for reuse),
+service/src/backup_inspect.rs and management/http.rs. A bounded Stored ZIP32
+preflight checks duplicate central names before zip 8.6.0 indexing can collapse
+them; local records and directory offsets/names/flags/CRC/lengths must agree with
+contiguous ranges, exact footer coverage and private regular-file modes. Existing
+zip readers verify CRC and ring verifies manifest SHA-256; files remain borrowed
+from the bounded upload rather than extracted. Service schemas, controller
+boundary and existing sequence/script-source validators check configuration and
+references. Uploaded JavaScript is not evaluated and Mihomo is not spawned.
+
+The authenticated binary inspection endpoint shares export admission before body
+collection, with upload timeout, cooperative worker cancellation and sanitized
+errors. Reports contain counts/digests and metadata without source contents or
+host paths. No dependency changes are needed. Transactional restore/rollback,
+retention, schedules, WebDAV and backup UI remain pending.

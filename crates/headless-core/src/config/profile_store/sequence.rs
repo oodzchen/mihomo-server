@@ -13,6 +13,11 @@ pub enum SequenceKind {
 }
 
 impl SequenceKind {
+    /// Validate stored source without changing files or applying enhancement.
+    pub fn validate_source(self, yaml: &str) -> Result<()> {
+        parse_sequence(yaml, self).map(|_| ())
+    }
+
     pub fn field(self) -> &'static str {
         match self {
             Self::Rules => "rules",

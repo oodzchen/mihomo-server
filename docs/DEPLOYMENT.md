@@ -21,6 +21,13 @@ or repair the persistent core through stable or Alpha channels. Both support
 force/no-op, durable rollback and installation readback; see the source
 repository's `docs/RUNNING.md`.
 
+Authenticated `POST /api/backup` exports a service snapshot. Upload its raw ZIP to
+`POST /api/backup/inspect` with `Content-Type: application/zip` to check structure,
+integrity and configuration references without applying it. Both share one
+bounded operation slot. No archive is retained or extracted; backup restore,
+retention, automatic schedules and WebDAV remain pending. Full request limits and
+error codes are documented in the source repository's `docs/RUNNING.md`.
+
 ```sh
 python3 scripts/package_bundle.py --build \
   --target x86_64-unknown-linux-gnu \
@@ -94,7 +101,8 @@ location must be writable by the service for future core upgrade staging. Existi
 nonempty regular executable cores are retained, even if their hash differs from
 the bundle pin; this preserves independently upgraded cores. Existing symlinks,
 nonexecutables or unsafe directory/file permissions are rejected. Automatic core
-upgrade, backup and rollback are not implemented yet.
+upgrade and backup schedules remain pending; manual core upgrades already support
+durable rollback, while configuration-backup restoration remains pending.
 
 Keep data outside versioned releases. It contains runtime revisions/journal,
 profiles and node records, credentials, the owned core, and runtime socket files.

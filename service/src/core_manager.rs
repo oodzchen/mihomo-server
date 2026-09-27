@@ -1132,6 +1132,15 @@ impl CoreManager {
         result.await.context("backup export cancelled during shutdown")?
     }
 
+    /// Admit before buffering an upload; shares the export/download memory slot.
+    pub(crate) fn admit_backup_inspection(&self) -> Result<(tokio::sync::OwnedSemaphorePermit, watch::Receiver<bool>)> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let permit = Arc::clone(&self.backup_admission)
+            .try_acquire_owned()
+            .context("backup operation already in progress")?;
+        Ok((permit, self.shutdown.subscribe()))
+    }
+
     pub async fn runtime_config(&self) -> Result<Mapping> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let (reply, result) = oneshot::channel();
