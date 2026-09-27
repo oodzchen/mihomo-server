@@ -53,12 +53,11 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** provider candidate path authority and deterministic
-HTTP cache conflict allocation, with confined inventory/readback and probe/start/
-reload checks. **Next implementation task (P1):** controlled Geo resource
-installation, content validation and first-use initialization. Geo updates, full
-settings and remaining resource lifecycle work are still pending; finish this
-priority before starting P2.
+**Latest completed task (P1):** optional integrity-pinned Geo bundle seeds and
+no-overwrite first-use initialization under the data lock, with existing provider
+path authority/inventory retained. **Next implementation task (P1):** Geo format
+validation and controlled updates. Full settings and cross-revision provider cache
+ownership remain pending; finish this priority before starting P2.
 
 ## Complete target architecture
 
@@ -145,7 +144,8 @@ mihomo-server/
 │   │   ├── Committed resource inventory / confined metadata / shared-path diagnostics [Implemented; Linux verified]
 │   │   ├── Final candidate provider normalization / conflict allocation / preserved source YAML [Implemented; Linux verified]
 │   │   ├── Probe/start/reload resource-path checks / service-file protection [Implemented; Linux verified]
-│   │   └── Geo lifecycle / full settings              [Pending; P1]
+│   │   ├── Pinned Geo seed schema / bounded staging / no-overwrite bootstrap / orphan recovery [Implemented; Linux verified]
+│   │   └── Geo format validation / controlled updates / full settings [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
 │   ├── Profile snapshots/watches and active UID     [Implemented]
@@ -268,7 +268,8 @@ mihomo-server/
 │   ├── Preserve data and existing upgraded core      [Implemented; Linux verified]
 │   ├── Managed core installation receipt / interrupted-switch recovery [Implemented; Linux x86_64]
 │   ├── Actual Linux systemd installation / lifecycle verification [Pending; P4; template exists]
-│   ├── Linux Geo resource packaging               [Pending; P4]
+│   ├── Optional integrity-pinned Geo resources / packager handoff [Implemented; P1 dependency; Linux verified]
+│   ├── Full Linux release resource/license inventory [Pending; P4]
 │   ├── Other platforms / containers / Alpha bundle seeds [Deferred]
 │   ├── Linux package license inventory              [Pending; P4]
 │   └── External publication                      [Deferred]
@@ -3336,6 +3337,73 @@ reload commands, rules/delay Web views (P2), i18n/signals (P3), actual Linux sys
 installation (P4) and previously deferred work are not completed by this increment.
 The service remains a runnable development MVP; older release bundles do not yet
 contain these P1 changes.
+
+## Latest increment: integrity-pinned Geo seeds and first-use initialization (P1)
+
+The prior provider-path increment is complete. This increment adds an optional
+schema-1 `geo` map to the resource manifest and `--geo-dir`/`--geo-manifest` inputs
+to the existing packager. Entries are limited to the six upstream Geo names and
+contain exact byte size plus SHA-256. Old bundles without a `geo` map remain valid.
+The manifest is bounded to 64 KiB, each seed to 128 MiB and the set to 256 MiB.
+The packager checks original and copied seed pins and includes the files in the
+existing bundle checksum inventory. It performs no resource download.
+
+Under the data-directory lock, startup initializes the managed core and then Geo
+files before spawning the actor/core. Only absent declared files are seeded.
+Existing nonempty regular Geo files remain authoritative, even when bundle bytes
+change or the seed source disappears; existing links, empty files or oversized
+files fail initialization rather than being overwritten. Each needed source is
+opened relative to its real directory without following links, streamed into a
+private 0700 `.geo-seed` directory and verified against size/digest. All needed
+files pass integrity checks before any live publication. No-replace hard links
+publish independent 0600 copies, with data-directory fsync. A hash/size failure
+before publication leaves live Geo names untouched. Publication is atomic per
+file; an I/O error or abrupt exit partway through a set may retain already verified
+files and the next startup seeds only the missing ones.
+
+Interrupted staging recovery is confined to the fixed six-name namespace. Known
+regular partial files are removed; unknown entries or links are preserved and
+reported as unsafe. A staged hard link from an interrupted publication is removed
+without changing its already published live file. No mtime-based overwrite,
+resource deletion, HTTP download, authenticated update/upload API or settings
+fields are delivered here. The existing resource panel observes the installed
+files through its metadata refresh.
+
+SHA-256 validates pinned content integrity; it is not a generic binary-format
+validator. All six names can be seeded, but this increment's actual format/runtime
+check covers `geoip.metadb` with real Mihomo: an IP-only request exercises its MMDB
+loader through reject-only rules, followed by real proxy HTTPS traffic. Dedicated
+MMDB/protobuf/ASN validation and controlled update/rollback remain pending.
+
+Validation:
+
+- `cargo check --workspace --locked --offline`, service build, formatting and diff
+  checks passed. The regular workspace suite passed 336 tests, with 76 unrelated
+  opt-in tests ignored. Geo tests cover pin/schema/size limits, failure before
+  publication, source/destination links, private output, existing-data preservation
+  and interrupted-staging cleanup.
+- Nine Python packager boundary tests passed, including pin mismatch, paired Geo
+  arguments, unsafe names/links and bounds.
+- The real-Mihomo actual-node integration passed using private copies of node and
+  Geo data. Startup seeded `geoip.metadb`; a reject-only IP request exercised the
+  MMDB loader without an outbound connection. Local/HTTP providers remained usable,
+  HTTPS proxy requests returned 204 before and after restart, and a changed bundle
+  seed did not replace the installed Geo file. Original node and Geo SHA-256 values
+  were unchanged. Other Geo formats were not exercised.
+- A runnable local debug bundle was prepared at
+  `target/mihomo-server-linux-x86_64-geo-seeds-1790519261902358745`; all 13 checksums
+  passed. Its launcher reached Running, authenticated resource readback matched the
+  Geo pin/private permissions, and SIGTERM exited cleanly with its core child reaped.
+  This is a local verified artifact, not a completed production/systemd deployment.
+
+No Web source changed; existing built assets are included, without a new browser
+suite run. No sandbox Git commit occurs; the host script owns the commit.
+
+Next task: P1 format-aware Geo validation and controlled replacement/update, then
+full settings and cross-revision provider cache ownership. P2 operations/views,
+P3 i18n/signals, P4 actual systemd installation and all deferred expansions remain
+unfinished. Optional local Geo packaging supports this P1 slice and does not
+complete the full P4 deployment/release scope.
 
 ## MVP completion boundary
 

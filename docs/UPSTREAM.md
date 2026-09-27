@@ -77,6 +77,19 @@ revisions. Upstream Tauri logging, IPC bundle asset copying and remote-provider
 transfer are omitted. The actor normalizes generated candidates and raw-edit probe
 copies while preserving source YAML; it does not migrate or prune old cache files.
 
+## Geo first-use initialization and integrity-pinned bundle adaptation
+
+The startup responsibility and resource identities reference
+`src-tauri/src/utils/init.rs::init_resources` and
+`src-tauri/src/core/runtime_bundle.rs::GEO_ASSETS` at pinned commit
+`b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b`. New service code in
+`service/src/geo_resources.rs` and the optional `geo` manifest in
+`service/src/resources.rs` replace desktop copy/mtime overwrite with bounded,
+SHA-256-pinned staging and no-replace publication under the data lock. The local
+packager accepts explicitly pinned existing seed files and copies only named Geo
+assets. Tauri paths, logging and automatic overwrite are omitted. The code checks
+content integrity; generic Geo-format validation and updates remain future work.
+
 ## Mihomo plugin
 
 - Repository: https://github.com/clash-verge-rev/tauri-plugin-mihomo

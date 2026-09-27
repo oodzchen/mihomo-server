@@ -3,6 +3,7 @@ use anyhow::{Context as _, Result, ensure};
 use ring::digest::{Context, SHA256};
 use serde::Deserialize;
 use std::{
+    collections::BTreeMap,
     fs::{self, File, OpenOptions},
     io::{Read as _, Write as _},
     path::{Path, PathBuf},
@@ -16,6 +17,9 @@ struct Manifest {
     schema_version: u32,
     target: String,
     core: Core,
+    #[cfg(unix)]
+    #[serde(default)]
+    geo: BTreeMap<String, crate::geo_resources::Seed>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -28,6 +32,8 @@ struct Core {
 pub struct Resources {
     root: PathBuf,
     hash: String,
+    #[cfg(unix)]
+    geo: BTreeMap<String, crate::geo_resources::Seed>,
 }
 impl Resources {
     pub fn directory(&self) -> &Path {
@@ -38,7 +44,10 @@ impl Resources {
         ensure!(cfg!(target_os = "linux"), "bundled resources currently require Linux");
         let root = directory.canonicalize().context("open resource directory")?;
         let manifest_path = inside(&root, "manifest.json")?;
-        let manifest: Manifest = serde_json::from_slice(&fs::read(manifest_path)?)?;
+        let mut bytes = Vec::new();
+        File::open(manifest_path)?.take(64 * 1024 + 1).read_to_end(&mut bytes)?;
+        ensure!(bytes.len() <= 64 * 1024, "resource manifest exceeds 64 KiB");
+        let manifest: Manifest = serde_json::from_slice(&bytes)?;
         ensure!(manifest.schema_version == 1, "unsupported resource manifest schema");
         ensure!(
             manifest.target == TARGET,
@@ -58,9 +67,13 @@ impl Resources {
             manifest.core.sha256.len() == 64 && manifest.core.sha256.bytes().all(|b| b.is_ascii_hexdigit()),
             "invalid pinned core SHA-256"
         );
+        #[cfg(unix)]
+        crate::geo_resources::validate_manifest(&manifest.geo)?;
         Ok(Self {
             root,
             hash: manifest.core.sha256.to_ascii_lowercase(),
+            #[cfg(unix)]
+            geo: manifest.geo,
         })
     }
 
@@ -70,6 +83,19 @@ impl Resources {
 
     pub fn bootstrap(&self) -> Result<PathBuf> {
         inside(&self.root, "minimal.yaml")
+    }
+
+    /// Integrity-pinned, no-overwrite initialization under the manager's data lock.
+    pub fn initialize_geo(&self, data: &Path) -> Result<Vec<String>> {
+        #[cfg(unix)]
+        {
+            crate::geo_resources::initialize(&self.root.join("geo"), data, &self.geo)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = data;
+            Ok(Vec::new())
+        }
     }
 
     /// Called only while the manager owns its data-directory lock.

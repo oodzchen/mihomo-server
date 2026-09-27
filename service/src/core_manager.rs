@@ -231,6 +231,7 @@ impl CoreOptions {
             let core_directory = self.core_dir.clone().unwrap_or_else(|| self.data_dir.join("core"));
             crate::core_upgrade::recover(&core_directory).context("managed core upgrade recovery failed")?;
             self.binary = resources.initialize_core(&core_directory)?;
+            resources.initialize_geo(&self.data_dir)?;
         } else {
             ensure!(self.core_dir.is_none(), "core directory requires bundle resources");
         }

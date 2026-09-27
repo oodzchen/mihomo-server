@@ -67,24 +67,50 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
         directory.0.join("providers/rules.yaml"),
         "payload: ['DOMAIN,example.org']\n",
     )?;
-    if let Some(data) = source.parent().and_then(|path| path.parent()) {
-        if data.join("geoip.metadb").is_file() {
-            fs::copy(data.join("geoip.metadb"), directory.0.join("geoip.metadb"))?;
-        }
-    }
+    let geo_source = source
+        .parent()
+        .and_then(|path| path.parent())
+        .context("profile must have a data root")?
+        .join("geoip.metadb");
+    let geo_bytes = fs::read(&geo_source).context("real-data test needs geoip.metadb beside profiles")?;
+    let geo_fingerprint = digest(&SHA256, &geo_bytes);
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
     drop(listener);
     let config = format!(
-        "mixed-port: {port}\nallow-lan: false\nmode: rule\ndns: {{enable: false}}\ntun: {{enable: false}}\nproxy-providers:\n  nodes: {{type: file, path: providers/nodes.yaml}}\n  remote_one: {{type: http, path: ./providers/shared.yaml, url: '{provider_url}/one'}}\n  remote_two: {{type: http, path: providers/shared.yaml, url: '{provider_url}/two'}}\nrule-providers:\n  local: {{type: file, behavior: classical, path: providers/rules.yaml}}\nproxy-groups:\n  - {{name: verification, type: select, use: [nodes]}}\nrules: ['RULE-SET,local,verification', 'MATCH,verification']\n"
+        "mixed-port: {port}\nallow-lan: false\nmode: rule\ngeodata-mode: false\ngeo-auto-update: false\ngeox-url: {{mmdb: 'http://127.0.0.1:1/unavailable'}}\ndns: {{enable: false}}\ntun: {{enable: false}}\nproxy-providers:\n  nodes: {{type: file, path: providers/nodes.yaml}}\n  remote_one: {{type: http, path: ./providers/shared.yaml, url: '{provider_url}/one'}}\n  remote_two: {{type: http, path: providers/shared.yaml, url: '{provider_url}/two'}}\nrule-providers:\n  local: {{type: file, behavior: classical, path: providers/rules.yaml}}\nproxy-groups:\n  - {{name: verification, type: select, use: [nodes]}}\nrules: ['RULE-SET,local,verification', 'GEOIP,CN,REJECT,no-resolve', 'IP-CIDR,1.1.1.1/32,REJECT,no-resolve', 'MATCH,verification']\n"
     );
     let config_path = directory.0.join("bootstrap.yaml");
     fs::write(&config_path, &config)?;
     let binary = PathBuf::from(std::env::var_os("MIHOMO_TEST_BINARY").context("set MIHOMO_TEST_BINARY")?);
+    let bundle = directory.0.join("bundle");
+    fs::create_dir_all(bundle.join("core"))?;
+    fs::create_dir(bundle.join("geo"))?;
+    fs::copy(&binary, bundle.join("core/verge-mihomo"))?;
+    fs::copy(&geo_source, bundle.join("geo/geoip.metadb"))?;
+    let hex = |bytes: &[u8]| {
+        digest(&SHA256, bytes)
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    fs::write(
+        bundle.join("manifest.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "schema_version":1,"target":mihomo_server::resources::TARGET,
+            "core":{"version":"v1.19.31","sha256":hex(&fs::read(&binary)?)},
+            "geo":{"geoip.metadb":{"bytes":geo_bytes.len(),"sha256":hex(&geo_bytes)}}
+        }))?,
+    )?;
+    let resources = mihomo_server::resources::Resources::open(&bundle)?;
     let mut options = CoreOptions::new(binary, directory.0.clone(), config_path);
+    options.resources = Some(resources.clone());
     options.script_worker = Some(PathBuf::from(env!("CARGO_BIN_EXE_mihomo-server")));
     let manager = CoreManager::spawn(options)?;
     let result = async {
+        assert_eq!(fs::read(directory.0.join("geoip.metadb"))?, geo_bytes);
+        assert!(!directory.0.join(".geo-seed").exists());
         let profile = manager
             .import_profile_yaml(config.clone(), "isolated live providers".into())
             .await?;
@@ -154,6 +180,16 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
             .proxy(reqwest::Proxy::http(format!("http://127.0.0.1:{port}"))?)
             .timeout(Duration::from_secs(12))
             .build()?;
+        // IP-only request triggers the Geo matcher; both possible rules reject it
+        // before any outbound connection, so this check needs no network access.
+        let _ = client.get("http://1.1.1.1/").send().await;
+        ensure!(
+            manager
+                .logs()
+                .iter()
+                .any(|log| log.message.contains("Load MMDB file:") && log.message.contains("geoip.metadb")),
+            "core did not exercise the seeded MMDB loader"
+        );
         let mut successful = false;
         for name in names.iter().take(5) {
             manager.select_node("verification".into(), name.clone()).await?;
@@ -168,6 +204,10 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
             }
         }
         ensure!(successful, "no HTTPS 204 response through the tested live nodes");
+        let installed = fs::read(directory.0.join("geoip.metadb"))?;
+        fs::write(bundle.join("geo/geoip.metadb"), "bundle changed after initialization")?;
+        assert!(resources.initialize_geo(&directory.0)?.is_empty());
+        assert_eq!(fs::read(directory.0.join("geoip.metadb"))?, installed);
         manager.restart().await?;
         assert_eq!(manager.resource_inventory().await?.providers.len(), 4);
         assert_eq!(
@@ -191,5 +231,9 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
     .await;
     let cleanup = manager.shutdown().await;
     assert_eq!(digest(&SHA256, &fs::read(source)?).as_ref(), fingerprint.as_ref());
+    assert_eq!(
+        digest(&SHA256, &fs::read(geo_source)?).as_ref(),
+        geo_fingerprint.as_ref()
+    );
     result.and(cleanup)
 }

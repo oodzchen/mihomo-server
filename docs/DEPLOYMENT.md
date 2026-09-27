@@ -135,7 +135,52 @@ For a service update, stop the current service, prepare a fresh bundle, launch i
 with the same absolute data/core directories, and keep the previous bundle for
 service rollback. The committed runtime takes precedence over the new bootstrap;
 existing credentials and managed core are not replaced. Never delete persistent
-data as part of bundle replacement. Geo/provider resource seeding is pending.
+data as part of bundle replacement. Optional pinned Geo seeding is available as
+described below; full resource update/rollback and provider cache ownership remain
+pending.
+
+## Include existing Geo files for first-use initialization
+
+Provide a directory of existing files and a JSON integrity manifest alongside the
+normal bundle arguments:
+
+```sh
+python3 scripts/package_bundle.py \
+  --target x86_64-unknown-linux-gnu \
+  --mihomo /path/to/verge-mihomo --core-version v1.19.31 \
+  --core-sha256 EXPECTED_CORE_SHA256 --output /path/to/fresh-bundle \
+  --geo-dir /path/to/geo-files --geo-manifest /path/to/geo-pins.json
+```
+
+The Geo pin file maps supported filenames to exact sizes and expected SHA-256:
+
+```json
+{
+  "geoip.metadb": {
+    "bytes": 123456,
+    "sha256": "EXPECTED_64_HEX_DIGIT_SHA256"
+  }
+}
+```
+
+Replace the example size/digest with trusted pins for the input. Supported names
+are `Country.mmdb`, `ASN.mmdb`, `geoip.dat`, `geosite.dat`, `geoip.metadb` and
+`GeoSite.dat`. Files must be nonempty, at most 128 MiB each and 256 MiB total.
+Both optional arguments are required together. The packager reads only named seed
+files, checks pins before/after copying into `resources/geo`, records them in the
+resource manifest's optional `geo` map and includes them in `checksums.sha256`.
+Old manifests without this map remain supported. No Geo download is performed.
+
+At startup, while holding the data lock, only missing declared Geo files are
+initialized. Existing declared nonempty regular data files remain authoritative even if
+the bundle changes; links, empty or oversized existing entries stop initialization.
+Seeds are staged privately and checked before publication as independent 0600
+files. Known partial staging is recovered after interruption. Publication is
+atomic per file, so a partially published verified set resumes at next startup.
+Inspect installed files in the Web settings resource panel or the authenticated
+`resources` command. Geo updates and format-specific validation are not provided
+by this initialization path: matching SHA-256 proves integrity, not validity of
+every Geo database format. Select suitable assets for the configuration's Geo mode.
 
 ## Optional user systemd template
 

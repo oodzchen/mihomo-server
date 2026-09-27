@@ -12,6 +12,40 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 TARGET = "x86_64-unknown-linux-gnu"
+GEO_NAMES = {"Country.mmdb", "ASN.mmdb", "geoip.dat", "geosite.dat", "geoip.metadb", "GeoSite.dat"}
+MAX_GEO_FILE = 128 * 1024 * 1024
+
+
+def geo_seeds(args):
+    directory, manifest = getattr(args, "geo_dir", None), getattr(args, "geo_manifest", None)
+    if not directory and not manifest:
+        return None, {}
+    if not directory or not manifest:
+        raise ValueError("Geo directory and integrity manifest must be supplied together")
+    directory, manifest = Path(directory).absolute(), Path(manifest).absolute()
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError("Geo source directory must be real")
+    if manifest.is_symlink() or not manifest.is_file() or manifest.stat().st_size > 65536:
+        raise ValueError("Geo manifest must be a regular file up to 64 KiB")
+    pins = json.loads(manifest.read_text())
+    if not isinstance(pins, dict) or len(pins) > len(GEO_NAMES):
+        raise ValueError("Geo pins must be a map of supported filenames")
+    for name, pin in pins.items():
+        if name not in GEO_NAMES or not isinstance(pin, dict) or set(pin) != {"bytes", "sha256"}:
+            raise ValueError("Unsupported Geo filename or pin fields")
+        if type(pin["bytes"]) is not int or not 0 < pin["bytes"] <= MAX_GEO_FILE:
+            raise ValueError("Geo file must be 1 byte to 128 MiB")
+        if not isinstance(pin["sha256"], str) or not re.fullmatch(r"[0-9a-fA-F]{64}", pin["sha256"]):
+            raise ValueError("Invalid Geo SHA-256 pin")
+        source = directory / name
+        if source.is_symlink() or not source.is_file() or source.stat().st_size != pin["bytes"]:
+            raise ValueError("Geo source size/type differs from pin")
+        if sha256(source) != pin["sha256"].lower():
+            raise ValueError("Geo source SHA-256 differs from pin")
+        pin["sha256"] = pin["sha256"].lower()
+    if sum(pin["bytes"] for pin in pins.values()) > 256 * 1024 * 1024:
+        raise ValueError("Geo seeds exceed 256 MiB total")
+    return directory, pins
 
 
 def sha256(path):
@@ -44,6 +78,7 @@ def package(args):
         raise ValueError("Provide the expected 64-digit core SHA-256")
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", args.core_version):
         raise ValueError("Provide an explicit pinned core version")
+    geo_directory, geo = geo_seeds(args)
     output = Path(args.output).absolute()
     if output.exists() or output.is_symlink():
         raise ValueError("Bundle output already exists; use a fresh version directory")
@@ -82,6 +117,15 @@ def package(args):
         shutil.copyfile(ROOT / "examples" / "minimal.yaml", stage / "resources" / "minimal.yaml")
         manifest = {"schema_version": 1, "target": args.target,
                     "core": {"version": args.core_version, "sha256": args.core_sha256.lower()}}
+        if geo:
+            (stage / "resources" / "geo").mkdir()
+            for name, pin in geo.items():
+                destination = stage / "resources" / "geo" / name
+                shutil.copyfile(geo_directory / name, destination)
+                destination.chmod(0o644)
+                if destination.stat().st_size != pin["bytes"] or sha256(destination) != pin["sha256"]:
+                    raise ValueError("Geo source changed while preparing bundle")
+            manifest["geo"] = geo
         (stage / "resources" / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         shutil.copyfile(ROOT / "deploy" / "launch.sh", stage / "launch")
         (stage / "launch").chmod(0o755)
@@ -110,6 +154,8 @@ def main():
     parser.add_argument("--build", action="store_true", help="Build locked frontend and release service first")
     parser.add_argument("--service", help="Use a prebuilt service instead of the release build location")
     parser.add_argument("--web-dir", help="Use prebuilt assets instead of web/dist")
+    parser.add_argument("--geo-dir", help="Optional directory of existing Geo seed files")
+    parser.add_argument("--geo-manifest", help="Expected Geo filename -> {bytes, sha256} pins; requires --geo-dir")
     args = parser.parse_args()
     try:
         package(args)

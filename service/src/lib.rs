@@ -2,6 +2,8 @@ pub mod backup;
 pub mod core_manager;
 pub mod core_release;
 pub mod core_upgrade;
+#[cfg(unix)]
+mod geo_resources;
 pub mod management;
 mod proxy_access;
 pub mod remote;

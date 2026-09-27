@@ -2392,7 +2392,9 @@ this command does not change whether Mihomo accepts the configuration.
 that its content format is valid or that a running core has loaded it. Missing Geo
 files may be normal when rules do not require them. The filesystem can change after
 a read; refresh after a core download or external file change. Geo installation,
-updates/content validation and Provider refresh/reload APIs remain future work.
+updates/format-specific validation and Provider refresh/reload APIs remain future
+work. Optional bundle Geo seeds can now initialize missing files under pinned
+size/SHA-256 checks; see [Geo deployment inputs](DEPLOYMENT.md#include-existing-geo-files-for-first-use-initialization).
 
 ## Provider candidate paths and shared HTTP caches
 
