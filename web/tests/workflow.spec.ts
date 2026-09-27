@@ -444,6 +444,63 @@ test("connection settings save explicit false, preserve failed drafts and retry 
   } finally { await page.unroute("**/api/commands"); await api("set_settings", { runtime: original.runtime }); }
 });
 
+test("hosts editor preserves map shapes, explicit empty and false switches with failed drafts", async ({ page }) => {
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });
+    expect(response.ok).toBe(true); return response.json();
+  };
+  const original = await api("settings");
+  await page.goto(`${base}/settings`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  const form = page.getByRole("region", { name: "服务设置编辑器", exact: true });
+  const owned = page.getByRole("checkbox", { name: "管理 hosts 映射", exact: true });
+  const hosts = page.getByRole("textbox", { name: "hosts JSON 映射", exact: true });
+  const save = page.getByRole("button", { name: "保存服务设置", exact: true });
+  const custom = { "*.example.test": "192.0.2.1", "multi.example.test": ["192.0.2.2", "2001:db8::1"], "alias.example.test": "multi.example.test" };
+  try {
+    await expect(owned).not.toBeChecked(); await expect(hosts).toBeDisabled();
+    await owned.check();
+    for (const invalid of ['[]', '{"a.test":123}', '{"a.test":[]}', '{"a.test":["alias.test"]}', '{"*.test":"a.test"}', '{"a.test":"192.0.2.1","A.TEST":"192.0.2.2"}']) {
+      await hosts.fill(invalid); await save.click();
+      await expect(form.getByRole("alert")).toContainText("hosts");
+      expect(await api("settings")).toEqual(original);
+    }
+    await hosts.fill(JSON.stringify(custom));
+    await page.getByRole("combobox", { name: "DNS 设置来源", exact: true }).selectOption("true");
+    await page.getByRole("combobox", { name: "DNS 使用 hosts", exact: true }).selectOption("false");
+    await page.getByRole("combobox", { name: "DNS 使用系统 hosts", exact: true }).selectOption("false");
+    await save.click(); await expect(form.getByRole("status")).toContainText("保存结果已核对");
+    expect((await api("settings")).runtime).toEqual({ ...original.runtime, hosts: custom, dns: { "use-hosts": false, "use-system-hosts": false } });
+    await expect(page.getByLabel("已保存 hosts 映射", { exact: true })).toContainText('"alias.example.test": "multi.example.test"');
+    await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
+    await expect(owned).toBeChecked(); expect(JSON.parse(await hosts.inputValue())).toEqual(custom);
+    await expect(page.getByRole("combobox", { name: "DNS 使用系统 hosts", exact: true })).toHaveValue("false");
+    await hosts.fill(JSON.stringify(Object.fromEntries(Object.entries(custom).reverse())));
+    await expect(save).toBeDisabled();
+    await page.route("**/api/commands", async route => {
+      if (route.request().postDataJSON().command === "set_settings") await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture hosts failure" } }) });
+      else await route.continue();
+    });
+    await hosts.fill('{}'); await save.click(); await expect(form.getByRole("status")).toContainText("草稿已保留");
+    await expect(hosts).toHaveValue('{}'); expect((await api("settings")).runtime.hosts).toEqual(custom);
+    await page.unroute("**/api/commands");
+    await save.click(); await expect(form.getByRole("status")).toContainText("保存结果已核对");
+    expect((await api("settings")).runtime.hosts).toEqual({});
+    await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
+    await expect(owned).toBeChecked(); await expect(hosts).toHaveValue('{}');
+    await page.getByRole("combobox", { name: "DNS 设置来源", exact: true }).selectOption("");
+    await save.click(); await expect(form.getByRole("status")).toContainText("保存结果已核对");
+    expect((await api("settings")).runtime).toEqual({ ...original.runtime, hosts: {} });
+    await expect(page.getByRole("region", { name: "订阅 DNS 覆盖", exact: true })).not.toContainText("启用覆盖前");
+    await owned.uncheck(); await expect(hosts).toBeDisabled();
+    await save.click(); await expect(form.getByRole("status")).toContainText("保存结果已核对");
+    expect((await api("settings")).runtime).toEqual(original.runtime);
+    await expect(page.getByRole("region", { name: "订阅 DNS 覆盖", exact: true })).toContainText("DNS 配置段或 hosts 映射");
+    await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  } finally { await page.unroute("**/api/commands"); await api("set_settings", { runtime: original.runtime }); }
+});
+
 test("Geo settings editor saves inherited URL leaves and reads core values with retry", async ({ page }) => {
   const api = async (command: string, fields: Record<string, unknown> = {}) => {
     const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });

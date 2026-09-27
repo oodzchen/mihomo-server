@@ -985,3 +985,214 @@ async fn core_download_settings_control_real_http_headers_and_conditional_reques
     server.abort();
     result.and(cleanup)
 }
+
+#[tokio::test]
+#[ignore = "requires real Mihomo; isolated DNS listener and upstream fixture"]
+async fn hosts_dns_queries_authority_protection_rollback_and_restart() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+    use std::time::Duration;
+    use tokio::net::UdpSocket;
+    // Minimal DNS fixture: bounded A/AAAA packets, no public resolver involved.
+    async fn query(address: SocketAddr, name: &str, kind: u16) -> Result<Vec<IpAddr>> {
+        let socket = UdpSocket::bind("127.0.0.1:0").await?;
+        let mut packet = vec![0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0];
+        for label in name.split('.') {
+            packet.push(label.len() as u8);
+            packet.extend_from_slice(label.as_bytes());
+        }
+        packet.push(0);
+        packet.extend_from_slice(&kind.to_be_bytes());
+        packet.extend_from_slice(&[0, 1]);
+        socket.connect(address).await?;
+        socket.send(&packet).await?;
+        let mut response = [0u8; 4096];
+        let n = tokio::time::timeout(Duration::from_secs(3), socket.recv(&mut response)).await??;
+        let response = &response[..n];
+        anyhow::ensure!(
+            n >= 12 && response[..2] == packet[..2] && response[3] & 15 == 0,
+            "DNS response invalid"
+        );
+        fn name_end(data: &[u8], mut pos: usize) -> Result<usize> {
+            loop {
+                let len = *data.get(pos).context("truncated DNS name")?;
+                pos += 1;
+                if len == 0 {
+                    return Ok(pos);
+                }
+                if len & 0xc0 == 0xc0 {
+                    anyhow::ensure!(pos < data.len(), "truncated DNS pointer");
+                    return Ok(pos + 1);
+                }
+                anyhow::ensure!(len <= 63 && pos + usize::from(len) <= data.len(), "invalid DNS label");
+                pos += usize::from(len);
+            }
+        }
+        let mut pos = name_end(response, 12)? + 4;
+        let mut answers = Vec::new();
+        for _ in 0..u16::from_be_bytes([response[6], response[7]]) {
+            pos = name_end(response, pos)?;
+            let header = response.get(pos..pos + 10).context("truncated DNS answer")?;
+            let record = u16::from_be_bytes([header[0], header[1]]);
+            let len = usize::from(u16::from_be_bytes([header[8], header[9]]));
+            pos += 10;
+            let data = response.get(pos..pos + len).context("truncated DNS answer data")?;
+            if record == 1 && len == 4 {
+                answers.push(Ipv4Addr::from(<[u8; 4]>::try_from(data)?).into());
+            }
+            if record == 28 && len == 16 {
+                answers.push(Ipv6Addr::from(<[u8; 16]>::try_from(data)?).into());
+            }
+            pos += len;
+        }
+        Ok(answers)
+    }
+    let upstream = UdpSocket::bind("127.0.0.1:0").await?;
+    let upstream_address = upstream.local_addr()?;
+    let upstream_task = tokio::spawn(async move {
+        let mut buffer = [0u8; 4096];
+        while let Ok((n, peer)) = upstream.recv_from(&mut buffer).await {
+            if n < 16 {
+                continue;
+            }
+            let kind = u16::from_be_bytes([buffer[n - 4], buffer[n - 3]]);
+            let data: Vec<u8> = match kind {
+                1 => vec![192, 0, 2, 200],
+                28 => "2001:db8::200".parse::<Ipv6Addr>().unwrap().octets().to_vec(),
+                _ => continue,
+            };
+            let mut response = buffer[..n].to_vec();
+            response[2] = 0x81;
+            response[3] = 0x80;
+            response[6] = 0;
+            response[7] = 1;
+            response.extend_from_slice(&[0xc0, 0x0c]);
+            response.extend_from_slice(&kind.to_be_bytes());
+            response.extend_from_slice(&[0, 1, 0, 0, 0, 0]);
+            response.extend_from_slice(&(data.len() as u16).to_be_bytes());
+            response.extend_from_slice(&data);
+            let _ = upstream.send_to(&response, peer).await;
+        }
+    });
+    let reservation = UdpSocket::bind("127.0.0.1:0").await?;
+    let dns_address = reservation.local_addr()?;
+    drop(reservation);
+    let system_bytes = fs::read("/etc/hosts")?;
+    let system_host = std::str::from_utf8(&system_bytes)?
+        .lines()
+        .filter_map(|line| {
+            let mut words = line.split('#').next()?.split_whitespace();
+            let ip = words.next()?.parse::<Ipv4Addr>().ok()?;
+            if ip.is_unspecified() || ip.is_multicast() {
+                return None;
+            }
+            let name = words.find(|s| *s != "localhost" && s.is_ascii() && !s.contains(':'))?;
+            Some((name.to_owned(), IpAddr::V4(ip)))
+        })
+        .next()
+        .context("live system-hosts check needs a non-localhost IPv4 mapping")?;
+    let dir = Directory::new()?;
+    let manager = CoreManager::spawn(dir.options()?)?;
+    let result = async {
+        let raw = format!("mode: direct\nmixed-port: 0\nipv6: true\ndns: {{enable: true, ipv6: true, enhanced-mode: redir-host, listen: '{dns_address}', use-hosts: true, use-system-hosts: false, nameserver: ['{upstream_address}']}}\ntun: {{enable: false}}\nhosts: {{exact.fixture.test: 192.0.2.10}}\nrules: ['MATCH,DIRECT']");
+        let uid = manager.import_profile_yaml(raw.clone(), "DNS hosts fixture".into()).await?.uid.unwrap().to_string();
+        let mut runtime: RuntimeSettings = serde_yaml_ng::from_str("hosts: {'*.fixture.test': 192.0.2.43, exact.fixture.test: 192.0.2.42, multi.fixture.test: [192.0.2.44, '2001:db8::42'], alias.fixture.test: exact.fixture.test}\ndns: {use-hosts: true, use-system-hosts: false}")?;
+        manager.set_settings(runtime.clone()).await?;
+        manager.select_profile(uid.clone()).await?;
+        manager.set_global_script(Some("function main(c) { c['initial-hosts-input']=c.hosts; c['initial-hosts-use-input']=c.dns['use-hosts']; c['initial-system-hosts-input']=c.dns['use-system-hosts']; return c; }".into())).await?;
+        manager.set_profile_merge(uid.clone(), Some("hosts: {merge.fixture.test: 192.0.2.99}\ndns: {use-hosts: false, use-system-hosts: true}".into())).await?;
+        manager.set_profile_script(uid.clone(), Some("function main(c) { c['hosts-input']=c.hosts; c['hosts-use-input']=c.dns['use-hosts']; c.hosts={'script.fixture.test':'192.0.2.98'}; c.dns['use-hosts']=true; c.dns['use-system-hosts']=true; if(c.mode==='global') c.rules=['INVALID,DIRECT']; return c; }".into())).await?;
+        let committed = manager.runtime_config().await?;
+        // The profile merge comes after initial authority; final authority discards it.
+        assert_eq!(committed["initial-hosts-input"]["exact.fixture.test"].as_str(), Some("192.0.2.42"));
+        assert_eq!(committed["initial-hosts-use-input"].as_bool(), Some(true));
+        assert_eq!(committed["initial-system-hosts-input"].as_bool(), Some(false));
+        assert_eq!(committed["hosts-input"]["merge.fixture.test"].as_str(), Some("192.0.2.99"));
+        assert_eq!(committed["hosts"], serde_yaml_ng::to_value(&runtime.hosts)?);
+        assert_eq!(committed["dns"]["use-system-hosts"].as_bool(), Some(false));
+        manager.start().await?;
+        assert_eq!(query(dns_address, "exact.fixture.test", 1).await?, ["192.0.2.42".parse::<IpAddr>()?]);
+        assert_eq!(query(dns_address, "wild.fixture.test", 1).await?, ["192.0.2.43".parse::<IpAddr>()?]);
+        assert_eq!(query(dns_address, "alias.fixture.test", 1).await?, ["192.0.2.42".parse::<IpAddr>()?]);
+        assert_eq!(query(dns_address, "multi.fixture.test", 1).await?, ["192.0.2.44".parse::<IpAddr>()?]);
+        assert_eq!(query(dns_address, "multi.fixture.test", 28).await?, ["2001:db8::42".parse::<IpAddr>()?]);
+        let before = manager.status(); let saved = manager.settings().await?;
+        let mut invalid = runtime.clone(); invalid.mode = Some(Mode::Global); invalid.hosts = Some(serde_yaml_ng::from_str("{new.fixture.test: 192.0.2.90}")?);
+        assert!(manager.set_settings(invalid).await.is_err());
+        assert_eq!(manager.settings().await?, saved); assert_eq!(SettingsStore::open(&dir.0)?.snapshot(), saved); assert_eq!(manager.runtime_config().await?, committed);
+        assert_eq!(manager.status().pid, before.pid); assert_eq!(manager.status().config_revision, before.config_revision);
+        assert_eq!(query(dns_address, "exact.fixture.test", 1).await?, ["192.0.2.42".parse::<IpAddr>()?]);
+        runtime.dns.as_mut().unwrap().use_hosts = Some(false); manager.set_settings(runtime.clone()).await?;
+        manager.client().flush_dns().await?;
+        assert_eq!(manager.runtime_config().await?["dns"]["use-hosts"].as_bool(), Some(false));
+        assert_eq!(query(dns_address, "exact.fixture.test", 1).await?, ["192.0.2.200".parse::<IpAddr>()?]);
+        runtime.dns.as_mut().unwrap().use_hosts = Some(true);
+        runtime.dns.as_mut().unwrap().use_system_hosts = Some(true); manager.set_settings(runtime.clone()).await?;
+        manager.client().flush_dns().await?;
+        assert_eq!(query(dns_address, &system_host.0, 1).await?, [system_host.1]);
+        runtime.dns.as_mut().unwrap().use_system_hosts = Some(false); manager.set_settings(runtime.clone()).await?;
+        manager.client().flush_dns().await?;
+        assert_eq!(query(dns_address, &system_host.0, 1).await?, ["192.0.2.200".parse::<IpAddr>()?]);
+        runtime.hosts = Some(Default::default()); manager.set_settings(runtime.clone()).await?;
+        assert!(manager.runtime_config().await?["hosts"].as_mapping().unwrap().is_empty());
+        manager.client().flush_dns().await?;
+        assert_eq!(query(dns_address, "exact.fixture.test", 1).await?, ["192.0.2.200".parse::<IpAddr>()?]);
+        manager.stop().await?;
+        manager.apply_overlay(parse("hosts: {overlay.fixture.test: 192.0.2.99}\ndns: {use-hosts: false, use-system-hosts: true}")?).await?;
+        assert_eq!(manager.status().phase, CorePhase::Stopped);
+        let overlay = manager.runtime_config().await?;
+        assert!(overlay["hosts"].as_mapping().unwrap().is_empty());
+        assert_eq!(overlay["dns"]["use-hosts"].as_bool(), Some(true));
+        assert_eq!(overlay["dns"]["use-system-hosts"].as_bool(), Some(false));
+        manager.start().await?;
+        assert_eq!(query(dns_address, "exact.fixture.test", 1).await?, ["192.0.2.200".parse::<IpAddr>()?]);
+        manager.set_global_script(None).await?;
+        manager.set_profile_merge(uid.clone(), None).await?; manager.set_profile_script(uid.clone(), None).await?;
+        manager.set_settings(RuntimeSettings::default()).await?;
+        assert_eq!(query(dns_address, "exact.fixture.test", 1).await?, ["192.0.2.10".parse::<IpAddr>()?]);
+        assert_eq!(manager.profile_raw(uid).await?.yaml, raw);
+        // Hosts-only saves are protected by the same per-profile DNS challenge.
+        runtime.dns = None; runtime.hosts = Some(serde_yaml_ng::from_str("{exact.fixture.test: 192.0.2.42}")?);
+        manager.set_settings(runtime.clone()).await?;
+        let protected_raw = raw.replace("nameserver:", &format!("nameserver-policy: {{protected.test: '{upstream_address}'}}, nameserver:"));
+        let protected = manager.import_profile_yaml(protected_raw, "protected hosts".into()).await?.uid.unwrap().to_string();
+        manager.select_profile(protected.clone()).await?;
+        assert!(!manager.profile_dns(protected.clone()).await?.enabled);
+        assert_eq!(query(dns_address, "exact.fixture.test", 1).await?, ["192.0.2.10".parse::<IpAddr>()?]);
+        assert!(matches!(manager.set_profile_dns(protected.clone(), true, None).await?, headless_core::config::dns::DnsOverrideOutcome::ConfirmationRequired { .. }));
+        let source = manager.profile_dns(protected.clone()).await?.source;
+        manager.set_profile_dns(protected.clone(), true, source).await?;
+        assert_eq!(query(dns_address, "exact.fixture.test", 1).await?, ["192.0.2.42".parse::<IpAddr>()?]);
+        manager.stop().await?;
+        Ok::<_, anyhow::Error>((protected, manager.settings().await?))
+    }.await;
+    let cleanup = manager.shutdown().await;
+    let restored_result = async {
+        let (protected, saved) = result?;
+        cleanup?;
+        let restored = CoreManager::spawn(dir.options()?)?;
+        let result = async {
+            restored.start().await?;
+            assert_eq!(restored.settings().await?, saved);
+            // Persisted revision survives; confirmations remain session-scoped.
+            assert_eq!(
+                query(dns_address, "exact.fixture.test", 1).await?,
+                ["192.0.2.42".parse::<IpAddr>()?]
+            );
+            assert!(!restored.profile_dns(protected.clone()).await?.enabled);
+            restored.select_profile(protected).await?;
+            assert_eq!(
+                query(dns_address, "exact.fixture.test", 1).await?,
+                ["192.0.2.10".parse::<IpAddr>()?]
+            );
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        let cleanup = restored.shutdown().await;
+        result.and(cleanup)
+    }
+    .await;
+    upstream_task.abort();
+    assert_eq!(fs::read("/etc/hosts")?, system_bytes);
+    restored_result
+}

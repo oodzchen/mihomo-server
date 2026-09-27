@@ -15,6 +15,8 @@ use super::runtime::{Revision, sync_directory, unique_id, write_new};
 
 mod geo;
 pub use geo::{GeoUrls, GeodataLoader, GeositeMatcher};
+mod hosts;
+pub use hosts::{HostValue, Hosts};
 mod network;
 pub use network::{DnsMode, DnsSettings, TunSettings, TunStack};
 
@@ -99,6 +101,8 @@ pub struct RuntimeSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dns: Option<DnsSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hosts: Option<Hosts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tun: Option<TunSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geodata_mode: Option<bool>,
@@ -131,6 +135,7 @@ impl RuntimeSettings {
     pub fn prepare(&self, config: Mapping) -> Result<Mapping> {
         let mut initial = self.clone();
         initial.dns = None;
+        initial.hosts = None;
         let mut config = initial.enforce(config)?;
         if let Some(enable) = self.tun.as_ref().and_then(|tun| tun.enable) {
             config = crate::enhance::tun::use_tun(config, enable);
@@ -179,6 +184,9 @@ impl RuntimeSettings {
         if let Some(urls) = &self.geox_url {
             urls.validate()?;
         }
+        if let Some(hosts) = &self.hosts {
+            hosts.validate()?;
+        }
         if let Some(tun) = &self.tun {
             tun.validate()?;
         }
@@ -204,7 +212,7 @@ impl RuntimeSettings {
         Ok(config)
     }
 
-    /// Only true/non-empty DNS page fields have authority, matching upstream is_set.
+    /// DNS host-use flags own both booleans; other page fields follow upstream is_set.
     /// TUN false and empty lists are explicit values; absent fields inherit.
     fn owned_fields(&self) -> Result<Mapping> {
         let mut values = serde_yaml_ng::to_value(self)?
@@ -214,9 +222,11 @@ impl RuntimeSettings {
         for section in ["dns", "tun", "geox-url"] {
             if let Some(nested) = values.get_mut(section).and_then(|v| v.as_mapping_mut()) {
                 if section == "dns" {
-                    nested.retain(|_, value| match value {
+                    nested.retain(|key, value| match value {
                         serde_yaml_ng::Value::Null => false,
-                        serde_yaml_ng::Value::Bool(on) => *on,
+                        serde_yaml_ng::Value::Bool(on) => {
+                            *on || matches!(key.as_str(), Some("use-hosts" | "use-system-hosts"))
+                        }
                         serde_yaml_ng::Value::String(s) => !s.trim().is_empty(),
                         serde_yaml_ng::Value::Sequence(s) => !s.is_empty(),
                         serde_yaml_ng::Value::Mapping(m) => !m.is_empty(),
@@ -236,7 +246,11 @@ impl RuntimeSettings {
         let mut changed = Vec::new();
         for (key, value) in self.owned_fields()? {
             let name = key.as_str().context("invalid settings key")?;
-            if let Some(nested) = value.as_mapping() {
+            if name == "hosts" {
+                if before.get(&key) != after.get(&key) {
+                    changed.push(name.to_owned());
+                }
+            } else if let Some(nested) = value.as_mapping() {
                 for subkey in nested.keys() {
                     let get = |config: &Mapping| {
                         config

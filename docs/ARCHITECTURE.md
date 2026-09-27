@@ -53,14 +53,14 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** authoritative global core download User-Agent and
-ETag settings, Web editing and presence-preserving readback. Real HTTP verification
-covers provider header precedence, conditional 304 requests, explicit empty/false
-values and core restart; configuration authority, rollback and real proxy traffic
-remain verified. **Next implementation task (P1):** hosts configuration authority
-and DNS host-use controls with Web editing and actual DNS behavior verification.
-DAT validation, controlled online/running-core Geo updates and remaining full
-settings still belong to P1; finish this priority before starting P2.
+**Latest completed task (P1):** typed hosts mapping authority, explicit DNS
+host-use switches and Web editing, integrated with subscription DNS confirmation
+and settings recovery. Real UDP verification covers IPv4/IPv6, wildcard precedence,
+aliases, system-host toggling, rollback, inheritance and service restart.
+**Next implementation task (P1):** DAT resource validation and compatibility
+diagnostics, with corresponding management/Web checks. Controlled online/running-
+core Geo updates and remaining full settings still belong to P1; finish this
+priority before starting P2.
 
 ## Complete target architecture
 
@@ -112,14 +112,14 @@ mihomo-server/
 │       ├── Global/profile execution order and fallback [Migrated + staged adaptation]
 │       ├── Transactional global editing / pointer recovery [Implemented]
 │       ├── Explicit runtime settings authority       [Implemented; Linux verified]
-│       ├── Typed DNS/TUN subset / shallow authority  [Implemented; Linux verified]
+│       ├── Typed DNS/TUN subset / explicit host-use booleans / shallow authority [Implemented; Linux verified]
 │       ├── Typed Geo fields incl. geosite matcher / per-URL authority / bounds / schema-one recovery [Implemented; Linux verified]
 │       ├── TCP concurrency / process mode authority / schema-one recovery [Implemented; Linux verified]
 │       ├── Signed TCP keep-alive durations / disable authority / schema-one recovery [Implemented; Linux verified]
 │       ├── Pure TUN/DNS derivation / IPv6 range repair [Migrated + staged adaptation; Linux validation]
-│       ├── Provider DNS digest / profile preference / session confirmation [Migrated + adaptation; Linux verified]
+│       ├── Provider DNS digest / profile preference / session confirmation / hosts-only protection [Migrated + adaptation; Linux verified]
 │       ├── Deleted-profile DNS preference / confirmation cleanup [Implemented; recoverable]
-│       ├── Hosts authority / DNS host-use controls    [Pending; next P1 task]
+│       ├── settings/hosts.rs / strict typed maps / whole-map authority / empty clear / alias-cycle checks [Implemented; Linux verified]
 │       ├── Remaining native TUN integration           [Pending; P1]
 │       ├── Final LAN bind / group cleanup / field order [Migrated + staged adaptation; Linux verified]
 │       ├── Outbound interface / Linux routing mark authority / bounds / recovery [Implemented; Linux verified]
@@ -147,9 +147,9 @@ mihomo-server/
 │   ├── Pinned resource directory / persistent managed core [Implemented; Linux]
 │   ├── Startup settings snapshot / candidate authority [Implemented; Linux verified]
 │   ├── Actor settings read/replace / coordinated apply and rollback [Implemented; Linux verified]
-│   ├── DNS/TUN subset in generation / settings transactions [Implemented; Linux verified]
+│   ├── DNS/TUN/hosts subset in generation / settings transactions [Implemented; Linux verified]
 │   ├── Raw/enhanced candidate phases / single TUN derivation [Implemented; Linux validation]
-│   ├── DNS conflict commands / scoped confirmation / coordinated auto-disable [Implemented; Linux verified]
+│   ├── DNS/hosts conflict commands / scoped confirmation / coordinated auto-disable [Implemented; Linux verified]
 │   ├── Final candidate LAN/group normalization after authority [Implemented; Linux verified]
 │   ├── Geo/provider resources / full settings       [Partially implemented; P1]
 │   │   ├── Committed resource inventory / confined metadata / shared-path diagnostics [Implemented; Linux verified]
@@ -161,7 +161,8 @@ mihomo-server/
 │   │   ├── Stopped-core pinned MMDB replacement / digest guards / atomic commit / orphan recovery [Implemented; Linux verified]
 │   │   ├── Geo actor settings/config/core comparison / geosite matcher / bounded readback / URL model aliases [Implemented; Linux verified]
 │   │   ├── Connection/outbound/download comparison / nine presence-preserving fields / shared snapshot envelope [Implemented; Linux verified]
-│   │   └── DAT validation / controlled online and running-core Geo updates / remaining full settings [Pending; P1]
+│   │   ├── DAT validation / compatibility diagnostics [Pending; next P1 task]
+│   │   └── Controlled online and running-core Geo updates / remaining full settings [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
 │   ├── Profile snapshots/watches and active UID     [Implemented]
@@ -273,7 +274,8 @@ mihomo-server/
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
 │   ├── outbound-settings.tsx / interface ownership / Linux mark editor / readback [Implemented; Linux verified]
 │   ├── download-settings.tsx / User-Agent ownership / ETag editor / readback [Implemented; Linux verified]
-│   ├── DNS/TUN editor / lossless nested inheritance / readback [Implemented; Linux verified]
+│   ├── DNS/TUN editor / explicit host-use booleans / lossless nested inheritance / readback [Implemented; Linux verified]
+│   ├── hosts-settings.tsx / typed JSON editor / explicit empty / canonical save comparison / snapshot [Implemented; Linux verified]
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
 │   ├── Geo/Provider inventory / metadata states / refresh and retry [Implemented; Linux verified]
@@ -333,7 +335,8 @@ Boa script processor with global defaults and saved per-profile links; authorita
 explicit settings, DNS/TUN field authority and pure TUN/DNS derivation are connected;
 provider DNS protection and confirmation are connected. Final LAN binding,
 proxy-group cleanup and upstream field order run after authority and before
-validation. Native TUN integration, hosts settings and the full resource pipeline
+validation. Typed hosts authority and DNS host-use controls are connected with
+provider confirmation; native TUN integration and the full resource pipeline
 remain pending. Subscription schema extraction includes
 `IProfiles`, `PrfItem`, `PrfSelected`, `PrfExtra`, and `PrfOption`. The new profile
 store persists the upstream `profiles.yaml` and `profiles/<file>` layouts, retains
@@ -4037,6 +4040,79 @@ and real DNS behavior verification. Remaining settings, DAT validation and contr
 Geo updates stay in P1. P2 rules/provider/delay, P3 i18n/signals and P4 actual Linux
 systemd installation remain incomplete; unrelated work remains deferred. The host
 script commits this increment; no sandbox Git commit is performed.
+
+## Increment: hosts configuration and DNS host-use controls
+
+Completed the next P1 task in Delivery order. New
+`crates/headless-core/src/config/settings/hosts.rs` models strict scalar IP/alias/lan
+and IP-list values while retaining source spelling and scalar/list shape. Optional
+`RuntimeSettings.hosts` owns the entire table; absent/null inherits and `{}` clears
+configuration mappings. Hosts applies with the DNS stage after TUN derivation,
+before enhancements, and again during final authority, including overlays. Override
+diagnostics report `hosts` for whole-table changes, including removal/empty tables.
+Schema-one save/recovery preserves empty hosts and false DNS host-use values.
+
+The service accepts a bounded ASCII domain-pattern subset (wildcards and leading
+`.`/`+.` suffix patterns, punycode for IDNs), at most 1024 entries and 1–64 IPs per
+list, within the existing whole-settings 64 KiB bound. It rejects malformed/empty
+patterns, YAML scalar coercion, non-IP lists, case-duplicate keys and potential
+alias cycles, conservatively including wildcard matches even if shadowed. These
+are service input policies; not all upstream permissive syntax is exposed.
+
+`DnsSettings` adds `use-system-hosts`; both it and `use-hosts` preserve authoritative
+true/false. This is an intentional extension of the upstream DNS page's true/
+nonempty rule. Other DNS false/empty inheritance remains unchanged. Hosts and DNS
+share the existing provider-policy digest, profile preference and session-scoped
+confirmation. Hosts-only saves can request/confirm an override; denied or expired
+permissions suppress both DNS and hosts at regeneration, retaining source values.
+Persisted committed revisions keep the existing restart/reapplication semantics.
+Neither host files nor system DNS/routes are modified.
+
+`web/src/hosts-settings.tsx` adds **hosts 映射**, explicit ownership, a typed JSON
+editor, input validation and a saved snapshot. The DNS fieldset includes both
+host-use selects, and hosts-only settings enable the existing subscription
+confirmation panel. Failed drafts, explicit empty tables, rereading and full
+inheritance restoration work with whole-runtime replacement. Browser host-map
+ordering normalizes to the backend BTreeMap for save/dirty comparison; a browser
+regression exposed and fixed false mismatch reporting for reordered equivalent
+maps. IP list ordering and scalar/list shapes remain significant. The existing
+configuration page/API exposes generated values. No actual hosts/host-use fields
+are fabricated from GET /configs; DNS behavior is verified directly.
+
+Verification:
+
+- Workspace compilation and Web production build succeed. Workspace tests report
+  **365 passed, 81 opt-in ignored**. Two new pure cases cover types, bounds,
+  patterns/aliases, scalar/list roundtrip, whole-map clearing, initial/final
+  authority and false-switch semantics. Existing journal recovery and authenticated
+  full-replacement command checks now cover hosts and both DNS switches.
+- The explicitly enabled real-core UDP workflow passes against
+  `/usr/bin/verge-mihomo`, with a local deterministic upstream. Exact/wildcard
+  priority, alias resolution, A/AAAA and mixed IP lists, configured-host disable,
+  system-host enable/disable using an existing entry, initial script inputs/final
+  ownership, semantic failure rollback, stopped-overlay authority, empty tables,
+  released inheritance, hosts-only provider confirmation and service restart are
+  verified. `/etc/hosts` bytes and original subscription YAML remain unchanged.
+- The existing real-core provider DNS confirmation and refresh/recovery workflows,
+  and network authority/rollback workflow, are explicitly enabled to check
+  compatibility with the extended gating and host booleans.
+- The actual-node resource workflow passes using private subscription/Geo copies
+  and `wlo1`; HTTPS proxy traffic returns 204 after core restart and original node/
+  Geo hashes remain unchanged.
+- Full Chromium regression reports **27 passed, 4 optional bundle upgrade/repair
+  workflows skipped**, verifying the new hosts editor alongside existing settings,
+  network/provider confirmation and profile workflows. It covers invalid
+  input rejection, map shape/canonical comparison, false switches, explicit empty
+  save/reread, failed drafts and released inheritance. The hosts workflow is also
+  rerun against the final production bundle after clarifying the hosts-only
+  confirmation guidance and adding a hosts-only saved-state check.
+
+The complete architecture tree is synchronized above and the Linux MVP remains
+runnable. Next task: P1 DAT resource validation and compatibility diagnostics with
+management/Web checks. Remaining full settings, native TUN and controlled Geo
+updates stay pending P1; P2 rules/provider/delay, P3 i18n/signals and P4 actual
+systemd installation remain incomplete. Deferred features remain deferred, and
+Git submission is left to the external host script.
 
 ## MVP completion boundary
 

@@ -37,6 +37,7 @@ fn interrupted_settings_update_follows_runtime_commit_at_each_publication_phase(
             candidate.runtime.interface_name = Some(String::new());
             candidate.runtime.global_ua = Some(String::new());
             candidate.runtime.etag_support = Some(false);
+            candidate.runtime.hosts = Some(serde_yaml_ng::from_str("{}")?);
             if cfg!(target_os = "linux") {
                 candidate.runtime.routing_mark = Some(u32::MAX);
             }
@@ -45,7 +46,9 @@ fn interrupted_settings_update_follows_runtime_commit_at_each_publication_phase(
                 "one".into(),
                 headless_core::config::dns::ProfileDnsSettings { enabled: false },
             );
-            candidate.runtime.dns = Some(serde_yaml_ng::from_str("enable: false\nnameserver: [1.1.1.1]")?);
+            candidate.runtime.dns = Some(serde_yaml_ng::from_str(
+                "enable: false\nuse-hosts: false\nuse-system-hosts: false\nnameserver: [1.1.1.1]",
+            )?);
             candidate.runtime.tun = Some(serde_yaml_ng::from_str("enable: false\nmtu: 1500")?);
             let next = runtime.stage(parse("mode: global")?)?;
             runtime.begin(next.clone())?;
@@ -647,6 +650,105 @@ fn download_settings_preserve_empty_false_and_reject_invalid_header_text() -> Re
             serde_yaml_ng::from_str::<RuntimeSettings>(invalid).is_err(),
             "{invalid}"
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn hosts_replace_the_whole_map_preserve_shapes_and_own_false_dns_switches() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    let source = parse(
+        "hosts: {source.test: 192.0.2.1}\ndns: {use-hosts: true, use-system-hosts: true, ipv6: true, nameserver: [9.9.9.9]}",
+    )?;
+    let runtime: RuntimeSettings = serde_yaml_ng::from_str(
+        "hosts: {'*.example.test': 192.0.2.2, ipv6.example.test: ['2001:db8::1', 192.0.2.3], alias.example.test: ipv6.example.test, lan.example.test: lan}\ndns: {use-hosts: false, use-system-hosts: false, ipv6: false}",
+    )?;
+    let owned = serde_yaml_ng::to_value(&runtime)?;
+    for applied in [runtime.prepare(source.clone())?, runtime.enforce(source.clone())?] {
+        assert_eq!(applied["hosts"], owned["hosts"]);
+        assert_eq!(applied["dns"]["use-hosts"].as_bool(), Some(false));
+        assert_eq!(applied["dns"]["use-system-hosts"].as_bool(), Some(false));
+        assert_eq!(applied["dns"]["ipv6"].as_bool(), Some(true));
+        assert_eq!(applied["dns"]["nameserver"], source["dns"]["nameserver"]);
+        assert_eq!(
+            runtime.overridden_fields(&source, &applied)?,
+            ["dns.use-hosts", "dns.use-system-hosts", "hosts"]
+        );
+    }
+    for data in [serde_yaml_ng::to_string(&runtime)?, serde_json::to_string(&runtime)?] {
+        assert_eq!(serde_yaml_ng::from_str::<RuntimeSettings>(&data)?, runtime);
+    }
+    let empty: RuntimeSettings = serde_yaml_ng::from_str("hosts: {}")?;
+    let cleared = empty.enforce(source.clone())?;
+    assert!(cleared["hosts"].as_mapping().unwrap().is_empty());
+    assert_eq!(empty.overridden_fields(&source, &cleared)?, ["hosts"]);
+    let inherited: RuntimeSettings =
+        serde_yaml_ng::from_str("hosts: null\ndns: {use-hosts: null, use-system-hosts: null}")?;
+    assert_eq!(inherited.enforce(source.clone())?, source);
+    Ok(())
+}
+
+#[test]
+fn hosts_reject_coerced_types_invalid_patterns_lists_and_alias_cycles() -> Result<()> {
+    use headless_core::config::settings::{HostValue, Hosts, RuntimeSettings};
+    for invalid in [
+        "hosts: []",
+        "hosts: {1: 192.0.2.1}",
+        "hosts: {a.test: 123}",
+        "hosts: {a.test: true}",
+        "hosts: {a.test: null}",
+        "hosts: {a.test: []}",
+        "hosts: {a.test: [192.0.2.1, true]}",
+        "hosts: {a.test: [alias.test]}",
+        "hosts: {'': 192.0.2.1}",
+        "hosts: {'bad..test': 192.0.2.1}",
+        "hosts: {'bad.*part.test': 192.0.2.1}",
+        "hosts: {'a.+.test': 192.0.2.1}",
+        "hosts: {'a.test.': 192.0.2.1}",
+        "hosts: {'中文.test': 192.0.2.1}",
+        "hosts: {a.test: bad/value}",
+        "hosts: {a.test: 'bad alias.test'}",
+        "hosts: {a.test: b.test, b.test: a.test}",
+        "hosts: {a.test: a.test}",
+        "hosts: {'*.test': a.test}",
+        "hosts: {'+.test': b.example, '*.example': a.test}",
+        "hosts: {a.test: 192.0.2.1, A.TEST: 192.0.2.2}",
+        "dns: {use-system-hosts: 'false'}",
+    ] {
+        assert!(
+            serde_yaml_ng::from_str::<RuntimeSettings>(invalid).is_err(),
+            "{invalid}"
+        );
+    }
+    let too_many = Hosts(
+        (0..1025)
+            .map(|i| (format!("h{i}.test"), HostValue::Single("192.0.2.1".into())))
+            .collect(),
+    );
+    assert!(
+        RuntimeSettings {
+            hosts: Some(too_many),
+            ..Default::default()
+        }
+        .validate()
+        .is_err()
+    );
+    let addresses = Hosts([("a.test".into(), HostValue::Addresses(vec!["192.0.2.1".into(); 65]))].into());
+    assert!(
+        RuntimeSettings {
+            hosts: Some(addresses),
+            ..Default::default()
+        }
+        .validate()
+        .is_err()
+    );
+    for valid in [
+        "hosts: {'.example.test': 192.0.2.1}",
+        "hosts: {'+.example.test': 192.0.2.1}",
+        "hosts: {'a.*.test': 192.0.2.1}",
+        "hosts: {a.test: '::ffff:192.0.2.1'}",
+    ] {
+        serde_yaml_ng::from_str::<RuntimeSettings>(valid)?;
     }
     Ok(())
 }

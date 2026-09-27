@@ -1355,9 +1355,10 @@ runtime object. Read it back after either success or failure. For example:
 ```
 
 DNS supports enable, ipv6, listen, enhanced-mode (`fake-ip`/`redir-host`),
-fake-ip-range/range6, use-hosts, default-nameserver, nameserver, fallback and
-fake-ip-filter. Following the upstream DNS page, **false, null, blank text and
-empty lists inherit**; only true/nonempty values are restored after enhancements.
+fake-ip-range/range6, use-hosts, use-system-hosts, default-nameserver, nameserver,
+fallback and fake-ip-filter. The two hosts switches own both true and false.
+For the other fields, following the upstream DNS page, **false, null, blank text
+and empty lists inherit**; only true/nonempty values are restored after enhancements.
 DNS false therefore does not disable a source configuration that enables DNS.
 Remove an override to inherit the source; editing DNS in standalone runtime YAML
 is still available when no authoritative setting controls that field.
@@ -1373,9 +1374,86 @@ generation and Mihomo validation precede publication. Without a runtime, semanti
 core validation is deferred until bootstrap, as for the existing scalar fields.
 
 This is the typed/authority and pure derivation subset. TUN does not change host
-DNS or acquire TUN permissions. Policy settings and fallback-filter/hosts remain pending. The browser now edits
+DNS or acquire TUN permissions. Hosts mapping and host-use switches are supported below; policy settings and
+fallback-filter remain pending. The browser now edits
 all of the typed fields above and preserves other supported runtime settings.
 Unknown nested fields prevent saving until a compatible snapshot is read.
+
+### hosts mappings and DNS host-use controls
+
+Save optional `runtime.hosts` with the existing authenticated full-replacement
+`set_settings` command, retaining other runtime fields you want to keep:
+
+```json
+{
+  "command": "set_settings",
+  "runtime": {
+    "hosts": {
+      "*.example.test": "192.0.2.1",
+      "multi.example.test": ["192.0.2.2", "2001:db8::1"],
+      "alias.example.test": "multi.example.test"
+    },
+    "dns": {"use-hosts": true, "use-system-hosts": false}
+  }
+}
+```
+
+Missing/null hosts inherits; an owned map replaces the entire source map, and
+`{}` explicitly clears configuration mappings. It does not remove core builtins
+such as localhost or the host machine's file. Keys retain spelling/case and support
+ASCII labels, underscores, single-label `*` wildcards, and leading `.`/`+.` suffix
+patterns. Use punycode for internationalized domains. This bounded service subset
+limits patterns to 253 bytes/63 bytes per ordinary label and 1024 entries, rejects
+case-duplicate keys, empty/malformed labels and partial/misplaced wildcards.
+Scalar values are IP addresses, `lan` (core interface addresses), or dotted ASCII
+domain aliases; lists contain 1–64 IP strings, preserving scalar/list shape.
+Malformed types, YAML string coercion and potential alias cycles are rejected.
+Cycle detection conservatively includes every matching alias pattern, even when
+another entry might shadow it. The existing 64 KiB whole-settings bound also applies.
+These are service input policies, not a claim to expose every upstream syntax.
+
+Both DNS switches support true/false/null inheritance. Explicit false is authoritative
+for these switches, a deliberate extension of the upstream DNS page's general
+true/nonempty selection rule. All other DNS fields keep their previous semantics.
+`use-hosts` controls DNS replies using configured mappings; `use-system-hosts`
+controls use of system hosts where applicable. Turning them off does not rewrite
+`/etc/hosts` or guarantee that every proxy/resolver ignores configuration aliases.
+Original subscriptions and source files remain unchanged.
+
+Hosts and DNS fields share the existing **订阅 DNS 覆盖** preference and protected
+provider-policy challenge, including hosts-only saves. A denied/unconfirmed
+subscription inherits both hosts and DNS. No preference exists initially: saved
+hosts or DNS requests an override, subject to the source challenge. Confirmation
+is session-scoped; after restart the committed revision can still contain prior
+owned values until reapplication, as for existing DNS settings. Reapplying a
+protected profile without confirmation restores its source hosts/DNS. Disabling
+the profile override is separate from `dns.use-hosts: false`.
+
+The Web **hosts 映射** fieldset uses **管理 hosts 映射** for inheritance versus an
+owned table, and **hosts JSON 映射** accepts the mapping above. An owned `{}` is
+retained across save/reread; unchecking inherits. The DNS editor adds **DNS 使用系统
+hosts** alongside **DNS 使用 hosts**. The saved hosts snapshot preserves types;
+map key ordering is normalized during save verification, while IP list order stays
+significant. Invalid entries and failed saves retain drafts. Generated values are
+available in the existing configuration page/API; this increment does not fabricate
+hosts or host-use values from GET /configs, which does not expose them.
+
+The isolated real-core DNS check uses local UDP listeners and a local upstream
+with known A/AAAA answers. It verifies exact/wildcard precedence, aliases and dual
+families, switch disable behavior (including a read-only existing system-host
+entry), initial/script/final and stopped-overlay authority, rollback, empty-table
+clearing, inheritance, hosts-only confirmation and service restart:
+
+```sh
+CARGO_HOME=/tmp/mihomo-server-cargo \
+MIHOMO_TEST_BINARY=/usr/bin/verge-mihomo \
+cargo test -p mihomo-server --test settings hosts_dns_queries_authority_protection_rollback_and_restart --locked --offline -- --ignored --test-threads=1
+```
+
+The system-host check requires an existing non-localhost IPv4 alias in `/etc/hosts`;
+it verifies that the file bytes remain unchanged. No system DNS/route setting is
+modified. The separate real-node inventory check verifies usable HTTPS traffic
+with private node/Geo copies.
 
 ### TUN-derived DNS configuration
 
@@ -1461,7 +1539,7 @@ source configuration. String fields have a separate Inherit/Specify control so
 empty saved DNS strings remain distinguishable from absent fields. List inputs
 accept JSON string arrays, for example `["1.1.1.1", "https://dns.example/query"]`.
 Blank inherits, `[]` saves an empty list. This preserves delimiters and escaped
-newlines inside strings. DNS false/empty values inherit at generation time; TUN
+newlines inside strings. Except for the two hosts switches, DNS false/empty values inherit at generation time; TUN
 false/empty lists override. MTU must be 1–65535. The saved network snapshot shows
 the last successful read. All settings share validation, failed-draft retention
 and independent readback; uncertain saves must be checked before resubmission.

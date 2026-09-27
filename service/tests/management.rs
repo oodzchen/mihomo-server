@@ -564,6 +564,11 @@ async fn settings_commands_authenticate_validate_full_replacement_and_work_befor
             json!({"command":"set_settings","runtime":{"tun":{"unknown":true}}}),
             json!({"command":"set_settings","runtime":{"tun":{"mtu":0}}}),
             json!({"command":"set_settings","runtime":{},"schema_version":2}),
+            json!({"command":"set_settings","runtime":{"hosts":{"a.test":123}}}),
+            json!({"command":"set_settings","runtime":{"hosts":{"a.test":[]}}}),
+            json!({"command":"set_settings","runtime":{"hosts":{"a.test":["alias.test"]}}}),
+            json!({"command":"set_settings","runtime":{"hosts":{"*.test":"a.test"}}}),
+            json!({"command":"set_settings","runtime":{"dns":{"use-system-hosts":"false"}}}),
         ] {
             assert!(
                 !response(&app, request(&token, "/api/commands", Some(command))?)
@@ -595,7 +600,7 @@ async fn settings_commands_authenticate_validate_full_replacement_and_work_befor
         .await?;
         assert_eq!(saved, settings);
         let runtime =
-            json!({"dns":{"enable":false,"nameserver":["1.1.1.1"]},"tun":{"enable":false,"dns-hijack":[],"mtu":1500}});
+            json!({"hosts":{"a.test":["192.0.2.1","2001:db8::1"],"alias.test":"a.test"},"dns":{"enable":false,"use-hosts":false,"use-system-hosts":false,"nameserver":["1.1.1.1"]},"tun":{"enable":false,"dns-hijack":[],"mtu":1500}});
         let (status, nested) = response(
             &app,
             request(

@@ -12,6 +12,7 @@ const schemas: Record<"dns" | "tun", Field[]> = {
     { key: "enable", label: "DNS 启用", kind: "bool" },
     { key: "ipv6", label: "DNS IPv6", kind: "bool" },
     { key: "use-hosts", label: "DNS 使用 hosts", kind: "bool" },
+    { key: "use-system-hosts", label: "DNS 使用系统 hosts", kind: "bool" },
     { key: "listen", label: "DNS 监听地址", kind: "string" },
     {
       key: "enhanced-mode",
@@ -145,7 +146,7 @@ export function NetworkFields({
           <legend>{section.toUpperCase()} 设置</legend>
           <p className="hint">
             {section === "dns"
-              ? "DNS 的禁用、空字符串和空列表会保存，但不覆盖订阅值。非空值与启用项需要当前订阅允许 DNS 覆盖。"
+              ? "两个 hosts 开关的禁用会显式覆盖；其他 DNS 禁用项、空字符串和空列表仅保存并继承订阅值。DNS 和 hosts 设置需要当前订阅允许 DNS 覆盖。"
               : "TUN 的禁用和空列表会显式覆盖订阅值。自动重定向仅支持 Linux；实际启用需要服务主机权限和网络条件。"}
           </p>
           <label>

@@ -14,6 +14,7 @@ import { useProxyAccess } from "./proxy-access";
 import { GEO_KEYS, GeoFields, GeoReadback, geoDraft, geoRuntime, validateGeo } from "./geo-settings";
 import { OUTBOUND_KEYS, OutboundFields, outboundDraft, outboundRuntime, validateOutbound } from "./outbound-settings";
 import { DOWNLOAD_KEYS, DownloadFields, downloadDraft, downloadRuntime, validateDownload } from "./download-settings";
+import { HostsFields, hostsDraft, hostsRuntime, validateHosts } from "./hosts-settings";
 import { SettingsReadback } from "./settings-readback";
 import { ResourcesPanel } from "./resources";
 
@@ -74,6 +75,7 @@ function toDraft(settings: Settings): Draft {
     ...Object.entries(geoDraft(settings.runtime)),
     ...Object.entries(outboundDraft(settings.runtime)),
     ...Object.entries(downloadDraft(settings.runtime)),
+    ...Object.entries(hostsDraft(settings.runtime)),
     ...fields.map((field) => [
       field.key,
       settings.runtime[field.key] == null
@@ -83,7 +85,7 @@ function toDraft(settings: Settings): Draft {
   ]);
 }
 function runtime(draft: Draft): Runtime {
-  const result: Runtime = { ...networkRuntime(draft), ...geoRuntime(draft), ...outboundRuntime(draft), ...downloadRuntime(draft) };
+  const result: Runtime = { ...networkRuntime(draft), ...geoRuntime(draft), ...outboundRuntime(draft), ...downloadRuntime(draft), ...hostsRuntime(draft) };
   for (const field of fields) {
     const value = draft[field.key];
     if (value === "") continue;
@@ -115,6 +117,7 @@ function decode(value: unknown): Settings {
     throw new Error("无法编辑此设置版本，请检查服务版本。");
   validateGeo(settings.runtime);
   for (const [key, value] of Object.entries(settings.runtime)) {
+    if (key === "hosts") { if (value != null) validateHosts(value); continue; }
     if (GEO_KEYS.has(key)) continue;
     if (DOWNLOAD_KEYS.has(key)) { validateDownload(key, value); continue; }
     if (OUTBOUND_KEYS.has(key)) { validateOutbound(key, value); continue; }
@@ -429,6 +432,10 @@ export function SettingsPage({
               setDraft(previous => ({ ...previous, [key]: value }));
               setError(""); setNotice(""); setConfirmation(undefined);
             }} />
+            <HostsFields draft={draft} disabled={disabled} change={(key, value) => {
+              setDraft(previous => ({ ...previous, [key]: value }));
+              setError(""); setNotice(""); setConfirmation(undefined);
+            }} />
             <NetworkFields
               draft={draft}
               disabled={disabled}
@@ -524,7 +531,7 @@ export function SettingsPage({
           token={token}
           status={status}
           connection={connection}
-          hasDns={saved?.runtime.dns != null}
+          hasDns={saved?.runtime.dns != null || saved?.runtime.hosts != null}
           blocked={disabled || uncertain || dirty || !saved}
           perform={perform}
           logout={logout}
@@ -555,6 +562,7 @@ export function SettingsPage({
           ) : (
             <p className="muted">尚未读取到设置。</p>
           )}
+          {saved && <pre className="network-snapshot" aria-label="已保存 hosts 映射">{saved.runtime.hosts == null ? "继承" : JSON.stringify(saved.runtime.hosts, null, 2)}</pre>}
           {saved && <pre className="network-snapshot" aria-label="已保存核心下载设置">{JSON.stringify(Object.fromEntries([...DOWNLOAD_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
           {saved && <pre className="network-snapshot" aria-label="已保存出口设置">{JSON.stringify(Object.fromEntries([...OUTBOUND_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
           {saved && <pre className="network-snapshot" aria-label="已保存 Geo 设置">{JSON.stringify(Object.fromEntries([...GEO_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}

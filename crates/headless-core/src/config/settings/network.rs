@@ -36,6 +36,8 @@ pub struct DnsSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_hosts: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_system_hosts: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_nameserver: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nameserver: Option<Vec<String>>,

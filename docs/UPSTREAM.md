@@ -264,6 +264,39 @@ explicit disable/empty behavior and restart rather than inferring these from
 GET /configs. The regular API/Web/recovery checks and real-node workflow extend
 existing integration tests. Provider refresh commands and views remain P2 work.
 
+## Hosts authority and DNS host-use controls
+
+Inspected pinned Clash Verge Rev `src/components/setting/mods/dns-viewer.tsx`
+(`parseHosts`, `formatHosts`, both host-use toggles) and
+`src-tauri/src/enhance/mod.rs::{merge_dns_config, AuthoritativeFields,
+apply_dns_settings}`. The upstream applies nonempty hosts by whole-map replacement,
+restores it after enhancements and gates hosts/DNS on the profile override decision.
+The new typed `config/settings/hosts.rs` and `web/src/hosts-settings.tsx` are original
+service adaptations; no source or new dependency is copied. Existing migrated merge
+behavior and schema-one transactions are reused. Hosts now follows the existing
+profile DNS preference/challenge, including hosts-only settings and refresh/recovery.
+
+Explicit `{}` clears an owned hosts map, and both true/false host-use booleans are
+authoritative. These deliberately extend the upstream page's nonempty/true selection
+rule without changing other DNS fields. The service exposes scalar IP/alias/lan and
+IP-list shapes with a bounded ASCII domain-pattern subset, strict YAML/JSON types,
+case-duplicate rejection and conservative wildcard-aware alias-cycle checks.
+Input limits are service policy. Browser full-replacement verification normalizes
+host map order to the backend BTreeMap while preserving IP list order.
+
+Mihomo primary references inspected on 2026-09-28:
+[hosts syntax](https://wiki.metacubex.one/en/config/dns/hosts/),
+[DNS switches](https://wiki.metacubex.one/en/config/dns/),
+[config parsing](https://github.com/MetaCubeX/mihomo/blob/Meta/config/config.go),
+[host values/system lookup](https://github.com/MetaCubeX/mihomo/blob/Meta/component/resolver/host.go),
+[domain patterns](https://github.com/MetaCubeX/mihomo/blob/Meta/component/trie/domain.go)
+and [DNS hosts middleware](https://github.com/MetaCubeX/mihomo/blob/Meta/dns/middleware.go).
+The real-core test verifies actual UDP A/AAAA responses and switch behavior with an
+isolated local upstream, not inferred GET /configs values. It reads existing system
+hosts without modifying the file, verifies provider confirmation and restart,
+and retains raw subscription bytes. Native TUN, remaining DNS policy/fallback and
+Geo lifecycle work are still pending P1.
+
 ## Mihomo plugin
 
 - Repository: https://github.com/clash-verge-rev/tauri-plugin-mihomo

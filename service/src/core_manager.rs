@@ -2389,11 +2389,10 @@ impl Actor {
     }
 
     fn dns_decision(&self, uid: &str, source: Option<String>) -> DnsOverrideState {
-        let requested = self
-            .settings
-            .profile_dns
-            .get(uid)
-            .map_or(self.settings.runtime.dns.is_some(), |settings| settings.enabled);
+        let requested = self.settings.profile_dns.get(uid).map_or(
+            self.settings.runtime.dns.is_some() || self.settings.runtime.hosts.is_some(),
+            |settings| settings.enabled,
+        );
         DnsOverrideState::new(
             uid,
             source,
@@ -2406,6 +2405,7 @@ impl Actor {
         let mut runtime = self.settings.runtime.clone();
         if !state.enabled {
             runtime.dns = None;
+            runtime.hosts = None;
         }
         runtime
     }
@@ -2425,8 +2425,8 @@ impl Actor {
             return Ok(DnsOverrideOutcome::ConfirmationRequired { source: source.clone() });
         }
         ensure!(
-            !enabled || self.settings.runtime.dns.is_some(),
-            "save DNS settings before enabling the profile override"
+            !enabled || self.settings.runtime.dns.is_some() || self.settings.runtime.hosts.is_some(),
+            "save DNS or hosts settings before enabling the profile override"
         );
         self.observe_exit().await?;
         let old_revision = self.store.state().current;
@@ -2667,7 +2667,9 @@ impl Actor {
             _ => self.settings.clone(),
         };
         if let Some(state) = &dns
-            && (settings_candidate.runtime.dns.is_some() || settings_candidate.profile_dns.contains_key(&state.uid))
+            && (settings_candidate.runtime.dns.is_some()
+                || settings_candidate.runtime.hosts.is_some()
+                || settings_candidate.profile_dns.contains_key(&state.uid))
         {
             settings_candidate
                 .profile_dns
