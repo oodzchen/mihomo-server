@@ -116,7 +116,7 @@ mihomo-server/
 │   │   ├── Official stable/Alpha metadata and platform asset [Implemented; Linux x86_64]
 │   │   ├── Bounded compressed download / SHA-256 / private atomic cache [Implemented]
 │   │   ├── Authenticated preparation/readback / cancellation [Implemented]
-│   │   ├── Bounded gzip / ELF / version / configuration probes [Implemented; Linux x86_64]
+│   │   ├── Bounded gzip / ELF / version / configuration probes [Implemented; stable/Alpha Linux x86_64]
 │   │   ├── Actor snapshot / staged manifest / verified restart readback [Implemented]
 │   │   ├── Actor activation / live version and port checks / rollback [Implemented; Linux x86_64]
 │   │   ├── Durable switch journal / installation receipt / startup recovery [Implemented; Linux x86_64]
@@ -124,7 +124,8 @@ mihomo-server/
 │   │   ├── Repair of unreadable/empty previous core [Implemented; Linux x86_64]
 │   │   ├── Managed/system/direct routing / verified static-root TLS retry [Implemented; Linux verified]
 │   │   ├── Alpha compressed preparation / authenticated readback [Implemented; Linux x86_64]
-│   │   └── Alpha executable staging / activation / receipts / Web; other targets [Pending]
+│   │   ├── Alpha executable/version/config staging / private proof / readback [Implemented; Linux x86_64]
+│   │   └── Alpha activation / receipts / Web; other targets [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
@@ -141,7 +142,7 @@ mihomo-server/
 │   ├── Axum management API / command adapters       [Implemented; MVP allowlist]
 │   │   ├── State, logs, profiles, config, proxies queries [Implemented]
 │   │   ├── Lifecycle, YAML import/edit/overlay, profile edit/delete/import/refresh, linked read/set/clear, global read/set/reset, settings read/replace, profile DNS read/set, raw profile read/edit and node selection [Implemented]
-│   │   ├── Stable core query / preparation / staging / activation / installation/version readback / force-no-op; Alpha query / compressed preparation / readback [Implemented; Linux x86_64]
+│   │   ├── Stable core query / preparation / staging / activation / installation/version readback / force-no-op; Alpha query / compressed preparation / executable staging / readback [Implemented; Linux x86_64]
 │   │   └── Broader rules/providers/connections/delay commands [Pending]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
@@ -2207,7 +2208,7 @@ validation, followed by Alpha activation/rollback and browser integration. Other
 targets, native TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage
 collection, SOCKS/PAC and platform/deployment work remain pending.
 
-## Latest increment: Alpha metadata and compressed candidate preparation
+## Previous increment: Alpha metadata and compressed candidate preparation
 
 Delivery step 7 adds authenticated `alpha_core_release` and
 `prepare_alpha_core_upgrade`, each with an optional bounded Alpha version.
@@ -2263,6 +2264,64 @@ step 7 subtask: Alpha executable/version/config staging, then durable activation
 rollback/installation receipts and channel-aware force/no-op/browser integration.
 Other targets, native TUN/DNS/hosts/resources, backups/WebDAV, advanced pages,
 garbage collection, SOCKS/PAC and platform/deployment work remain pending.
+
+## Latest increment: Alpha executable, version and configuration staging
+
+Delivery step 7 now accepts an Alpha prepared ID in `stage_core_upgrade`. Stable
+and Alpha share the bounded, private gzip/ELF extraction pipeline and actor-owned
+configuration snapshot. Stage ID parsing splits package/config digests from the
+right so hyphenated Alpha versions remain intact; existing stable IDs and schema-1
+stage manifests stay compatible. `staged_core_upgrade` rechecks the prepared
+package, manifest, executable size/hash/mode and candidate YAML hash after restart.
+
+Every stage requires one gzip member with valid CRC/EOF and no trailing data,
+a Linux x86_64 ELF, at most 128 MiB unpacked bytes and a 15-second unpack budget.
+The candidate reports the exact resolved Alpha version in a bounded five-second
+`-v` probe, then validates current YAML using `-t` with its own private resource
+directory. Both streams remain bounded to 64 KiB; shutdown cancels/reaps probes.
+Configuration/resource limits remain 8 MiB/256 MiB. Executable and YAML hashes are
+checked again after execution, before fsync/atomic publication. Repeated staging
+runs probes again before returning an existing immutable proof. Failure removes
+only pending work and keeps the compressed candidate for retry.
+
+The live core, profile catalog, runtime revision, configuration and node selections
+are not replaced. Alpha activation is explicitly rejected immediately after staged
+readback, before fresh probes, journaling, stopping or file switching. Durable Alpha
+activation/rollback/receipts, force/no-op and browser controls remain pending.
+
+Verification: `cargo check --workspace --locked --offline`, 261 regular workspace
+Rust tests, all 68 opt-in tests using real Mihomo, Clippy with warnings denied,
+formatting and diff checks pass. New Alpha fixtures cover exact version/config
+proofs, private Geo validation resources, cache revalidation/restart readback,
+wrong version, configuration rejection, executable/YAML mutation, both probe-phase
+cancellation/reaping and pending cleanup. Stable and Alpha readback tests reject
+unsafe IDs, config tampering, executable modes and links. Actor tests confirm that
+Alpha activation is gated without additional probes, status changes, receipts or
+switch journals. Existing stable activation/repair/crash and subscription regressions
+remain green.
+
+All 24 browser workflows pass with the fresh production bundle. A private copy of
+the actual 56-node subscription prepares official `alpha-63bd52e` (22,849,242
+compressed bytes), stages the real executable against the current generated YAML,
+revalidates an identical cached proof and reads it back after service restart.
+Managed routing and verified static-root TLS retry under an unrelated platform CA
+remain functional. A wrong Alpha version and tampered executable/YAML readback are
+rejected. Activation returns its explicit pending-integration error without creating
+a journal. The running stable core's PID/inode/version, config, catalog and selected
+node are preserved; proxy HTTPS returns 204 before and after staging. Original data
+hashes are unchanged.
+
+The runnable `target/mihomo-server-linux-x86_64-alpha-staging` bundle passes all
+checksums; its service binary matches the fresh release build and its deployment/
+provenance documents match the sources. Temporary services, cores, script workers
+and probe processes are terminated/reaped; the final process audit reports zero.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The Linux MVP remains runnable; the complete project is not done. Next Delivery
+step 7 subtask: durable Alpha activation/rollback and installation-receipt recovery,
+then channel-aware force/no-op and browser integration. Other targets, native
+TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage collection,
+SOCKS/PAC and platform/deployment work remain pending.
 
 ## MVP completion boundary
 

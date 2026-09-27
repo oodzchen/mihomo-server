@@ -82,7 +82,7 @@ pub(crate) enum ReleaseChannel {
     Stable,
     Alpha,
 }
-fn alpha_version(version: &str) -> bool {
+pub(crate) fn alpha_version(version: &str) -> bool {
     version.strip_prefix("alpha-").is_some_and(|hash| {
         (7..=40).contains(&hash.len()) && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     })

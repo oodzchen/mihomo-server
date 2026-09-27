@@ -29,9 +29,9 @@ fn hash(bytes: &[u8]) -> String {
 }
 fn stage_name(id: &str) -> Result<(&str, &str)> {
     let (package_id, config_hash) = id.rsplit_once('-').context("invalid staged core ID")?;
-    let (version, package_hash) = package_id.split_once('-').context("invalid staged core ID")?;
+    let (version, package_hash) = package_id.rsplit_once('-').context("invalid staged core ID")?;
     ensure!(
-        stable_version(version)
+        release_version(version)
             && valid_hash(package_hash)
             && valid_hash(config_hash)
             && package_hash == package_hash.to_ascii_lowercase()
@@ -104,10 +104,6 @@ impl CoreDownloads {
         ensure!(yaml.len() <= MAX_CONFIG_BYTES, "configuration exceeds 8 MiB");
         headless_core::config::runtime::parse(&yaml)?;
         let prepared = self.inspect(id)?;
-        ensure!(
-            stable_version(&prepared.release.version),
-            "Alpha executable staging is not yet supported"
-        );
         let package = self.root.join(id).join("package.gz");
         let pending = Pending::new(&self.root)?;
         let binary = pending.0.join("verge-mihomo");

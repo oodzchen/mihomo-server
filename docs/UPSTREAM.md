@@ -1345,3 +1345,22 @@ snapshot integrity, cancellation and restart readback. Preparation never touches
 the live core; executable staging deliberately rejects Alpha before unpack/probe.
 Alpha activation/receipts/force-no-op/Web and other targets remain pending.
 No dependency is added.
+
+## Alpha executable, version and configuration staging
+
+Source: `src-tauri/src/feat/core_upgrade.rs::stage_core`, `unpack` and
+`read_core_version`, pinned commit b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b.
+Destination: core_stage.rs and the actor staging/activation boundary in
+core_manager.rs. Alpha reuses the verified Linux gzip/ELF pipeline, exact version
+probe and isolated configuration validation already adapted for stable candidates.
+Hyphenated Alpha stage IDs split the package and configuration digests from the
+right; existing stable schema-1 manifests remain compatible. Immutable proofs are
+published only after execution-time executable/YAML rehashing. Readback rechecks
+package, executable, config, permissions and manifest identity after restart.
+
+Fixtures cover Alpha successful/cached staging, private Geo validation resources,
+wrong version/configuration, executable/YAML mutation, cancellation/reaping of both
+probe phases, tampered readback and actor activation gating before new probes or
+journaling. Alpha activation remains explicitly rejected until durable receipt and
+rollback support is implemented. Existing stable lifecycle/upgrade behavior and
+MVP proxy traffic remain supported; no dependency is added.

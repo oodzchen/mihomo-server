@@ -1976,7 +1976,38 @@ than silently downloading another version. The active file, PID, configuration a
 saved node selections are unchanged by preparation. Metadata remains limited to
 1 MiB, package to 64 MiB; the same deadlines and redirect allowlist apply.
 
-Alpha executable staging, activation, receipts, force/no-op and Web controls are
-pending. `stage_core_upgrade` currently rejects an Alpha candidate before unpacking
-or execution. Stable upgrade/repair remains available through `/core`. Cached
-candidate garbage collection remains pending.
+Alpha executable staging and readback are available through the existing commands
+below. Alpha activation, receipts, force/no-op and Web controls remain pending.
+Stable upgrade/repair remains available through `/core`. Cached candidate garbage
+collection remains pending.
+
+## Validate and read back an Alpha executable candidate
+
+Use the prepared ID returned by `prepare_alpha_core_upgrade`:
+
+```json
+{"command":"stage_core_upgrade","id":"alpha-<commit>-<package-sha256>"}
+{"command":"staged_core_upgrade","id":"alpha-<commit>-<package-sha256>-<config-sha256>"}
+```
+
+The lifecycle actor snapshots the current YAML, retains its runtime revision and
+validates the prepared package again. Extraction requires a single CRC-valid gzip
+member, complete EOF, no trailing bytes, Linux x86_64 ELF and at most 128 MiB of
+unpacked data. Extraction has a 15-second budget. Separate five-second `-v` and
+`-t` probes verify the exact resolved Alpha version and current configuration.
+Validation uses private copies of supported Geo resources, with an aggregate
+256 MiB limit; YAML remains limited to 8 MiB. Probe output is bounded, rejected
+configuration diagnostics are sanitized, and cancellation terminates/reaps probes.
+
+After probing, executable and YAML hashes are checked again. Only successful
+proofs are atomically published under the private validated cache; no local paths
+are returned. IDs retain both package and configuration digests. Readback checks
+all files after restart, and repeating staging revalidates before reusing an
+immutable proof. Failed validation leaves the live core/configuration and compressed
+candidate intact and removes pending work. The existing upgrade admission slot
+covers queued/running staging even if the browser disconnects.
+
+`activate_core_upgrade` explicitly rejects Alpha proofs before lifecycle changes
+or creating a switch journal. Alpha activation/rollback/installation receipts and
+Web controls are the next integration work. This staging step does not install
+Alpha or alter saved profiles/nodes; the running stable proxy remains available.

@@ -829,7 +829,7 @@ async fn alpha_metadata_rejects_draft_tag_ambiguity_invalid_version_digest_size_
     Ok(())
 }
 #[tokio::test]
-async fn alpha_preparation_retains_snapshot_readback_and_live_core_while_staging_stays_disabled() -> Result<()> {
+async fn alpha_preparation_retains_snapshot_readback_and_live_core_while_nonexecutable_staging_fails() -> Result<()> {
     let dir = Directory::new()?;
     let fixture = Fixture::new().await?;
     *fixture.state.metadata.lock().unwrap() = alpha_metadata(&fixture, "alpha-63bd52e")?;
@@ -855,7 +855,7 @@ async fn alpha_preparation_retains_snapshot_readback_and_live_core_while_staging
         )
         .await
         .unwrap_err();
-    assert!(format!("{result:#}").contains("Alpha executable staging is not yet supported"));
+    assert!(format!("{result:#}").contains("candidate must be a Linux x86_64 ELF executable"));
     assert_eq!(fs::read(dir.0.join("verge-mihomo"))?, b"unchanged live core");
     assert!(!fs::read_dir(&downloads.root)?.any(|entry| entry.unwrap().file_name().to_str().is_some_and(pending_name)));
     assert!(
