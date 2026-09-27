@@ -4,7 +4,7 @@ use anyhow::{Result, ensure};
 use std::ffi::OsString;
 
 /// True means all system proxy discovery must be disabled for this request.
-pub(super) fn bypass_all() -> Result<bool> {
+pub(crate) fn bypass_all() -> Result<bool> {
     validate_values(|name| std::env::var_os(name))
 }
 

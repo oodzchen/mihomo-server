@@ -1,6 +1,6 @@
 //! Direct, system or managed HTTP proxy subscription downloads. Store writes remain owned by the lifecycle actor.
-mod environment;
-mod tls;
+pub(crate) mod environment;
+pub(crate) mod tls;
 
 use anyhow::{Context as _, Result, ensure};
 use headless_core::config::{
@@ -46,12 +46,20 @@ impl RemoteOptions {
 }
 
 /// A private route resolved from the running core, never from caller input or environment.
+#[derive(Clone)]
 pub(crate) struct ManagedProxy {
     address: SocketAddr,
     authentication: Option<(String, String)>,
 }
 
 impl ManagedProxy {
+    pub(crate) fn configure(&self, builder: reqwest::ClientBuilder) -> Result<reqwest::ClientBuilder> {
+        let mut proxy = reqwest::Proxy::all(format!("http://{}", self.address))?;
+        if let Some((user, password)) = &self.authentication {
+            proxy = proxy.basic_auth(user, password);
+        }
+        Ok(builder.no_proxy().proxy(proxy))
+    }
     pub(crate) fn from_core(core: &BaseConfig, runtime: &serde_yaml_ng::Mapping) -> Result<Self> {
         let port = if core.mixed_port != 0 {
             core.mixed_port
@@ -207,11 +215,7 @@ async fn fetch(
         builder = builder.no_proxy();
     }
     if let Some(route) = proxy {
-        let mut proxy = reqwest::Proxy::all(format!("http://{}", route.address))?;
-        if let Some((user, password)) = &route.authentication {
-            proxy = proxy.basic_auth(user, password);
-        }
-        builder = builder.proxy(proxy);
+        builder = route.configure(builder)?;
     }
     let client = builder.build()?;
     let mut response = client

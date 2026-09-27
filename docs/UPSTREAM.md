@@ -1275,3 +1275,29 @@ fixtures check duplicate suppression, no-op/result/error display and force
 confirmation; forced success delegates to real authenticated stage/activation,
 including persistent receipt readback after service restart. Separate official
 release smoke exercises the actual end-to-end wrapper.
+
+## Core-download routing and verified TLS-root retry
+
+Source: src-tauri/src/feat/core_upgrade.rs::resolve_latest_version/download_package
+and src-tauri/src/utils/network.rs TLS/proxy policy, pinned commit
+b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b. Destination: core_release.rs,
+core_release_transport.rs and actor-backed resolution in core_manager.rs. Retained
+behavior tries managed/system/direct discovery in order and downloads with the
+successful policy. Shared private remote environment/TLS helpers keep platform-first
+verification and selective static Mozilla-root retry; no certificate bypass is added.
+
+Managed actual ports/authentication use a generation/PID/revision guard, cancellation
+on lifecycle changes and identity checks before cache reuse/publication. Subscription
+downloads reuse this guard. System discovery retains validated environment, NO_PROXY/
+CGI and native library support; Windows/macOS runtime checks, SOCKS/PAC remain pending.
+Proxy secrets/addresses stay in private ephemeral objects; logs contain policy names.
+Metadata has 20 seconds per policy and package one 300-second budget including root
+retry. Existing redirect/size/hash/version/config protections remain. Package failure
+does not select a different route or publish partial data.
+
+Fixtures cover authenticated managed metadata/package affinity, metadata fallback,
+package status/integrity rejection without route switching, generation/revision/stop/
+watch-close cancellation/cleanup and wrong-host/untrusted TLS rejection in both modes.
+Process-isolated children exercise system authentication, NO_PROXY global/IP bypass,
+CGI and direct fallback without changing the parent environment. Existing subscription
+routing/TLS and real activation tests remain applicable. No dependency is added.

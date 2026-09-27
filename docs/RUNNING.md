@@ -1894,7 +1894,29 @@ An unmanaged `--mihomo` service shows that online upgrading requires a bundle.
 
 This increment supports stable Linux x86_64 ordinary managed executables. An
 unreadable/empty installed core fails the bounded version probe; upstream's repair
-of a previously truncated binary remains pending. Core-download managed/system
-proxy fallback and static-root TLS retry, Alpha and other platforms also remain
+of a previously truncated binary remains pending. Alpha and other platforms remain
 pending. The browser does not accept package URLs, paths, hashes or version
 overrides for the latest-stable wrapper.
+
+## Core download routing and TLS verification
+
+Latest/pinned discovery tries the running managed HTTP/Mixed listener, service
+system proxy policy, then direct. Managed routing reads actual ports and committed
+authentication; unavailable/stale routes are skipped. System policy validates
+environment/native discovery with NO_PROXY rules; NO_PROXY=* and CGI REQUEST_METHOD
+bypass system discovery. Native Windows/macOS validation and SOCKS/PAC are pending.
+
+Each metadata policy has one 20-second budget including TLS-root retry; managed
+resolution adds at most three seconds. The successful policy is retained for the
+pinned package with one 300-second budget. Package failure returns an error without
+switching policies. Managed lifecycle/configuration changes cancel downloads and
+require a fresh request; shutdown cancels the whole chain. Network stays outside
+the actor; activation retains its existing serialization/rollback rules.
+
+Platform verification is preferred; certificate-related failures retry with locked
+Mozilla roots. Both modes validate certificates/hostnames, require TLS 1.2/1.3 and
+use the same policy. Legacy TLS does not trigger root retry. No invalid-certificate
+or caller proxy/URL option is accepted for core upgrades. Owned partial files are
+cleaned before retry; completed candidates remain pending garbage collection.
+Cached records contain metadata/hashes, not proxy credentials or policy choices.
+The core-upgrade log records only managed/system/direct for successful discovery.

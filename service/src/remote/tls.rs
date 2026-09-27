@@ -3,12 +3,12 @@ use anyhow::Result;
 use reqwest::ClientBuilder;
 
 #[derive(Clone, Copy)]
-pub(super) enum RootMode {
+pub(crate) enum RootMode {
     Platform,
     Static,
 }
 
-pub(super) fn configure(builder: ClientBuilder, mode: RootMode, invalid: bool) -> Result<ClientBuilder> {
+pub(crate) fn configure(builder: ClientBuilder, mode: RootMode, invalid: bool) -> Result<ClientBuilder> {
     let mut builder = builder;
     if matches!(mode, RootMode::Static) {
         // The already locked DER bundle represents the same Mozilla roots as
@@ -32,7 +32,7 @@ fn legacy(error: &(dyn std::error::Error + 'static)) -> bool {
     detail.contains("protocolversion") || detail.contains("protocol version")
 }
 
-pub(super) fn should_retry(error: &anyhow::Error) -> bool {
+pub(crate) fn should_retry(error: &anyhow::Error) -> bool {
     if error.chain().any(legacy) {
         return false;
     }

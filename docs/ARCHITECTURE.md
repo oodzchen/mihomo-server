@@ -122,7 +122,8 @@ mihomo-server/
 │   │   ├── Durable switch journal / installation receipt / startup recovery [Implemented; Linux x86_64]
 │   │   ├── Stable upstream force/no-op adapter / upgrade Web workflow [Implemented; Linux x86_64]
 │   │   ├── Repair of unreadable/empty previous core [Pending]
-│   │   └── Proxy routing / static-root fallback / Alpha / other targets [Pending]
+│   │   ├── Managed/system/direct routing / verified static-root TLS retry [Implemented; Linux verified]
+│   │   └── Alpha / other targets [Pending]
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
@@ -2010,7 +2011,7 @@ Core-download managed/system routing/static roots, Alpha/other targets, full nat
 TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage collection, SOCKS/PAC
 and additional platform/deployment integrations remain pending.
 
-## Latest increment: stable force/no-op adapter and browser upgrade workflow
+## Previous increment: stable force/no-op adapter and browser upgrade workflow
 
 Delivery step 7 now exposes upstream-shaped upgrade_clash_core with required
 boolean force, returning upgraded/from/to, plus installed_core_version for an
@@ -2084,6 +2085,61 @@ successful metadata route for package download and lifecycle cancellation.
 Broken/empty-core repair, Alpha/other targets, native TUN/DNS/hosts/resources,
 backups/WebDAV, advanced pages, garbage collection, SOCKS/PAC and additional
 platform/deployment integrations remain pending.
+
+## Latest increment: core-download routing and verified TLS fallback
+
+Delivery step 7 now routes stable latest/pinned discovery through managed-core,
+system and direct policies in order. Managed endpoints/authentication come from
+actual HTTP/Mixed ports and committed configuration with port consistency and
+generation/PID/revision checks. Unavailable managed routes are skipped. System
+uses validated environment/native discovery with NO_PROXY/global/CGI bypass.
+Discovery errors advance policies; each has one 20-second budget including TLS
+retry. Successful policy is retained privately with pinned metadata for package
+download; logs record only its name, never proxy endpoints or credentials.
+
+Platform TLS is preferred; certificate-related failures retry once with locked
+Mozilla roots on the same policy and deadline. Hostname/certificate checks and
+TLS 1.2 minimum remain. Legacy protocol, status, redirect, bounds and integrity
+errors do not trigger root retry. Package download has one 300-second budget and
+never silently switches policies on failure. Known owned partial files are retired
+before root retry; failure/cancellation cleans pending directories. Existing
+private cache, checksum, staging, admission and durable activation/rollback remain.
+
+Managed generation/PID/revision/phase changes or a closed watch cancel network
+work, with identity checks again before cache reuse/publication. Shutdown cancels
+the entire chain; network remains outside the actor. Subscription downloads reuse
+the managed route/parser/watch guard and existing private environment/TLS helpers,
+preserving explicit direct/self_proxy/with_proxy semantics.
+
+Verification: `cargo check --workspace --locked --offline`, 249 regular Rust
+tests, 66 opt-in tests using real Mihomo v1.19.31, 23 production-bundle browser
+workflows, Clippy with warnings denied, formatting and diff checks pass. New
+coverage exercises private managed proxy authentication, retained package routing,
+metadata fallback, package HTTP/integrity failures without policy switching,
+generation/revision/stop/closed-watch cancellation and pending-file cleanup,
+process-isolated environment/NO_PROXY/CGI behavior, and rejection of untrusted or
+wrong-host TLS certificates after both verified-root attempts. Existing subscription
+proxy/TLS/cancellation and activation/recovery regressions remain green.
+
+The fresh `target/mihomo-server-linux-x86_64-core-network` Linux bundle passes
+checksum verification; its service binary matches the fresh release build and its
+deployment/provenance documents match the sources. Official v1.19.31 discovery,
+same-version no-op, forced installation of the 22,805,792-byte package, stopped
+state retention, running PID/inode replacement and durable receipt readback after
+service restart pass. A private copy of the actual 56-node subscription verifies
+managed-route discovery, verified static-root fallback with an unrelated platform
+CA, restored node selection and HTTPS 204 proxy traffic before and after official
+forced activation. System-proxy subscription HTTPS also reaches YAML validation.
+Original data hashes are unchanged. Temporary services, cores, script workers and
+probe processes are terminated/reaped; the final process audit reports zero.
+
+Git handoff: no sandbox Git writes/commits; the external host script owns the commit.
+The Linux MVP remains runnable; the complete project is not done. Next Delivery
+step 7 subtask: durable repair of an unreadable/empty managed core, including failed
+repair rollback/recovery and browser repair readback. Alpha/other targets, native
+TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage collection,
+SOCKS/PAC and platform/deployment work remain pending. Native Windows/macOS system
+proxy discovery still requires platform runtime checks.
 
 ## MVP completion boundary
 

@@ -2,6 +2,9 @@
 //! Actor-owned staging validates executables; activation remains a separate workflow.
 #[path = "core_stage.rs"]
 mod stage;
+#[path = "core_release_transport.rs"]
+mod transport;
+use crate::remote::tls::{self, RootMode};
 use crate::resources::TARGET;
 use anyhow::{Context as _, Result, ensure};
 use ring::digest::{Context, SHA256};
@@ -14,6 +17,7 @@ use std::{
     time::Duration,
 };
 use tokio::{io::AsyncWriteExt as _, sync::watch};
+pub(crate) use transport::Route;
 const MAX_METADATA: usize = 1024 * 1024;
 const MAX_PACKAGE: u64 = 64 * 1024 * 1024;
 const MAX_MANIFEST: u64 = 16 * 1024;
@@ -33,6 +37,10 @@ pub struct CoreRelease {
 pub struct PreparedCore {
     pub id: String,
     pub release: CoreRelease,
+}
+pub(crate) struct ResolvedRelease {
+    pub(crate) release: CoreRelease,
+    pub(crate) route: Route,
 }
 #[derive(Deserialize)]
 struct ReleaseResponse {
@@ -104,11 +112,14 @@ impl Repository {
             .join(&format!("{version}/{}", asset_name(version)?))?
             .to_string())
     }
+    #[cfg(test)]
     fn client(&self) -> Result<reqwest::Client> {
+        self.client_for(&Route::Direct, RootMode::Platform)
+    }
+    fn client_for(&self, route: &Route, roots: RootMode) -> Result<reqwest::Client> {
         let api = self.api.clone();
         let packages = self.packages.clone();
-        reqwest::Client::builder()
-            .no_proxy()
+        let builder = reqwest::Client::builder()
             .tls_backend_rustls()
             .min_tls_version(reqwest::tls::Version::TLS_1_2)
             .https_only(self.api.scheme() == "https")
@@ -132,9 +143,44 @@ impl Repository {
                 } else {
                     attempt.follow()
                 }
-            }))
+            }));
+        tls::configure(route.configure(builder)?, roots, false)?
             .build()
             .context("build verified core release client")
+    }
+    async fn resolve(&self, version: Option<&str>, routes: Vec<Route>) -> Result<ResolvedRelease> {
+        asset_name(version.unwrap_or("v0.0.0"))?;
+        let mut last = None;
+        for route in routes {
+            let result = tokio::time::timeout(
+                Duration::from_secs(20),
+                route.run(async {
+                    let first = async {
+                        let client = self.client_for(&route, RootMode::Platform)?;
+                        self.discover(&client, version).await
+                    }
+                    .await;
+                    match first {
+                        Ok(release) => Ok(release),
+                        Err(error) if tls::should_retry(&error) => {
+                            let client = self.client_for(&route, RootMode::Static)?;
+                            self.discover(&client, version)
+                                .await
+                                .context("core metadata static roots fallback failed")
+                        }
+                        Err(error) => Err(error),
+                    }
+                }),
+            )
+            .await
+            .context("core release metadata timed out")
+            .and_then(|result| result);
+            match result {
+                Ok(release) => return Ok(ResolvedRelease { release, route }),
+                Err(error) => last = Some(error.context(format!("core metadata {} route failed", route.name()))),
+            }
+        }
+        Err(last.unwrap_or_else(|| anyhow::anyhow!("no core download route available")))
     }
     fn validate(&self, release: &CoreRelease) -> Result<()> {
         ensure!(
@@ -221,12 +267,9 @@ impl Repository {
         Ok(release)
     }
 }
-pub(crate) async fn discover(version: Option<&str>) -> Result<CoreRelease> {
+pub(crate) async fn discover_via(version: Option<&str>, routes: Vec<Route>) -> Result<ResolvedRelease> {
     let repository = Repository::official();
-    let client = repository.client()?;
-    tokio::time::timeout(Duration::from_secs(20), repository.discover(&client, version))
-        .await
-        .context("core release metadata timed out")?
+    repository.resolve(version, routes).await
 }
 
 pub(crate) struct CoreDownloads {
@@ -251,38 +294,97 @@ impl CoreDownloads {
             repository: Repository::official(),
         })
     }
+    #[cfg(test)]
     pub(crate) async fn prepare(
         &self,
         version: Option<&str>,
         shutdown: &watch::Receiver<bool>,
     ) -> Result<PreparedCore> {
-        let client = self.repository.client()?;
-        let release = tokio::time::timeout(Duration::from_secs(20), self.repository.discover(&client, version))
-            .await
-            .context("core release metadata timed out")??;
-        self.prepare_resolved(release, shutdown).await
+        self.prepare_via(version, vec![Route::Direct], shutdown).await
+    }
+    #[cfg(test)]
+    pub(crate) async fn prepare_via(
+        &self,
+        version: Option<&str>,
+        routes: Vec<Route>,
+        shutdown: &watch::Receiver<bool>,
+    ) -> Result<PreparedCore> {
+        let resolved = self.repository.resolve(version, routes).await?;
+        self.prepare_selected(resolved, shutdown).await
     }
     /// Keep the metadata/hash pinned across the pre-download no-op check.
+    #[cfg(test)]
     pub(crate) async fn prepare_resolved(
         &self,
         release: CoreRelease,
         shutdown: &watch::Receiver<bool>,
     ) -> Result<PreparedCore> {
+        self.prepare_selected(
+            ResolvedRelease {
+                release,
+                route: Route::Direct,
+            },
+            shutdown,
+        )
+        .await
+    }
+    pub(crate) async fn prepare_selected(
+        &self,
+        resolved: ResolvedRelease,
+        shutdown: &watch::Receiver<bool>,
+    ) -> Result<PreparedCore> {
+        let ResolvedRelease { release, route } = resolved;
+        route.check()?;
         self.repository.validate(&release)?;
         ensure!(!*shutdown.borrow(), "core preparation cancelled during shutdown");
-        let client = self.repository.client()?;
         let id = format!("{}-{}", release.version, release.sha256);
         let final_path = self.root.join(&id);
         if fs::symlink_metadata(&final_path).is_ok() {
             let cached = self.inspect(&id)?;
             ensure!(cached.release == release, "prepared core release metadata changed");
+            route.check()?;
             return Ok(cached);
         }
         let pending = Pending::new(&self.root)?;
-        tokio::time::timeout(Duration::from_secs(300), self.download(&client, &release, &pending.0))
-            .await
-            .context("core package download timed out")??;
+        tokio::time::timeout(
+            Duration::from_secs(300),
+            route.run(async {
+                let first = async {
+                    let client = self.repository.client_for(&route, RootMode::Platform)?;
+                    self.download(&client, &release, &pending.0).await
+                }
+                .await;
+                match first {
+                    Ok(()) => Ok(()),
+                    Err(error) if tls::should_retry(&error) => {
+                        let package = pending.0.join("package.gz");
+                        if package.try_exists()? {
+                            // Only this exclusively owned partial file may be retired for TLS retry.
+                            let m = fs::symlink_metadata(&package)?;
+                            ensure!(m.is_file() && m.len() <= MAX_PACKAGE, "unsafe partial core package");
+                            #[cfg(unix)]
+                            {
+                                use std::os::unix::fs::PermissionsExt as _;
+                                ensure!(
+                                    m.permissions().mode() & 0o077 == 0,
+                                    "unsafe partial core package permissions"
+                                );
+                            }
+                            fs::remove_file(package)?;
+                        }
+                        let client = self.repository.client_for(&route, RootMode::Static)?;
+                        self.download(&client, &release, &pending.0)
+                            .await
+                            .context("core package static roots fallback failed")
+                    }
+                    Err(error) => Err(error),
+                }
+            }),
+        )
+        .await
+        .context("core package download timed out")??;
         ensure!(!*shutdown.borrow(), "core preparation cancelled during shutdown");
+        route.check()?;
         let manifest = Manifest {
             schema_version: 1,
             release: release.clone(),
@@ -293,6 +395,7 @@ impl CoreDownloads {
         sync_directory(&pending.0)?;
         // No await between cancellation check and atomic publication.
         ensure!(!*shutdown.borrow(), "core preparation cancelled during shutdown");
+        route.check()?;
         fs::rename(&pending.0, &final_path)?;
         sync_directory(&self.root)?;
         Ok(PreparedCore { id, release })

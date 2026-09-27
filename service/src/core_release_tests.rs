@@ -42,6 +42,7 @@ struct Provider {
     metadata: Mutex<Value>,
     package: Mutex<Vec<u8>>,
     status: AtomicU16,
+    metadata_status: AtomicU16,
     hold_metadata: AtomicBool,
     hold_package: AtomicBool,
     stream: AtomicBool,
@@ -67,6 +68,7 @@ impl Fixture {
             metadata: Mutex::new(metadata),
             package: Mutex::new(PACKAGE.to_vec()),
             status: AtomicU16::new(200),
+            metadata_status: AtomicU16::new(200),
             hold_metadata: AtomicBool::new(false),
             hold_package: AtomicBool::new(false),
             stream: AtomicBool::new(false),
@@ -138,7 +140,7 @@ async fn serve(State(state): State<Arc<Provider>>, request: Request) -> Response
     };
     Response::builder()
         .status(if metadata {
-            200
+            state.metadata_status.load(Ordering::SeqCst)
         } else {
             state.status.load(Ordering::SeqCst)
         })
@@ -397,5 +399,301 @@ async fn real_mihomo_package_is_staged_and_read_back_without_changing_the_existi
     assert!(decoded.status.success());
     assert_eq!(hash(&decoded.stdout), before);
     assert_eq!(hash(&fs::read(dir.0.join("verge-mihomo"))?), before);
+    Ok(())
+}
+
+#[path = "../tests/support/tls.rs"]
+#[allow(dead_code)] // Shared HTTPS fixture also supplies helpers for other integration suites.
+mod https_fixture;
+
+struct ProxyFixture {
+    state: Arc<Provider>,
+    port: u16,
+    task: JoinHandle<std::io::Result<()>>,
+}
+impl ProxyFixture {
+    async fn new(origin: &Fixture, authenticated: bool) -> Result<Self> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        let state = Arc::new(Provider {
+            metadata: Mutex::new(origin.state.metadata.lock().unwrap().clone()),
+            package: Mutex::new(PACKAGE.to_vec()),
+            status: AtomicU16::new(200),
+            metadata_status: AtomicU16::new(200),
+            hold_metadata: AtomicBool::new(false),
+            hold_package: AtomicBool::new(false),
+            stream: AtomicBool::new(false),
+            redirect: Mutex::new(None),
+            requests: Mutex::new(Vec::new()),
+            release: Semaphore::new(0),
+        });
+        let task = tokio::spawn(
+            axum::serve(
+                listener,
+                Router::new()
+                    .fallback(move |State(state), mut request: Request| async move {
+                        assert!(!request.headers().contains_key("authorization"));
+                        let header = request.headers_mut().remove("proxy-authorization");
+                        if authenticated {
+                            assert_eq!(header.unwrap(), "Basic Zml4dHVyZS11c2VyOmZpeHR1cmUtcGFzc3dvcmQ=");
+                        } else {
+                            assert!(header.is_none());
+                        }
+                        serve(State(state), request).await
+                    })
+                    .with_state(Arc::clone(&state)),
+            )
+            .into_future(),
+        );
+        Ok(Self { state, port, task })
+    }
+    fn managed(&self, authenticated: bool) -> Result<(Route, watch::Sender<crate::core_manager::CoreStatus>)> {
+        let core = mihomo_client::models::BaseConfig {
+            mixed_port: self.port,
+            authentication: authenticated.then(|| vec!["fixture-user".into()]),
+            ..Default::default()
+        };
+        let config = if authenticated {
+            headless_core::config::runtime::parse("authentication: ['fixture-user:fixture-password']")?
+        } else {
+            serde_yaml_ng::Mapping::new()
+        };
+        let proxy = crate::remote::ManagedProxy::from_core(&core, &config)?;
+        let snapshot = crate::core_manager::CoreStatus {
+            phase: crate::core_manager::CorePhase::Running,
+            pid: Some(1234),
+            ..Default::default()
+        };
+        let (sender, state) = watch::channel(snapshot.clone());
+        Ok((
+            Route::Managed {
+                proxy,
+                snapshot: Box::new(snapshot),
+                state,
+            },
+            sender,
+        ))
+    }
+}
+impl Drop for ProxyFixture {
+    fn drop(&mut self) {
+        self.state.release.add_permits(100);
+        self.task.abort();
+    }
+}
+
+#[tokio::test]
+async fn managed_metadata_route_is_retained_for_package_with_private_authentication() -> Result<()> {
+    let dir = Directory::new()?;
+    let origin = Fixture::new().await?;
+    let proxy = ProxyFixture::new(&origin, true).await?;
+    let (route, _owner) = proxy.managed(true)?;
+    let resolved = origin.repository.resolve(None, vec![route, Route::Direct]).await?;
+    assert_eq!(resolved.route.name(), "managed");
+    let downloads = origin.downloads(&dir)?;
+    let (_, stop) = watch::channel(false);
+    let prepared = downloads.prepare_selected(resolved, &stop).await?;
+    assert_eq!(prepared.release.sha256, hash(PACKAGE));
+    assert_eq!(proxy.state.requests.lock().unwrap().len(), 2);
+    assert!(origin.state.requests.lock().unwrap().is_empty());
+    let saved = fs::read_to_string(downloads.root.join(prepared.id).join("release.json"))?;
+    assert!(!saved.contains("fixture-user"));
+    assert!(!saved.contains("fixture-password"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn metadata_route_failure_falls_back_but_package_http_or_integrity_failure_never_switches_routes() -> Result<()> {
+    let dir = Directory::new()?;
+    let origin = Fixture::new().await?;
+    let proxy = ProxyFixture::new(&origin, false).await?;
+    proxy.state.metadata_status.store(503, Ordering::SeqCst);
+    let (route, _owner) = proxy.managed(false)?;
+    let resolved = origin.repository.resolve(None, vec![route, Route::Direct]).await?;
+    assert_eq!(resolved.route.name(), "direct");
+    assert_eq!(proxy.state.requests.lock().unwrap().len(), 1);
+    assert_eq!(origin.state.requests.lock().unwrap().len(), 1);
+    proxy.state.metadata_status.store(200, Ordering::SeqCst);
+    let downloads = origin.downloads(&dir)?;
+    let (_, stop) = watch::channel(false);
+    for corrupt in [false, true] {
+        let (route, _owner) = proxy.managed(false)?;
+        let resolved = origin.repository.resolve(None, vec![route, Route::Direct]).await?;
+        if corrupt {
+            proxy.state.status.store(200, Ordering::SeqCst);
+            proxy.state.package.lock().unwrap()[5] ^= 1;
+        } else {
+            proxy.state.status.store(503, Ordering::SeqCst);
+        }
+        let error = downloads.prepare_selected(resolved, &stop).await.unwrap_err();
+        assert!(format!("{error:#}").contains(if corrupt { "SHA-256 mismatch" } else { "status 503" }));
+        assert_eq!(fs::read_dir(&downloads.root)?.count(), 0);
+        assert_eq!(origin.state.requests.lock().unwrap().len(), 1);
+    }
+    // No certificate-root retry for ordinary status or integrity failures.
+    assert_eq!(proxy.state.requests.lock().unwrap().len(), 5);
+    Ok(())
+}
+
+#[tokio::test]
+async fn managed_generation_revision_stop_and_closed_watch_cancel_and_remove_inflight_package() -> Result<()> {
+    let origin = Fixture::new().await?;
+    for change in 0..4 {
+        let proxy = ProxyFixture::new(&origin, false).await?;
+        let dir = Directory::new()?;
+        let downloads = Arc::new(origin.downloads(&dir)?);
+        let (route, owner) = proxy.managed(false)?;
+        let resolved = origin.repository.resolve(None, vec![route]).await?;
+        proxy.state.hold_package.store(true, Ordering::SeqCst);
+        let count = proxy.state.requests.lock().unwrap().len();
+        let (_, stop) = watch::channel(false);
+        let job = tokio::spawn(async move { downloads.prepare_selected(resolved, &stop).await });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while proxy.state.requests.lock().unwrap().len() == count {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await?;
+        if change == 3 {
+            drop(owner);
+        } else {
+            owner.send_modify(|state| match change {
+                0 => state.generation += 1,
+                1 => state.config_revision = Some("new-fixture-revision".into()),
+                _ => state.phase = crate::core_manager::CorePhase::Stopped,
+            });
+        }
+        let error = tokio::time::timeout(Duration::from_secs(1), job).await??.unwrap_err();
+        assert!(format!("{error:#}").contains("managed proxy changed"));
+        assert_eq!(fs::read_dir(dir.0.join(".upgrade-staging"))?.count(), 0);
+        proxy.state.release.add_permits(1);
+        proxy.state.hold_package.store(false, Ordering::SeqCst);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn core_metadata_and_package_tls_retry_reject_untrusted_or_wrong_host_without_disabling_verification()
+-> Result<()> {
+    let https = https_fixture::Fixture::new().await?;
+    let base = url::Url::parse(&https.url)?;
+    let repository = Repository {
+        api: base.join("api/")?,
+        packages: base.join("download/")?,
+    };
+    let error = repository.resolve(None, vec![Route::Direct]).await.err().unwrap();
+    assert!(format!("{error:#}").contains("static roots fallback failed"));
+    assert!(!format!("{error:#}").contains("private-test-token"));
+    assert_eq!(https.state.connections.load(Ordering::SeqCst), 2);
+    assert_eq!(https.state.count(), 0);
+    let dir = Directory::new()?;
+    let mut downloads = CoreDownloads::new(&dir.0)?;
+    downloads.repository = repository;
+    let release = CoreRelease {
+        version: "v1.19.31".into(),
+        target: TARGET.into(),
+        asset: asset_name("v1.19.31")?,
+        bytes: PACKAGE.len() as u64,
+        sha256: hash(PACKAGE),
+        download_url: downloads.repository.package_url("v1.19.31")?,
+    };
+    let (_, stop) = watch::channel(false);
+    let error = downloads.prepare_resolved(release, &stop).await.unwrap_err();
+    assert!(format!("{error:#}").contains("static roots fallback failed"));
+    assert_eq!(https.state.connections.load(Ordering::SeqCst), 4);
+    assert_eq!(https.state.count(), 0);
+    assert_eq!(fs::read_dir(&downloads.root)?.count(), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn system_proxy_auth_bypass_cgi_and_direct_fallback_are_process_isolated() -> Result<()> {
+    const CHILD: &str = "MIHOMO_CORE_NETWORK_CHILD";
+    if let Ok(mode) = std::env::var(CHILD) {
+        let base = std::env::var("MIHOMO_CORE_NETWORK_ORIGIN")?;
+        let repository = Repository {
+            api: format!("{base}api/").parse()?,
+            packages: format!("{base}download/").parse()?,
+        };
+        let dir = Directory::new()?;
+        let mut downloads = CoreDownloads::new(&dir.0)?;
+        downloads.repository = repository;
+        let resolved = downloads
+            .repository
+            .resolve(None, vec![Route::System, Route::Direct])
+            .await?;
+        assert_eq!(
+            resolved.route.name(),
+            if mode == "fallback" { "direct" } else { "system" }
+        );
+        let (_, stop) = watch::channel(false);
+        downloads.prepare_selected(resolved, &stop).await?;
+        return Ok(());
+    }
+    for mode in ["proxy", "bypass", "ip-bypass", "cgi", "fallback"] {
+        let origin = Fixture::new().await?;
+        let proxy = ProxyFixture::new(&origin, true).await?;
+        if mode == "fallback" {
+            proxy.state.metadata_status.store(503, Ordering::SeqCst);
+        }
+        let mut command = tokio::process::Command::new(std::env::current_exe()?);
+        command.args([
+            "--exact",
+            "core_release::tests::system_proxy_auth_bypass_cgi_and_direct_fallback_are_process_isolated",
+        ]);
+        for key in [
+            "HTTP_PROXY",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
+            "REQUEST_METHOD",
+        ] {
+            command.env_remove(key);
+        }
+        command
+            .env(CHILD, mode)
+            .env(
+                "MIHOMO_CORE_NETWORK_ORIGIN",
+                origin.repository.api.join("../")?.as_str(),
+            )
+            .env(
+                "HTTP_PROXY",
+                format!("http://fixture-user:fixture-password@127.0.0.1:{}", proxy.port),
+            )
+            .env(
+                "NO_PROXY",
+                match mode {
+                    "bypass" => "*",
+                    "ip-bypass" => "127.0.0.1",
+                    _ => "",
+                },
+            );
+        if mode == "cgi" {
+            command.env("REQUEST_METHOD", "GET");
+        }
+        command.kill_on_drop(true);
+        let output = tokio::time::timeout(Duration::from_secs(10), command.output()).await??;
+        ensure!(
+            output.status.success(),
+            "system proxy child fixture failed in {mode} mode: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert_eq!(
+            proxy.state.requests.lock().unwrap().len(),
+            match mode {
+                "proxy" => 2,
+                "fallback" => 1,
+                _ => 0,
+            }
+        );
+        assert_eq!(
+            origin.state.requests.lock().unwrap().len(),
+            if mode == "proxy" { 0 } else { 2 }
+        );
+    }
     Ok(())
 }

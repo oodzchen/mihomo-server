@@ -82,7 +82,7 @@ impl Default for CoreStatus {
     }
 }
 
-fn same_proxy_snapshot(before: &CoreStatus, after: &CoreStatus) -> bool {
+pub(crate) fn same_proxy_snapshot(before: &CoreStatus, after: &CoreStatus) -> bool {
     after.phase == CorePhase::Running
         && before.generation == after.generation
         && before.pid == after.pid
@@ -535,7 +535,7 @@ impl CoreManager {
         tokio::select! {
             biased;
             _ = closing(&mut shutdown) => bail!("core release check cancelled during shutdown"),
-            result = crate::core_release::discover(version.as_deref()) => result,
+            result = async { Ok(self.discover_core_release(version.as_deref()).await?.release) } => result,
         }
     }
 
@@ -553,7 +553,7 @@ impl CoreManager {
         tokio::select! {
             biased;
             _ = closing(&mut shutdown) => bail!("core preparation cancelled during shutdown"),
-            result = downloads.prepare(version.as_deref(), &cancellation) => result,
+            result = async { let resolved=self.discover_core_release(version.as_deref()).await?; downloads.prepare_selected(resolved,&cancellation).await } => result,
         }
     }
 
@@ -663,12 +663,12 @@ impl CoreManager {
         let mut shutdown = self.shutdown.subscribe();
         let release = tokio::select! {biased;
             _ = closing(&mut shutdown) => bail!("core upgrade cancelled during shutdown"),
-            result = crate::core_release::discover(None) => result?,
+            result = self.discover_core_release(None) => result?,
         };
         let (reply, response) = oneshot::channel();
         self.commands
             .send(CommandMessage::CheckCoreUpgrade {
-                version: release.version.clone(),
+                version: release.release.version.clone(),
                 force,
                 reply,
             })
@@ -680,7 +680,7 @@ impl CoreManager {
         let cancellation = self.shutdown.subscribe();
         let prepared = tokio::select! {biased;
             _ = closing(&mut shutdown) => bail!("core upgrade cancelled during shutdown"),
-            result = downloads.prepare_resolved(release, &cancellation) => result?,
+            result = downloads.prepare_selected(release, &cancellation) => result?,
         };
         let (reply, response) = oneshot::channel();
         self.commands
@@ -995,16 +995,28 @@ impl CoreManager {
         result.await.context("remote refresh cancelled during shutdown")?
     }
 
-    /// Resolve after admission, then cancel if the child or committed configuration changes.
-    async fn download_remote(
-        &self,
-        url: &str,
-        name: Option<&str>,
-        options: crate::remote::RemoteOptions,
-    ) -> Result<headless_core::config::remote::RemoteProfile> {
-        if options.self_proxy != Some(true) {
-            return crate::remote::download(url, name, options).await;
+    async fn core_download_routes(&self) -> Vec<crate::core_release::Route> {
+        let mut routes = Vec::new();
+        if self.status().phase == CorePhase::Running
+            && let Ok(route) = self.managed_download_route().await
+        {
+            routes.push(route);
         }
+        routes.extend([crate::core_release::Route::System, crate::core_release::Route::Direct]);
+        routes
+    }
+
+    async fn discover_core_release(&self, version: Option<&str>) -> Result<crate::core_release::ResolvedRelease> {
+        let resolved = crate::core_release::discover_via(version, self.core_download_routes().await).await?;
+        self.logs.append(
+            "core-upgrade",
+            format!("release metadata resolved via {} route", resolved.route.name()),
+        );
+        Ok(resolved)
+    }
+
+    /// Resolve only from the current child's reported ports and committed authentication.
+    async fn managed_download_route(&self) -> Result<crate::core_release::Route> {
         let mut state = self.state.clone();
         let snapshot = state.borrow_and_update().clone();
         ensure!(
@@ -1023,21 +1035,30 @@ impl CoreManager {
         })
         .await
         .context("managed proxy query timed out")??;
-        let changed = async {
-            loop {
-                if !same_proxy_snapshot(&snapshot, &state.borrow_and_update()) {
-                    break;
-                }
-                if state.changed().await.is_err() {
-                    break;
-                }
-            }
-        };
-        tokio::select! {
-            biased;
-            _ = changed => bail!("managed proxy changed during download; retry"),
-            result = crate::remote::download_via(url, name, options, Some(route)) => result,
+        Ok(crate::core_release::Route::Managed {
+            proxy: route,
+            snapshot: Box::new(snapshot),
+            state,
+        })
+    }
+
+    /// Resolve after admission, then cancel if the child or committed configuration changes.
+    async fn download_remote(
+        &self,
+        url: &str,
+        name: Option<&str>,
+        options: crate::remote::RemoteOptions,
+    ) -> Result<headless_core::config::remote::RemoteProfile> {
+        if options.self_proxy != Some(true) {
+            return crate::remote::download(url, name, options).await;
         }
+        let route = self.managed_download_route().await?;
+        let crate::core_release::Route::Managed { proxy, .. } = &route else {
+            unreachable!()
+        };
+        route
+            .run(crate::remote::download_via(url, name, options, Some(proxy.clone())))
+            .await
     }
 
     pub async fn runtime_config(&self) -> Result<Mapping> {
