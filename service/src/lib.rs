@@ -1,4 +1,5 @@
 pub mod backup;
+pub mod connection_settings;
 pub mod core_manager;
 pub mod core_release;
 pub mod core_upgrade;
@@ -15,5 +16,6 @@ pub mod resource_inventory;
 pub mod resources;
 pub mod script;
 mod selections;
+mod settings_readback;
 pub mod shutdown;
 mod validation;

@@ -1038,6 +1038,15 @@ impl Mihomo {
         Ok(response.json::<BaseConfig>().await?)
     }
 
+    /// GET /configs with field presence retained for connection settings readback.
+    pub async fn get_connection_config(&self) -> Result<crate::models::ConnectionConfig> {
+        let response = self.load_ctx().build_request(Method::GET, "/configs")?.send().await?;
+        if !response.status().is_success() {
+            ret_failed_resp!("connection settings read failed");
+        }
+        Ok(response.json::<crate::models::ConnectionConfig>().await?)
+    }
+
     /// 重新加载配置
     pub async fn reload_config(&self, force: bool, config_path: &str) -> Result<()> {
         let response = self

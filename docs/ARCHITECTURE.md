@@ -53,10 +53,10 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** typed geosite matcher settings, Web editing and
-saved/configured/actual readback, with script authority, rollback and restart
-verification. **Next implementation task (P1):** authoritative TCP concurrency and
-process matching settings with Web editing and core readback. DAT validation,
+**Latest completed task (P1):** authoritative TCP concurrency and process matching
+settings, Web editing and presence-preserving core readback, with script authority,
+rollback and restart verification. **Next implementation task (P1):** TCP keep-alive
+interval/idle/disable settings with Web editing and core readback. DAT validation,
 controlled online and running-core Geo updates, and other remaining full settings
 still belong to P1; finish this priority before starting P2.
 
@@ -80,6 +80,7 @@ mihomo-server/
 │   ├── mihomo-client/                               [Migrated; Linux verified]
 │   │   ├── Unix socket / explicit loopback HTTP      [Migrated]
 │   │   ├── API methods, response models, errors      [Migrated]
+│   │   ├── Presence-preserving connection-settings GET /configs projection [Implemented; Linux verified]
 │   │   └── Realtime feeds, cancellation, reconnect   [Migrated]
 <!--│   │   └── Windows Named Pipe runtime validation    [Deferred; code retained; Windows compatibility postponed] -->
 │   └── headless-core/                               [Partially migrated]
@@ -111,6 +112,7 @@ mihomo-server/
 │       ├── Explicit runtime settings authority       [Implemented; Linux verified]
 │       ├── Typed DNS/TUN subset / shallow authority  [Implemented; Linux verified]
 │       ├── Typed Geo fields incl. geosite matcher / per-URL authority / bounds / schema-one recovery [Implemented; Linux verified]
+│       ├── TCP concurrency / process mode authority / schema-one recovery [Implemented; Linux verified]
 │       ├── Pure TUN/DNS derivation / IPv6 range repair [Migrated + staged adaptation; Linux validation]
 │       ├── Provider DNS digest / profile preference / session confirmation [Migrated + adaptation; Linux verified]
 │       ├── Deleted-profile DNS preference / confirmation cleanup [Implemented; recoverable]
@@ -152,6 +154,7 @@ mihomo-server/
 │   │   ├── Read-only MMDB verification / pinned parser / metadata-only compatibility outcome [Implemented; Linux verified]
 │   │   ├── Stopped-core pinned MMDB replacement / digest guards / atomic commit / orphan recovery [Implemented; Linux verified]
 │   │   ├── Geo actor settings/config/core comparison / geosite matcher / bounded readback / URL model aliases [Implemented; Linux verified]
+│   │   ├── Connection settings comparison / field presence / shared snapshot envelope [Implemented; Linux verified]
 │   │   └── DAT validation / controlled online and running-core Geo updates / remaining full settings [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
@@ -261,6 +264,7 @@ mihomo-server/
 │   ├── Rules/provider/delay views                   [Pending; P2]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
+│   ├── TCP concurrency / process mode editor / shared Geo-connection comparison / retry [Implemented; Linux verified]
 │   ├── DNS/TUN editor / lossless nested inheritance / readback [Implemented; Linux verified]
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
@@ -3778,6 +3782,67 @@ runnable. Next task: P1 TCP concurrency and process matching settings, followed 
 other remaining configuration and Geo lifecycle work. P2 rules/provider/delay
 operations/views, P3 i18n/signals, P4 actual Linux systemd installation and deferred
 features remain incomplete. No sandbox Git commit is performed.
+
+## P1 increment: TCP concurrency and process matching settings
+
+The geosite matcher increment is complete. Optional `tcp-concurrent` and
+`find-process-mode` now join schema-one service runtime settings. The TCP value is
+a strict boolean; explicit false remains authoritative. Process modes are typed
+canonical `strict`, `always` and `off`; missing/null fields inherit. Both values enter
+before scripts and win after scripts, merges and overlays. Existing settings/runtime
+journals protect interrupted saves and failed candidate application without changing
+subscription source YAML. Older settings files continue to load without a migration.
+
+Authenticated `connection_settings` returns the same committed comparison envelope
+as Geo readback with two whitelisted leaves. It reads the core from the serialized
+actor with a three-second timeout, reports stopped or failed readback as unknown,
+and keeps saved/committed values available. A narrow client GET /configs projection
+uses optional fields to distinguish absence from false/off; native lower/title-case
+process modes normalize to canonical lower-case names. Unsupported/missing fields
+do not acquire BaseConfig's legacy defaults. Read errors use a fixed diagnostic.
+
+The backend per-leaf comparison and Web refresh/readback panel are shared with the
+Geo view, retaining its nine fields and order. The Web settings form adds TCP and
+process mode choices with inheritance, lossless full replacement, confirmed saved
+values and draft preservation on errors. Both comparison panels clear stale values
+on failures, disconnects and lifecycle/revision/settings changes.
+
+This verifies configured and core-reported values and usable proxy traffic; it does
+not prove that a specific process was identified or that concurrency improves
+performance. Process rules/results and richer connection dashboards are not added.
+
+Validation:
+
+- `cargo check --workspace --locked --offline`, the service build and formatting
+  checks passed. Workspace tests passed: 359 regular tests, zero failures and 79
+  opt-in tests skipped by default. The two relevant real-core tests below were
+  explicitly enabled and passed separately.
+- Pure settings tests cover explicit false, all canonical process modes,
+  absent/null inheritance, invalid types/variants and unchanged unrelated fields.
+  Existing interrupted-publication recovery now includes both connection fields.
+  Comparison tests cover native mode casing, missing old-core fields, mismatches,
+  inherited defaults, stopped state and read failure; existing Geo comparisons
+  verify the shared helper preserves their behavior.
+- Authenticated HTTP integration verifies preconfiguration saves, merge/overlay
+  authority, invalid input rejection with unchanged saved state/revision,
+  committed readback, inheritance restoration and unchanged raw YAML.
+- Explicit real-Mihomo connection integration passed: initial/final script
+  authority, enabled/disabled TCP and all process modes, core readback, failed probe
+  rollback retaining PID/revision/settings/actual values, stopped saves and service
+  restart persistence.
+- Explicit actual-node integration passed with private data copies: TCP/process
+  values matched the core, resources/Geo remained usable and HTTPS proxy traffic
+  returned 204 before/after restart. Original node and Geo hashes were unchanged.
+- TypeScript/Vite build and the full Playwright suite passed: 26 workflows with
+  four optional upgrade/repair checks skipped. Coverage includes real connection
+  settings save/reload/inheritance, failed-draft preservation, read failures,
+  mismatch rendering, stale-row clearing and the existing Geo/network editors.
+
+The complete architecture tree is updated above. The Linux development MVP remains
+runnable. Next task: P1 TCP keep-alive interval/idle/disable settings and readback,
+then other remaining configuration/Geo lifecycle work. P2 rules/provider/delay
+operations/views, P3 i18n/signals, P4 actual Linux systemd installation and previously
+deferred features remain incomplete. No sandbox Git commit is performed.
 
 ## MVP completion boundary
 

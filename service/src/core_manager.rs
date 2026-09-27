@@ -407,6 +407,7 @@ enum CommandMessage {
         reply: oneshot::Sender<Result<crate::geo_validation::Validation>>,
     },
     ReadGeoSettings(oneshot::Sender<Result<crate::geo_settings::Snapshot>>),
+    ReadConnectionSettings(oneshot::Sender<Result<crate::connection_settings::Snapshot>>),
     ReadSettings(oneshot::Sender<Result<ServiceSettings>>),
     ReadResources(oneshot::Sender<Result<crate::resource_inventory::Inventory>>),
     SetSettings {
@@ -1276,6 +1277,18 @@ impl CoreManager {
         result.await.context("Geo settings read cancelled during shutdown")?
     }
 
+    pub async fn connection_settings(&self) -> Result<crate::connection_settings::Snapshot> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(CommandMessage::ReadConnectionSettings(reply))
+            .await
+            .context("core manager stopped")?;
+        result
+            .await
+            .context("Connection settings read cancelled during shutdown")?
+    }
+
     pub async fn settings(&self) -> Result<ServiceSettings> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let (reply, result) = oneshot::channel();
@@ -1865,7 +1878,7 @@ impl Actor {
                             CommandMessage::InstallGeoSeed { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ValidateGeo { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadResources(reply) => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
-                            CommandMessage::ReadGeoSettings(reply) => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
+                            CommandMessage::ReadGeoSettings(reply) | CommandMessage::ReadConnectionSettings(reply) => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::ReadSettings(reply) | CommandMessage::SetSettings { reply, .. } => { let _ = reply.send(Err(anyhow::anyhow!(message))); }
                             CommandMessage::Control(request) => { let _ = request.reply.send(Err(anyhow::anyhow!(message))); }
                         }
@@ -2045,6 +2058,20 @@ impl Actor {
                                         timeout(Duration::from_secs(3), self.client.get_base_config()).await.ok().and_then(Result::ok)
                                     } else { None };
                                     crate::geo_settings::snapshot(&self.settings.runtime, config.as_ref(), revision, running, actual.as_ref())
+                                }.await;
+                                let _ = reply.send(result);
+                            }
+                        }
+                        CommandMessage::ReadConnectionSettings(reply) => {
+                            if !reply.is_closed() {
+                                let result = async {
+                                    let revision = self.store.state().current.map(|revision| revision.file);
+                                    let config = if revision.is_some() { Some(self.store.read_current()?) } else { None };
+                                    let running = self.status.borrow().phase == CorePhase::Running;
+                                    let actual = if running {
+                                        timeout(Duration::from_secs(3), self.client.get_connection_config()).await.ok().and_then(Result::ok)
+                                    } else { None };
+                                    crate::connection_settings::snapshot(&self.settings.runtime, config.as_ref(), revision, running, actual.as_ref())
                                 }.await;
                                 let _ = reply.send(result);
                             }

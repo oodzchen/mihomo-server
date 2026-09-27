@@ -12,6 +12,7 @@ import {
 import { ProfileDnsPanel } from "./profile-dns";
 import { useProxyAccess } from "./proxy-access";
 import { GEO_KEYS, GeoFields, GeoReadback, geoDraft, geoRuntime, validateGeo } from "./geo-settings";
+import { SettingsReadback } from "./settings-readback";
 import { ResourcesPanel } from "./resources";
 
 type Settings = { schema_version: number; runtime: Runtime };
@@ -34,6 +35,8 @@ const fields = [
   { key: "allow-lan", label: "允许局域网访问", kind: "bool" },
   { key: "ipv6", label: "IPv6", kind: "bool" },
   { key: "unified-delay", label: "统一延迟", kind: "bool" },
+  { key: "tcp-concurrent", label: "TCP 并发连接", kind: "bool" },
+  { key: "find-process-mode", label: "进程匹配模式", kind: "select", options: [["strict", "strict（按需）"], ["always", "always（始终）"], ["off", "off（关闭）"]] },
   {
     key: "log-level",
     label: "日志等级",
@@ -490,6 +493,7 @@ export function SettingsPage({
         </p>
       </section>
       <div className="settings-side">
+        <SettingsReadback label="连接设置读回" operation="connection_settings" hint="显示核心报告的设置，不保证已识别进程或改善连接速度。未指定项可能使用核心默认值。" token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
         <GeoReadback token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
         <ResourcesPanel token={token} status={status} connection={connection} logout={logout} />
         <ProfileDnsPanel

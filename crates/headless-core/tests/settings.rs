@@ -30,6 +30,8 @@ fn interrupted_settings_update_follows_runtime_commit_at_each_publication_phase(
             let prior = settings.snapshot();
             let mut candidate = prior.clone();
             candidate.runtime.mode = Some(Mode::Global);
+            candidate.runtime.tcp_concurrent = Some(false);
+            candidate.runtime.find_process_mode = Some(headless_core::config::settings::FindProcessMode::Off);
             candidate.profile_dns.insert(
                 "one".into(),
                 headless_core::config::dns::ProfileDnsSettings { enabled: false },
@@ -427,5 +429,41 @@ fn oversized_combined_settings_are_rejected_before_a_transaction_journal_is_writ
     );
     assert_eq!(SettingsStore::open(&dir.0)?.snapshot(), original);
     assert!(!dir.0.join("settings-transaction.yaml").exists());
+    Ok(())
+}
+
+#[test]
+fn connection_settings_preserve_inheritance_and_enforce_false_and_process_modes() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    let source: serde_yaml_ng::Mapping =
+        serde_yaml_ng::from_str("tcp-concurrent: true\nfind-process-mode: always\ncustom: preserved")?;
+    assert_eq!(RuntimeSettings::default().prepare(source.clone())?, source);
+    for mode in ["strict", "always", "off"] {
+        let runtime: RuntimeSettings =
+            serde_yaml_ng::from_str(&format!("tcp-concurrent: false\nfind-process-mode: {mode}"))?;
+        let initial = runtime.prepare(source.clone())?;
+        assert_eq!(initial["tcp-concurrent"].as_bool(), Some(false));
+        assert_eq!(initial["find-process-mode"].as_str(), Some(mode));
+        let final_config = runtime.enforce(source.clone())?;
+        assert_eq!(final_config["tcp-concurrent"].as_bool(), Some(false));
+        assert_eq!(final_config["find-process-mode"].as_str(), Some(mode));
+        assert_eq!(final_config["custom"], source["custom"]);
+        assert!(
+            runtime
+                .overridden_fields(&source, &final_config)?
+                .contains(&"tcp-concurrent".to_owned())
+        );
+    }
+    let null: RuntimeSettings = serde_yaml_ng::from_str("tcp-concurrent: null\nfind-process-mode: null")?;
+    assert_eq!(null.enforce(source.clone())?, source);
+    for invalid in [
+        "tcp-concurrent: 'false'",
+        "tcp-concurrent: 0",
+        "find-process-mode: Strict",
+        "find-process-mode: invalid",
+        "find-process-mode: false",
+    ] {
+        assert!(serde_yaml_ng::from_str::<RuntimeSettings>(invalid).is_err());
+    }
     Ok(())
 }

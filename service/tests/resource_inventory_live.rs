@@ -204,7 +204,7 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
             }
         }
         ensure!(successful, "no HTTPS 204 response through the tested live nodes");
-        let geo_runtime: headless_core::config::settings::RuntimeSettings = serde_yaml_ng::from_str("geodata-mode: false\ngeodata-loader: standard\ngeosite-matcher: mph\ngeo-auto-update: false\ngeo-update-interval: 48\ngeox-url: {geoip: 'http://127.0.0.1:1/geoip', geosite: 'http://127.0.0.1:1/geosite', mmdb: 'http://127.0.0.1:1/mmdb', asn: 'http://127.0.0.1:1/asn'}")?;
+        let geo_runtime: headless_core::config::settings::RuntimeSettings = serde_yaml_ng::from_str("tcp-concurrent: true\nfind-process-mode: off\ngeodata-mode: false\ngeodata-loader: standard\ngeosite-matcher: mph\ngeo-auto-update: false\ngeo-update-interval: 48\ngeox-url: {geoip: 'http://127.0.0.1:1/geoip', geosite: 'http://127.0.0.1:1/geosite', mmdb: 'http://127.0.0.1:1/mmdb', asn: 'http://127.0.0.1:1/asn'}")?;
         manager.set_settings(geo_runtime.clone()).await?;
         let geo_readback = manager.geo_settings().await?;
         ensure!(geo_readback.running && geo_readback.error.is_none(), "Geo actual readback unavailable");
@@ -214,6 +214,9 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
             assert!(!field.mismatch);
         }
         assert_eq!(manager.settings().await?.runtime, geo_runtime);
+        let connection = manager.connection_settings().await?;
+        assert!(connection.running && connection.error.is_none());
+        assert!(connection.fields.iter().all(|f| f.setting == f.configured && f.configured == f.actual && !f.mismatch));
         let before_check = manager.status();
         let validation = manager.validate_geo("geoip.metadb".into()).await?;
         assert_eq!(validation.format, "mmdb");

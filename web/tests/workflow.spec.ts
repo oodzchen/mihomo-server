@@ -307,6 +307,67 @@ test("Geo bundle update requests guard hashes, require fresh inspection and reta
   await page.getByRole("button", { name: "退出登录" }).click();
 });
 
+test("connection settings save explicit false, preserve failed drafts and retry actual readback", async ({ page }) => {
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });
+    expect(response.ok).toBe(true); return response.json();
+  };
+  const original = await api("settings");
+  await page.goto(`${base}/settings`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  const form = page.getByRole("region", { name: "服务设置编辑器", exact: true });
+  const panel = page.getByRole("region", { name: "连接设置读回", exact: true });
+  const tcp = page.getByRole("combobox", { name: "TCP 并发连接", exact: true });
+  const mode = page.getByRole("combobox", { name: "进程匹配模式", exact: true });
+  const row = panel.locator("li").filter({ has: page.getByText("tcp-concurrent", { exact: true }) });
+  try {
+    await expect(panel).toContainText("尚无已提交配置");
+    await tcp.selectOption("false"); await mode.selectOption("off");
+    await page.getByRole("combobox", { name: "IPv6", exact: true }).selectOption("false");
+    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+    await expect(form.getByRole("status")).toContainText("保存结果已核对");
+    expect((await api("settings")).runtime).toEqual({ ...original.runtime, ipv6: false, "tcp-concurrent": false, "find-process-mode": "off" });
+    await expect(row).toContainText("服务设置：false");
+    await expect(panel).toContainText("内核未运行，实际值未确认");
+    await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
+    await expect(tcp).toHaveValue("false"); await expect(mode).toHaveValue("off");
+    await page.route("**/api/commands", async route => {
+      if (route.request().postDataJSON().command === "set_settings") await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture settings failure" } }) });
+      else await route.continue();
+    });
+    await tcp.selectOption("true"); await mode.selectOption("always");
+    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+    await expect(form.getByRole("status")).toContainText("草稿已保留");
+    await expect(tcp).toHaveValue("true"); await expect(mode).toHaveValue("always");
+    expect((await api("settings")).runtime["tcp-concurrent"]).toBe(false);
+    await page.unroute("**/api/commands");
+    let fail = true;
+    await page.route("**/api/commands", async route => {
+      if (route.request().postDataJSON().command === "connection_settings") {
+        if (fail) await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture connection read failure" } }) });
+        else await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ running: true, config_revision: "fixture.yaml", error: null, fields: [{ key: "tcp-concurrent", setting: false, configured: false, actual: true, mismatch: true }, { key: "find-process-mode", setting: "off", configured: "off", actual: "always", mismatch: true }] }) });
+      } else await route.continue();
+    });
+    await panel.getByRole("button", { name: "刷新连接设置读回", exact: true }).click();
+    await expect(panel.getByRole("alert")).toContainText("fixture connection read failure");
+    await expect(row).toHaveCount(0);
+    fail = false;
+    await panel.getByRole("button", { name: "刷新连接设置读回", exact: true }).click();
+    await expect(row).toContainText("配置值与内核实际值不一致");
+    await page.unroute("**/api/commands");
+    await panel.getByRole("button", { name: "刷新连接设置读回", exact: true }).click();
+    await expect(panel).toContainText("内核未运行，实际值未确认");
+    await expect(panel).not.toContainText("配置值与内核实际值不一致");
+    await tcp.selectOption(""); await mode.selectOption("");
+    await page.getByRole("combobox", { name: "IPv6", exact: true }).selectOption("");
+    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+    await expect(form.getByRole("status")).toContainText("保存结果已核对");
+    expect((await api("settings")).runtime).toEqual(original.runtime);
+    await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  } finally { await page.unroute("**/api/commands"); await api("set_settings", { runtime: original.runtime }); }
+});
+
 test("Geo settings editor saves inherited URL leaves and reads core values with retry", async ({ page }) => {
   const api = async (command: string, fields: Record<string, unknown> = {}) => {
     const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });

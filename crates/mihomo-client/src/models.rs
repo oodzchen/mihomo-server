@@ -126,6 +126,15 @@ pub struct BaseConfig {
     pub unknown_fields: HashMap<String, Value>,
 }
 
+/// Presence-preserving projection of GET /configs. Older cores must not acquire
+/// invented false/off values through BaseConfig's legacy serde defaults.
+#[derive(Debug, Deserialize, Default)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct ConnectionConfig {
+    pub tcp_concurrent: Option<bool>,
+    pub find_process_mode: Option<FindProcessMode>,
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, rename_all(serialize = "camelCase", deserialize = "kebab-case"))]
 pub struct TunConfig {

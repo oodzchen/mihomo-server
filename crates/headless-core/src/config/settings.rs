@@ -38,6 +38,14 @@ pub enum LogLevel {
     Debug,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FindProcessMode {
+    Strict,
+    Always,
+    Off,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct RuntimeSettings {
@@ -59,6 +67,10 @@ pub struct RuntimeSettings {
     pub ipv6: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unified_delay: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tcp_concurrent: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub find_process_mode: Option<FindProcessMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_level: Option<LogLevel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

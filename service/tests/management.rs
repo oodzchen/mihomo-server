@@ -1595,3 +1595,106 @@ async fn raw_profile_commands_authenticate_reject_unknown_fields_and_stale_versi
     result?;
     cleanup
 }
+
+#[tokio::test]
+async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid_updates() -> Result<()> {
+    let directory = Directory::new()?;
+    let manager = directory.manager()?;
+    let app = router(HttpState::new(Management::new(
+        manager.clone(),
+        directory.authentication()?,
+    )));
+    let token = directory.token()?;
+    let result = async {
+        let read = json!({"command":"connection_settings"});
+        assert_eq!(
+            response(&app, request("wrong", "/api/commands", Some(read.clone()))?)
+                .await?
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
+        let (_, initial) = response(&app, request(&token, "/api/commands", Some(read.clone()))?).await?;
+        assert_eq!(initial["fields"].as_array().unwrap().len(), 2);
+        assert!(
+            initial["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|f| f["setting"].is_null() && f["configured"].is_null() && f["actual"].is_null())
+        );
+        let settings = json!({"command":"set_settings","runtime":{"tcp-concurrent":false,"find-process-mode":"off"}});
+        assert!(
+            response(&app, request(&token, "/api/commands", Some(settings))?)
+                .await?
+                .0
+                .is_success()
+        );
+        let (_, saved) = response(&app, request(&token, "/api/commands", Some(read.clone()))?).await?;
+        assert_eq!(saved["fields"][0]["setting"], false);
+        assert_eq!(saved["fields"][1]["setting"], "off");
+        assert!(saved["config_revision"].is_null());
+        let raw = "mode: direct\ntcp-concurrent: true\nfind-process-mode: strict";
+        let uid = manager
+            .import_profile_yaml(raw.into(), "connection source".into())
+            .await?
+            .uid
+            .unwrap()
+            .to_string();
+        manager.select_profile(uid.clone()).await?;
+        manager
+            .set_profile_merge(
+                uid.clone(),
+                Some("tcp-concurrent: true\nfind-process-mode: always".into()),
+            )
+            .await?;
+        manager
+            .apply_overlay(serde_yaml_ng::from_str(
+                "tcp-concurrent: true\nfind-process-mode: strict",
+            )?)
+            .await?;
+        let (_, committed) = response(&app, request(&token, "/api/commands", Some(read))?).await?;
+        assert_eq!(committed["fields"][0]["configured"], false);
+        assert_eq!(committed["fields"][1]["configured"], "off");
+        assert!(
+            committed["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|f| f["actual"].is_null())
+        );
+        let before = manager.status();
+        let settings = manager.settings().await?;
+        for invalid in [
+            json!({"tcp-concurrent":"false"}),
+            json!({"find-process-mode":false}),
+            json!({"find-process-mode":"Strict"}),
+            json!({"find-process-mode":"invalid"}),
+        ] {
+            assert!(
+                !response(
+                    &app,
+                    request(
+                        &token,
+                        "/api/commands",
+                        Some(json!({"command":"set_settings","runtime":invalid}))
+                    )?
+                )
+                .await?
+                .0
+                .is_success()
+            );
+            assert_eq!(manager.settings().await?, settings);
+            assert_eq!(manager.status().config_revision, before.config_revision);
+        }
+        manager.set_settings(Default::default()).await?;
+        let inherited = manager.connection_settings().await?;
+        assert_eq!(inherited.fields[0].configured, true);
+        assert_eq!(inherited.fields[1].configured, "always");
+        assert!(inherited.fields.iter().all(|f| f.setting.is_null()));
+        assert_eq!(manager.profile_raw(uid).await?.yaml, raw);
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}

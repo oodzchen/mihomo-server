@@ -1222,6 +1222,8 @@ runtime:
   allow-lan: false
   ipv6: false
   unified-delay: true
+  tcp-concurrent: true
+  find-process-mode: off
   log-level: info
 ```
 
@@ -1230,6 +1232,9 @@ Supported scalar fields are the example above plus `redir-port` (non-Windows) an
 Ports are integers 0–65535; zero disables that listener.
 Mode accepts `rule`, `global`, `direct`; log-level accepts `silent`, `error`,
 `warning`, `info`, `debug`. Missing/null fields inherit the source configuration.
+TCP concurrency accepts only true/false, with explicit false disabling it. Process
+matching accepts canonical `strict` (core decides), `always` (force matching) and
+`off` (disable). The Web settings form supports these values and inheritance.
 Explicit fields enter before global/profile enhancements and win in the final
 candidate even if a script changes/removes them. Discarded override warnings appear
 in Logs under `settings`. Imports/runtime edits/overlays obey the same explicit
@@ -2481,6 +2486,35 @@ or request cancellation after work begins cannot undo a committed file; inspect
 again after an ambiguous response. External file writers must honor the same data
 lock. Live/online updates, DAT handling and automatic runtime rollback are pending.
 
+
+## TCP concurrency and process matching readback
+
+Use `set_settings` to save optional `tcp-concurrent` and `find-process-mode` along
+with any other runtime fields you want to retain; it replaces the entire runtime
+settings object. The Web editor preserves existing supported fields automatically.
+Owned values apply before enhancements and again after scripts/merges/overlays.
+Absent/null restores active-subscription inheritance; standalone configurations
+retain their current values until edited, following existing settings semantics.
+Settings/application failure and interrupted saves use the existing transaction
+recovery. Original subscriptions are not rewritten.
+
+Read saved, committed and core-reported values through the authenticated command:
+
+```json
+{"command":"connection_settings"}
+```
+
+The response contains config_revision, running, optional error and two fields:
+tcp-concurrent and find-process-mode. Each includes setting, configured, actual
+and mismatch. Null setting means inheritance; null configured means unspecified;
+null actual means unknown. A core default for an unspecified value is not a
+mismatch. Native title-case mode names normalize to lower-case. Older cores that
+omit a field report null rather than fabricated false/off. A stopped core is not
+queried; running readback has a three-second timeout and a fixed failure diagnostic.
+
+The Web comparison refreshes on settings/config/lifecycle changes and offers
+refresh/retry, clearing stale rows on failure or disconnect. This reports settings,
+not proof of process identification, process-rule effectiveness or improved latency.
 
 ## Authoritative Geo settings and readback
 

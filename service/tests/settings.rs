@@ -805,3 +805,68 @@ async fn geo_settings_enforce_scripts_rollback_failed_probe_and_survive_service_
     let cleanup = restored.shutdown().await;
     result.and(cleanup)
 }
+
+#[tokio::test]
+#[ignore = "requires real Mihomo and bounded script worker"]
+async fn connection_settings_authority_switching_rollback_inheritance_and_restart() -> Result<()> {
+    use headless_core::config::settings::{FindProcessMode, RuntimeSettings};
+    let dir = Directory::new()?;
+    let manager = CoreManager::spawn(dir.options()?)?;
+    let runtime: RuntimeSettings =
+        serde_yaml_ng::from_str("tcp-concurrent: false\nfind-process-mode: off\nipv6: false")?;
+    let result = async {
+        manager.set_settings(runtime.clone()).await?;
+        let source = "mode: direct\nmixed-port: 0\ntcp-concurrent: true\nfind-process-mode: strict\nipv6: false\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']";
+        let uid = manager.import_profile_yaml(source.into(), "connection settings".into()).await?.uid.unwrap().to_string();
+        manager.select_profile(uid.clone()).await?;
+        manager.set_profile_script(uid.clone(), Some("function main(c) { c['tcp-input']=c['tcp-concurrent']; c['process-input']=c['find-process-mode']; c['tcp-concurrent']=true; c['find-process-mode']='always'; if(c.ipv6) c.rules=['INVALID,DIRECT']; return c; }".into())).await?;
+        let config = manager.runtime_config().await?;
+        assert_eq!(config["tcp-input"].as_bool(), Some(false));
+        assert_eq!(config["process-input"].as_str(), Some("off"));
+        manager.start().await?;
+        assert!(manager.connection_settings().await?.fields.iter().all(|f| f.actual == f.setting && f.configured == f.setting && !f.mismatch));
+        for (mode, text) in [(FindProcessMode::Strict, "strict"), (FindProcessMode::Always, "always"), (FindProcessMode::Off, "off")] {
+            let mut changed = runtime.clone(); changed.tcp_concurrent = Some(true); changed.find_process_mode = Some(mode);
+            manager.set_settings(changed).await?;
+            let actual = manager.connection_settings().await?;
+            assert_eq!(actual.fields[0].actual, true); assert_eq!(actual.fields[1].actual, text);
+            assert!(actual.fields.iter().all(|f| !f.mismatch));
+        }
+        let saved = manager.set_settings(runtime.clone()).await?;
+        let before = manager.status();
+        let mut invalid = runtime.clone(); invalid.ipv6 = Some(true); invalid.tcp_concurrent = Some(true); invalid.find_process_mode = Some(FindProcessMode::Always);
+        assert!(manager.set_settings(invalid).await.is_err());
+        assert_eq!(manager.status().pid, before.pid); assert_eq!(manager.status().config_revision, before.config_revision);
+        assert_eq!(manager.settings().await?, saved); assert_eq!(manager.runtime_config().await?, config);
+        assert_eq!(manager.connection_settings().await?.fields[0].actual, false);
+        assert_eq!(manager.connection_settings().await?.fields[1].actual, "off");
+        manager.stop().await?;
+        manager.set_settings(RuntimeSettings::default()).await?;
+        let inherited = manager.connection_settings().await?;
+        assert_eq!(inherited.fields[0].configured, true); assert_eq!(inherited.fields[1].configured, "always");
+        assert!(inherited.fields.iter().all(|f| f.setting.is_null() && f.actual.is_null()));
+        manager.set_settings(runtime).await?;
+        assert_eq!(manager.profile_raw(uid).await?.yaml, source);
+        Ok::<_, anyhow::Error>(saved)
+    }.await;
+    let cleanup = manager.shutdown().await;
+    let saved = result?;
+    cleanup?;
+    let restored = CoreManager::spawn(dir.options()?)?;
+    let result = async {
+        restored.start().await?;
+        assert_eq!(restored.settings().await?, saved);
+        let actual = restored.connection_settings().await?;
+        assert!(actual.running && actual.error.is_none());
+        assert!(
+            actual
+                .fields
+                .iter()
+                .all(|f| f.setting == f.configured && f.configured == f.actual && !f.mismatch)
+        );
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let cleanup = restored.shutdown().await;
+    result.and(cleanup)
+}

@@ -171,6 +171,21 @@ alias. Matcher readback adds a ninth field without reordering existing fields;
 missing older-core values are unknown. No upstream source or new dependencies
 are introduced; DAT validity and rule matching are not claimed by settings reads.
 
+## TCP concurrency and process matching authority
+
+Original service adaptation using retained Mihomo TCP/process response fields.
+Strict boolean and process-mode semantics are verified against the
+[official general configuration](https://wiki.metacubex.one/en/config/general/).
+No upstream source is copied and no dependencies are added. Typed optional runtime
+fields reuse the service settings transaction and initial/final enforcement.
+
+The additional `ConnectionConfig`/GET /configs client projection retains field
+presence rather than applying legacy BaseConfig false/off defaults. The retained
+FindProcessMode parser accepts native title/lower case; service saves use canonical
+lower case. `connection_settings` is an authenticated, actor-serialized comparison,
+not a mutating upstream command. Shared backend/Web comparison helpers preserve
+existing Geo behavior. This verifies settings readback, not process-rule results.
+
 ## Mihomo plugin
 
 - Repository: https://github.com/clash-verge-rev/tauri-plugin-mihomo

@@ -1,8 +1,6 @@
 //! Geo settings/config/core comparison without implying resource validity.
 use headless_core::config::settings::RuntimeSettings;
 use mihomo_client::models::BaseConfig;
-use serde::Serialize;
-use serde_json::Value;
 use serde_yaml_ng::Mapping;
 
 const KEYS: [&str; 9] = [
@@ -16,22 +14,7 @@ const KEYS: [&str; 9] = [
     "geox-url.asn",
     "geosite-matcher",
 ];
-#[derive(Debug, Serialize)]
-pub struct Field {
-    pub key: &'static str,
-    pub setting: Value,
-    pub configured: Value,
-    pub actual: Value,
-    pub mismatch: bool,
-}
-#[derive(Debug, Serialize)]
-pub struct Snapshot {
-    pub config_revision: Option<String>,
-    pub running: bool,
-    pub error: Option<&'static str>,
-    pub fields: Vec<Field>,
-}
-
+pub use crate::settings_readback::{Field, Snapshot};
 pub(crate) fn snapshot(
     settings: &RuntimeSettings,
     config: Option<&Mapping>,
@@ -39,42 +22,21 @@ pub(crate) fn snapshot(
     running: bool,
     actual: Option<&BaseConfig>,
 ) -> anyhow::Result<Snapshot> {
-    let owned = serde_json::to_value(settings)?;
     let actual = actual.map(|core| serde_json::json!({
         "geodata-mode":core.geodata_mode, "geodata-loader":core.geodata_loader,
         "geo-auto-update":core.geo_auto_update, "geo-update-interval":core.geo_update_interval,
         "geosite-matcher": (!core.geosite_matcher.is_empty()).then_some(&core.geosite_matcher),
         "geox-url":{"geoip":core.geox_url.geo_ip,"geosite":core.geox_url.geo_site,"mmdb":core.geox_url.mmdb,"asn":core.geox_url.asn}
     }));
-    let get = |value: &Value, key: &str| key.split('.').fold(value, |value, part| &value[part]).clone();
-    Ok(Snapshot {
-        config_revision: revision,
+    crate::settings_readback::snapshot(
+        settings,
+        config,
+        revision,
         running,
-        error: (running && actual.is_none()).then_some("Geo core readback unavailable"),
-        fields: KEYS
-            .into_iter()
-            .map(|key| {
-                let configured = if let Some(config) = config {
-                    let mut parts = key.split('.');
-                    let value = config.get(parts.next().unwrap()).and_then(|value| {
-                        parts.try_fold(value, |value, part| value.as_mapping().and_then(|map| map.get(part)))
-                    });
-                    value.map(serde_json::to_value).transpose()?.unwrap_or(Value::Null)
-                } else {
-                    Value::Null
-                };
-                let actual = actual.as_ref().map(|value| get(value, key)).unwrap_or(Value::Null);
-                let mismatch = !configured.is_null() && !actual.is_null() && configured != actual;
-                Ok::<_, anyhow::Error>(Field {
-                    key,
-                    setting: get(&owned, key),
-                    configured,
-                    actual,
-                    mismatch,
-                })
-            })
-            .collect::<anyhow::Result<Vec<_>>>()?,
-    })
+        actual.as_ref(),
+        &KEYS,
+        "Geo core readback unavailable",
+    )
 }
 
 #[cfg(test)]
