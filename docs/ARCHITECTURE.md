@@ -12,6 +12,10 @@ Status meanings:
 - **Partially migrated**: some named responsibilities are verified; the remaining ones are pending.
 - **Partially implemented**: service runtime pieces work, while the remaining integrations are pending.
 - **Pending**: the component has not been implemented or extracted.
+- **Deferred**: planned capabilities or platform compatibility that have been postponed (e.g., Windows compatibility).
+
+> [!NOTE]
+> **Windows compatibility deferred**: Windows-related feature plans (including Windows Named Pipe runtime validation, native Windows system proxy discovery, and Windows SCM service integration) are commented out and deferred to focus on Linux and core headless service stability.
 
 A copied source file, a successful build, or an empty route does not by itself
 establish a working integration. Mark partially migrated components explicitly.
@@ -35,8 +39,8 @@ mihomo-server/
 │   ├── mihomo-client/                               [Migrated; Linux verified]
 │   │   ├── Unix socket / explicit loopback HTTP      [Migrated]
 │   │   ├── API methods, response models, errors      [Migrated]
-│   │   ├── Realtime feeds, cancellation, reconnect   [Migrated]
-│   │   └── Windows Named Pipe runtime validation    [Pending; code retained]
+│   │   └── Realtime feeds, cancellation, reconnect   [Migrated]
+<!--│   │   └── Windows Named Pipe runtime validation    [Deferred; code retained; Windows compatibility postponed] -->
 │   └── headless-core/                               [Partially migrated]
 │       ├── Draft and limiter type re-exports        [Implemented]
 │       ├── Subscription models and YAML schema     [Migrated]
@@ -109,7 +113,8 @@ mihomo-server/
 │   │   ├── Manual refresh / stale-download guard / journal recovery [Implemented; Linux]
 │   │   ├── Managed core proxy / live route / auth / lifecycle cancellation [Implemented; Linux verified]
 │   │   ├── Service system proxy / environment / bypass / auth [Implemented; Linux verified]
-│   │   ├── Native Windows/macOS proxy discovery runtime validation [Pending; library code retained]
+│   │   ├── Native macOS proxy discovery runtime validation [Pending; library code retained]
+<!--│   │   ├── Native Windows proxy discovery runtime validation [Deferred; Windows compatibility postponed] -->
 │   │   ├── TLS platform/static roots / explicit certificate option [Migrated + adaptation; Linux verified]
 │   │   ├── Scheduled refresh / retirement / bounded workers / drain [Migrated + adaptation; Linux verified]
 │   │   └── SOCKS/PAC                               [Pending]
@@ -168,7 +173,8 @@ mihomo-server/
 │   ├── Web static assets and scoped SPA fallback    [Implemented; Linux verified]
 │   ├── Unix SIGINT/SIGTERM and unified shutdown     [Implemented]
 │   ├── User systemd unit template                  [Scaffold; static check only]
-│   └── Windows SCM / other platform service integration [Pending]
+│   └── Other platform service integration           [Pending]
+<!--│   └── Windows SCM service integration              [Deferred; Windows compatibility postponed] -->
 ├── web/                                             [Partially implemented]
 │   ├── React build, login and responsive layout     [Implemented; MVP]
 │   ├── HTTP commands, WebSocket events/feed adapters [Implemented; MVP allowlist]
@@ -298,8 +304,11 @@ unavailable records; config/profile application can reconcile stale records afte
 confirmation. Linked merge/sequence/script changes coordinate catalog and runtime commit/recovery.
 Complete enhancement/resource transactions,
 provider/Geo resource rollback, and structured validation outcomes remain pending.
+<!-- Windows compatibility deferred:
 Windows console/pipe/storage behavior remains unverified, and SCM and
 abnormal-exit platform cleanup require deployment integration.
+-->
+Windows-specific compatibility (console, Named Pipe, SCM, storage) is deferred; abnormal-exit platform cleanup requires deployment integration.
 
 ## Previous increment: authenticated HTTP management
 
@@ -1652,7 +1661,8 @@ CIDR matching. A `*` bypass entry is explicitly global for IP literals too,
 correcting the locked matcher's domain-only wildcard. Missing configuration or
 bypass permits direct access, matching upstream disabled/unavailable discovery.
 CGI REQUEST_METHOD suppresses discovery, following the locked matcher. Native
-Windows/macOS discovery remains library code awaiting runtime verification.
+macOS discovery remains library code awaiting runtime verification.
+<!-- Windows compatibility deferred: Native Windows proxy discovery remains library code awaiting runtime verification. -->
 No Linux desktop session, PAC/WPAD or external discovery command is required.
 
 Effective variables are bounded UTF-8/control-free values; HTTP(S) endpoint
@@ -2156,8 +2166,9 @@ The Linux MVP remains runnable; the complete project is not done. Next Delivery
 step 7 subtask: durable repair of an unreadable/empty managed core, including failed
 repair rollback/recovery and browser repair readback. Alpha/other targets, native
 TUN/DNS/hosts/resources, backups/WebDAV, advanced pages, garbage collection,
-SOCKS/PAC and platform/deployment work remain pending. Native Windows/macOS system
-proxy discovery still requires platform runtime checks.
+SOCKS/PAC and platform/deployment work remain pending. Native macOS system
+proxy discovery still requires platform runtime checks (Windows compatibility deferred).
+<!-- Windows compatibility deferred: Native Windows system proxy discovery still requires platform runtime checks. -->
 
 ## Previous increment: durable repair of broken managed cores
 
@@ -2773,11 +2784,13 @@ remaining integration gaps. Prioritize the usable MVP before expanding features:
 7. Complete remaining remote subscription/enhancement workflows, then expand
    scheduled updates, stable/Alpha core upgrades with rollback, backups
    and WebDAV, media detection, advanced settings, the remaining UI pages,
-   and additional platform release/service integrations from `headless.md`.
+   and additional platform release/service integrations from `headless.md`
+   (Windows-related compatibility is deferred).
 
 Deferred capabilities remain required by the full design. Preserve existing
 business semantics during extraction, even when the initial UI exposes only
 the operations needed for the MVP.
+<!-- Note: Windows-specific compatibility plans (Named Pipe, Windows SCM, native Windows proxy discovery) are deferred. -->
 
 ## Migration report requirements
 
