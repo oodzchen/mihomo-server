@@ -252,6 +252,44 @@ test("resource inventory reads metadata, refreshes changes and retries without e
   } finally { await rm(join(directory, "Country.mmdb"), { force: true }); }
 });
 
+test("DAT resource checks show structural counts, unknown fields and stale result clearing", async ({ page }) => {
+  const vint = (n: number): number[] => { const out: number[] = []; while (n > 127) { out.push((n & 127) | 128); n >>>= 7; } return [...out, n]; };
+  const field = (n: number, bytes: number[]) => [...vint((n << 3) | 2), ...vint(bytes.length), ...bytes];
+  const string = (s: string) => [...Buffer.from(s)];
+  const group = (records: number[][]) => Buffer.from(field(1, [...field(1, string("browser")), ...records.flatMap(r => field(2, r))]));
+  const geoip = group([[...field(1, [192, 0, 2, 0]), 16, 24], [...field(1, [32, 1, 13, 184, ...Array(12).fill(0)]), 16, 32]]);
+  const geosite = group([[8, 3, ...field(2, string("exact.dat.test")), ...field(3, [...field(1, string("test")), 16, 1])], [8, 1, ...field(2, string("^.*$"))]]);
+  await page.goto(`${base}/settings`); await page.getByLabel("管理令牌").fill(token); await page.getByRole("button", { name: "连接服务" }).click();
+  const panel = page.getByRole("region", { name: "运行资源清单", exact: true });
+  const ip = panel.locator("li").filter({ has: page.getByText("geoip.dat", { exact: true }) });
+  const site = panel.locator("li").filter({ has: page.getByText("geosite.dat", { exact: true }) });
+  try {
+    await writeFile(join(directory, "geoip.dat"), geoip); await writeFile(join(directory, "geosite.dat"), geosite);
+    await panel.getByRole("button", { name: "刷新资源清单" }).click();
+    await ip.getByRole("button", { name: "校验 geoip.dat", exact: true }).click();
+    await expect(ip.getByRole("status")).toContainText("DAT 已知结构校验通过");
+    await expect(ip.getByRole("status")).toContainText("1 分组 · 2 记录 · IPv4 1 / IPv6 1");
+    await expect(ip.getByRole("status")).toContainText(createHash("sha256").update(geoip).digest("hex"));
+    await expect(ip.getByRole("status")).toContainText("兼容性未验证");
+    await expect(ip.getByRole("status")).toContainText("缺少 CN 分组");
+    expect(await readFile(join(directory, "geoip.dat"))).toEqual(geoip);
+    await site.getByRole("button", { name: "校验 geosite.dat", exact: true }).click();
+    await expect(site.getByRole("status")).toContainText("正则 1 · 属性 1");
+    const future = Buffer.concat([geosite, Buffer.from([32, 1])]); await writeFile(join(directory, "geosite.dat"), future);
+    await site.getByRole("button", { name: "校验 geosite.dat", exact: true }).click();
+    await expect(site.getByRole("status")).toContainText("未知字段，完整结构未验证");
+    await expect(site.getByRole("status")).toContainText("未知字段 1");
+    await expect(site).not.toContainText("已知结构校验通过");
+    await writeFile(join(directory, "geosite.dat"), Buffer.from([10, 255]));
+    await site.getByRole("button", { name: "校验 geosite.dat", exact: true }).click();
+    await expect(site.getByRole("alert")).toContainText("校验失败"); await expect(site.getByRole("status")).toHaveCount(0);
+    await writeFile(join(directory, "geosite.dat"), geosite);
+    await site.getByRole("button", { name: "校验 geosite.dat", exact: true }).click(); await expect(site.getByRole("status")).toContainText("已知结构校验通过");
+    await panel.getByRole("button", { name: "刷新资源清单" }).click(); await expect(site.getByRole("status")).toHaveCount(0); await expect(ip.getByRole("status")).toHaveCount(0);
+    await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  } finally { await rm(join(directory, "geoip.dat"), { force: true }); await rm(join(directory, "geosite.dat"), { force: true }); }
+});
+
 test("Geo bundle update requests guard hashes, require fresh inspection and retain warnings", async ({ page }) => {
   let reads = 0, installs = 0;
   let sendPhase: (phase: string) => void = () => { throw new Error("WebSocket fixture not ready"); };

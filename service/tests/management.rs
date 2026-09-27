@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+#[path = "fixtures/dat.rs"]
+mod dat_fixtures;
 use anyhow::{Context as _, Result};
 use axum::{
     Router,
@@ -287,9 +289,28 @@ async fn resource_inventory_authenticates_tracks_committed_config_and_redacts_so
         assert_eq!(std::fs::read(directory.0.join("Country.mmdb"))?, b"invalid MMDB");
         assert_eq!(manager.status().generation, before_check.generation);
         assert_eq!(manager.status().config_revision, before_check.config_revision);
-        for payload in [json!({"command":"validate_geo", "name":"../Country.mmdb"}), json!({"command":"validate_geo", "name":"geoip.dat"}), json!({"command":"validate_geo", "name":"Country.mmdb", "path":"/etc/passwd"})] {
+        for payload in [json!({"command":"validate_geo", "name":"../Country.mmdb"}), json!({"command":"validate_geo", "name":"GeoSite.dat"}), json!({"command":"validate_geo", "name":"Country.mmdb", "path":"/etc/passwd"})] {
             let (status, _) = response(&app, request(&token, "/api/commands", Some(payload))?).await?;
             assert!(!status.is_success());
+        }
+
+        for (name, data, count) in [("geoip.dat", dat_fixtures::geoip(), 3), ("geosite.dat", dat_fixtures::geosite(), 5)] {
+            let command = json!({"command":"validate_geo", "name":name});
+            assert_eq!(response(&app, request("wrong", "/api/commands", Some(command.clone()))?).await?.0, StatusCode::UNAUTHORIZED);
+            std::fs::write(directory.0.join(name), &data)?;
+            let (status, report) = response(&app, request(&token, "/api/commands", Some(command.clone()))?).await?;
+            assert!(status.is_success()); assert_eq!(report["format"], "dat"); assert_eq!(report["verified"], true);
+            assert_eq!(report["warning"], "dat_core_matching_unverified");
+            assert_eq!(report["dat"]["record_count"], count); assert_eq!(report["dat"]["core_matching_verified"], false);
+            assert_eq!(report["sha256"], ring::digest::digest(&ring::digest::SHA256, &data).as_ref().iter().map(|b| format!("{b:02x}")).collect::<String>()); assert!(report.get("node_count").is_none());
+            assert!(!report.to_string().contains("exact.dat.test"));
+            assert_eq!(std::fs::read(directory.0.join(name))?, data);
+            let mut corrupt = data; corrupt.pop(); std::fs::write(directory.0.join(name), &corrupt)?;
+            let (status, _) = response(&app, request(&token, "/api/commands", Some(command))?).await?;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(std::fs::read(directory.0.join(name))?, corrupt);
+            assert_eq!(manager.status().generation, before_check.generation);
+            assert_eq!(manager.status().config_revision, before_check.config_revision);
         }
 
         std::fs::create_dir(directory.0.join("providers"))?;

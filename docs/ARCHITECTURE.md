@@ -53,14 +53,14 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** typed hosts mapping authority, explicit DNS
-host-use switches and Web editing, integrated with subscription DNS confirmation
-and settings recovery. Real UDP verification covers IPv4/IPv6, wildcard precedence,
-aliases, system-host toggling, rollback, inheritance and service restart.
-**Next implementation task (P1):** DAT resource validation and compatibility
-diagnostics, with corresponding management/Web checks. Controlled online/running-
-core Geo updates and remaining full settings still belong to P1; finish this
-priority before starting P2.
+**Latest completed task (P1):** read-only GeoIP/GeoSite DAT structural validation,
+bounded protobuf parsing, CN/unknown-field compatibility diagnostics and management/
+Web resource checks. Actual core fixtures verify rule selection across both loaders
+and both matchers, with original node/Geo data preserved.
+**Next implementation task (P1):** stopped-core, integrity-pinned DAT bundle
+installation with compatibility validation, digest guards and recovery, extending
+the delivered MMDB workflow. Controlled online/running-core Geo updates and
+remaining full settings still belong to P1; finish this priority before starting P2.
 
 ## Complete target architecture
 
@@ -161,7 +161,9 @@ mihomo-server/
 │   │   ├── Stopped-core pinned MMDB replacement / digest guards / atomic commit / orphan recovery [Implemented; Linux verified]
 │   │   ├── Geo actor settings/config/core comparison / geosite matcher / bounded readback / URL model aliases [Implemented; Linux verified]
 │   │   ├── Connection/outbound/download comparison / nine presence-preserving fields / shared snapshot envelope [Implemented; Linux verified]
-│   │   ├── DAT validation / compatibility diagnostics [Pending; next P1 task]
+│   │   ├── dat_validation.rs / bounded protobuf / CIDR-domain-attribute checks / CN diagnostics [Implemented; Linux verified]
+│   │   ├── Read-only DAT snapshots / aggregate reports / core compatibility warning [Implemented; Linux verified]
+│   │   ├── Stopped-core pinned DAT installation / compatibility checks / recovery [Pending; next P1 task]
 │   │   └── Controlled online and running-core Geo updates / remaining full settings [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
@@ -279,7 +281,7 @@ mihomo-server/
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
 │   ├── Geo/Provider inventory / metadata states / refresh and retry [Implemented; Linux verified]
-│   ├── Explicit MMDB checks / errors and compatibility warnings / stale-result clearing [Implemented; Linux verified]
+│   ├── Explicit MMDB/DAT checks / aggregate diagnostics / compatibility warnings / stale-result clearing [Implemented; Linux verified]
 │   ├── Pinned MMDB update inspection / stopped-state install / explicit metadata-only acceptance [Implemented; Linux verified]
 │   ├── Geo field editor incl. geosite matcher / per-URL inheritance / saved-configured-actual readback / retry [Implemented; Linux verified]
 │   ├── Remaining full settings/resource lifecycle UI [Pending; P1]
@@ -4113,6 +4115,72 @@ management/Web checks. Remaining full settings, native TUN and controlled Geo
 updates stay pending P1; P2 rules/provider/delay, P3 i18n/signals and P4 actual
 systemd installation remain incomplete. Deferred features remain deferred, and
 Git submission is left to the external host script.
+
+## Increment: bounded DAT validation and compatibility diagnostics (P1)
+
+Completed the next task in Delivery order. New `service/src/dat_validation.rs`
+validates the GeoIPList/GeoSiteList protobuf schema through a bounded byte-slice
+reader, without new dependencies or retaining record payloads. Known fields check
+wire types, truncation/overflow, CIDR family/prefix, domain enums, nonempty UTF-8,
+attribute bool/int64 oneof and proto3 defaults. Limits bound file size, groups,
+records, total fields and text lengths; service policy rejects duplicate singular
+fields and case-duplicate group identifiers. Unknown fields are skipped safely
+and produce an explicitly unverified result. Fixed schema nesting bounds recursion.
+
+The existing authenticated actor `validate_geo` command now accepts `geoip.dat`
+and `geosite.dat` alongside the three MMDB names. It reuses confined no-follow
+regular-file snapshots, the 128 MiB bound, read-time metadata guards and SHA-256.
+It works before configuration and while stopped/running without starting, probing,
+reloading or writing the core/resources. Reports return counts and diagnostics,
+not domains, IP addresses, group lists or attribute values. MMDB JSON metadata
+retains its original numeric fields; DAT omits those fields and adds the `dat`
+aggregate object. Invalid DAT returns the existing validation error envelope.
+
+A structural pass deliberately does not claim Go regexp compilation, selected
+matcher validity, category existence or classification/attribute-filter semantics.
+`core_matching_verified` is always false. CN presence is reported independently;
+missing CN warns that Mihomo initialization can delete/re-download the file when
+its CN verification fails. Unknown-field warnings take precedence. Generated
+fixtures include CN and disable external downloads, so the real-core check does
+not exercise uncontrolled Geo initialization. Primary schema/loading/init source
+references and the original service adaptation are recorded in `docs/UPSTREAM.md`.
+
+The Web resource panel exposes both DAT checks, structural/unknown-field status,
+family/regex/attribute/empty-group counts, CN absence and the fingerprint. Checking,
+failure, retry, inventory refresh, lifecycle/revision changes and disconnect reuse
+the existing stale-result guards. Downloads and installation are not added here.
+`docs/RUNNING.md` documents the API, bounds, warnings and real-core check.
+
+Verification:
+
+- `cargo check --workspace`, formatting and the Web production build succeed.
+  Workspace tests report **370 passed, 82 opt-in ignored**. Pure validation cases
+  cover defaults, malformed known fields, truncation, varint overflow, field/group/
+  text bounds, unknown fields, empty groups and compatibility limits. Snapshot
+  checks cover digest/report privacy and symlink/FIFO/empty/oversized rejection;
+  management checks cover authentication, both DAT names, corrupt-file errors and
+  unchanged files/core revision.
+- The explicitly enabled real-core DAT workflow passes with
+  `/usr/bin/verge-mihomo`: standard/memconservative loaders × mph/succinct matchers
+  each route exact, suffix, keyword, regexp, IPv4, IPv6 and unmatched requests to
+  deterministic local HTTP proxy fixtures. It verifies read-only checks while
+  running/stopped, malformed-file failure without core/revision changes, and
+  restored operation after service restart. These fixtures do not prove arbitrary
+  user DAT files compatible or change the API compatibility flag.
+- The actual-node resource workflow passes against private copies of `data`
+  subscriptions and Geo resources using `wlo1`: HTTPS proxy traffic returns 204
+  after core restart and original source hashes remain unchanged.
+- Full Chromium regression reports **28 passed, 4 optional bundle upgrade/repair
+  workflows skipped**. The new DAT workflow verifies counts/fingerprints, missing
+  CN, unknown-field warnings, failure/retry and refresh clearing; existing settings,
+  profiles and MMDB workflows remain covered.
+
+The complete architecture tree above is synchronized and the Linux MVP remains
+runnable. Next: P1 stopped-core pinned DAT installation with compatibility checks
+and recovery. Controlled online/running-core Geo lifecycle, full settings and
+native TUN remain pending P1; P2 rules/provider/delay, P3 i18n/signals and P4 actual
+systemd installation remain incomplete. Deferred work stays deferred. Git submission
+is left to the external host script.
 
 ## MVP completion boundary
 

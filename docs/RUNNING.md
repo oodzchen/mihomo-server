@@ -2502,7 +2502,7 @@ this command does not change whether Mihomo accepts the configuration.
 that its content format is valid or that a running core has loaded it. Missing Geo
 files may be normal when rules do not require them. The filesystem can change after
 a read; refresh after a core download or external file change. Geo installation,
-online/running-core updates, DAT validation and Provider refresh/reload APIs remain
+online/running-core updates, DAT installation and Provider refresh/reload APIs remain
 future work. MMDB checks and stopped-core bundle installs are available explicitly
 as described below. Optional bundle Geo seeds can now initialize missing files under pinned
 size/SHA-256 checks; see [Geo deployment inputs](DEPLOYMENT.md#include-existing-geo-files-for-first-use-initialization).
@@ -2517,7 +2517,8 @@ and `geoip.metadb`. The authenticated equivalent is:
 {"command":"validate_geo","name":"geoip.metadb"}
 ```
 
-Only those three case-sensitive names are accepted, with no custom path/URL.
+MMDB validation accepts these three case-sensitive names; DAT validation accepts
+the two additional names described below. No custom path/URL is accepted.
 The command works while the core is stopped or running and reads a bounded local
 snapshot without modifying files, configuration, or the core. Empty/special/link
 files, inputs above 128 MiB/two million nodes and invalid databases are rejected.
@@ -2588,8 +2589,78 @@ Start the core explicitly after installation to use the new file. Installation
 never starts/restarts it or changes the configuration revision. Browser disconnect
 or request cancellation after work begins cannot undo a committed file; inspect
 again after an ambiguous response. External file writers must honor the same data
-lock. Live/online updates, DAT handling and automatic runtime rollback are pending.
+lock. Live/online updates, DAT installation and automatic runtime rollback are pending.
 
+
+## GeoIP/GeoSite DAT validation and compatibility diagnostics
+
+The authenticated `validate_geo` command additionally supports exactly `geoip.dat`
+and `geosite.dat` in the managed data root:
+
+```json
+{"command":"validate_geo","name":"geosite.dat"}
+```
+
+No arbitrary filename/path/URL or download/install request is accepted. The actor
+serializes this read-only check with service resource/lifecycle mutations. The same
+no-follow descriptors, regular-file/nonempty/128 MiB bound, read-time metadata
+checks and SHA-256 snapshot used by MMDB apply. It works before configuration and
+while the core is stopped or running, without probing/reloading/starting the core,
+changing revisions or writing the file. External writers must honor the data lock;
+subsequent core/external writes invalidate the result's snapshot.
+
+The bounded protobuf reader checks all known list/group/record/attribute fields.
+It verifies message lengths, varints and wire types; IPv4/IPv6 CIDR byte lengths
+and prefixes; supported domain enum/boolean values; required nonempty UTF-8 values;
+attribute keys and bool/int64 oneof shapes. Proto3 omitted Plain type, /0 prefix
+and false flags retain their defaults. Service limits are 20,000 groups, 2,000,000
+records, 20,000,000 fields, 128-byte ASCII case-unique group identifiers, 128-byte
+attribute keys and 4096-byte domain/pattern values. NUL text and duplicate singular/
+oneof fields are rejected, although protobuf generally permits last-value semantics.
+Deprecated group wire types are unsupported. These bounds are service policies.
+The parser has fixed nesting depth and does not retain all record strings or IPs.
+
+Success preserves `name`, `bytes`, `sha256`, `format: "dat"`, `verified` and `warning`.
+MMDB-only `ip_version`, `node_count` and `build_epoch` are absent. The `dat` object
+contains `kind`, `group_count`, `record_count`, `ipv4_count`, `ipv6_count`,
+`regex_count`, `attribute_count`, `empty_group_count`, `unknown_field_count`,
+`has_cn_group` and `core_matching_verified`. No group list, domain, IP or attribute
+value is returned. Unknown forward fields are safely skipped; known fields are
+still checked, but `verified` becomes false and warning is
+`dat_unknown_fields_unverified`. Malformed known fields fail the command.
+
+For known structure, `verified: true` means the structural checks above passed.
+It does not compile Go regexp syntax, build the selected matcher, verify attribute
+filter semantics, compare classification contents, or prove required rule categories
+exist. `core_matching_verified` remains false. Warning is `dat_cn_group_missing`
+when CN is absent, otherwise `dat_core_matching_unverified`; CN presence is also
+reported independently when unknown fields take warning precedence. Current Mihomo
+initialization verifies CN and can delete/re-download a file on verification failure,
+so structural validity alone must not be treated as safe core activation. Empty-group
+and regexp counts remain visible diagnostics even for a structurally valid file.
+
+The **Geo / Provider 资源** panel adds **校验 geoip.dat** and **校验 geosite.dat**
+for available files, shows structural/unknown-field status, counts, CN absence,
+compatibility limits and the fingerprint. Failed checks, refresh, lifecycle/revision
+changes and disconnect clear stale outcomes; retry is available. Existing MMDB
+checks and stopped-core MMDB installation keep their behavior. DAT installation,
+controlled online/running-core updates and P2 provider actions remain pending.
+
+An opt-in real-core check uses generated DAT fixtures (including CN), disabled
+external downloads and local HTTP proxy endpoints. It verifies exact/suffix/keyword/
+regexp and IPv4/IPv6 rule selection for standard/memconservative loaders and
+mph/succinct matchers, read-only checks while running/stopped, malformed-file
+failure and persistence after service restart:
+
+```sh
+CARGO_HOME=/tmp/mihomo-server-cargo \
+MIHOMO_TEST_BINARY=/usr/bin/verge-mihomo \
+cargo test -p mihomo-server --test dat_validation --locked --offline -- --ignored --test-threads=1
+```
+
+These real fixture results do not change the API's unverified compatibility flag.
+The separate `resource_inventory_live` check still uses private copies of actual
+`data` nodes/Geo data to verify HTTPS 204 and unchanged source hashes.
 
 ## Connection settings and TCP keep-alive readback
 

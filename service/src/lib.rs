@@ -3,6 +3,7 @@ pub mod connection_settings;
 pub mod core_manager;
 pub mod core_release;
 pub mod core_upgrade;
+mod dat_validation;
 #[cfg(unix)]
 mod geo_resources;
 pub mod geo_settings;

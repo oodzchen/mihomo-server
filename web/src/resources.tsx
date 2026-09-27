@@ -71,11 +71,17 @@ export function ResourcesPanel({ token, status, connection, logout }: {
     const controller = new AbortController();
     validationController.current = controller;
     setChecking(name);
-    setChecks(previous => ({ ...previous, [name]: { message: "正在校验 MMDB…" } }));
+    setChecks(previous => ({ ...previous, [name]: { message: `正在校验 ${name.endsWith(".dat") ? "DAT" : "MMDB"}…` } }));
     try {
-      const report = await command<{ verified: boolean; warning: string | null; sha256: string; bytes: number; ip_version: number; node_count: number }>(token, "validate_geo", { name }, controller.signal);
+      const report = await command<{ verified: boolean; warning: string | null; sha256: string; bytes: number; ip_version: number; node_count: number; dat?: { group_count: number; record_count: number; ipv4_count: number; ipv6_count: number; regex_count: number; attribute_count: number; empty_group_count: number; unknown_field_count: number; has_cn_group: boolean; core_matching_verified: boolean } }>(token, "validate_geo", { name }, controller.signal);
       if (currentEpoch !== epoch.current) return;
-      setChecks(previous => ({ ...previous, [name]: { message: `${report.verified ? "MMDB 结构校验通过" : "MMDB 元数据可读，完整结构未验证（缺少数据库描述）"} · IPv${report.ip_version} · ${report.node_count} 节点 · ${report.bytes} 字节 · SHA-256 ${report.sha256}` } }));
+      let message: string;
+      if (name.endsWith(".dat")) {
+        const dat = report.dat;
+        if (!dat) throw new Error("服务返回的 DAT 诊断无效。");
+        message = `${report.verified ? "DAT 已知结构校验通过" : "DAT 包含未知字段，完整结构未验证"} · ${dat.group_count} 分组 · ${dat.record_count} 记录 · IPv4 ${dat.ipv4_count} / IPv6 ${dat.ipv6_count} · 正则 ${dat.regex_count} · 属性 ${dat.attribute_count} · 空分组 ${dat.empty_group_count} · 未知字段 ${dat.unknown_field_count} · ${dat.has_cn_group ? "含 CN 分组" : "缺少 CN 分组，核心初始化可能删除并重新下载"} · 核心规则匹配与正则语法兼容性未验证`;
+      } else message = `${report.verified ? "MMDB 结构校验通过" : "MMDB 元数据可读，完整结构未验证（缺少数据库描述）"} · IPv${report.ip_version} · ${report.node_count} 节点`;
+      setChecks(previous => ({ ...previous, [name]: { message: `${message} · ${report.bytes} 字节 · SHA-256 ${report.sha256}` } }));
     } catch (error) {
       if (currentEpoch !== epoch.current) return;
       if (error instanceof ApiError && error.status === 401) logout("认证失效，请重新输入令牌。");
@@ -90,7 +96,7 @@ export function ResourcesPanel({ token, status, connection, logout }: {
       <strong>{item.name}</strong> · {item.section === "proxy-providers" ? "代理 Provider" : item.section === "rule-providers" ? "规则 Provider" : "Geo"}
       <p>{labels[item.state] || "未知状态"}{item.bytes !== null ? ` · ${item.bytes} 字节` : ""}{item.provider_type ? ` · ${item.provider_type}` : ""}</p>
       {item.path && <code>{item.path}</code>}
-      {item.section === "geo" && ["Country.mmdb", "ASN.mmdb", "geoip.metadb"].includes(item.name) && item.state === "available" && <button type="button" disabled={!!checking} onClick={() => void validate(item.name)}>校验 {item.name}</button>}
+      {item.section === "geo" && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && item.state === "available" && <button type="button" disabled={!!checking} onClick={() => void validate(item.name)}>校验 {item.name}</button>}
       {item.section === "geo" && checks[item.name] && <p role={checks[item.name].error ? "alert" : "status"} className={checks[item.name].error ? "alert" : "info"}>{checks[item.name].message}</p>}
       {item.section === "geo" && value?.bundle_dir && ["Country.mmdb", "ASN.mmdb", "geoip.metadb"].includes(item.name) && <GeoSeedAction name={item.name} token={token} status={status} connection={connection} logout={logout} installed={message => { setNotice(message); setRefresh(previous => previous + 1); }} />}
       {item.conflict && <p className="alert">多个资源声明共用此路径，请检查缓存是否冲突。</p>}
@@ -106,7 +112,7 @@ export function ResourcesPanel({ token, status, connection, logout }: {
       {!value.config_revision && <p className="info">尚无已提交配置，导入并使用订阅后显示 Provider 声明。</p>}
       <h3>Geo 文件</h3>{rows(value.geo)}
       <h3>Provider 文件与缓存</h3>{value.providers.length ? rows(value.providers) : <p className="muted">当前已提交配置没有 Provider 声明。</p>}
-      <p className="hint">路径相对于运行数据目录。文件存在仅表示元数据可读取，尚未验证内容格式。MMDB 可手动校验结构，结果仅针对当次读取的文件摘要，不证明规则覆盖或内核兼容性；打包 MMDB 可在停止内核后显式安装，安装失败或请求中断后请重新读取状态。DAT 格式校验待实现。Geo 文件是否必需取决于配置规则。Provider 声明来自已提交配置，内核下载后可刷新清单核对文件状态。</p>
+      <p className="hint">路径相对于运行数据目录。文件存在仅表示元数据可读取，尚未验证内容格式。MMDB 可手动校验结构，结果仅针对当次读取的文件摘要，不证明规则覆盖或内核兼容性；打包 MMDB 可在停止内核后显式安装，安装失败或请求中断后请重新读取状态。DAT 可校验已知 protobuf 结构与记录字段；未知字段、分组/记录统计和兼容性限制会单独显示，结构通过不保证所需分类存在或核心匹配效果。DAT 下载与安装待实现。Geo 文件是否必需取决于配置规则。Provider 声明来自已提交配置，内核下载后可刷新清单核对文件状态。</p>
     </>}
   </section>;
 }

@@ -125,6 +125,43 @@ Web checks and strict/metadata-only outcome tests are service code. No general
 DAT parser, country/ASN schema validator, upload/update/rollback flow or upstream
 Geo auto-update behavior is claimed migrated by this increment.
 
+## Explicit GeoIP/GeoSite DAT validation
+
+The DAT resource identities retain the pinned Clash Verge Rev
+`src-tauri/src/core/runtime_bundle.rs::GEO_ASSETS` and resource initialization
+references already listed above. The desktop/core configuration validation path
+remains separate. New `service/src/dat_validation.rs` is original service code:
+no upstream Go implementation is copied, no parser/dependency is added, and no
+DAT download/install operation is exposed by this increment.
+
+Schema and compatibility references inspected on 2026-09-28:
+[Mihomo router protobuf schema](https://github.com/MetaCubeX/mihomo/blob/Meta/component/geodata/router/config.proto),
+[standard loader](https://github.com/MetaCubeX/mihomo/blob/Meta/component/geodata/standard/standard.go),
+[CN verification and matcher loading](https://github.com/MetaCubeX/mihomo/blob/Meta/component/geodata/utils.go)
+and [resource initialization](https://github.com/MetaCubeX/mihomo/blob/Meta/component/geodata/init.go).
+The schema defines GeoIPList/GeoSiteList, CIDR bytes/prefix, four domain types,
+bool/int64 attribute values and reverse-match booleans. A bounded, non-recursive
+wire reader validates the known message fields with strict service policies:
+ASCII case-unique group identifiers, no duplicate singular/oneof values, bounded
+UTF-8 strings/counts, valid CIDR lengths/prefixes and supported enum/boolean values.
+Unknown fields are skipped with diagnostics and prevent a fully verified report.
+
+The existing no-follow snapshot, hash, actor serialization and `validate_geo`
+command are reused. Optional MMDB metadata preserves its existing JSON response,
+while DAT adds aggregate statistics without record values. `verified` concerns
+known structure; core matching/regexp syntax is explicitly unverified. CN absence
+is reported because current Mihomo initialization verifies that group and can
+remove/re-download a file when its check fails. The command never invokes that
+mutating initialization. The real-core fixture includes CN and disables downloads,
+then verifies actual local proxy selection for all domain types and IPv4/IPv6
+CIDRs with both loaders/matchers and restart. This demonstrates fixture compatibility,
+not validation of every classification/pattern in a user's DAT file.
+
+The independent tiny protobuf encodings in `service/tests/fixtures/dat.rs`,
+file/authentication/malformed-input checks and Web diagnostic/retry tests are new
+service tests. Core refresh APIs/Web rule views remain P2 work; controlled DAT
+installation and Geo updates remain P1 follow-up.
+
 ## Explicit stopped-core MMDB bundle installation
 
 Reference: `init_resources`/`handle_copy` in pinned upstream

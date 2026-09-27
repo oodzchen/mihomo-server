@@ -1,7 +1,9 @@
-//! Explicit, read-only MMDB structural verification. No database records are returned.
+//! Explicit read-only MMDB/DAT verification; no database records are returned.
 use anyhow::{Result, ensure};
 use serde::Serialize;
 use std::path::Path;
+
+pub use crate::dat_validation::Statistics as DatStatistics;
 
 pub const MMDB_FILES: [&str; 3] = ["Country.mmdb", "ASN.mmdb", "geoip.metadb"];
 const MAX_BYTES: u64 = 128 * 1024 * 1024;
@@ -15,9 +17,14 @@ pub struct Validation {
     pub warning: Option<&'static str>,
     pub bytes: u64,
     pub sha256: String,
-    pub ip_version: u16,
-    pub node_count: u32,
-    pub build_epoch: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_version: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub build_epoch: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dat: Option<DatStatistics>,
 }
 
 /// Caller serializes against service resource/lifecycle mutations. The snapshot is
@@ -34,8 +41,8 @@ pub(crate) fn snapshot(root: &Path, name: &str) -> Result<Option<Vec<u8>>> {
         },
     };
     ensure!(
-        MMDB_FILES.contains(&name),
-        "Geo format validation supports only Country.mmdb, ASN.mmdb and geoip.metadb"
+        MMDB_FILES.contains(&name) || crate::dat_validation::DAT_FILES.contains(&name),
+        "unsupported Geo validation filename"
     );
     let directory = OpenOptions::new()
         .read(true)
@@ -91,6 +98,28 @@ pub(crate) fn validate(root: &Path, name: &str) -> Result<Validation> {
     ensure!(!bytes.is_empty(), "Geo validation requires a nonempty file");
     let size = bytes.len() as u64;
     let hash = sha256(&bytes);
+    if crate::dat_validation::DAT_FILES.contains(&name) {
+        let dat = crate::dat_validation::validate(&bytes, name)?;
+        let verified = dat.unknown_field_count == 0;
+        return Ok(Validation {
+            name: name.into(),
+            format: "dat",
+            verified,
+            warning: Some(if !verified {
+                "dat_unknown_fields_unverified"
+            } else if !dat.has_cn_group {
+                "dat_cn_group_missing"
+            } else {
+                "dat_core_matching_unverified"
+            }),
+            bytes: size,
+            sha256: hash,
+            ip_version: None,
+            node_count: None,
+            build_epoch: None,
+            dat: Some(dat),
+        });
+    }
     let reader = maxminddb::Reader::from_source(bytes)
         .map_err(|_| anyhow::anyhow!("invalid MMDB metadata or search tree header"))?;
     ensure!(
@@ -116,9 +145,10 @@ pub(crate) fn validate(root: &Path, name: &str) -> Result<Validation> {
         warning,
         bytes: size,
         sha256: hash,
-        ip_version: metadata.ip_version,
-        node_count: metadata.node_count,
-        build_epoch: metadata.build_epoch,
+        ip_version: Some(metadata.ip_version),
+        node_count: Some(metadata.node_count),
+        build_epoch: Some(metadata.build_epoch),
+        dat: None,
     })
 }
 
@@ -194,8 +224,8 @@ pub(crate) mod tests {
         let report = validate(&directory.0, "Country.mmdb")?;
         assert!(report.verified);
         assert!(report.warning.is_none());
-        assert_eq!(report.node_count, 1);
-        assert_eq!(report.ip_version, 4);
+        assert_eq!(report.node_count, Some(1));
+        assert_eq!(report.ip_version, Some(4));
         assert_eq!(report.sha256.len(), 64);
         assert_eq!(fs::read(&path)?, bytes);
         let mut corrupt = bytes.clone();
@@ -219,6 +249,61 @@ pub(crate) mod tests {
         let report = validate(&directory.0, "geoip.metadb")?;
         assert!(!report.verified);
         assert_eq!(report.warning, Some("empty_description_structure_unverified"));
+        Ok(())
+    }
+
+    #[test]
+    fn dat_snapshot_reports_hash_counts_and_limits_without_mmdb_metadata() -> Result<()> {
+        let directory = Directory::new()?;
+        for (name, fixture) in [
+            ("geoip.dat", crate::dat_validation::fixtures::geoip()),
+            ("geosite.dat", crate::dat_validation::fixtures::geosite()),
+        ] {
+            let path = directory.0.join(name);
+            fs::write(&path, &fixture)?;
+            let report = validate(&directory.0, name)?;
+            assert!(report.verified && report.dat.is_some());
+            assert_eq!(report.format, "dat");
+            assert_eq!(report.warning, Some("dat_core_matching_unverified"));
+            assert_eq!(report.sha256, sha256(&fixture));
+            assert_eq!(report.bytes, fixture.len() as u64);
+            let json = serde_json::to_value(&report)?;
+            for absent in ["ip_version", "node_count", "build_epoch"] {
+                assert!(json.get(absent).is_none());
+            }
+            assert!(!json.to_string().contains("exact.dat.test"));
+            assert_eq!(fs::read(&path)?, fixture);
+            let record = if name == "geoip.dat" {
+                crate::dat_validation::fixtures::cidr(&[192, 0, 2, 0], 24)
+            } else {
+                crate::dat_validation::fixtures::domain(3, b"example.test")
+            };
+            let missing_cn = crate::dat_validation::fixtures::group(b"custom", &[record]);
+            fs::write(&path, missing_cn)?;
+            let missing = validate(&directory.0, name)?;
+            assert!(missing.verified);
+            assert_eq!(missing.warning, Some("dat_cn_group_missing"));
+            assert!(!missing.dat.unwrap().has_cn_group);
+            let mut future = fixture;
+            future.extend([0x20, 1]);
+            fs::write(&path, &future)?;
+            let report = validate(&directory.0, name)?;
+            assert!(!report.verified);
+            assert_eq!(report.warning, Some("dat_unknown_fields_unverified"));
+            assert_eq!(report.dat.unwrap().unknown_field_count, 1);
+            fs::remove_file(&path)?;
+            symlink("/etc/passwd", &path)?;
+            assert!(validate(&directory.0, name).is_err());
+            fs::remove_file(&path)?;
+            let pipe = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())?;
+            assert_eq!(unsafe { libc::mkfifo(pipe.as_ptr(), 0o600) }, 0);
+            assert!(validate(&directory.0, name).is_err());
+            fs::remove_file(&path)?;
+            fs::write(&path, [])?;
+            assert!(validate(&directory.0, name).is_err());
+            fs::OpenOptions::new().write(true).open(&path)?.set_len(MAX_BYTES + 1)?;
+            assert!(validate(&directory.0, name).is_err());
+        }
         Ok(())
     }
 
