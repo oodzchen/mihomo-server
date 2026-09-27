@@ -345,6 +345,48 @@ test("Geo bundle update requests guard hashes, require fresh inspection and reta
   await page.getByRole("button", { name: "退出登录" }).click();
 });
 
+test("pinned DAT install requires a fresh stopped-core inspection and shows core probe receipt", async ({ page }) => {
+  let phase: (value: string) => void = () => { throw new Error("socket not ready"); };
+  let reads = 0, installs = 0;
+  const seedHash = "a".repeat(64), oldHash = "b".repeat(64);
+  await page.routeWebSocket("**/api/events", socket => {
+    phase = value => socket.send(JSON.stringify({ type: "status", data: { phase: value, generation: 0, selection_pending: [] } }));
+    socket.onMessage(message => {
+      if (JSON.parse(String(message)).type === "authenticate") {
+        socket.send(JSON.stringify({ type: "ready" })); phase("running");
+      }
+    });
+  });
+  await page.route("**/api/commands", async route => {
+    const body = route.request().postDataJSON();
+    if (body.command === "resources") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data_dir: directory, bundle_dir: "/fixture/bundle", config_revision: null, geo: [{ section: "geo", name: "geosite.dat", state: "available", path: "geosite.dat", provider_type: null, bytes: 42, conflict: false }], providers: [] }) });
+    } else if (body.command === "geo_seed") {
+      reads++; expect(body.name).toBe("geosite.dat");
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ name: body.name, current_sha256: oldHash, seed_sha256: seedHash, seed_bytes: 42 }) });
+    } else if (body.command === "install_geo_seed") {
+      installs++; expect(body).toEqual({ command: "install_geo_seed", name: "geosite.dat", expected_current_sha256: oldHash, expected_seed_sha256: seedHash, accept_metadata_only: false });
+      await route.fulfill({ status: installs === 1 ? 422 : 200, contentType: "application/json", body: JSON.stringify(installs === 1 ? { error: { message: "isolated Mihomo DAT compatibility probe failed" } } : { changed: true, durable: true, cleanup_pending: false, core_load_verified: true, validation: { verified: true, sha256: seedHash, format: "dat" } }) });
+    } else await route.continue();
+  });
+  await page.goto(`${base}/settings`); await page.getByLabel("管理令牌").fill(token); await page.getByRole("button", { name: "连接服务" }).click();
+  const panel = page.getByRole("region", { name: "运行资源清单", exact: true });
+  const read = panel.getByRole("button", { name: "读取 geosite.dat 打包更新", exact: true });
+  await read.click();
+  const install = panel.getByRole("button", { name: "安装 geosite.dat 打包资源", exact: true });
+  await expect(install).toBeDisabled();
+  await expect(panel.getByRole("checkbox", { name: "允许安装描述为空、完整结构未验证的 MMDB" })).toHaveCount(0);
+  phase("stopped"); await expect(install).toHaveCount(0);
+  await read.click(); await expect(install).toBeEnabled();
+  await install.click(); await expect(panel.getByRole("alert")).toContainText("compatibility probe failed");
+  await expect(install).toHaveCount(0);
+  await read.click(); await install.click();
+  await expect(panel.getByRole("status")).toContainText("DAT 结构及隔离内核规则加载通过");
+  await expect(panel.getByRole("status")).toContainText(seedHash);
+  expect(reads).toBe(3); expect(installs).toBe(2);
+  await page.unroute("**/api/commands"); await page.getByRole("button", { name: "退出登录" }).click();
+});
+
 test("connection settings save explicit false, preserve failed drafts and retry actual readback", async ({ page }) => {
   const api = async (command: string, fields: Record<string, unknown> = {}) => {
     const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });

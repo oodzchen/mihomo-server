@@ -101,8 +101,8 @@ impl Resources {
     #[cfg(unix)]
     pub(crate) fn geo_seed_info(&self, data: &Path, name: &str) -> Result<crate::geo_update::SeedInfo> {
         ensure!(
-            crate::geo_validation::MMDB_FILES.contains(&name),
-            "only MMDB bundle updates are supported"
+            crate::geo_validation::MMDB_FILES.contains(&name) || crate::dat_validation::DAT_FILES.contains(&name),
+            "unsupported bundled Geo update name"
         );
         let seed = self
             .geo
@@ -126,6 +126,23 @@ impl Resources {
             .get(&request.name)
             .ok_or_else(|| anyhow::anyhow!("no pinned bundle seed for this Geo file"))?;
         crate::geo_update::install(&self.root.join("geo"), data, seed, request)
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn prepare_dat_seed(
+        &self,
+        data: &Path,
+        request: &crate::geo_update::InstallRequest,
+    ) -> Result<crate::geo_update::Prepared> {
+        ensure!(
+            crate::dat_validation::DAT_FILES.contains(&request.name.as_str()),
+            "only DAT bundle updates require a core probe"
+        );
+        let seed = self
+            .geo
+            .get(&request.name)
+            .ok_or_else(|| anyhow::anyhow!("no pinned bundle seed for this Geo file"))?;
+        crate::geo_update::prepare(&self.root.join("geo"), data, seed, request)
     }
 
     /// Called only while the manager owns its data-directory lock.

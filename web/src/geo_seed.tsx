@@ -3,12 +3,13 @@ import { ApiError, command } from "./api";
 import type { CoreStatus } from "./types";
 
 type Seed = { name: string; current_sha256: string | null; seed_sha256: string; seed_bytes: number };
-type Receipt = { changed: boolean; durable: boolean; cleanup_pending: boolean; validation: { verified: boolean; sha256: string } };
+type Receipt = { changed: boolean; durable: boolean; cleanup_pending: boolean; core_load_verified?: boolean; validation: { verified: boolean; sha256: string } };
 
 export function GeoSeedAction({ name, token, status, connection, logout, installed }: {
   name: string; token: string; status: CoreStatus; connection: string;
   logout: (reason?: string) => void; installed: (message: string) => void;
 }) {
+  const dat = name.endsWith(".dat");
   const [seed, setSeed] = useState<Seed>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,7 +36,8 @@ export function GeoSeedAction({ name, token, status, connection, logout, install
           expected_seed_sha256: seed.seed_sha256, accept_metadata_only: accept,
         }, abort.signal);
         if (version !== epoch.current) return;
-        installed(`${name}：${receipt.changed ? "已安装打包资源" : "当前文件已与打包资源一致"} · ${receipt.validation.verified ? "MMDB 结构校验通过" : "描述为空，完整结构未验证"} · SHA-256 ${receipt.validation.sha256}${!receipt.durable || receipt.cleanup_pending ? " · 目录同步或暂存清理未完成，请核对文件状态" : ""}`);
+        if (dat && receipt.core_load_verified !== true) throw new Error("服务未确认 DAT 隔离内核规则加载。");
+        installed(`${name}：${receipt.changed ? "已安装打包资源" : "当前文件已与打包资源一致"} · ${dat ? "DAT 结构及隔离内核规则加载通过；实际配置匹配效果仍需验证" : receipt.validation.verified ? "MMDB 结构校验通过" : "描述为空，完整结构未验证"} · SHA-256 ${receipt.validation.sha256}${!receipt.durable || receipt.cleanup_pending ? " · 目录同步或暂存清理未完成，请核对文件状态" : ""}`);
       } else {
         const next = await command<Seed>(token, "geo_seed", { name }, abort.signal);
         if (version === epoch.current) setSeed(next);
@@ -55,7 +57,7 @@ export function GeoSeedAction({ name, token, status, connection, logout, install
     {seed && <>
       <p>候选：{seed.seed_bytes} 字节 · SHA-256 <code>{seed.seed_sha256}</code></p>
       <p>当前：<code>{seed.current_sha256 || "文件缺失"}</code></p>
-      <label><input type="checkbox" checked={accept} disabled={busy} onChange={event => setAccept(event.target.checked)} />允许安装描述为空、完整结构未验证的 MMDB</label>
+      {!dat && <label><input type="checkbox" checked={accept} disabled={busy} onChange={event => setAccept(event.target.checked)} />允许安装描述为空、完整结构未验证的 MMDB</label>}
       {status.phase !== "stopped" && <p className="info">停止内核后可安装打包资源。</p>}
       <button type="button" disabled={busy || connection !== "已连接" || status.phase !== "stopped"} onClick={() => void run(true)}>安装 {name} 打包资源</button>
     </>}

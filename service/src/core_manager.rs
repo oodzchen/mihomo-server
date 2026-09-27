@@ -2043,7 +2043,31 @@ impl Actor {
                                     ensure!(self.status.borrow().phase == CorePhase::Stopped && self.process.is_none(), "stop the core before installing a Geo seed");
                                     let resources = self.options.resources.clone().context("Geo updates require bundle resources")?;
                                     let data = self.options.data_dir.clone();
-                                    tokio::task::spawn_blocking(move || resources.install_geo_seed(&data, &request)).await.context("Geo install worker failed")?
+                                    if crate::dat_validation::DAT_FILES.contains(&request.name.as_str()) {
+                                        let (mut prepared, probe) = tokio::task::spawn_blocking(move || {
+                                            let prepared = resources.prepare_dat_seed(&data, &request)?;
+                                            let probe = prepared.probe()?;
+                                            Ok::<_, anyhow::Error>((prepared, probe))
+                                        }).await.context("DAT staging worker failed")??;
+                                        for loader in ["standard", "memconservative"] {
+                                            for matcher in ["mph", "succinct"] {
+                                                tokio::fs::write(&probe.config, probe.config_for(loader, matcher)).await?;
+                                                crate::validation::validate(
+                                                    &self.options.binary,
+                                                    &probe.directory,
+                                                    &probe.config,
+                                                    &mut self.shutdown,
+                                                    Duration::from_secs(15),
+                                                ).await.with_context(|| format!("isolated Mihomo DAT compatibility probe failed for {loader}/{matcher}"))?;
+                                            }
+                                        }
+                                        probe.verify_input()?;
+                                        prepared.mark_core_load_verified();
+                                        drop(probe);
+                                        tokio::task::spawn_blocking(move || prepared.publish()).await.context("DAT publication worker failed")?
+                                    } else {
+                                        tokio::task::spawn_blocking(move || resources.install_geo_seed(&data, &request)).await.context("Geo install worker failed")?
+                                    }
                                 }.await;
                                 let _ = reply.send(result);
                             }

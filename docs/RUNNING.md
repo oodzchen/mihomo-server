@@ -2501,9 +2501,8 @@ this command does not change whether Mihomo accepts the configuration.
 `available` means a nonempty regular file's metadata was observed; it does not prove
 that its content format is valid or that a running core has loaded it. Missing Geo
 files may be normal when rules do not require them. The filesystem can change after
-a read; refresh after a core download or external file change. Geo installation,
-online/running-core updates, DAT installation and Provider refresh/reload APIs remain
-future work. MMDB checks and stopped-core bundle installs are available explicitly
+a read; refresh after a core download or external file change. Online/running-core Geo updates and Provider refresh/reload APIs remain future
+work. MMDB/DAT checks and stopped-core bundle installs are available explicitly
 as described below. Optional bundle Geo seeds can now initialize missing files under pinned
 size/SHA-256 checks; see [Geo deployment inputs](DEPLOYMENT.md#include-existing-geo-files-for-first-use-initialization).
 
@@ -2535,15 +2534,15 @@ it is not a declaration of corruption or a successful full validation. Other
 verification failures return 422 with a fixed diagnostic, without database records.
 
 Results identify the snapshot by SHA-256. Refresh clears them; external file
-changes/core automatic updates require a fresh check. Geo download, upload and DAT
-validation commands remain pending; stopped-core bundle replacement follows below.
+changes/core automatic updates require a fresh check. Controlled Geo download and
+upload remain pending; stopped-core bundle replacement follows below.
 
 
 ## Install a pinned Geo bundle file while the core is stopped
 
 Bundles may declare optional Geo seeds as described in
 [Geo deployment inputs](DEPLOYMENT.md#include-existing-geo-files-for-first-use-initialization).
-The resource page can inspect and explicitly install their MMDB entries. Bootstrap
+The resource page can inspect and explicitly install their MMDB and DAT entries. Bootstrap
 continues to preserve existing files; deploying a newer bundle alone does not
 overwrite them. Restart the service to load a changed manifest's new pins.
 
@@ -2568,7 +2567,8 @@ Stop the managed core, read information again, then send the expected hashes:
 ```
 
 Use JSON null rather than a string for a missing current file. Only declared
-`Country.mmdb`, `ASN.mmdb` and `geoip.metadb` seeds are accepted. Installation
+`Country.mmdb`, `ASN.mmdb`, `geoip.metadb`, `geoip.dat` and `geosite.dat` seeds
+are accepted. Installation
 requires the core's Stopped phase with its child reaped. The command checks pins,
 MMDB validity and the current-file digest before atomically publishing one file;
 stale hashes require a fresh inspection. No path, URL or file upload is accepted.
@@ -2589,8 +2589,46 @@ Start the core explicitly after installation to use the new file. Installation
 never starts/restarts it or changes the configuration revision. Browser disconnect
 or request cancellation after work begins cannot undo a committed file; inspect
 again after an ambiguous response. External file writers must honor the same data
-lock. Live/online updates, DAT installation and automatic runtime rollback are pending.
+lock. Live/online updates and automatic runtime rollback are pending.
 
+
+## Install a pinned GeoIP/GeoSite DAT bundle file
+
+Package existing DAT files under exact case-sensitive names and pins using the
+[Geo deployment inputs](DEPLOYMENT.md#include-existing-geo-files-for-first-use-initialization).
+The same `geo_seed` and `install_geo_seed` commands above accept `geoip.dat` and
+`geosite.dat` after the managed core is stopped. For example:
+
+```json
+{"command":"geo_seed","name":"geosite.dat"}
+```
+
+Then send `install_geo_seed` with `name: "geosite.dat"`, the inspected
+`expected_current_sha256` (or JSON null), `expected_seed_sha256` and
+`accept_metadata_only: false`. Reinspect after any ambiguous or failed result.
+The Web resource panel offers the same read/install buttons; the MMDB-only checkbox
+is hidden for DAT.
+
+DAT installation requires a pinned, nonempty, known-schema candidate with a CN
+group, no empty groups or unknown fields, and group identifiers representable in
+Mihomo rule syntax. The service stages a private, no-follow, hash-checked copy.
+It then runs the bundled managed Mihomo with `-t` in an isolated private directory
+against all candidate group rules under standard/memconservative loaders and
+mph/succinct matchers. External Geo URLs in the probe point to disabled loopback
+endpoints. Each validation is bounded to 15 seconds, with child cancellation/reap
+and bounded output. A failure leaves the old file untouched; unlike MMDB,
+`accept_metadata_only: true` cannot bypass these checks. The staged digest and
+current file digest are checked again before atomic publication. Existing staging
+orphan recovery applies after interruption.
+
+A successful receipt includes `core_load_verified: true`, the structural
+`validation`, previous hash, changed/durable/cleanup flags and installed hash.
+The structural report still has `validation.dat.core_matching_verified: false`:
+loading all groups does not prove every record's classification or future runtime
+configuration. Installation does not start/reload the core or change its revision;
+start it explicitly and inspect actual proxy behavior. No online download, upload
+or running-core Geo replacement is offered yet. Private `data` node/Geo copies are
+used for real proxy HTTPS 204 verification; the original files are left intact.
 
 ## GeoIP/GeoSite DAT validation and compatibility diagnostics
 
@@ -2643,8 +2681,9 @@ The **Geo / Provider 资源** panel adds **校验 geoip.dat** and **校验 geosi
 for available files, shows structural/unknown-field status, counts, CN absence,
 compatibility limits and the fingerprint. Failed checks, refresh, lifecycle/revision
 changes and disconnect clear stale outcomes; retry is available. Existing MMDB
-checks and stopped-core MMDB installation keep their behavior. DAT installation,
-controlled online/running-core updates and P2 provider actions remain pending.
+checks and stopped-core MMDB installation keep their behavior. Pinned stopped-core
+DAT installation is described above; controlled online/running-core updates and
+P2 provider actions remain pending.
 
 An opt-in real-core check uses generated DAT fixtures (including CN), disabled
 external downloads and local HTTP proxy endpoints. It verifies exact/suffix/keyword/

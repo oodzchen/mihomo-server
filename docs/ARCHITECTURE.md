@@ -53,14 +53,15 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** read-only GeoIP/GeoSite DAT structural validation,
-bounded protobuf parsing, CN/unknown-field compatibility diagnostics and management/
-Web resource checks. Actual core fixtures verify rule selection across both loaders
-and both matchers, with original node/Geo data preserved.
-**Next implementation task (P1):** stopped-core, integrity-pinned DAT bundle
-installation with compatibility validation, digest guards and recovery, extending
-the delivered MMDB workflow. Controlled online/running-core Geo updates and
-remaining full settings still belong to P1; finish this priority before starting P2.
+**Latest completed task (P1):** stopped-core, integrity-pinned GeoIP/GeoSite
+DAT installation. Candidate staging requires known structure, CN and nonempty
+groups; Mihomo loads every group in an isolated directory across both loaders and
+both matchers before digest-guarded atomic publication. The Web action and receipt
+show the load proof while preserving the existing MMDB flow.
+**Next implementation task (P1):** controlled online Geo updates with bounded
+source downloads, validated staging and failure recovery for stopped/running cores.
+Remaining full settings and native TUN still belong to P1; finish this priority
+before starting P2.
 
 ## Complete target architecture
 
@@ -163,8 +164,8 @@ mihomo-server/
 │   │   ├── Connection/outbound/download comparison / nine presence-preserving fields / shared snapshot envelope [Implemented; Linux verified]
 │   │   ├── dat_validation.rs / bounded protobuf / CIDR-domain-attribute checks / CN diagnostics [Implemented; Linux verified]
 │   │   ├── Read-only DAT snapshots / aggregate reports / core compatibility warning [Implemented; Linux verified]
-│   │   ├── Stopped-core pinned DAT installation / compatibility checks / recovery [Pending; next P1 task]
-│   │   └── Controlled online and running-core Geo updates / remaining full settings [Pending; P1]
+│   │   ├── Stopped-core pinned DAT installation / four-mode core load proof / digest guards / orphan recovery [Implemented; Linux verified]
+│   │   └── Controlled online and running-core Geo updates / remaining full settings [Pending; next P1 task]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
 │   ├── Profile snapshots/watches and active UID     [Implemented]
@@ -282,7 +283,7 @@ mihomo-server/
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
 │   ├── Geo/Provider inventory / metadata states / refresh and retry [Implemented; Linux verified]
 │   ├── Explicit MMDB/DAT checks / aggregate diagnostics / compatibility warnings / stale-result clearing [Implemented; Linux verified]
-│   ├── Pinned MMDB update inspection / stopped-state install / explicit metadata-only acceptance [Implemented; Linux verified]
+│   ├── Pinned MMDB/DAT update inspection / stopped-state install / DAT core load proof / MMDB metadata-only choice [Implemented; Linux verified]
 │   ├── Geo field editor incl. geosite matcher / per-URL inheritance / saved-configured-actual readback / retry [Implemented; Linux verified]
 │   ├── Remaining full settings/resource lifecycle UI [Pending; P1]
 │   └── Backup UI [Deferred; outside active scope]
@@ -4181,6 +4182,64 @@ and recovery. Controlled online/running-core Geo lifecycle, full settings and
 native TUN remain pending P1; P2 rules/provider/delay, P3 i18n/signals and P4 actual
 systemd installation remain incomplete. Deferred work stays deferred. Git submission
 is left to the external host script.
+
+## Increment: stopped-core pinned DAT installation (P1)
+
+Completed the next P1 task in Delivery order. The existing bundle manifest already
+pins `geoip.dat` and `geosite.dat` by size and SHA-256. `geo_seed` now inspects
+those two names; authenticated `install_geo_seed` accepts them only for a stopped,
+reaped core and requires fresh seed/current digests. The bounded, no-follow copy
+and private `.geo-seed` staging used for MMDB remain the publication path. Unknown
+fields, missing CN, empty groups, unsafe group delimiters, malformed known fields,
+wrong pins and `accept_metadata_only: true` block DAT installation before any
+publication. MMDB metadata-only acceptance remains unchanged and cannot bypass
+DAT checks.
+
+DAT candidates also require a disposable private Mihomo `-t` probe. The probe
+contains only the pinned DAT copy, disabled external Geo URLs and rules for every
+group. It loads the rules under standard/memconservative loaders and mph/succinct
+matchers. Each command has the existing bounded output/cancellation/reap behavior
+and a 15-second limit. Only after all four succeed does the actor mark a private
+core-load proof and atomically publish the staged file under a renewed current-file
+digest guard. The receipt adds `core_load_verified: true` for DAT; MMDB receipts
+retain their previous shape. `validation.dat.core_matching_verified` remains false:
+loading every group does not prove individual record classification, attribute
+filtering or behavior under a later changed core/configuration. Probe and staging
+cleanup run on success/failure; fixed staging orphans are recovered at startup.
+Publication does not restart the core or change the runtime revision.
+
+The Web resource panel now offers DAT bundle inspection and stopped-core install.
+It hides the MMDB-only metadata checkbox, prevents install while running, requires
+fresh inspection after failure/phase change, and shows the explicit core-load proof
+and fingerprint. Existing MMDB actions remain available. `docs/RUNNING.md` documents
+the command, receipt, limits and reinspection rule; `docs/UPSTREAM.md` records
+provenance and compatibility boundaries.
+
+Verification:
+
+- Workspace compilation, formatting and Web production build succeed. Workspace
+  tests report **371 passed, 84 opt-in ignored**, including new DAT staging guards,
+  simulated abandoned-DAT staging recovery and unchanged MMDB replacement checks.
+  An unrelated core-upgrade test hit a
+  transient `Text file busy` race under parallel execution; its isolated rerun
+  and the complete serial workspace run pass.
+- Three explicitly enabled real-core DAT workflows pass with
+  `/usr/bin/verge-mihomo`: rule routing across loader/matcher combinations,
+  digest-guarded stopped-core installation and post-install startup, and rejection
+  of a structurally valid DAT with an invalid Go regexp without changing the old
+  resource. Running-core installation is rejected.
+- Full Chromium regression reports **29 passed, 4 optional bundle upgrade/repair
+  workflows skipped**. It exercises DAT inspection, stopped-state gating,
+  failed-probe retry, receipt proof and unchanged MMDB controls. The actual-node
+  resource workflow checks proxy HTTPS 204 from private `data` copies and
+  unchanged original hashes.
+
+The complete architecture tree above is synchronized and the Linux MVP remains
+runnable. Next: P1 controlled online Geo updates with bounded downloads, candidate
+validation and stopped/running-core recovery. Remaining full settings/native TUN
+are P1; P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd installation
+remain incomplete. Deferred work stays deferred. Git submission is left to the
+external host script.
 
 ## MVP completion boundary
 

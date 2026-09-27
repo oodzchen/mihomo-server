@@ -162,6 +162,26 @@ file/authentication/malformed-input checks and Web diagnostic/retry tests are ne
 service tests. Core refresh APIs/Web rule views remain P2 work; controlled DAT
 installation and Geo updates remain P1 follow-up.
 
+## Stopped-core DAT bundle installation and isolated core load check
+
+This increment reuses the pinned Clash Verge Rev resource identities and the
+existing service's Geo seed manifest, confined copy, `.geo-seed` startup cleanup,
+actor serialization and atomic publication. It copies no upstream source and adds
+no dependencies. `geo_update.rs` retains the MMDB metadata-only path while DAT
+requires known protobuf structure, CN, nonempty groups and a separate managed
+Mihomo configuration probe. `core_manager.rs` serializes the operation while the
+core is stopped/reaped, then runs every candidate group under both Mihomo DAT
+loaders and both GeoSite matchers in a private disposable directory. The probe
+reuses `validation.rs` timeout/cancellation/reap/output bounds and disables
+external Geo download URLs. The new receipt distinguishes successful core rule
+loading from the parser's always-unverified record matching semantics.
+
+The real-core integration fixtures exercise valid installation and subsequent
+start, stale/wrong pin and running-core rejection, plus a structurally valid but
+Go-regexp-invalid bundle that must leave the previous file unchanged. Neither
+probe nor installation asserts that arbitrary user rules classify as expected;
+controlled online/running-core updates are still P1 work.
+
 ## Explicit stopped-core MMDB bundle installation
 
 Reference: `init_resources`/`handle_copy` in pinned upstream

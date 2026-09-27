@@ -5,7 +5,10 @@ use crate::{
 };
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Serialize)]
 pub struct SeedInfo {
@@ -32,6 +35,8 @@ pub struct Receipt {
     pub changed: bool,
     pub durable: bool,
     pub cleanup_pending: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub core_load_verified: Option<bool>,
 }
 
 fn current(data: &Path, name: &str) -> Result<Option<String>> {
@@ -66,6 +71,33 @@ fn check_current(data: &Path, request: &InstallRequest) -> Result<Option<String>
 /// External writers must obey the same data lock; this is not an OS-level CAS.
 pub(crate) fn install(source: &Path, data: &Path, seed: &Seed, request: &InstallRequest) -> Result<Receipt> {
     ensure!(
+        geo_validation::MMDB_FILES.contains(&request.name.as_str()),
+        "DAT installation requires isolated core validation"
+    );
+    prepare(source, data, seed, request)?.publish()
+}
+
+pub(crate) struct Prepared {
+    stage: PathBuf,
+    data: PathBuf,
+    request: InstallRequest,
+    seed: Seed,
+    previous: Option<String>,
+    core_load_verified: bool,
+}
+
+impl Drop for Prepared {
+    fn drop(&mut self) {
+        // Startup recovery examines this fixed, confined staging namespace if
+        // cleanup cannot complete here (including cancellation/panic).
+        if geo_resources::cleanup(&self.stage).is_ok() {
+            let _ = fs::remove_dir(&self.stage);
+        }
+    }
+}
+
+pub(crate) fn prepare(source: &Path, data: &Path, seed: &Seed, request: &InstallRequest) -> Result<Prepared> {
+    ensure!(
         hash_matches(&request.expected_seed_sha256, &seed.sha256),
         "bundled Geo pin changed; read update information again"
     );
@@ -78,34 +110,174 @@ pub(crate) fn install(source: &Path, data: &Path, seed: &Seed, request: &Install
             hash_matches(&validation.sha256, &seed.sha256) && validation.bytes == seed.bytes,
             "staged Geo pin mismatch"
         );
-        ensure!(
-            validation.verified || request.accept_metadata_only,
-            "bundled MMDB has an empty description and full structure is unverified; explicit accept_metadata_only is required"
-        );
+        if geo_validation::MMDB_FILES.contains(&request.name.as_str()) {
+            ensure!(
+                validation.verified || request.accept_metadata_only,
+                "bundled MMDB has an empty description and full structure is unverified; explicit accept_metadata_only is required"
+            );
+        } else {
+            ensure!(
+                !request.accept_metadata_only,
+                "MMDB metadata acceptance cannot bypass DAT compatibility checks"
+            );
+            let dat = validation
+                .dat
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("DAT diagnostics missing"))?;
+            ensure!(
+                validation.verified,
+                "DAT has unknown fields; core compatibility is unverified"
+            );
+            ensure!(
+                dat.has_cn_group,
+                "DAT lacks the CN group required by Mihomo initialization"
+            );
+            ensure!(
+                dat.empty_group_count == 0,
+                "DAT has empty groups; core compatibility is unverified"
+            );
+            ensure!(
+                dat.group_codes.iter().all(|code| !code.contains(',')),
+                "DAT group identifier cannot be represented in a Mihomo rule"
+            );
+        }
         check_current(data, request)?;
         Ok::<_, anyhow::Error>(validation)
     })();
-    let result = staged.and_then(|validation| {
-        // Identical content needs no file replacement, but still checks the source.
-        let changed = previous.as_deref() != Some(validation.sha256.as_str());
-        if changed {
-            publish(&stage, data, &request.name, previous.is_some())?;
+    if let Err(error) = staged {
+        let _ = geo_resources::cleanup(&stage).and_then(|_| fs::remove_dir(&stage).map_err(Into::into));
+        return Err(error);
+    }
+    Ok(Prepared {
+        stage,
+        data: data.into(),
+        request: request.clone(),
+        seed: seed.clone(),
+        previous,
+        core_load_verified: false,
+    })
+}
+
+impl Prepared {
+    pub(crate) fn mark_core_load_verified(&mut self) {
+        self.core_load_verified = true;
+    }
+    pub(crate) fn probe(&self) -> Result<DatProbe> {
+        ensure!(
+            crate::dat_validation::DAT_FILES.contains(&self.request.name.as_str()),
+            "only DAT seeds need core probes"
+        );
+        let bytes = geo_validation::snapshot(&self.stage, &self.request.name)?
+            .ok_or_else(|| anyhow::anyhow!("staged DAT missing"))?;
+        let dat = crate::dat_validation::validate(&bytes, &self.request.name)?;
+        DatProbe::new(&self.stage, &self.request.name, &dat.group_codes, &self.seed.sha256)
+    }
+
+    pub(crate) fn publish(self) -> Result<Receipt> {
+        ensure!(
+            geo_validation::MMDB_FILES.contains(&self.request.name.as_str()) || self.core_load_verified,
+            "DAT publication requires a successful isolated core load check"
+        );
+        let validation = geo_validation::validate(&self.stage, &self.request.name)?;
+        ensure!(
+            hash_matches(&validation.sha256, &self.seed.sha256) && validation.bytes == self.seed.bytes,
+            "staged Geo pin mismatch after validation"
+        );
+        check_current(&self.data, &self.request)?;
+        let result = (|| {
+            // Identical content needs no file replacement, but still checks the source.
+            let changed = self.previous.as_deref() != Some(validation.sha256.as_str());
+            if changed {
+                publish(&self.stage, &self.data, &self.request.name, self.previous.is_some())?;
+            }
+            Ok(Receipt {
+                previous_sha256: self.previous.clone(),
+                validation,
+                changed,
+                durable: std::fs::File::open(&self.data).and_then(|dir| dir.sync_all()).is_ok(),
+                cleanup_pending: false,
+                core_load_verified: if self.core_load_verified { Some(true) } else { None },
+            })
+        })();
+        let cleaned = geo_resources::cleanup(&self.stage).and_then(|_| fs::remove_dir(&self.stage).map_err(Into::into));
+        match result {
+            Ok(mut receipt) => {
+                receipt.cleanup_pending = cleaned.is_err();
+                Ok(receipt)
+            }
+            Err(error) => Err(error),
         }
-        Ok(Receipt {
-            previous_sha256: previous,
-            validation,
-            changed,
-            durable: std::fs::File::open(data).and_then(|dir| dir.sync_all()).is_ok(),
-            cleanup_pending: false,
-        })
-    });
-    let cleaned = geo_resources::cleanup(&stage).and_then(|_| fs::remove_dir(&stage).map_err(Into::into));
-    match result {
-        Ok(mut receipt) => {
-            receipt.cleanup_pending = cleaned.is_err();
-            Ok(receipt)
+    }
+}
+
+pub(crate) struct DatProbe {
+    pub(crate) directory: PathBuf,
+    pub(crate) config: PathBuf,
+    rules: String,
+    name: String,
+    expected_sha256: String,
+}
+impl Drop for DatProbe {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.directory);
+    }
+}
+impl DatProbe {
+    fn new(stage: &Path, name: &str, groups: &[String], expected_sha256: &str) -> Result<Self> {
+        use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+        let directory = std::env::temp_dir().join(format!(
+            "ms-dat-probe-{}-{:x}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        fs::DirBuilder::new().mode(0o700).create(&directory)?;
+        let mut probe = Self {
+            config: directory.join("probe.yaml"),
+            directory,
+            rules: String::new(),
+            name: name.into(),
+            expected_sha256: expected_sha256.into(),
+        };
+        fs::copy(stage.join(name), probe.directory.join(name))?;
+        fs::set_permissions(probe.directory.join(name), fs::Permissions::from_mode(0o600))?;
+        probe.verify_input()?;
+        for code in groups {
+            let line = if name == "geoip.dat" {
+                format!("GEOIP,{code},DIRECT,no-resolve")
+            } else {
+                format!("GEOSITE,{code},DIRECT")
+            };
+            probe.rules.push_str("  - ");
+            probe.rules.push_str(&serde_json::to_string(&line)?);
+            probe.rules.push('\n');
         }
-        Err(error) => Err(error),
+        probe.rules.push_str("  - MATCH,DIRECT\n");
+        ensure!(
+            probe.rules.len() <= 2 * 1024 * 1024,
+            "DAT group rules exceed isolated probe limits"
+        );
+        fs::write(&probe.config, probe.config_for("standard", "mph"))?;
+        fs::set_permissions(&probe.config, fs::Permissions::from_mode(0o600))?;
+        Ok(probe)
+    }
+
+    pub(crate) fn config_for(&self, loader: &str, matcher: &str) -> String {
+        format!(
+            "mode: rule\nlog-level: silent\ngeodata-mode: true\ngeodata-loader: {loader}\ngeosite-matcher: {matcher}\ngeo-auto-update: false\ngeox-url:\n  geoip: http://127.0.0.1:1/disabled\n  geosite: http://127.0.0.1:1/disabled\ndns: {{enable: false}}\ntun: {{enable: false}}\nrules:\n{}",
+            self.rules
+        )
+    }
+
+    pub(crate) fn verify_input(&self) -> Result<()> {
+        let bytes = geo_validation::snapshot(&self.directory, &self.name)?
+            .ok_or_else(|| anyhow::anyhow!("isolated DAT probe input disappeared"))?;
+        ensure!(
+            geo_validation::sha256(&bytes).eq_ignore_ascii_case(&self.expected_sha256),
+            "isolated DAT probe input changed"
+        );
+        Ok(())
     }
 }
 
@@ -149,6 +321,7 @@ fn publish(stage: &Path, data: &Path, name: &str, replacing: bool) -> Result<()>
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+    use crate::dat_validation::fixtures as dat_fixtures;
     use crate::geo_validation::tests::fixture_with_description;
     use std::{
         collections::BTreeMap,
@@ -262,6 +435,78 @@ mod tests {
             receipt.validation.warning,
             Some("empty_description_structure_unverified")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn dat_staging_rejects_unknown_fields_missing_cn_empty_groups_and_metadata_bypass() -> Result<()> {
+        let dir = Directory::new()?;
+        let source = dir.0.join("source");
+        let data = dir.0.join("data");
+        let path = data.join("geosite.dat");
+        fs::write(&path, b"previous")?;
+        let old_hash = geo_validation::sha256(b"previous");
+        let mut candidates = Vec::new();
+        let mut unknown = dat_fixtures::geosite();
+        unknown.extend([0x20, 1]);
+        candidates.push(unknown);
+        candidates.push(dat_fixtures::group(
+            b"custom",
+            &[dat_fixtures::domain(3, b"example.test")],
+        ));
+        let mut empty = dat_fixtures::group(b"custom", &[]);
+        empty.extend(dat_fixtures::group(b"CN", &[dat_fixtures::domain(3, b"example.test")]));
+        candidates.push(empty);
+        for bytes in candidates {
+            fs::write(source.join("geosite.dat"), &bytes)?;
+            let seed = Seed {
+                bytes: bytes.len() as u64,
+                sha256: geo_validation::sha256(&bytes),
+            };
+            let request = InstallRequest {
+                name: "geosite.dat".into(),
+                expected_current_sha256: Some(old_hash.clone()),
+                expected_seed_sha256: seed.sha256.clone(),
+                accept_metadata_only: false,
+            };
+            assert!(prepare(&source, &data, &seed, &request).is_err());
+            assert_eq!(fs::read(&path)?, b"previous");
+            assert!(!data.join(".geo-seed").exists());
+        }
+        let valid = dat_fixtures::geosite();
+        fs::write(source.join("geosite.dat"), &valid)?;
+        let seed = Seed {
+            bytes: valid.len() as u64,
+            sha256: geo_validation::sha256(&valid),
+        };
+        let mut request = InstallRequest {
+            name: "geosite.dat".into(),
+            expected_current_sha256: Some(old_hash),
+            expected_seed_sha256: seed.sha256.clone(),
+            accept_metadata_only: true,
+        };
+        assert!(prepare(&source, &data, &seed, &request).is_err());
+        request.accept_metadata_only = false;
+        let staged = prepare(&source, &data, &seed, &request)?;
+        let probe = staged.probe()?;
+        for mode in [("standard", "mph"), ("memconservative", "succinct")] {
+            let yaml = probe.config_for(mode.0, mode.1);
+            assert!(yaml.contains(&format!("geodata-loader: {}", mode.0)));
+            assert!(yaml.contains(&format!("geosite-matcher: {}", mode.1)));
+            assert!(yaml.contains("GEOSITE,ms-dat,DIRECT"));
+        }
+        drop(probe);
+        assert!(staged.publish().is_err()); // A parser pass cannot skip the core load proof.
+        assert_eq!(fs::read(&path)?, b"previous");
+        assert!(!data.join(".geo-seed").exists());
+        // Simulate a process dying after DAT staging, before the core probe or rename.
+        let abandoned = prepare(&source, &data, &seed, &request)?;
+        std::mem::forget(abandoned);
+        assert!(data.join(".geo-seed/geosite.dat").exists());
+        let seeds = BTreeMap::from([("geosite.dat".into(), seed)]);
+        assert!(geo_resources::initialize(&source, &data, &seeds)?.is_empty());
+        assert!(!data.join(".geo-seed").exists());
+        assert_eq!(fs::read(&path)?, b"previous");
         Ok(())
     }
     #[test]

@@ -22,6 +22,8 @@ pub struct Statistics {
     pub unknown_field_count: u64,
     pub has_cn_group: bool,
     pub core_matching_verified: bool,
+    #[serde(skip)]
+    pub(crate) group_codes: Vec<String>,
 }
 
 enum Data<'a> {
@@ -203,6 +205,7 @@ pub(crate) fn validate(data: &[u8], name: &str) -> Result<Statistics> {
         unknown_field_count: 0,
         has_cn_group: false,
         core_matching_verified: false,
+        group_codes: Vec::new(),
     };
     let mut budget = MAX_FIELDS;
     let mut list = Message { bytes: data };
@@ -236,6 +239,7 @@ pub(crate) fn validate(data: &[u8], name: &str) -> Result<Statistics> {
                         codes.insert(code.to_ascii_lowercase()),
                         "duplicate DAT group identifier"
                     );
+                    stats.group_codes.push(code.to_owned());
                 }
                 2 => {
                     stats.record_count += 1;
