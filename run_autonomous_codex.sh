@@ -223,12 +223,21 @@ get_latest_session_id() {
 
 # 监测 5 小时 Limit 限制与常见 Rate Limit 错误
 check_rate_limit() {
-    local log_file="$1"
-    local last_msg_file="$2"
+    local exit_code="$1"
+    local log_file="$2"
+    local last_msg_file="$3"
 
-    local patterns="(usage_limit_reached|rate_limit_exceeded|rate limit exceeded|hit your usage limit|usage limit reached|429 too many requests|insufficient_quota|reset_after_seconds|5[- ]hour|resets at|credit.*depleted|credits depleted|try again at|try again in|重试)"
+    # 如果轮次正常成功退出 (exit code 0) 且生成了非空的最终答复，且没有致命限额报错，绝不判定为限额中断
+    if [ "$exit_code" -eq 0 ] && [ -f "$last_msg_file" ] && [ -s "$last_msg_file" ]; then
+        if ! tail -n 50 "$log_file" 2>/dev/null | grep -i -E "(hit your usage limit|usage_limit_reached|rate_limit_exceeded|429 [tT]oo [mM]any [rR]equests)" >/dev/null 2>&1; then
+            return 1
+        fi
+    fi
+
+    local patterns="(usage_limit_reached|rate_limit_exceeded|rate limit exceeded|hit your usage limit|usage limit reached|429 [tT]oo [mM]any [rR]equests|insufficient_quota|reset_after_seconds|\btry again at\s+[0-9]|\btry again in\s+[0-9]|credits? depleted|已达到用量限制|已达到配额上限)"
     
-    if [ -f "$log_file" ] && grep -i -E "$patterns" "$log_file" >/dev/null 2>&1; then
+    # 仅检测末尾 100 行报错日志，避免匹配历史或正文讨论中的引用 (如'代码失败后重试')
+    if [ -f "$log_file" ] && tail -n 100 "$log_file" 2>/dev/null | grep -i -E "$patterns" >/dev/null 2>&1; then
         return 0
     fi
     if [ -f "$last_msg_file" ] && grep -i -E "$patterns" "$last_msg_file" >/dev/null 2>&1; then
@@ -320,10 +329,14 @@ def query_app_server():
         pass
     return None
 
-# --- 2. 报错文本正则解析器 (多格式提取) ---
+# --- 2. 报错文本正则解析器 (必须严格伴随限额关键字) ---
 def parse_text(text):
     if not text:
         return None
+    # 严格检验是否包含真实限额语义
+    if not re.search(r"(?:hit your usage limit|usage_limit_reached|rate_limit_exceeded|rate limit exceeded|usage limit reached|429 [tT]oo [mM]any [rR]equests|insufficient_quota|credits? depleted|已达到用量限制|已达到配额上限)", text, re.I):
+        return None
+
     # 2.1 reset_after_seconds
     m_sec = re.search(r"reset_after(?:_seconds)?[\s:=]+(\d+)", text, re.I)
     if m_sec:
@@ -396,7 +409,7 @@ def parse_text(text):
 
     return None
 
-# Read corpus from the current turn
+# Read corpus from the current turn (last 200 lines)
 text_corpus = ""
 for fpath in (last_msg_file, log_file):
     if fpath and os.path.exists(fpath):
@@ -410,8 +423,10 @@ text_res = parse_text(text_corpus)
 
 # Query app-server (like /status)
 app_res = query_app_server()
+is_app_limited = False
 app_target_ts = None
 app_desc = None
+p_used = 0
 if app_res:
     rl = app_res.get("rateLimits", {})
     primary = rl.get("primary") or {}
@@ -423,30 +438,59 @@ if app_res:
     ord_allowed = app_res.get("ordinaryUsageAllowed", True)
     reached_type = rl.get("rateLimitReachedType")
 
-    if p_resets and p_resets > now_ts:
-        if not ord_allowed or reached_type or p_used >= 100 or s_used >= 100 or p_used >= 80:
+    # 仅当普通用量明确禁止、到达上限类型或使用率>=100%时，才属于 app-server 限额状态
+    is_app_limited = (
+        ord_allowed is False
+        or reached_type is not None
+        or p_used >= 100
+        or s_used >= 100
+    )
+    if is_app_limited:
+        if p_used >= 100 and p_resets and p_resets > now_ts:
             app_target_ts = p_resets
             app_desc = f"Codex app-server (/status) 5小时滑动窗口重置点 (已用 {p_used}%)"
-        elif not text_res:
+        elif s_used >= 100 and s_resets and s_resets > now_ts:
+            app_target_ts = s_resets
+            app_desc = f"Codex app-server (/status) 周限额重置点 (已用 {s_used}%)"
+        elif p_resets and p_resets > now_ts:
             app_target_ts = p_resets
-            app_desc = f"Codex app-server (/status) 5小时滑动窗口重置点 (已用 {p_used}%)"
+            app_desc = f"Codex app-server (/status) 限额重置点 (已用 {p_used}%)"
+        elif s_resets and s_resets > now_ts:
+            app_target_ts = s_resets
+            app_desc = f"Codex app-server (/status) 周限额重置点 (已用 {s_used}%)"
 
+# --- 最终判定决策 ---
+# 1. 报错文本中明确包含限额提示和重试时间
 if text_res:
     wait_sec, target_str, desc = text_res
     source = "error_log"
-elif app_target_ts and app_target_ts > now_ts:
+    is_limited = 1
+# 2. App-Server 明确确认达到上限并提供了重置时间
+elif is_app_limited and app_target_ts and app_target_ts > now_ts:
     wait_sec = (app_target_ts - now_ts) + 60
     target_dt = datetime.datetime.fromtimestamp(app_target_ts)
     target_str = target_dt.strftime("%Y-%m-%d %H:%M:%S")
     desc = app_desc
     source = "app_server"
-else:
+    is_limited = 1
+# 3. App-Server 确认到达上限，但未返回未来时间戳
+elif is_app_limited:
     wait_sec = default_cooldown
     target_dt = now + datetime.timedelta(seconds=default_cooldown)
     target_str = target_dt.strftime("%Y-%m-%d %H:%M:%S")
-    desc = f"未检测到明确 reset time，采用默认 {default_cooldown // 3600} 小时冷却"
+    desc = f"检测到限额状态，但未解析到明确时间点，采用默认 {default_cooldown // 3600} 小时冷却"
     source = "default_fallback"
+    is_limited = 1
+# 4. 配额充足，未达到上限
+else:
+    rem = 100 - p_used if p_used <= 100 else 0
+    wait_sec = 0
+    target_str = ""
+    desc = f"未触发限额限制 (当前配额充足，5小时窗口已用: {p_used}%, 剩余余量: {rem}%)"
+    source = "none"
+    is_limited = 0
 
+print(f"IS_RATE_LIMITED={is_limited}")
 print(f"WAIT_SECONDS={wait_sec}")
 print(f"RESET_TIME=\"{target_str}\"")
 print(f"RESET_SOURCE=\"{source}\"")
@@ -552,6 +596,95 @@ wait_with_countdown() {
 }
 
 # ------------------------------------------------------------------------------
+# 宿主自动化 Git 提交函数 (解决沙箱 .git 只读限制，严格满足 AGENTS.md 规范)
+# ------------------------------------------------------------------------------
+auto_commit_subtask_changes() {
+    local turn_num="$1"
+    local last_msg_file="$2"
+
+    if [ ! -d "${PROJECT_ROOT}/.git" ]; then
+        return 0
+    fi
+
+    # 检查除 runner 脚本与格式化工具之外是否有待提交的代码改动
+    local status_output
+    status_output=$(git -C "$PROJECT_ROOT" status --porcelain -- ':!run_autonomous_codex.sh' ':!format_codex_stream.py' 2>/dev/null || true)
+
+    if [ -z "$status_output" ]; then
+        log_info "工作区无新增待提交代码改动，跳过自动 Git 提交。"
+        return 0
+    fi
+
+    log_info "检测到本轮产生未提交代码改动，正在由宿主执行自动 Git 提交..."
+
+    # 提取结构化提交信息
+    local commit_msg
+    commit_msg=$(python3 - "$last_msg_file" "$turn_num" <<'PYEOF'
+import re, os, sys
+
+msg_file = sys.argv[1] if len(sys.argv) > 1 else ""
+turn = sys.argv[2] if len(sys.argv) > 2 else "1"
+
+def build_commit():
+    lines = []
+    if msg_file and os.path.exists(msg_file):
+        try:
+            with open(msg_file, "r", encoding="utf-8", errors="replace") as f:
+                lines = [l.strip() for l in f if l.strip()]
+        except Exception:
+            pass
+
+    if not lines:
+        return f"chore(turn-{turn}): complete autonomous subtask\n\nTurn #{turn} automated commit by host runner."
+
+    first = lines[0]
+    # 清理 markdown 粗体、斜体、代码、标题和链接
+    clean_title = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", first)
+    clean_title = re.sub(r"\*\*|__|[*`#]", "", clean_title)
+    clean_title = re.sub(r"^[：:]+|[：:]+$", "", clean_title).strip()
+
+    # 规范化 commit 标题
+    if not re.match(r"^(feat|fix|refactor|chore|docs|test|style)\b", clean_title, re.I):
+        if len(clean_title) > 65:
+            clean_title = clean_title[:62] + "..."
+        subject = f"feat: {clean_title}"
+    else:
+        subject = clean_title
+
+    body_lines = []
+    for l in lines[1:8]:
+        if "```" in l or "ARCHITECTURE.md" in l or "已同步" in l or "未能提交" in l or "已尝试提交" in l:
+            break
+        body_lines.append(l)
+
+    body = "\n".join(body_lines).strip()
+    footer = f"\n\nTurn #{turn} autonomous subtask completion.\nAutomated commit by host runner."
+    return subject + ("\n\n" + body if body else "") + footer
+
+print(build_commit())
+PYEOF
+    )
+
+    if [ -z "$commit_msg" ]; then
+        commit_msg="feat(turn-${turn_num}): complete autonomous subtask"
+    fi
+
+    # 暂存所有项目改动 (保持 runner 脚本本身不被混入子任务业务 commit)
+    git -C "$PROJECT_ROOT" add -A -- ':!run_autonomous_codex.sh' ':!format_codex_stream.py'
+
+    # 执行 commit
+    if git -C "$PROJECT_ROOT" commit -m "$commit_msg" >/dev/null 2>&1; then
+        local commit_hash
+        commit_hash=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD)
+        local commit_subject
+        commit_subject=$(git -C "$PROJECT_ROOT" log -1 --pretty=format:"%s")
+        log_success "【Git 自动提交完成】${CLR_BOLD}${commit_hash}${CLR_RESET} - ${commit_subject}"
+    else
+        log_warn "Git 提交执行未生效或已由前序操作提交。"
+    fi
+}
+
+# ------------------------------------------------------------------------------
 # 5. 提示词构造 (Prompt Generator)
 # ------------------------------------------------------------------------------
 generate_initial_prompt() {
@@ -572,7 +705,11 @@ generate_initial_prompt() {
 4. 【强制要求 - 同步进度】：在完成该小任务并验证后，必须立即编辑 ./docs/ARCHITECTURE.md 文档：
    - 更新 ## Complete target architecture 中的状态标签（例如将 [Pending] 变更为 [Partially implemented] 或 [Implemented]）。
    - 更新文档底部的迁移状态与进度记录，说明本次变更、验证结果和下一步计划。
-5. 【重要 - 完成判定与标志输出】：
+5. 【重要 - 关于 Git 自动提交】：
+   - Linux Codex 沙箱环境按安全设计将 .git 目录挂载为只读，因此在沙箱内部执行 git add / git commit 会报错 "Read-only file system" 或无法创建 index.lock。
+   - 请【绝对不要】在沙箱内尝试执行 git 提交命令。
+   - 外部自动化宿主运行脚本 (run_autonomous_codex.sh) 会在每轮子任务完成并验证通过后，自动代你在宿主机上将代码改动原子提交到 Git 并记录提交信息。你只需专注于编写代码、跑通测试验证、并同步更新 ./docs/ARCHITECTURE.md 即可！
+6. 【重要 - 完成判定与标志输出】：
    当且仅当 ./headless.md 和 ./docs/ARCHITECTURE.md 中所要求的所有架构组件（核心库、Axum API、WebSocket、Web UI 适配、生命周期管理、配置增强与事务、单服务打包部署与测试验证）全部完整实现并通过验证时，在本次最终回答的最末尾单独输出一行特定标记字符串：
    $COMPLETION_FLAG
    如果整个项目的最终计划尚未全部达成，请绝对不要输出该标记字符串！只需总结本小任务的完成成果并指出下一步任务即可。
@@ -591,7 +728,8 @@ $extra_warning
 3. 【上游参考】：若需要参考上游原始实现，可直接查阅 ../clash-verge-rev 目录中的源码。
 4. 运行 \`cargo check --workspace\` 及相关测试，验证修改的正确性。
 5. 【强制要求 - 同步进度】：完成该小任务后，必须同步更新 ./docs/ARCHITECTURE.md 文件中的架构树状态与进度总结。
-6. 【重要 - 完成判定】：
+6. 【关于 Git 提交】：.git 在沙箱内为只读挂载，请勿在沙箱内执行 git commit；每轮完成后外部宿主脚本会自动代你提交。你只需专注于代码实现、验证测试以及同步更新 ./docs/ARCHITECTURE.md。
+7. 【重要 - 完成判定】：
    如果且仅如果整个项目的目标与功能已全部完成并验证通过，请在最后输出特定完成标志：
    $COMPLETION_FLAG
    若尚未全部完成，严禁输出该标志，请总结当前进度并明确下一个待办子任务。
@@ -911,33 +1049,35 @@ main() {
         fi
 
         # ----------------------------------------------------------------------
-        # 分支 B: 监测 5 小时 Limit 限制问题 (基于准确 reset time 动态倒计时)
+        # 分支 B: 监测 5 小时 Limit 限制问题 (基于真实配额状态与准确 reset time)
         # ----------------------------------------------------------------------
-        if check_rate_limit "$LAST_LOG_FILE" "$LAST_MSG_FILE"; then
-            echo ""
-            log_box "【检测到触发 5 小时 Limit / Rate Limit 配额上限】" "$CLR_RED"
-            log_warn "依据最新交互日志与 Codex 会话状态分析，当前 API 配额已达到限额。"
-
-            # 智能提取下一次重置时间点 (结合官方报错可用时间与 app-server /status 状态)
+        if check_rate_limit "$LAST_EXIT_CODE" "$LAST_LOG_FILE" "$LAST_MSG_FILE"; then
+            local IS_RATE_LIMITED=0
             local WAIT_SECONDS="$RATE_LIMIT_COOLDOWN"
             local RESET_TIME=""
             local RESET_SOURCE=""
             local RESET_DETAIL=""
             eval "$(get_rate_limit_info "$LAST_LOG_FILE" "$LAST_MSG_FILE" "$RATE_LIMIT_COOLDOWN")"
 
-            log_warn "限额详情: ${CLR_BOLD}${RESET_DETAIL}${CLR_RESET}"
-            log_info "精准预计恢复时间: ${CLR_BOLD}${RESET_TIME}${CLR_RESET} (来源: ${RESET_SOURCE})"
-            local wait_h=$(( WAIT_SECONDS / 3600 ))
-            local wait_m=$(( (WAIT_SECONDS % 3600) / 60 ))
-            local wait_s=$(( WAIT_SECONDS % 60 ))
-            log_info "动态计算等待时长: ${CLR_BOLD}${wait_h}小时 ${wait_m}分钟 ${wait_s}秒${CLR_RESET} (已计入 60 秒安全缓冲，无需盲目等待 5 小时)"
+            if [ "$IS_RATE_LIMITED" -eq 1 ] && [ "$WAIT_SECONDS" -gt 0 ]; then
+                echo ""
+                log_box "【检测到触发 5 小时 Limit / Rate Limit 配额上限】" "$CLR_RED"
+                log_warn "限额详情: ${CLR_BOLD}${RESET_DETAIL}${CLR_RESET}"
+                log_info "精准预计恢复时间: ${CLR_BOLD}${RESET_TIME}${CLR_RESET} (来源: ${RESET_SOURCE})"
+                local wait_h=$(( WAIT_SECONDS / 3600 ))
+                local wait_m=$(( (WAIT_SECONDS % 3600) / 60 ))
+                local wait_s=$(( WAIT_SECONDS % 60 ))
+                log_info "动态计算等待时长: ${CLR_BOLD}${wait_h}小时 ${wait_m}分钟 ${wait_s}秒${CLR_RESET} (已计入 60 秒安全缓冲，无需盲目等待 5 小时)"
 
-            wait_with_countdown "$WAIT_SECONDS" "等待配额刷新重置 ($RESET_TIME)"
+                wait_with_countdown "$WAIT_SECONDS" "等待配额刷新重置 ($RESET_TIME)"
 
-            log_info "已成功到达配额重置时间点 ($RESET_TIME)，自动重新拉起 Codex 会话..."
-            consecutive_timeouts=0
-            turn_count=$(( turn_count + 1 ))
-            continue
+                log_info "已成功到达配额重置时间点 ($RESET_TIME)，自动重新拉起 Codex 会话..."
+                consecutive_timeouts=0
+                turn_count=$(( turn_count + 1 ))
+                continue
+            else
+                log_info "经核验当前配额充足 (${RESET_DETAIL})，判定为非限额异常，继续正常调度流程。"
+            fi
         fi
 
         # ----------------------------------------------------------------------
@@ -975,6 +1115,23 @@ main() {
         consecutive_lock_conflicts=0
 
         # ----------------------------------------------------------------------
+        # 分支 E: 验证文档同步状态 (ARCHITECTURE.md)
+        # ----------------------------------------------------------------------
+        local arch_hash_after
+        arch_hash_after=$(get_arch_hash)
+        if [ "$arch_hash_before" != "$arch_hash_after" ]; then
+            log_success "【进度已同步】检测到 ./docs/ARCHITECTURE.md 已成功更新进度！"
+        else
+            log_warn "【进度未同步告警】本轮子任务结束后，./docs/ARCHITECTURE.md 未检测到修改！"
+            last_sync_warning="【注意：上一轮任务完成后未检测到 ./docs/ARCHITECTURE.md 更新，请在本轮务必更新 ARCHITECTURE.md 同步最新架构与完成状态！】"
+        fi
+
+        # ----------------------------------------------------------------------
+        # 分支 F: 宿主自动化 Git 提交 (严格执行 AGENTS.md 规范并避开沙箱只读限制)
+        # ----------------------------------------------------------------------
+        auto_commit_subtask_changes "$turn_count" "$LAST_MSG_FILE"
+
+        # ----------------------------------------------------------------------
         # 分支 D: 检测整个项目计划完成标志 flag (严格多层防误判校验)
         # ----------------------------------------------------------------------
         if check_all_tasks_completed "$LAST_MSG_FILE"; then
@@ -985,18 +1142,6 @@ main() {
             log_info "总执行轮次: $turn_count"
             log_info "最终日志文件: $LAST_LOG_FILE"
             exit 0
-        fi
-
-        # ----------------------------------------------------------------------
-        # 分支 E: 验证文档同步状态 (ARCHITECTURE.md)
-        # ----------------------------------------------------------------------
-        local arch_hash_after
-        arch_hash_after=$(get_arch_hash)
-        if [ "$arch_hash_before" != "$arch_hash_after" ]; then
-            log_success "【进度已同步】检测到 ./docs/ARCHITECTURE.md 已成功更新进度！"
-        else
-            log_warn "【进度未同步告警】本轮子任务结束后，./docs/ARCHITECTURE.md 未检测到修改！"
-            last_sync_warning="【注意：上一轮任务完成后未检测到 ./docs/ARCHITECTURE.md 更新，请在本轮务必更新 ARCHITECTURE.md 同步最新架构与完成状态！】"
         fi
 
         # 正常轮次推进
