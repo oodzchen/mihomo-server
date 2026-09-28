@@ -15,6 +15,8 @@ use super::runtime::{Revision, sync_directory, unique_id, write_new};
 
 mod geo;
 pub use geo::{GeoUrls, GeodataLoader, GeositeMatcher};
+mod dns_policy;
+pub use dns_policy::{FallbackFilter, ResolverPolicy, ResolverPolicyValue};
 mod hosts;
 pub use hosts::{HostValue, Hosts};
 mod network;
@@ -129,6 +131,23 @@ fn deserialize_optional_string<'de, D: serde::Deserializer<'de>>(
     }
 }
 
+fn deserialize_optional_string_list<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<String>>, D::Error> {
+    match Option::<serde_yaml_ng::Value>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(serde_yaml_ng::Value::Sequence(values)) => values
+            .into_iter()
+            .map(|value| match value {
+                serde_yaml_ng::Value::String(value) => Ok(value),
+                _ => Err(serde::de::Error::custom("list must contain only strings")),
+            })
+            .collect::<std::result::Result<Vec<_>, D::Error>>()
+            .map(Some),
+        Some(_) => Err(serde::de::Error::custom("setting must be a string list or null")),
+    }
+}
+
 impl RuntimeSettings {
     /// Initial stage only: service fields/TUN, pure TUN derivation, then DNS page.
     /// Final enforcement must not rerun derivation after manual enhancements.
@@ -190,6 +209,9 @@ impl RuntimeSettings {
         if let Some(tun) = &self.tun {
             tun.validate()?;
         }
+        if let Some(dns) = &self.dns {
+            dns.validate()?;
+        }
         Ok(())
     }
 
@@ -204,7 +226,18 @@ impl RuntimeSettings {
                     .remove(section)
                     .and_then(|v| v.as_mapping().cloned())
                     .unwrap_or_default();
-                nested.extend(value.as_mapping().context("invalid nested settings mapping")?.clone());
+                let mut owned = value.as_mapping().context("invalid nested settings mapping")?.clone();
+                if section == "dns" {
+                    if let Some(filter) = owned.remove("fallback-filter") {
+                        let mut merged = nested
+                            .remove("fallback-filter")
+                            .and_then(|value| value.as_mapping().cloned())
+                            .unwrap_or_default();
+                        merged.extend(filter.as_mapping().context("invalid fallback filter mapping")?.clone());
+                        nested.insert("fallback-filter".into(), merged.into());
+                    }
+                }
+                nested.extend(owned);
                 config.insert(section.into(), nested.into());
             }
         }
@@ -222,6 +255,17 @@ impl RuntimeSettings {
         for section in ["dns", "tun", "geox-url"] {
             if let Some(nested) = values.get_mut(section).and_then(|v| v.as_mapping_mut()) {
                 if section == "dns" {
+                    if let Some(filter) = nested
+                        .get_mut("fallback-filter")
+                        .and_then(|value| value.as_mapping_mut())
+                    {
+                        filter.retain(|_, value| match value {
+                            serde_yaml_ng::Value::Null => false,
+                            serde_yaml_ng::Value::String(value) => !value.trim().is_empty(),
+                            serde_yaml_ng::Value::Sequence(value) => !value.is_empty(),
+                            _ => true,
+                        });
+                    }
                     nested.retain(|key, value| match value {
                         serde_yaml_ng::Value::Null => false,
                         serde_yaml_ng::Value::Bool(on) => {
@@ -251,7 +295,22 @@ impl RuntimeSettings {
                     changed.push(name.to_owned());
                 }
             } else if let Some(nested) = value.as_mapping() {
-                for subkey in nested.keys() {
+                for (subkey, owned) in nested {
+                    if name == "dns" && subkey.as_str() == Some("fallback-filter") {
+                        let before_filter = before.get(&key).and_then(|value| value.get(subkey));
+                        let after_filter = after.get(&key).and_then(|value| value.get(subkey));
+                        for field in owned.as_mapping().context("invalid fallback filter mapping")?.keys() {
+                            if before_filter.and_then(|value| value.get(field))
+                                != after_filter.and_then(|value| value.get(field))
+                            {
+                                changed.push(format!(
+                                    "dns.fallback-filter.{}",
+                                    field.as_str().context("invalid fallback filter key")?
+                                ));
+                            }
+                        }
+                        continue;
+                    }
                     let get = |config: &Mapping| {
                         config
                             .get(&key)

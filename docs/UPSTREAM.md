@@ -48,6 +48,17 @@ round-trip through upstream-format YAML, while transient uploaded content is
 not persisted. Pure configuration tests are reused from upstream rather than
 reimplementing the algorithms or inventing a new processing order.
 
+## DNS resolver policy settings reference
+
+The P1 DNS policy controls follow the saved shapes and editor fields in
+`src/components/setting/mods/dns-viewer.tsx` and the provider conflict fields in
+`src-tauri/src/config/dns.rs` at pinned revision
+`b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b`. New service code lives in
+`crates/headless-core/src/config/settings/dns_policy.rs` and the existing
+`settings/network.rs` authority model; `web/src/network-settings.tsx` adapts
+the browser editor. Strict policy decoding, bounded values and per-leaf
+fallback-filter merging are headless adaptations rather than copied source.
+
 ## Geo/provider resource inventory reference
 
 The P1 inventory adapts the resource identities and provider sections from

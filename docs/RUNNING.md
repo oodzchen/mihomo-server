@@ -1356,10 +1356,20 @@ runtime object. Read it back after either success or failure. For example:
 
 DNS supports enable, ipv6, listen, enhanced-mode (`fake-ip`/`redir-host`),
 fake-ip-range/range6, use-hosts, use-system-hosts, default-nameserver, nameserver,
-fallback and fake-ip-filter. The two hosts switches own both true and false.
+fallback, fake-ip-filter, proxy-server-nameserver, direct-nameserver,
+direct-nameserver-follow-policy, nameserver-policy,
+proxy-server-nameserver-policy and fallback-filter. Resolver policies are JSON
+objects whose values are a server string or a nonempty string list. Fallback
+filter supports geoip, geoip-code, ipcidr and domain. The two hosts switches own
+both true and false.
 For the other fields, following the upstream DNS page, **false, null, blank text
 and empty lists inherit**; only true/nonempty values are restored after enhancements.
 DNS false therefore does not disable a source configuration that enables DNS.
+Nonempty policy maps replace their corresponding source map; empty maps inherit.
+Fallback-filter merges by leaf, so `geoip: false` is explicit and a saved
+domain list does not erase the source GeoIP code or CIDR list. Empty filter
+strings/lists inherit. The direct resolver follow-policy switch follows the
+other top-level DNS booleans: false inherits.
 Remove an override to inherit the source; editing DNS in standalone runtime YAML
 is still available when no authoritative setting controls that field.
 
@@ -1380,8 +1390,7 @@ auto-route readback before reporting readiness. Stopped settings can still be
 prepared without the device. Mihomo itself creates the interface and routes;
 the service does not change host DNS or grant TUN permissions. A working kernel
 interface, routes and traffic still require verification on a privileged host.
-Hosts mapping and host-use switches are supported below; policy settings and
-fallback-filter remain pending. The browser now edits
+Hosts mapping and host-use switches are supported below. The browser now edits
 all of the typed fields above and preserves other supported runtime settings.
 Unknown nested fields prevent saving until a compatible snapshot is read.
 

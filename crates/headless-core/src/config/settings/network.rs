@@ -3,6 +3,8 @@
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 
+use super::{FallbackFilter, ResolverPolicy};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DnsMode {
@@ -43,8 +45,43 @@ pub struct DnsSettings {
     pub nameserver: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback: Option<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::deserialize_optional_string_list"
+    )]
+    pub proxy_server_nameserver: Option<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::deserialize_optional_string_list"
+    )]
+    pub direct_nameserver: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_nameserver_follow_policy: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nameserver_policy: Option<ResolverPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_server_nameserver_policy: Option<ResolverPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_filter: Option<FallbackFilter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fake_ip_filter: Option<Vec<String>>,
+}
+
+impl DnsSettings {
+    pub(super) fn validate(&self) -> Result<()> {
+        for policy in [&self.nameserver_policy, &self.proxy_server_nameserver_policy]
+            .into_iter()
+            .flatten()
+        {
+            policy.validate()?;
+        }
+        if let Some(filter) = &self.fallback_filter {
+            filter.validate()?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

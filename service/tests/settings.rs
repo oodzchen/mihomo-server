@@ -10,6 +10,35 @@ use std::{fs, path::PathBuf};
 struct Directory(PathBuf);
 
 #[tokio::test]
+#[ignore = "requires real Mihomo and local DNS listener binding"]
+async fn resolver_policy_and_fallback_filter_apply_and_reject_invalid_core_candidate() -> Result<()> {
+    let dir = Directory::new()?;
+    let manager = CoreManager::spawn(dir.options()?)?;
+    let result = async {
+        manager.start().await?;
+        let runtime = serde_yaml_ng::from_str("dns: {enable: true, enhanced-mode: redir-host, listen: '127.0.0.1:0', nameserver: [1.1.1.1], nameserver-policy: {example.test: [1.1.1.1]}, proxy-server-nameserver: [8.8.8.8], direct-nameserver: [9.9.9.9], fallback-filter: {geoip: false, geoip-code: CN, domain: ['+.example.test']}}")?;
+        manager.set_settings(runtime).await?;
+        let applied = manager.runtime_config().await?;
+        assert_eq!(applied["dns"]["nameserver-policy"]["example.test"][0].as_str(), Some("1.1.1.1"));
+        assert_eq!(applied["dns"]["fallback-filter"]["geoip"].as_bool(), Some(false));
+        assert_eq!(applied["dns"]["fallback-filter"]["geoip-code"].as_str(), Some("CN"));
+        assert_eq!(applied["dns"]["proxy-server-nameserver"][0].as_str(), Some("8.8.8.8"));
+        let before = manager.status();
+        let settings = manager.settings().await?;
+        let invalid = serde_yaml_ng::from_str("dns: {enable: true, nameserver: [1.1.1.1], nameserver-policy: {example.test: 'https://['}}")?;
+        assert!(manager.set_settings(invalid).await.is_err());
+        assert_eq!(manager.status().phase, CorePhase::Running);
+        assert_eq!(manager.status().pid, before.pid);
+        assert_eq!(manager.status().config_revision, before.config_revision);
+        assert_eq!(manager.runtime_config().await?, applied);
+        assert_eq!(manager.settings().await?, settings);
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
 #[ignore = "requires real Mihomo and a Linux host without /dev/net/tun"]
 async fn unavailable_native_tun_rejects_live_settings_without_stopping_proxy() -> Result<()> {
     if std::path::Path::new("/dev/net/tun").exists() {

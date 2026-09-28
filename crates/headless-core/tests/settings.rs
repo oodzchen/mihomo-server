@@ -159,7 +159,7 @@ fn malformed_unknown_unsafe_and_oversized_settings_are_rejected_without_replacem
         "schema_version: 1\nruntime: {tun: {unknown: false}}",
         "schema_version: 1\nruntime: {dns: {nameserver: '1.1.1.1'}}",
         "schema_version: 1\nruntime: {dns: {enhanced-mode: invalid}}",
-        "schema_version: 1\nruntime: {dns: {nameserver-policy: {example.org: 1.1.1.1}}}",
+        "schema_version: 1\nruntime: {dns: {nameserver-policy: {example.org: 123}}}",
         "[]",
     ] {
         fs::write(dir.0.join("settings.yaml"), yaml)?;
@@ -280,6 +280,83 @@ fn dns_page_empty_and_false_values_inherit_while_tun_false_and_empty_lists_are_o
     let mut store = SettingsStore::open(&dir.0)?;
     store.replace(settings.clone())?;
     assert_eq!(SettingsStore::open(&dir.0)?.snapshot(), settings);
+    Ok(())
+}
+
+#[test]
+fn resolver_policies_and_fallback_filter_keep_unowned_source_leaves() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    let source = parse(
+        "dns: {nameserver-policy: {source.test: 9.9.9.9}, proxy-server-nameserver-policy: {source.proxy: [1.1.1.1]}, proxy-server-nameserver: [9.9.9.9], direct-nameserver-follow-policy: true, fallback-filter: {geoip: true, geoip-code: CN, ipcidr: [240.0.0.0/4], domain: ['+.source.test']}, custom: retained}",
+    )?;
+    let runtime: RuntimeSettings = serde_yaml_ng::from_str(
+        "dns: {nameserver-policy: {owned.test: [1.1.1.1, 'https://dns.example/dns-query']}, proxy-server-nameserver-policy: {node.test: 8.8.8.8}, proxy-server-nameserver: [1.1.1.1], direct-nameserver: [8.8.4.4], direct-nameserver-follow-policy: false, fallback-filter: {geoip: false, domain: ['+.owned.test']}}",
+    )?;
+    for applied in [runtime.prepare(source.clone())?, runtime.enforce(source.clone())?] {
+        assert!(applied["dns"]["nameserver-policy"].get("source.test").is_none());
+        assert_eq!(
+            applied["dns"]["nameserver-policy"]["owned.test"][0].as_str(),
+            Some("1.1.1.1")
+        );
+        assert_eq!(
+            applied["dns"]["proxy-server-nameserver-policy"]["node.test"].as_str(),
+            Some("8.8.8.8")
+        );
+        assert_eq!(applied["dns"]["proxy-server-nameserver"][0].as_str(), Some("1.1.1.1"));
+        assert_eq!(applied["dns"]["direct-nameserver"][0].as_str(), Some("8.8.4.4"));
+        assert_eq!(applied["dns"]["direct-nameserver-follow-policy"].as_bool(), Some(true));
+        assert_eq!(applied["dns"]["fallback-filter"]["geoip"].as_bool(), Some(false));
+        assert_eq!(applied["dns"]["fallback-filter"]["geoip-code"].as_str(), Some("CN"));
+        assert_eq!(
+            applied["dns"]["fallback-filter"]["ipcidr"][0].as_str(),
+            Some("240.0.0.0/4")
+        );
+        assert_eq!(
+            applied["dns"]["fallback-filter"]["domain"][0].as_str(),
+            Some("+.owned.test")
+        );
+        assert_eq!(applied["dns"]["custom"].as_str(), Some("retained"));
+        let changed = runtime.overridden_fields(&source, &applied)?;
+        assert!(changed.contains(&"dns.nameserver-policy".into()));
+        assert!(changed.contains(&"dns.fallback-filter.geoip".into()));
+        assert!(changed.contains(&"dns.fallback-filter.domain".into()));
+        assert!(!changed.contains(&"dns.fallback-filter.geoip-code".into()));
+    }
+    let empty: RuntimeSettings =
+        serde_yaml_ng::from_str("dns: {nameserver-policy: {}, fallback-filter: {geoip-code: ' ', ipcidr: []}}")?;
+    assert_eq!(empty.enforce(source.clone())?, source);
+    assert_eq!(
+        serde_yaml_ng::from_str::<RuntimeSettings>(&serde_yaml_ng::to_string(&runtime)?)?,
+        runtime
+    );
+    let dir = Directory::new()?;
+    let mut store = SettingsStore::open(&dir.0)?;
+    let mut saved = store.snapshot();
+    saved.runtime = runtime;
+    store.replace(saved.clone())?;
+    assert_eq!(SettingsStore::open(&dir.0)?.snapshot(), saved);
+    Ok(())
+}
+
+#[test]
+fn resolver_policies_and_fallback_filter_reject_invalid_saved_shapes() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    for invalid in [
+        "dns: {nameserver-policy: []}",
+        "dns: {nameserver-policy: {example.test: []}}",
+        "dns: {nameserver-policy: {example.test: 123}}",
+        "dns: {nameserver-policy: {example.test: [1.1.1.1, 123]}}",
+        "dns: {proxy-server-nameserver-policy: {example.test: false}}",
+        "dns: {fallback-filter: {geoip: 'false'}}",
+        "dns: {fallback-filter: {geoip-code: 123}}",
+        "dns: {fallback-filter: {unknown: true}}",
+        "dns: {fallback-filter: {domain: [123]}}",
+    ] {
+        assert!(
+            serde_yaml_ng::from_str::<RuntimeSettings>(invalid).is_err(),
+            "accepted {invalid}"
+        );
+    }
     Ok(())
 }
 

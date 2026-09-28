@@ -1,10 +1,10 @@
-type Value = number | boolean | string | string[];
+type Value = number | boolean | string | string[] | Record<string, unknown>;
 export type Runtime = Record<string, Value | Record<string, Value>>;
 export type Draft = Record<string, string>;
 type Field = {
   key: string;
   label: string;
-  kind: "bool" | "string" | "list" | "mtu" | "select";
+  kind: "bool" | "string" | "list" | "mtu" | "select" | "policy" | "filter";
   options?: string[];
 };
 const schemas: Record<"dns" | "tun", Field[]> = {
@@ -25,6 +25,12 @@ const schemas: Record<"dns" | "tun", Field[]> = {
     { key: "default-nameserver", label: "DNS 默认解析服务器", kind: "list" },
     { key: "nameserver", label: "DNS 解析服务器", kind: "list" },
     { key: "fallback", label: "DNS 后备解析服务器", kind: "list" },
+    { key: "proxy-server-nameserver", label: "DNS 代理节点解析服务器", kind: "list" },
+    { key: "direct-nameserver", label: "DNS 直连解析服务器", kind: "list" },
+    { key: "direct-nameserver-follow-policy", label: "DNS 直连遵循策略", kind: "bool" },
+    { key: "nameserver-policy", label: "DNS 域名解析策略", kind: "policy" },
+    { key: "proxy-server-nameserver-policy", label: "DNS 代理节点解析策略", kind: "policy" },
+    { key: "fallback-filter", label: "DNS 后备过滤条件", kind: "filter" },
     { key: "fake-ip-filter", label: "DNS Fake-IP 过滤列表", kind: "list" },
   ],
   tun: [
@@ -46,6 +52,25 @@ const schemas: Record<"dns" | "tun", Field[]> = {
   ],
 };
 
+function object(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validPolicy(value: unknown): boolean {
+  return object(value) && Object.entries(value).every(([key, server]) =>
+    key.trim().length > 0 && (typeof server === "string" && server.trim().length > 0 ||
+      Array.isArray(server) && server.length > 0 && server.every((item) => typeof item === "string" && item.trim().length > 0))
+  );
+}
+
+function validFilter(value: unknown): boolean {
+  return object(value) && Object.entries(value).every(([key, entry]) =>
+    key === "geoip" ? typeof entry === "boolean" :
+    key === "geoip-code" ? typeof entry === "string" :
+    key === "ipcidr" || key === "domain" ? Array.isArray(entry) && entry.every((item) => typeof item === "string") : false
+  );
+}
+
 export function validateNetwork(section: "dns" | "tun", value: unknown) {
   if (value == null) return;
   if (typeof value !== "object" || Array.isArray(value))
@@ -60,6 +85,10 @@ export function validateNetwork(section: "dns" | "tun", value: unknown) {
     const valid =
       f.kind === "bool"
         ? typeof v === "boolean"
+        : f.kind === "policy"
+          ? validPolicy(v)
+          : f.kind === "filter"
+            ? validFilter(v)
         : f.kind === "list"
           ? Array.isArray(v) && v.every((item) => typeof item === "string")
           : f.kind === "mtu"
@@ -82,7 +111,7 @@ export function networkDraft(runtime: Runtime): Draft {
       const key = `${section}.${field.key}`,
         v = value?.[field.key];
       draft[key] =
-        v == null ? "" : field.kind === "list" ? JSON.stringify(v) : String(v);
+        v == null ? "" : ["list", "policy", "filter"].includes(field.kind) ? JSON.stringify(v) : String(v);
       draft[`${key}.present`] = v == null ? "" : "true";
     }
   }
@@ -99,18 +128,18 @@ export function networkRuntime(draft: Draft): Runtime {
       if (f.kind === "string") {
         if (draft[`${key}.present`] === "true") value[f.key] = v;
       } else if (v !== "") {
-        if (f.kind === "list") {
+        if (f.kind === "list" || f.kind === "policy" || f.kind === "filter") {
           try {
-            const list: unknown = JSON.parse(v);
-            if (
-              !Array.isArray(list) ||
-              !list.every((item) => typeof item === "string")
-            )
-              throw new Error();
-            value[f.key] = list;
+            const parsed: unknown = JSON.parse(v);
+            if (f.kind === "list") {
+              if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) throw new Error();
+            } else if (f.kind === "policy" ? !validPolicy(parsed) : !validFilter(parsed)) throw new Error();
+            value[f.key] = parsed as Value;
           } catch {
             throw new Error(
-              `${f.label}必须是 JSON 字符串列表，例如 ["1.1.1.1"]；留空继承，[] 表示空列表。`,
+              f.kind === "list"
+                ? `${f.label}必须是 JSON 字符串列表，例如 ["1.1.1.1"]；留空继承，[] 表示空列表。`
+                : `${f.label}必须是有效的 JSON 对象；留空继承。`,
             );
           }
         } else if (f.kind === "mtu") {
@@ -183,12 +212,12 @@ export function NetworkFields({
                     )}
                     <label>
                       {f.label}
-                      {f.kind === "list" ? (
+                      {f.kind === "list" || f.kind === "policy" || f.kind === "filter" ? (
                         <textarea
                           aria-label={f.label}
                           rows={3}
                           value={draft[key] ?? ""}
-                          placeholder="留空继承，或输入 JSON 列表 []"
+                          placeholder={f.kind === "list" ? "留空继承，或输入 JSON 列表 []" : "留空继承，或输入 JSON 对象 {}"}
                           onChange={(e) => change(key, e.target.value)}
                         />
                       ) : f.kind === "string" || f.kind === "mtu" ? (

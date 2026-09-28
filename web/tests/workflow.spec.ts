@@ -2392,6 +2392,10 @@ test("network editor preserves all supported fields and explicitly confirms chan
       "default-nameserver": ["1.1.1.1"],
       nameserver: ["1.1.1.1"],
       fallback: [],
+      "proxy-server-nameserver": ["8.8.8.8"],
+      "direct-nameserver": ["9.9.9.9"],
+      "nameserver-policy": { "owned.test": ["1.1.1.1"] },
+      "fallback-filter": { geoip: false, "geoip-code": "CN" },
       "fake-ip-filter": ["*.lan"],
     },
     tun: {
@@ -2412,6 +2416,8 @@ test("network editor preserves all supported fields and explicitly confirms chan
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务", exact: true }).click();
   await expect(input("DNS 解析服务器")).toHaveValue('["1.1.1.1"]');
+  await expect(input("DNS 域名解析策略")).toHaveValue('{"owned.test":["1.1.1.1"]}');
+  await expect(input("DNS 后备过滤条件")).toHaveValue('{"geoip":false,"geoip-code":"CN"}');
   await expect(input("DNS 监听地址")).toHaveValue("");
   await expect(select("DNS 监听地址来源")).toHaveValue("true");
   await expect(input("TUN DNS 劫持列表")).toHaveValue("[]");
@@ -2442,6 +2448,11 @@ test("network editor preserves all supported fields and explicitly confirms chan
     "必须是 JSON 字符串列表",
   );
   await input("DNS 后备解析服务器").fill("[]");
+  await input("DNS 域名解析策略").fill('{"bad.test":[]}');
+  await save.click();
+  await expect(page.getByRole("alert").last()).toContainText("必须是有效的 JSON 对象");
+  expect((await api("settings")).runtime).toEqual(runtime);
+  await input("DNS 域名解析策略").fill('{"owned.test":["1.1.1.1"]}');
   await select("DNS 启用").selectOption("true");
   await input("DNS 解析服务器").fill('["https://["]');
   const prior = await api("status");
