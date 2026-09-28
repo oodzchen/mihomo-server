@@ -57,6 +57,18 @@ pub(crate) fn should_retry(error: &anyhow::Error) -> bool {
 }
 
 pub(super) fn transport_error(error: reqwest::Error, context: &'static str) -> anyhow::Error {
+    transport_error_for(
+        error,
+        context,
+        "Subscription server uses legacy TLS; only TLS 1.2/1.3 is supported",
+    )
+}
+
+pub(crate) fn transport_error_for(
+    error: reqwest::Error,
+    context: &'static str,
+    legacy_message: &'static str,
+) -> anyhow::Error {
     let error = error.without_url();
     let old_protocol = std::iter::successors(Some(&error as &(dyn std::error::Error + 'static)), |error| {
         error.source()
@@ -64,7 +76,7 @@ pub(super) fn transport_error(error: reqwest::Error, context: &'static str) -> a
     .any(legacy);
     let error = anyhow::Error::new(error).context(context);
     if old_protocol {
-        error.context("Subscription server uses legacy TLS; only TLS 1.2/1.3 is supported")
+        error.context(legacy_message)
     } else {
         error
     }

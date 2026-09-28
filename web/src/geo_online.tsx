@@ -4,6 +4,7 @@ import type { CoreStatus } from "./types";
 
 type Info = { name: string; current_sha256: string | null; source_sha256: string };
 type Receipt = { changed: boolean; durable: boolean; cleanup_pending: boolean; core_load_verified?: boolean; validation: { verified: boolean; sha256: string; format: string } };
+type Route = "direct" | "system" | "managed";
 
 export function GeoOnlineAction({ name, token, status, connection, logout, installed }: {
   name: string; token: string; status: CoreStatus; connection: string;
@@ -11,6 +12,8 @@ export function GeoOnlineAction({ name, token, status, connection, logout, insta
 }) {
   const [info, setInfo] = useState<Info>();
   const [pin, setPin] = useState("");
+  const [route, setRoute] = useState<Route>("direct");
+  const [invalidCerts, setInvalidCerts] = useState(false);
   const [accept, setAccept] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -19,7 +22,7 @@ export function GeoOnlineAction({ name, token, status, connection, logout, insta
   const dat = name.endsWith(".dat");
   useEffect(() => {
     epoch.current++; controller.current?.abort();
-    setInfo(undefined); setPin(""); setAccept(false); setError(""); setBusy(false);
+    setInfo(undefined); setPin(""); setRoute("direct"); setInvalidCerts(false); setAccept(false); setError(""); setBusy(false);
     return () => { epoch.current++; controller.current?.abort(); };
   }, [name, token, status.config_revision, connection]);
 
@@ -39,6 +42,8 @@ export function GeoOnlineAction({ name, token, status, connection, logout, insta
           expected_source_sha256: info.source_sha256,
           expected_download_sha256: pin || null,
           accept_metadata_only: dat ? false : accept,
+          route,
+          danger_accept_invalid_certs: invalidCerts,
         }, abort.signal);
         if (version !== epoch.current) return;
         if (dat && receipt.core_load_verified !== true) throw new Error("服务未确认 DAT 隔离内核规则加载。");
@@ -63,10 +68,15 @@ export function GeoOnlineAction({ name, token, status, connection, logout, insta
       <p>已提交来源指纹：<code>{info.source_sha256}</code></p>
       <p>当前文件：<code>{info.current_sha256 || "文件缺失"}</code></p>
       <label>可选下载 SHA-256 <input value={pin} disabled={busy} onChange={event => setPin(event.target.value.trim())} /></label>
+      <label>下载路由 <select value={route} disabled={busy} onChange={event => setRoute(event.target.value as Route)}>
+        <option value="direct">直连</option><option value="system">服务系统代理</option><option value="managed" disabled={status.phase !== "running"}>运行中核心代理</option>
+      </select></label>
+      <label><input type="checkbox" checked={invalidCerts} disabled={busy} onChange={event => setInvalidCerts(event.target.checked)} />显式忽略下载来源证书错误</label>
+      <p className="info">默认验证平台证书，证书链失败时会尝试静态根证书。忽略证书错误仅用于可信来源。</p>
       {!dat && <label><input type="checkbox" checked={accept} disabled={busy} onChange={event => setAccept(event.target.checked)} />允许安装描述为空、完整结构未验证的 MMDB</label>}
       {status.phase === "running" && <p className="info">更新时将短暂停止核心，验证新资源后重启；失败会尝试恢复旧文件和核心。</p>}
       {!(["running", "stopped"] as string[]).includes(status.phase) && <p className="info">核心进入运行或停止状态后才能更新在线 Geo 资源。</p>}
-      <button type="button" disabled={busy || connection !== "已连接" || !(["running", "stopped"] as string[]).includes(status.phase)} onClick={() => void run(true)}>更新 {name} 在线资源</button>
+      <button type="button" disabled={busy || connection !== "已连接" || !(["running", "stopped"] as string[]).includes(status.phase) || (route === "managed" && status.phase !== "running")} onClick={() => void run(true)}>更新 {name} 在线资源</button>
     </>}
     {busy && <p role="status">正在处理在线 Geo 资源…</p>}
     {error && <p role="alert" className="alert">在线 Geo 更新失败：{error}</p>}

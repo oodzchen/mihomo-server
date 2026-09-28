@@ -4,7 +4,7 @@ mod dat;
 use anyhow::Result;
 use mihomo_server::{
     core_manager::{CoreManager, CoreOptions, CorePhase},
-    geo_online::Request,
+    geo_online::{Request, RouteChoice},
 };
 use std::{
     fs,
@@ -67,7 +67,7 @@ async fn online_dat_update_guards_inputs_and_recovers_running_core_and_startup_j
         let site_info = manager.geo_online_info("geosite.dat".into()).await?;
         assert_eq!(site_info.source_sha256.len(), 64);
         let old = site_info.current_sha256.clone();
-        let mut request = Request { name: "geosite.dat".into(), expected_current_sha256: old.clone(), expected_source_sha256: "0".repeat(64), expected_download_sha256: None, accept_metadata_only: false };
+        let mut request = Request { name: "geosite.dat".into(), expected_current_sha256: old.clone(), expected_source_sha256: "0".repeat(64), expected_download_sha256: None, accept_metadata_only: false, route: Default::default(), danger_accept_invalid_certs: false };
         assert!(manager.update_geo_online(request.clone()).await.is_err());
         assert_eq!(manager.geo_online_info("geosite.dat".into()).await?.current_sha256, old);
         request.expected_source_sha256 = site_info.source_sha256;
@@ -90,16 +90,17 @@ async fn online_dat_update_guards_inputs_and_recovers_running_core_and_startup_j
         invalid_regex.extend(dat::group(b"CN", &[dat::domain(3, b"bootstrap.invalid")]));
         *site.lock().unwrap() = invalid_regex;
         let site_info = manager.geo_online_info("geosite.dat".into()).await?;
-        let request = Request { name: "geosite.dat".into(), expected_current_sha256: site_info.current_sha256, expected_source_sha256: site_info.source_sha256, expected_download_sha256: None, accept_metadata_only: false };
+        let request = Request { name: "geosite.dat".into(), expected_current_sha256: site_info.current_sha256, expected_source_sha256: site_info.source_sha256, expected_download_sha256: None, accept_metadata_only: false, route: Default::default(), danger_accept_invalid_certs: false };
         assert!(manager.update_geo_online(request).await.is_err());
         assert_eq!(fs::read(dir.0.join("geosite.dat"))?, dat::geosite());
         let ip_info = manager.geo_online_info("geoip.dat".into()).await?;
         let ip_hash = ring::digest::digest(&ring::digest::SHA256, &ip).as_ref().iter().map(|b| format!("{b:02x}")).collect::<String>();
-        let request = Request { name: "geoip.dat".into(), expected_current_sha256: ip_info.current_sha256, expected_source_sha256: ip_info.source_sha256, expected_download_sha256: Some(ip_hash), accept_metadata_only: false };
+        let request = Request { name: "geoip.dat".into(), expected_current_sha256: ip_info.current_sha256, expected_source_sha256: ip_info.source_sha256, expected_download_sha256: Some(ip_hash), accept_metadata_only: false, route: Default::default(), danger_accept_invalid_certs: false };
         let receipt = manager.update_geo_online(request.clone()).await?;
         assert_eq!(receipt.core_load_verified, Some(true));
         assert_eq!(fs::read(dir.0.join("geoip.dat"))?, ip);
-        let config: serde_yaml_ng::Mapping = serde_yaml_ng::from_str(&format!("mode: rule\ngeodata-mode: true\ngeodata-loader: standard\ngeosite-matcher: mph\ngeo-auto-update: false\ngeox-url: {{geoip: '{origin}/ip', geosite: '{origin}/site'}}\ndns: {{enable: false}}\ntun: {{enable: false}}\nrules: ['GEOSITE,ms-dat,DIRECT', 'GEOIP,ms-dat,DIRECT,no-resolve', 'MATCH,DIRECT']\n"))?;
+        let mixed_port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
+        let config: serde_yaml_ng::Mapping = serde_yaml_ng::from_str(&format!("mode: rule\nmixed-port: {mixed_port}\ngeodata-mode: true\ngeodata-loader: standard\ngeosite-matcher: mph\ngeo-auto-update: false\ngeox-url: {{geoip: '{origin}/ip', geosite: '{origin}/site'}}\ndns: {{enable: false}}\ntun: {{enable: false}}\nrules: ['GEOSITE,ms-dat,DIRECT', 'GEOIP,ms-dat,DIRECT,no-resolve', 'MATCH,DIRECT']\n"))?;
         manager.apply_config(config).await?;
         manager.start().await?;
         assert!(manager.status().pid.is_some());
@@ -108,7 +109,7 @@ async fn online_dat_update_guards_inputs_and_recovers_running_core_and_startup_j
         changed_site.extend(dat::group(b"extra", &[dat::domain(3, b"new.example.test")]));
         *site.lock().unwrap() = changed_site.clone();
         let live_info = manager.geo_online_info("geosite.dat".into()).await?;
-        let live_request = Request { name: "geosite.dat".into(), expected_current_sha256: live_info.current_sha256, expected_source_sha256: live_info.source_sha256, expected_download_sha256: None, accept_metadata_only: false };
+        let live_request = Request { name: "geosite.dat".into(), expected_current_sha256: live_info.current_sha256, expected_source_sha256: live_info.source_sha256, expected_download_sha256: None, accept_metadata_only: false, route: Default::default(), danger_accept_invalid_certs: false };
         let live = manager.update_geo_online(live_request).await?;
         assert!(live.changed && live.durable && live.core_load_verified == Some(true));
         assert_eq!(manager.status().phase, CorePhase::Running);
@@ -117,16 +118,28 @@ async fn online_dat_update_guards_inputs_and_recovers_running_core_and_startup_j
         assert_eq!(fs::read(dir.0.join("geosite.dat"))?, changed_site);
         assert!(!dir.0.join(".geo-live").exists());
 
+        changed_site.extend(dat::group(b"through-proxy", &[dat::domain(3, b"proxied.example.test")]));
+        *site.lock().unwrap() = changed_site.clone();
+        let proxied_info = manager.geo_online_info("geosite.dat".into()).await?;
+        let proxied_request = Request { name: "geosite.dat".into(), expected_current_sha256: proxied_info.current_sha256, expected_source_sha256: proxied_info.source_sha256, expected_download_sha256: None, accept_metadata_only: false, route: RouteChoice::Managed, danger_accept_invalid_certs: false };
+        let proxied = manager.update_geo_online(proxied_request.clone()).await?;
+        assert!(proxied.changed && proxied.durable);
+        assert_eq!(manager.status().phase, CorePhase::Running);
+        assert_eq!(fs::read(dir.0.join("geosite.dat"))?, changed_site);
+
         let mut incompatible = dat::group(b"other", &[dat::domain(3, b"unreferenced.example")]);
         incompatible.extend(dat::group(b"CN", &[dat::domain(3, b"bootstrap.invalid")]));
         *site.lock().unwrap() = incompatible;
         let failed_info = manager.geo_online_info("geosite.dat".into()).await?;
-        let failed_request = Request { name: "geosite.dat".into(), expected_current_sha256: failed_info.current_sha256, expected_source_sha256: failed_info.source_sha256, expected_download_sha256: None, accept_metadata_only: false };
+        let failed_request = Request { name: "geosite.dat".into(), expected_current_sha256: failed_info.current_sha256, expected_source_sha256: failed_info.source_sha256, expected_download_sha256: None, accept_metadata_only: false, route: Default::default(), danger_accept_invalid_certs: false };
         assert!(manager.update_geo_online(failed_request).await.is_err());
         assert_eq!(manager.status().phase, CorePhase::Running);
         assert_eq!(fs::read(dir.0.join("geosite.dat"))?, changed_site);
         assert!(!dir.0.join(".geo-live").exists());
         manager.stop().await?;
+        let stopped_info = manager.geo_online_info("geosite.dat".into()).await?;
+        let stopped_request = Request { expected_current_sha256: stopped_info.current_sha256, expected_source_sha256: stopped_info.source_sha256, ..proxied_request };
+        assert!(format!("{:#}", manager.update_geo_online(stopped_request).await.unwrap_err()).contains("running core"));
         Ok::<_, anyhow::Error>(())
     }.await;
     let cleanup = manager.shutdown().await;

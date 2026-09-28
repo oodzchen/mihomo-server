@@ -2657,6 +2657,8 @@ fingerprints in a separate explicit command:
   "expected_current_sha256":null,
   "expected_source_sha256":"<source_sha256 from geo_online_info>",
   "expected_download_sha256":null,
+  "route":"direct",
+  "danger_accept_invalid_certs":false,
   "accept_metadata_only":false
 }
 ```
@@ -2665,11 +2667,20 @@ Use the inspected current SHA-256 instead of null when a file exists. Optionally
 supply a known 64-character download SHA-256 to pin the new bytes. No arbitrary
 path, URL, credentials or filename is accepted. The source must be explicit in the
 committed configuration; an inherited Mihomo default URL is not assumed. Source
-or current-file changes require reinspection. The service fetches directly without
-ambient proxy settings or redirects, with a 10-second connect/20-second overall
-limit, streaming at most 128 MiB to a private file. Empty, oversized, HTTP-failed
-or mismatched downloads leave the current resource untouched. This direct route
-may be unavailable on networks requiring an HTTP proxy.
+or current-file changes require reinspection. `route` is optional and defaults to
+`direct`, which ignores ambient proxy settings. Choose `system` to use the service
+process's validated HTTP(S)/NO_PROXY environment and native platform proxy
+discovery, or `managed` to use the running Mihomo HTTP/Mixed listener with
+authentication from the committed configuration. `managed` is unavailable with a
+stopped core. A route failure never falls back to another route. The service uses
+the platform TLS verifier, retrying certificate failures once with static WebPKI
+roots on the same route within one 20-second total deadline. Set
+`danger_accept_invalid_certs: true` only when explicitly accepting an untrusted
+source; this disables certificate verification and the fallback attempt. Downloads
+keep the 10-second connect bound, reject redirects and stream at most 128 MiB to a
+private file. Empty, oversized, HTTP-failed or mismatched downloads leave the
+current resource untouched. Proxy URLs, passwords and source query tokens are not
+included in management responses.
 
 After download, the existing bounded no-follow staging and validation applies.
 MMDB retains its optional explicit metadata-only acceptance; DAT never accepts
@@ -2689,8 +2700,9 @@ Failure or an ambiguous browser response requires a new inspection. The fixed
 Geo staging namespace recovers unpublished candidates at startup.
 
 The **Geo / Provider 资源** panel offers source inspection and stopped/running-core
-online update controls, including an optional digest field. No source URL or query token
-is rendered there. Existing bundle and read-only validation actions remain
+online update controls, including an optional digest field, explicit route selector
+and certificate exception checkbox. No source URL or query token is rendered there.
+Existing bundle and read-only validation actions remain
 separate. Real-core validation uses local download fixtures; existing `data` node/
 Geo files are tested through private copies and are never downloaded over.
 

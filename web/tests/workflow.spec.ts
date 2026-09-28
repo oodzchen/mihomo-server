@@ -408,7 +408,7 @@ test("online Geo update preserves inspection across running-core restart and ret
       reads++; expect(body.name).toBe("geosite.dat");
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ name: body.name, current_sha256: oldHash, source_sha256: sourceHash }) });
     } else if (body.command === "update_geo_online") {
-      updates++; expect(body).toEqual({ command: "update_geo_online", name: "geosite.dat", expected_current_sha256: oldHash, expected_source_sha256: sourceHash, expected_download_sha256: newHash, accept_metadata_only: false });
+      updates++; expect(body).toEqual({ command: "update_geo_online", name: "geosite.dat", expected_current_sha256: oldHash, expected_source_sha256: sourceHash, expected_download_sha256: newHash, accept_metadata_only: false, route: "managed", danger_accept_invalid_certs: true });
       if (updates === 2) { phase("stopping"); phase("starting"); phase("running"); }
       await route.fulfill({ status: updates === 1 ? 422 : 200, contentType: "application/json", body: JSON.stringify(updates === 1 ? { error: { message: "Geo download SHA-256 differs from expected pin" } } : { changed: true, durable: true, cleanup_pending: false, core_load_verified: true, validation: { verified: true, sha256: newHash, format: "dat" } }) });
     } else await route.continue();
@@ -421,6 +421,8 @@ test("online Geo update preserves inspection across running-core restart and ret
   await expect(update).toBeEnabled();
   await expect(panel).toContainText("短暂停止核心");
   await expect(panel).toContainText(sourceHash);
+  await panel.getByRole("combobox", { name: "下载路由" }).selectOption("managed");
+  await panel.getByRole("checkbox", { name: "显式忽略下载来源证书错误" }).check();
   await panel.getByRole("textbox", { name: "可选下载 SHA-256" }).fill("bad");
   await update.click(); await expect(panel.getByRole("alert")).toContainText("64 位十六进制");
   expect(updates).toBe(0);

@@ -269,6 +269,40 @@ fn environment(values: &[(&'static str, String)]) -> BTreeMap<&'static str, Stri
 }
 
 #[tokio::test]
+async fn geo_online_system_route_uses_service_proxy_without_changing_default_direct() -> Result<()> {
+    let dir = Directory::new()?;
+    let proxy = Fixture::new().await?;
+    let values = environment(&[
+        ("HTTP_PROXY", proxy.base.clone()),
+        ("NO_PROXY", "127.0.0.1,localhost".into()),
+    ]);
+    let mut service = Service::start(&dir, &values, false).await?;
+    let result = async {
+        let item = service.api(json!({"command":"import_profile", "name":"Geo route", "yaml":"mode: direct\ngeox-url: {geosite: 'http://geo.invalid/geo?token=source-secret'}\ngeo-auto-update: false\n"})).await?;
+        service.api(json!({"command":"select_profile", "uid":item["uid"]})).await?;
+        let info = service.api(json!({"command":"geo_online_info", "name":"geosite.dat"})).await?;
+        let command = json!({"command":"update_geo_online", "name":"geosite.dat", "expected_current_sha256":info["current_sha256"], "expected_source_sha256":info["source_sha256"]});
+        assert!(!service.request(command.clone()).await?.0.is_success());
+        assert_eq!(proxy.count(), 0);
+        let mut routed = command.clone();
+        routed["route"] = json!("system");
+        let (status, body) = service.request(routed).await?;
+        assert!(!status.is_success()); // The proxy returns subscription YAML, not a valid DAT.
+        assert_eq!(proxy.count(), 1);
+        assert!(proxy.state.requests.lock().unwrap()[0].0.contains("geo.invalid/geo"));
+        assert!(!body.to_string().contains("source-secret"));
+        assert!(!dir.0.join("geosite.dat").exists());
+        let mut managed = command;
+        managed["route"] = json!("managed");
+        assert!(!service.request(managed).await?.0.is_success());
+        assert_eq!(proxy.count(), 1);
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = service.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
 async fn service_system_proxy_auth_redirect_refresh_metadata_guard_and_restart() -> Result<()> {
     let dir = Directory::new()?;
     let origin = Fixture::new().await?;

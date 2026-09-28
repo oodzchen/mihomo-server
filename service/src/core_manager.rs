@@ -1562,6 +1562,41 @@ fn drain<R: AsyncRead + Unpin + Send + 'static>(reader: R, logs: Logs, stream: &
 
 impl Actor {
     #[cfg(unix)]
+    async fn geo_download_route(
+        &mut self,
+        choice: crate::geo_online::RouteChoice,
+        config: &Mapping,
+    ) -> Result<crate::core_release::Route> {
+        use crate::geo_online::RouteChoice;
+        match choice {
+            RouteChoice::Direct => Ok(crate::core_release::Route::Direct),
+            RouteChoice::System => Ok(crate::core_release::Route::System),
+            RouteChoice::Managed => {
+                let snapshot = self.status.borrow().clone();
+                ensure!(
+                    snapshot.phase == CorePhase::Running && self.process.is_some(),
+                    "managed Geo route requires a running core"
+                );
+                let core = tokio::select! {biased;
+                    _ = closing(&mut self.shutdown) => bail!("managed Geo route cancelled during shutdown"),
+                    result = timeout(Duration::from_secs(3), self.client.get_base_config()) => result.context("managed Geo route query timed out")??,
+                };
+                ensure!(
+                    same_proxy_snapshot(&snapshot, &self.status.borrow()),
+                    "managed Geo route changed during inspection"
+                );
+                crate::proxy_access::verify_ports(config, &core)?;
+                let proxy = crate::remote::ManagedProxy::from_core(&core, config)?;
+                Ok(crate::core_release::Route::Managed {
+                    proxy,
+                    snapshot: Box::new(snapshot),
+                    state: self.status.subscribe(),
+                })
+            }
+        }
+    }
+
+    #[cfg(unix)]
     async fn verify_prepared_geo(
         &mut self,
         mut prepared: crate::geo_update::Prepared,
@@ -2254,11 +2289,16 @@ impl Actor {
                                         },
                                         "Geo file changed since online inspection; inspect again"
                                     );
+                                    let route = self.geo_download_route(request.route, &config).await?;
                                     let downloaded = tokio::select! {
                                         biased;
                                         _ = closing(&mut self.shutdown) => bail!("Geo download cancelled during shutdown"),
-                                        result = crate::geo_online::fetch(&url, &request.name, request.expected_download_sha256.as_deref()) => result?,
+                                        result = crate::geo_online::fetch(&url, &request.name, request.expected_download_sha256.as_deref(), &route, request.danger_accept_invalid_certs) => result?,
                                     };
+                                    if running {
+                                        self.observe_exit().await?;
+                                        ensure!(self.status.borrow().phase == CorePhase::Running && self.process.is_some(), "core changed during Geo download; inspect again");
+                                    }
                                     let data = self.options.data_dir.clone();
                                     let name = request.name.clone();
                                     let prepared = tokio::task::spawn_blocking(move || {

@@ -1,6 +1,6 @@
 //! Bounded direct downloads from a committed Geo URL; no caller-supplied destination or URL.
 use crate::{geo_resources::Seed, geo_validation};
-use anyhow::{Result, ensure};
+use anyhow::{Context as _, Result, ensure};
 use ring::digest::{Context, SHA256};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Mapping;
@@ -30,6 +30,19 @@ pub struct Request {
     pub expected_download_sha256: Option<String>,
     #[serde(default)]
     pub accept_metadata_only: bool,
+    #[serde(default)]
+    pub route: RouteChoice,
+    #[serde(default)]
+    pub danger_accept_invalid_certs: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteChoice {
+    #[default]
+    Direct,
+    System,
+    Managed,
 }
 
 pub(crate) fn source(config: &Mapping, name: &str) -> Result<(url::Url, String)> {
@@ -102,7 +115,13 @@ impl Download {
     }
 }
 
-pub(crate) async fn fetch(url: &url::Url, name: &str, expected_download_sha256: Option<&str>) -> Result<Download> {
+pub(crate) async fn fetch(
+    url: &url::Url,
+    name: &str,
+    expected_download_sha256: Option<&str>,
+    route: &crate::core_release::Route,
+    danger_accept_invalid_certs: bool,
+) -> Result<Download> {
     ensure!(
         geo_validation::MMDB_FILES.contains(&name) || crate::dat_validation::DAT_FILES.contains(&name),
         "unsupported online Geo filename"
@@ -113,23 +132,65 @@ pub(crate) async fn fetch(url: &url::Url, name: &str, expected_download_sha256: 
             "invalid expected Geo download SHA-256"
         );
     }
-    let client = crate::remote::tls::configure(
-        reqwest::Client::builder()
-            .tls_backend_rustls()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(20))
-            .connect_timeout(Duration::from_secs(10))
-            .pool_max_idle_per_host(0),
-        crate::remote::tls::RootMode::Platform,
-        false,
-    )?
-    .build()?;
-    let mut response = client
-        .get(url.clone())
-        .send()
+    route
+        .run(async {
+            tokio::time::timeout(Duration::from_secs(20), async {
+                match fetch_once(
+                    url,
+                    name,
+                    expected_download_sha256,
+                    route,
+                    danger_accept_invalid_certs,
+                    crate::remote::tls::RootMode::Platform,
+                )
+                .await
+                {
+                    Ok(download) => Ok(download),
+                    Err(error) if !danger_accept_invalid_certs && crate::remote::tls::should_retry(&error) => {
+                        fetch_once(
+                            url,
+                            name,
+                            expected_download_sha256,
+                            route,
+                            false,
+                            crate::remote::tls::RootMode::Static,
+                        )
+                        .await
+                        .context("static webpki roots fallback failed after platform TLS verifier failed")
+                    }
+                    Err(error) => Err(error),
+                }
+            })
+            .await
+            .context("Geo download timed out")?
+        })
         .await
-        .map_err(|_| anyhow::anyhow!("Geo download transport failed"))?;
+}
+
+async fn fetch_once(
+    url: &url::Url,
+    name: &str,
+    expected_download_sha256: Option<&str>,
+    route: &crate::core_release::Route,
+    danger_accept_invalid_certs: bool,
+    roots: crate::remote::tls::RootMode,
+) -> Result<Download> {
+    let builder = reqwest::Client::builder()
+        .tls_backend_rustls()
+        .min_tls_version(reqwest::tls::Version::TLS_1_2)
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(20))
+        .connect_timeout(Duration::from_secs(10))
+        .pool_max_idle_per_host(0);
+    let builder = crate::remote::tls::configure(builder, roots, danger_accept_invalid_certs)?;
+    let client = route.configure(builder)?.build()?;
+    let mut response = client.get(url.clone()).send().await.map_err(|error| {
+        crate::remote::tls::transport_error_for(
+            error,
+            "Geo download transport failed",
+            "Geo source uses legacy TLS; only TLS 1.2/1.3 is supported",
+        )
+    })?;
     ensure!(
         response.status().is_success(),
         "Geo download failed with HTTP status {}",
@@ -148,11 +209,13 @@ pub(crate) async fn fetch(url: &url::Url, name: &str, expected_download_sha256: 
     let mut file = tokio::fs::File::from_std(file);
     let mut digest = Context::new(&SHA256);
     let mut count = 0u64;
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|_| anyhow::anyhow!("Geo download body failed"))?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        crate::remote::tls::transport_error_for(
+            error,
+            "Geo download body failed",
+            "Geo source uses legacy TLS; only TLS 1.2/1.3 is supported",
+        )
+    })? {
         count = count
             .checked_add(chunk.len() as u64)
             .ok_or_else(|| anyhow::anyhow!("Geo download too large"))?;
@@ -214,6 +277,7 @@ mod tests {
 
     #[tokio::test]
     async fn bounded_download_checks_status_redirects_length_and_optional_digest() -> Result<()> {
+        let route = crate::core_release::Route::Direct;
         let app = Router::new()
             .route("/ok", get(|| async { "private geo fixture" }))
             .route(
@@ -234,7 +298,7 @@ mod tests {
         let server = tokio::spawn(axum::serve(listener, app).into_future());
         let good = url::Url::parse(&format!("{origin}/ok"))?;
         let hash = geo_validation::sha256(b"private geo fixture");
-        let downloaded = fetch(&good, "geosite.dat", Some(&hash)).await?;
+        let downloaded = fetch(&good, "geosite.dat", Some(&hash), &route, false).await?;
         assert_eq!(downloaded.seed.bytes, 19);
         assert_eq!(downloaded.seed.sha256, hash);
         assert_eq!(
@@ -244,16 +308,32 @@ mod tests {
         let directory = downloaded.directory.clone();
         drop(downloaded);
         assert!(!directory.exists());
-        assert!(fetch(&good, "geosite.dat", Some(&"0".repeat(64))).await.is_err());
         assert!(
-            fetch(&url::Url::parse(&format!("{origin}/redirect"))?, "geosite.dat", None)
+            fetch(&good, "geosite.dat", Some(&"0".repeat(64)), &route, false)
                 .await
                 .is_err()
         );
         assert!(
-            fetch(&url::Url::parse(&format!("{origin}/huge"))?, "geosite.dat", None)
-                .await
-                .is_err()
+            fetch(
+                &url::Url::parse(&format!("{origin}/redirect"))?,
+                "geosite.dat",
+                None,
+                &route,
+                false
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            fetch(
+                &url::Url::parse(&format!("{origin}/huge"))?,
+                "geosite.dat",
+                None,
+                &route,
+                false
+            )
+            .await
+            .is_err()
         );
         server.abort();
         Ok(())
@@ -277,7 +357,14 @@ mod tests {
         let server = tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
-        let downloaded = fetch(&url, "Country.mmdb", Some(&geo_validation::sha256(&bytes))).await?;
+        let downloaded = fetch(
+            &url,
+            "Country.mmdb",
+            Some(&geo_validation::sha256(&bytes)),
+            &crate::core_release::Route::Direct,
+            false,
+        )
+        .await?;
         let data = tempfile_data()?;
         let path = data.join("Country.mmdb");
         fs::write(&path, b"old database")?;

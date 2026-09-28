@@ -79,6 +79,10 @@ pub enum ManagementCommand {
         expected_download_sha256: Option<String>,
         #[serde(default)]
         accept_metadata_only: bool,
+        #[serde(default)]
+        route: crate::geo_online::RouteChoice,
+        #[serde(default)]
+        danger_accept_invalid_certs: bool,
     },
     ValidateGeo {
         name: String,
@@ -302,6 +306,8 @@ impl Management {
                 expected_source_sha256,
                 expected_download_sha256,
                 accept_metadata_only,
+                route,
+                danger_accept_invalid_certs,
             } => serde_json::to_value(
                 self.manager
                     .update_geo_online(crate::geo_online::Request {
@@ -310,6 +316,8 @@ impl Management {
                         expected_source_sha256,
                         expected_download_sha256,
                         accept_metadata_only,
+                        route,
+                        danger_accept_invalid_certs,
                     })
                     .await?,
             )?,

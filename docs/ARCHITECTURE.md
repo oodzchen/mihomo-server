@@ -53,14 +53,13 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** running-core online Geo replacement from committed
-`geox-url` leaves. Candidates pass existing structural/DAT load checks before a
-durable rollback journal, core stop, atomic publication, verified restart and
-commit. Failed activation restores the previous file and core; interrupted
-transactions recover before resource seeding at service startup.
-**Next implementation task (P1):** proxy-aware Geo download routing and TLS
-retry parity with subscription downloads. Remaining full settings and native TUN
-also belong to P1; finish this priority before starting P2.
+**Latest completed task (P1):** explicit direct/system/managed routes for online
+Geo downloads, using the subscription downloader's proxy discovery and TLS root
+fallback policy. Managed routing reads live Mihomo listeners and committed
+authentication; route failure never silently falls back. The bounded download,
+Geo validation and stopped/running publication paths remain in place.
+**Next implementation task (P1):** remaining authoritative service/resource
+settings, starting with native Linux TUN integration. Finish P1 before P2.
 
 ## Complete target architecture
 
@@ -164,11 +163,11 @@ mihomo-server/
 │   │   ├── dat_validation.rs / bounded protobuf / CIDR-domain-attribute checks / CN diagnostics [Implemented; Linux verified]
 │   │   ├── Read-only DAT snapshots / aggregate reports / core compatibility warning [Implemented; Linux verified]
 │   │   ├── Stopped-core pinned DAT installation / four-mode core load proof / digest guards / orphan recovery [Implemented; Linux verified]
-│   │   ├── geo_online.rs / committed-source inspection / 128 MiB direct download / optional content pin [Implemented; Linux verified]
+│   │   ├── geo_online.rs / committed-source inspection / 128 MiB direct-system-managed download / TLS fallback / optional pins [Implemented; Linux verified]
 │   │   ├── Stopped-core online MMDB/DAT update / staged validation / four-mode DAT load proof / digest guards [Implemented; Linux verified]
 │   │   ├── geo_live.rs / durable rollback journal / startup recovery / guarded cleanup [Implemented; Linux verified]
 │   │   ├── Running-core online Geo replacement / verified restart / rollback and crash recovery [Implemented; Linux verified]
-│   │   ├── Online Geo managed/system proxy route choice and TLS retry parity [Pending; P1]
+│   │   ├── Online Geo managed/system proxy route choice and TLS retry parity [Implemented; Linux verified]
 │   │   └── Remaining full settings and native TUN [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
@@ -288,7 +287,7 @@ mihomo-server/
 │   ├── Geo/Provider inventory / metadata states / refresh and retry [Implemented; Linux verified]
 │   ├── Explicit MMDB/DAT checks / aggregate diagnostics / compatibility warnings / stale-result clearing [Implemented; Linux verified]
 │   ├── Pinned MMDB/DAT bundle inspection / stopped-state install / DAT core load proof / MMDB metadata-only choice [Implemented; Linux verified]
-│   ├── Configured-source Geo inspection / stopped and running-core online update / fresh-hash retry [Implemented; Linux verified]
+│   ├── Configured-source Geo inspection / explicit download route and TLS choice / stopped and running-core update / fresh-hash retry [Implemented; Linux verified]
 │   ├── Geo field editor incl. geosite matcher / per-URL inheritance / saved-configured-actual readback / retry [Implemented; Linux verified]
 │   ├── Remaining full settings/resource lifecycle UI [Pending; P1]
 │   └── Backup UI [Deferred; outside active scope]
@@ -4345,6 +4344,51 @@ subscription downloads. Remaining full settings/native TUN remain P1; P2 rules/
 provider/delay, P3 i18n/signals and P4 actual systemd installation remain
 incomplete. Deferred work stays deferred. Git submission is left to the external
 host script.
+
+## Increment: proxy-aware online Geo download and TLS retry parity (P1)
+
+`update_geo_online` accepts an explicit `direct` (default), `system` or
+`managed` route and an explicit `danger_accept_invalid_certs` flag. The source
+still comes only from the committed `geox-url` leaf and is pinned by its
+inspection digest; no caller URL, destination or arbitrary proxy endpoint is
+accepted. System routing reuses validated service proxy environment/NO_PROXY
+handling. Managed routing requires a running core, verifies its reported
+HTTP/Mixed listener against committed configuration and resolves authentication
+from that private configuration. A route error never silently falls back to a
+different route. The actor confirms the core remains running after a managed
+download before staging or stopping it for live publication.
+
+Geo downloads now use the shared platform/static WebPKI root policy, legacy TLS
+diagnostic and source-redacted transport errors used for subscriptions. A TLS
+certificate failure makes one static-root retry on the same route within a
+single 20-second total deadline; an explicit certificate exception disables
+verification and retry. The existing no-redirect, 128 MiB streamed-body cap,
+SHA-256 pin, private staging, MMDB/DAT checks and live rollback are preserved.
+The Web action exposes route and certificate choices without rendering the
+source URL or credentials. `docs/RUNNING.md` records route semantics and limits.
+
+Verification:
+
+- Workspace compilation and Web production build succeed. The workspace reports
+  **379 passed, 85 opt-in ignored**. It covers a process-isolated system proxy route against a Geo-only URL,
+  keeping direct as the default and rejecting managed while stopped. A private
+  self-signed HTTPS fixture confirms two verified-root attempts, one explicit
+  certificate-exception attempt, URL redaction and unchanged old Geo data.
+- The opt-in real Mihomo workflow updates a GeoSite DAT through the live managed
+  HTTP/Mixed listener and retains the previous live activation/rollback/startup
+  recovery checks. The actual-node proxy workflow returns HTTPS 204 through a
+  selected node using private copies of `data` and leaves source subscriptions
+  untouched.
+- Full Chromium regression reports **30 passed, 4 optional bundle upgrade/repair
+  workflows skipped**. The online Geo action covers explicit managed-route and
+  certificate choices while preserving its inspected hashes through live phase
+  changes and requiring fresh inspection after a failed or successful update.
+
+The complete architecture tree above is synchronized and the Linux MVP remains
+runnable. Next: P1 remaining authoritative settings and native Linux TUN
+integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
+installation remain incomplete. Deferred work stays deferred. Git submission is
+left to the external host script.
 
 ## MVP completion boundary
 
