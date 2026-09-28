@@ -52,6 +52,11 @@ pub enum ManagementCommand {
     Config {},
     Settings {},
     Resources {},
+    Rules {},
+    RuleProviders {},
+    UpdateRuleProvider {
+        name: String,
+    },
     GeoSettings {},
     ConnectionSettings {},
     #[cfg(unix)]
@@ -327,6 +332,12 @@ impl Management {
             }
             ManagementCommand::GeoSettings {} => serde_json::to_value(self.manager.geo_settings().await?)?,
             ManagementCommand::Resources {} => serde_json::to_value(self.manager.resource_inventory().await?)?,
+            ManagementCommand::Rules {} => serde_json::to_value(self.manager.rules().await?)?,
+            ManagementCommand::RuleProviders {} => serde_json::to_value(self.manager.rule_providers().await?)?,
+            ManagementCommand::UpdateRuleProvider { name } => {
+                self.manager.update_rule_provider(&name).await?;
+                serde_json::json!({ "name": name, "updated": true })
+            }
             ManagementCommand::ProxyAccess {} => crate::proxy_access::inspect(&self.manager).await?,
             ManagementCommand::SetSettings { runtime } => {
                 serde_json::to_value(self.manager.set_settings(*runtime).await?)?

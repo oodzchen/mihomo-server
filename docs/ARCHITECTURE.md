@@ -53,16 +53,18 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** The resource inventory now inspects and exposes
-the effective automatic-update state (`Active`, `Disabled`, `Stopped`, `Indeterminate`)
-and resource freshness (`Fresh`, `Stale`, `Indeterminate`) against effective/configured
-intervals without duplicating Mihomo's updater. The Web resource panel displays the
-running auto-update state and per-resource freshness diagnostics. Real-core readback
-and actual-node traffic pass.
-**Next implementation task (P1):** verify actual TUN interface, routes and traffic
-when a Linux host with `/dev/net/tun` and the required privileges is available, and
-complete any remaining P1 authoritative resource/service validations before proceeding
-to P2 (rules, providers, and delay testing).
+**Latest completed task (P2):** Authenticated rules and rule-provider management
+is delivered. The service core manager now exposes `rules()`, `rule_providers()`,
+and `update_rule_provider(name)` with stopped-core checks and bounded timeouts;
+management commands dispatch token-authenticated queries and updates; and the Web
+interface provides a dedicated Rules page (`05 规则` at `/rules`) with rule search,
+type/payload badges, rule provider inventory, and manual refresh actions.
+Real-core readback and actual-node proxy traffic pass.
+**Next implementation task (P2):** Proxy providers and latency/delay testing.
+Implement `delay_group`, `delay_proxy`, `proxy_providers`, and
+`healthcheck_proxy_provider` commands in the service core manager, connect
+management API adapters, and display delay badges and latency test actions
+in the Web proxies interface.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -174,7 +176,8 @@ mihomo-server/
 │       ├── Per-profile node selection records       [Implemented; upstream schema]
 │       ├── Provider path authority / normalized destinations / SHA-256 cache allocation [Migrated + service adaptation; Linux verified]
 │       ├── Remaining Geo lifecycle / resource settings [Pending; P1; typed runtime fields delivered]
-│       ├── Proxy/rule/provider operation models      [Pending; P2 service integration; client models retained]
+│       ├── Rule and provider operation models        [Implemented; Linux verified]
+│       ├── Proxy provider and delay operation models [Pending; P2]
 │       ├── Immutable revision / orphan file garbage collection [Pending]
 │       ├── Timed update metadata / saved refresh source [Migrated + service scheduler]
 │       ├── Backup manifest / bounded entries / inspection, validation, runtime policy and restore receipt models [Implemented; upstream ZIP adaptation]
@@ -291,7 +294,8 @@ mihomo-server/
 │   │   ├── Authenticated POST /api/backup/validate restore rehearsal [Implemented; Linux verified]
 │   │   ├── Authenticated POST /api/backup/restore running/stopped restoration [Implemented; Linux verified]
 │   │   ├── Authenticated POST/GET /api/backups and GET/DELETE /api/backups/{id} [Implemented; Linux verified]
-│   │   └── Rules/providers/delay commands [Pending; P2; full connection expansion deferred]
+│   │   ├── Rules and rule-provider query and update commands [Implemented; Linux verified]
+│   │   └── Proxy providers and group/node delay commands [Pending; P2; full connection expansion deferred]
 │   ├── HTTP bearer / WS first-frame auth, Host/Origin controls [Implemented; Linux verified]
 │   ├── WebSocket events and realtime forwarding     [Implemented; Linux verified]
 │   │   ├── State/profile snapshots, watches, log tail/reset [Implemented]
@@ -305,7 +309,8 @@ mihomo-server/
 ├── web/                                             [Partially implemented]
 │   ├── React build, login and responsive layout     [Implemented; MVP]
 │   ├── HTTP commands, WebSocket events/feed adapters [Implemented; MVP allowlist]
-│   │   └── Rules/providers/delay command views      [Pending; P2; unrelated views deferred]
+│   │   ├── Rules and rule-provider command views    [Implemented; Linux verified]
+│   │   └── Proxy providers and delay command views  [Pending; P2; unrelated views deferred]
 │   ├── Local profiles, config editor, core state    [Implemented; MVP]
 │   │   ├── Remote URL import, usage display, saved auxiliary defaults [Implemented]
 │   │   ├── Manual remote refresh / usage updates  [Implemented]
@@ -321,7 +326,8 @@ mihomo-server/
 │   ├── Proxy selection, unfix and bounded logs      [Implemented; MVP]
 │   ├── Proxy connection information / actual ports / save verification [Implemented; Linux verified]
 │   ├── Traffic, memory and connection-count overview [Implemented; MVP]
-│   ├── Rules/provider/delay views                   [Pending; P2]
+│   ├── Rules and rule-provider management page      [Implemented; Linux verified]
+│   ├── Proxy providers and node delay views         [Pending; P2]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4445,7 +4451,36 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: effective automatic-update state and resource freshness
+## Current increment: rules and rule-provider management
+
+Delivery step 8 (P2) now exposes authenticated query and update operations for
+Mihomo routing rules and external rule providers:
+- `headless-core` defines `ProviderAction` (`Update`, `Healthcheck`) and `ProviderOperationReceipt`
+  in `config::operations`.
+- `CoreManager` implements `rules()`, `rule_providers()` and `update_rule_provider(name)`
+  with `CorePhase::Running` checks, bounded timeouts (10s for reads, 30s for updates),
+  and safe JSON mapping from the underlying Mihomo controller client.
+- `ManagementCommand` registers `Rules`, `RuleProviders`, and `UpdateRuleProvider`
+  with token authentication and 422 Unprocessable Entity error reporting when the
+  core is stopped or the provider does not exist.
+- The Web UI adds a dedicated Rules page (`05 规则` at `/rules`) featuring rule count
+  metrics, search and filter bar (by rule type, payload, or target proxy), styled badge
+  visualization, and an external Rule Providers panel with per-provider update and
+  update-all actions.
+
+Verification: `cargo check --workspace` and the serial workspace suite pass with
+zero failures. Management commands reject unauthenticated requests and stopped-core
+invocations with 422 Unprocessable Entity (`service/tests/management.rs`). Real-Mihomo
+live test `rules_live.rs` validates rule listing, rule provider readback, and provider
+updates against `/usr/bin/verge-mihomo`. The actual-node proxy workflow in
+`service/tests/resource_inventory_live.rs` returns HTTPS 204 through private copies
+of `data`. The Playwright browser test suite reports **30 passed, 4 optional upgrade/repair
+workflows skipped**.
+
+Next: P2 proxy providers and delay testing (`delay_group`, `delay_proxy`,
+`healthcheck_proxy_provider`, latency badges in Web proxies view).
+
+## Previous increment: effective automatic-update state and resource freshness
 
 Delivery step 7 now inspects and exposes the effective automatic-update state
 (`Active`, `Disabled`, `Stopped`, `Indeterminate`) and resource freshness (`Fresh`,

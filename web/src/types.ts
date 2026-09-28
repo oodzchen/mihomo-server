@@ -60,3 +60,24 @@ export type EventMessage = {
   code?: string;
   message?: string;
 };
+export interface Rule {
+  type: string;
+  payload: string;
+  proxy: string;
+  size?: number;
+}
+export interface Rules {
+  rules: Rule[];
+}
+export interface RuleProvider {
+  name: string;
+  type: string;
+  vehicleType: string;
+  behavior: string;
+  format: string;
+  ruleCount: number;
+  updatedAt: string;
+}
+export interface RuleProviders {
+  providers: Record<string, RuleProvider>;
+}

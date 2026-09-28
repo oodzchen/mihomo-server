@@ -814,6 +814,33 @@ impl CoreManager {
         Arc::clone(&self.client)
     }
 
+    pub async fn rules(&self) -> Result<mihomo_client::models::Rules> {
+        ensure!(self.status().phase == CorePhase::Running, "core is not running");
+        tokio::time::timeout(std::time::Duration::from_secs(10), self.client.get_rules())
+            .await
+            .map_err(|_| anyhow::anyhow!("rules query timed out"))?
+            .context("failed to query rules from core")
+    }
+
+    pub async fn rule_providers(&self) -> Result<mihomo_client::models::RuleProviders> {
+        ensure!(self.status().phase == CorePhase::Running, "core is not running");
+        tokio::time::timeout(std::time::Duration::from_secs(10), self.client.get_rule_providers())
+            .await
+            .map_err(|_| anyhow::anyhow!("rule providers query timed out"))?
+            .context("failed to query rule providers from core")
+    }
+
+    pub async fn update_rule_provider(&self, name: &str) -> Result<()> {
+        ensure!(self.status().phase == CorePhase::Running, "core is not running");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            self.client.update_rule_provider(name),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("update rule provider timed out"))?
+        .with_context(|| format!("failed to update rule provider '{name}'"))
+    }
+
     pub fn profiles(&self) -> IProfiles {
         self.profiles.borrow().clone()
     }

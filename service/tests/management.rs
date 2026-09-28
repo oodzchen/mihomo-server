@@ -1780,3 +1780,66 @@ async fn connection_settings_authenticate_enforce_inheritance_and_reject_invalid
     let cleanup = manager.shutdown().await;
     result.and(cleanup)
 }
+
+#[tokio::test]
+async fn rules_and_provider_commands_reject_when_unauthorized_or_core_stopped() -> Result<()> {
+    let directory = Directory::new()?;
+    let manager = directory.manager()?;
+    let app = router(HttpState::new(Management::new(
+        manager.clone(),
+        directory.authentication()?,
+    )));
+    let token = directory.token()?;
+
+    for cmd in [
+        json!({"command": "rules"}),
+        json!({"command": "rule_providers"}),
+        json!({"command": "update_rule_provider", "name": "test_provider"}),
+    ] {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/commands")
+            .header(header::HOST, "127.0.0.1:9090")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(cmd.to_string()))?;
+        let (status, _) = response(&app, req).await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    for cmd in [
+        json!({"command": "rules"}),
+        json!({"command": "rule_providers"}),
+        json!({"command": "update_rule_provider", "name": "test_provider"}),
+    ] {
+        let (status, err) = response(&app, request(&token, "/api/commands", Some(cmd))?).await?;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(err.to_string().contains("core is not running"), "{err}");
+    }
+
+    assert!(
+        manager
+            .rules()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("core is not running")
+    );
+    assert!(
+        manager
+            .rule_providers()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("core is not running")
+    );
+    assert!(
+        manager
+            .update_rule_provider("test")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("core is not running")
+    );
+
+    manager.shutdown().await
+}

@@ -812,3 +812,87 @@ footer {
 .resource-list li { margin-bottom: 1rem; overflow-wrap: anywhere; }
 .resource-list p { margin: 0.3rem 0; }
 .settings-side code { overflow-wrap: anywhere; }
+
+/* Rules and Rule Providers styles */
+.rules-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.rules-search input[type="search"] {
+  flex: 1;
+  min-width: 220px;
+  padding: 8px 12px;
+  border: 1px solid #d3ddda;
+  border-radius: 6px;
+  font-size: 13px;
+  background: white;
+}
+.rules-table-scroll {
+  overflow-x: auto;
+}
+.rules-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+.rules-table th, .rules-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e7eee9;
+}
+.rules-table th {
+  font-weight: 600;
+  color: #71847c;
+  background: #f7faf8;
+}
+.rule-type-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #e9f2ee;
+  color: #176e59;
+}
+.rule-payload code {
+  font-size: 12px;
+  color: #234346;
+  overflow-wrap: anywhere;
+}
+.rule-proxy-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #edf2f7;
+  color: #2d3748;
+}
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.provider-card {
+  border: 1px solid #e7eee9;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: white;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.provider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.card-actions {
+  margin-top: 6px;
+  display: flex;
+  justify-content: flex-end;
+}

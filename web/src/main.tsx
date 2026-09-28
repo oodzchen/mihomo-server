@@ -12,6 +12,7 @@ import { SettingsPage } from "./settings";
 import { ProxyAccessPanel } from "./proxy-access";
 import { RawEditor } from "./raw-editor";
 import { CoreUpgradePage } from "./core-upgrade";
+import { RulesPage } from "./rules";
 import type {
   CoreLog,
   CoreStatus,
@@ -36,9 +37,10 @@ const pages = [
   ["/profiles", "订阅", "02"],
   ["/config", "配置", "03"],
   ["/proxies", "节点", "04"],
-  ["/logs", "日志", "05"],
-  ["/settings", "设置", "06"],
-  ["/core", "内核升级", "07"],
+  ["/rules", "规则", "05"],
+  ["/logs", "日志", "06"],
+  ["/settings", "设置", "07"],
+  ["/core", "内核升级", "08"],
 ];
 const describe = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -384,6 +386,13 @@ function Manager({
           <ConfigPage token={token} busy={busy} perform={perform} />
         ) : route === "/proxies" ? (
           <ProxyPage
+            token={token}
+            status={status}
+            busy={busy}
+            perform={perform}
+          />
+        ) : route === "/rules" ? (
+          <RulesPage
             token={token}
             status={status}
             busy={busy}
