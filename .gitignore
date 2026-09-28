@@ -39,7 +39,7 @@ env/
 
 # Codex / AI automation artifacts
 automation/logs/
-automation/.session_id
+automation/.session_id*
 automation/__pycache__/
 .codex_autonomous_logs/
 .codex_autonomous_session_id

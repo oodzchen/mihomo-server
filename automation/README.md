@@ -1,6 +1,8 @@
-# mihomo-server 无人值守自动化 Codex 编程工作台
+# mihomo-server 无人值守自动化 Agent 编程工作台
 
 本目录集中管理服务重构期间的无人值守自动化脚本、会话追踪工具及日志记录，实现与业务源码的完全隔离。
+
+工作台现已全面升级为**多代理工具引擎**架构，原生支持 **Google Antigravity CLI (`agy`)** 与 **OpenAI Codex CLI (`codex`)**，并保证双引擎在无人值守、流式渲染、看门狗看护与 Git 自动原子提交等方面具备完全一致的运行效果。
 
 ---
 
@@ -8,10 +10,13 @@
 
 ```text
 automation/
-├── run_autonomous_codex.sh   # 宿主自动化主调度器 (会话推进/看门狗/限额冷却/Git自动提交)
-├── format_codex_stream.py    # 实时流式渲染与终端 TUI 折叠动画格式化器
+├── run_autonomous_codex.sh   # 宿主自动化主调度器 (软链接: run_autonomous.sh)
+├── run_autonomous.sh         # 通用主调度器入口
+├── format_codex_stream.py    # 实时流式渲染与终端 TUI 折叠动画格式化器 (支持 Codex 文本流与 Antigravity stream-json)
 ├── logs/                     # 历史每轮子任务的执行全量日志与最终答复摘要 (.gitignore)
-├── .session_id               # 当前自动化任务绑定的最新 Codex 会话 UUID (.gitignore)
+├── .session_id               # 最近激活的 Agent 会话 UUID (.gitignore)
+├── .session_id_codex         # Codex 专属最新会话 UUID (.gitignore)
+├── .session_id_agy           # Antigravity 专属最新会话 UUID (.gitignore)
 └── README.md                 # 工作台使用说明文档
 ```
 
@@ -19,66 +24,91 @@ automation/
 
 ## 快速使用
 
-### 1. 启动或继续自动化开发
+### 1. 代理工具选择 (`--agent`)
+
+工作台支持自由选择不同的底层代理工具，两者均享有完全一致的无人值守体验与资源调度保障：
+
 ```bash
-# 默认模式：自动恢复上一次的最新会话继续推进子任务
-./automation/run_autonomous_codex.sh
+# 模式 A: 使用 Google Antigravity CLI (推荐)
+./automation/run_autonomous_codex.sh --agent agy
+# 或使用通用别名入口:
+./automation/run_autonomous.sh --agent agy
 
-# 强制开启全新独立会话
-./automation/run_autonomous_codex.sh --new
-
-# 指定恢复特定会话 UUID
-./automation/run_autonomous_codex.sh --session <UUID>
-
-# 从已有会话分叉 (Fork) 出新分支 (避免终端会话锁定冲突)
-./automation/run_autonomous_codex.sh --fork [UUID]
-
-# 运行日志清理 (保持轻量，保留摘要与最近全量日志)
-./automation/run_autonomous_codex.sh --clean-logs
-
-# 自定义最多保留的最近全量日志轮数 (默认: 5)
-./automation/run_autonomous_codex.sh --max-logs 3
-
-# 系统资源调度与防抢占 (仅预留 CPU 0-1 供 Samba 与日常网页浏览，其余 14 线程全部分配给开发编译)
-# 默认已自动开启: 绑定 CPU 2-15, Nice=10 (温和让位), Ionice=Best Effort, Cargo 并发=12
-./automation/run_autonomous_codex.sh
-
-# 自定义绑定核心与编译并发数 (如只留 1 个核或分配不同核)
-./automation/run_autonomous_codex.sh --cpu-affinity 4-15 --cargo-jobs 10
-
-# 完全禁用资源限制 (全核极速编译模式)
-./automation/run_autonomous_codex.sh --no-limit
+# 模式 B: 使用 OpenAI Codex CLI (默认)
+./automation/run_autonomous_codex.sh --agent codex
 ```
 
-### 2. 随时安全中断与追查会话
-任何时候在终端按 `Ctrl+C` 即可优雅终止。退出时终端会自动打印出当前会话的 `session id`，方便后续无缝恢复。
+也可以通过环境变量指定默认代理工具：
+```bash
+export AGENT_TOOL=agy
+./automation/run_autonomous.sh
+```
+
+### 2. 会话生命周期控制
+
+```bash
+# 默认模式：自动恢复对应 Agent 上一次的最新会话继续推进子任务
+./automation/run_autonomous.sh --agent agy
+
+# 强制开启全新独立会话
+./automation/run_autonomous.sh --agent agy --new
+
+# 指定恢复特定会话 UUID
+./automation/run_autonomous.sh --agent agy --session <UUID>
+
+# 从已有会话分叉 (Fork) 出新分支 (避免终端会话锁定冲突)
+./automation/run_autonomous.sh --fork [UUID]
+
+# 运行日志清理 (保持轻量，保留摘要与最近全量日志)
+./automation/run_autonomous.sh --clean-logs
+
+# 自定义最多保留的最近全量日志轮数 (默认: 5)
+./automation/run_autonomous.sh --max-logs 3
+```
+
+### 3. 系统资源调度与防抢占 (保护 Samba 媒体服务与宿主桌面响应)
+仅预留 CPU 0-1 专供 Samba 与日常操作，其余全部算力分配给开发编译：
+```bash
+# 默认已自动开启: 绑定 CPU 2-15, Nice=10 (温和让位), Ionice=Best Effort, Cargo 并发=12
+./automation/run_autonomous.sh --agent agy
+
+# 自定义绑定核心与编译并发数
+./automation/run_autonomous.sh --agent agy --cpu-affinity 4-15 --cargo-jobs 10
+
+# 完全禁用资源限制 (全核极速编译模式)
+./automation/run_autonomous.sh --no-limit
+```
+
+### 4. 随时安全中断与追查会话
+任何时候在终端按 `Ctrl+C` 即可优雅终止。退出时终端会根据当前选择的 Agent 自动打印出专属的恢复与调试命令：
+- **Antigravity CLI**:
+  - 继续无人值守运行: `./automation/run_autonomous.sh --agent agy --session <UUID>`
+  - 交互式终端恢复: `agy --conversation <UUID>`
+  - 单次指令追加: `agy --conversation <UUID> -p "你的指令"`
+- **Codex CLI**:
+  - 继续无人值守运行: `./automation/run_autonomous.sh --agent codex --session <UUID>`
+  - 交互式终端恢复: `codex resume <UUID>`
+  - 单次指令追加: `codex exec resume <UUID> "你的指令"`
 
 ---
 
 ## 核心机制设计
 
-1. **沙箱模式与上游跨库读取**：
-   - 采用 `--sandbox workspace-write` 配合 `-c sandbox_workspace_write.network_access=true`。
-   - 自动挂载 `../clash-verge-rev` 为只读代码库，供 Agent 实时查阅上游核心实现。
+| 维度 | OpenAI Codex 引擎 | Google Antigravity CLI 引擎 | 调度器统一表现 |
+| :--- | :--- | :--- | :--- |
+| **执行权限** | `-c approval_policy=never` 自动批准 | `--dangerously-skip-permissions` 自动批准 | 全程无人值守，无任何审批阻塞 |
+| **沙箱与上游** | `--sandbox workspace-write` + `--add-dir ../clash-verge-rev` | 开放工作区读写 + `--add-dir ../clash-verge-rev` | 安全读写本项目并只读查阅上游源码 |
+| **终端 TUI 流式渲染** | 正则匹配状态机、代码 Diff 折叠与命令去重 | 原生解析 `stream-json` NDJSON 事件流 | 统一动态 Spinner、耗时统计、命令与代码折叠展示 |
+| **会话隔离** | `.session_id_codex` | `.session_id_agy` | 双引擎各自持久化最新会话，互不干扰 |
+| **10分钟看门狗** | 监测 `turn_log` 文件 mtime，超时安全中断重试 | 同左 | 避免任何死循环、网络悬挂或长时间无响应 |
+| **限额智能冷却** | 解析 OpenAI API 报错与 app-server 5小时重置点 | 解析 Google Cloud / Gemini 配额与 429 报错 | 毫秒级倒计时，到期后自动重新拉起会话 |
+| **宿主 Git 自动提交** | 宿主机在轮次结束后提取 Conventional Commit 自动提交 | 同左 | 完美解决沙箱内 `.git` 只读限制，遵循 `AGENTS.md` |
+| **进度更新与完成判定** | 检测 `docs/ARCHITECTURE.md` 与完成标志 | 同左 | 保证每次子任务推进均同步架构文档 |
 
-2. **宿主级 Git 自动化原子提交 (解决沙箱 `.git` 只读限制)**：
-   - Linux Bubblewrap 沙箱出于安全防逃逸设计，强制将 `.git` 挂载为只读。
-   - 调度器直接运行在宿主机上，每轮子任务完成并验证通过（且同步更新 `docs/ARCHITECTURE.md`）后，宿主调度器自动提取子任务总结并执行原子提交，严格遵循 `AGENTS.md` 规范。
+---
 
-3. **动态 5 小时限额精确重置**：
-   - 自动解析 OpenAI API 官方报错及 App-Server 返回的精准 `resetsAt` 时间戳。
-   - 遭遇限额时显示毫秒级倒计时，到达重置点后自动唤醒重跑，无需盲目等待 5 小时。
+## 规范化英文 Conventional Commits 与测试噪音过滤
 
-4. **10 分钟看门狗监控**：
-   - 监测长时间挂起或死锁请求，超时后自动执行进程树清理与自适应重试。
-
-5. **日志瘦身与生命周期治理 (去冗余、防膨胀)**：
-   - **Codex 原生追查支持**：Codex 底层已将完整的会话消息、模型推理、所有工具执行详情持久化在 `~/.codex/thread_history_1.sqlite` 中。任何历史会话均可随时通过 `codex resume <session-id>` 原生回溯追查，完全没有必要在项目目录保留两份冗余的全量长日志。
-   - **自动化运行期瘦身**：调度器日志主要用于实时看门狗心跳、错误捕获与限额倒计时。每轮任务完成后，全量日志会自动进行 **gzip 压缩**（压缩率达 90%+），并根据 FIFO 规则**滚动保留最近 5 轮**日志，总目录上限限制在 15MB 以内。
-   - **轻量交付摘要永久保留**：每轮最终的交付总结 `turn_X_last_msg.txt`（每份仅 3~8 KB）及 Git Commit 记录将被永久完整保留，实现超轻量级的全流程审计追踪。
-
-6. **规范化英文 Conventional Commits 与测试噪音过滤**：
-   - 调度器提示词明确要求 Agent 在答复首部输出标准的 `COMMIT_START` / `COMMIT_END` 英文提交块。
-   - 提取器严格过滤任何测试流水表述（如 `验证通过`、`cargo check`、`测试结果`、`playwright` 等），保持提交历史纯净专业。
-   - 具备自适应降级回退机制，即便模型未显式输出标记块，提取器也会自动映射语义并生成标准格式的英文 Conventional Commit。
-
+1. 调度器提示词明确要求 Agent 在答复首部输出标准的 `COMMIT_START` / `COMMIT_END` 英文提交块。
+2. 提取器严格过滤任何测试流水表述（如 `验证通过`、`cargo check`、`测试结果`、`playwright` 等），保持提交历史纯净专业。
+3. 具备自适应降级回退机制，即便模型未显式输出标记块，提取器也会自动映射语义并生成标准格式的英文 Conventional Commit。

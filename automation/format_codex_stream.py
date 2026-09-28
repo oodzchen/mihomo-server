@@ -2,21 +2,22 @@
 # ==============================================================================
 # format_codex_stream.py
 #
-# 为 Codex CLI (exec 模式) 提供仿原生 TUI 的实时流式折叠渲染与动态 Loading 效果。
+# 为 Codex CLI 与 Antigravity CLI (agy) 提供仿原生 TUI 的实时流式折叠渲染与动态 Loading 效果。
 #
 # 功能特性:
 # 1. 实时动态 Loading 动画 (Spinner + 当前操作说明 + 耗时计时器)
 # 2. 长命令输出与大文本折叠显示 (避免终端平铺刷屏，超长输出仅保留首尾若干行)
 # 3. 原始数据 100% 实时原样落盘至日志文件 (保证看门狗与限额检测正常工作)
 # 4. 全状态覆盖的补丁/Git Diff 自动折叠捕获 (杜绝任何代码差异泄露导致刷屏覆盖进度)
-# 5. 健壮的状态机：准确识别多行复合命令、精准匹配 succeeded/exited 状态行、识别 apply patch 与环境 diff
-# 6. 美化 Codex 答复、指令执行和代码补丁展示，智能去重冗余环境 diff 输出
+# 5. 双引擎智能识别：自动解析 Codex 纯文本流与 Antigravity CLI 的 stream-json NDJSON 流
+# 6. 会话追踪与最终交付摘要自动落盘，支持多种 Agent CLI 无缝切换
 # ==============================================================================
 
 import os
 import re
 import sys
 import time
+import json
 import signal
 import threading
 import argparse
@@ -40,7 +41,7 @@ STATUS_RE = re.compile(r"^\s*(succeeded|exited\s+\d+)\s+in\s+.*:", re.IGNORECASE
 
 
 class TerminalRenderer:
-    def __init__(self, raw_log_path=None, is_tty=True):
+    def __init__(self, raw_log_path=None, is_tty=True, default_msg="正在启动代理服务..."):
         self.raw_log_path = raw_log_path
         self.raw_log_file = None
         if self.raw_log_path:
@@ -49,7 +50,7 @@ class TerminalRenderer:
         self.is_tty = is_tty
         self.lock = threading.Lock()
         self.running = True
-        self.status_msg = "正在启动 Codex..."
+        self.status_msg = default_msg
         self.start_time = time.time()
         self.action_start_time = time.time()
         self.spinner_thread = None
@@ -222,13 +223,10 @@ def fold_code_blocks(text):
     return re.sub(r"```[^\n]*\n(.*?)\n```", replacer, text, flags=re.DOTALL)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Codex Stream Formatter")
-    parser.add_argument("--log-file", help="Path to write complete raw output")
-    parser.add_argument("--session-file", help="Path to write captured session id")
-    args = parser.parse_args()
-
-    # 处理中断信号：标记中断，但不立即强杀，以便读取并冲刷 Codex 的 turn interrupted 退出输出
+# ==============================================================================
+# Codex CLI 流式输出处理器 (状态机实现)
+# ==============================================================================
+def process_codex_stream(renderer, args, first_line=""):
     is_interrupted = False
 
     def sig_handler(sig, frame):
@@ -237,9 +235,6 @@ def main():
 
     signal.signal(signal.SIGINT, sig_handler)
     signal.signal(signal.SIGTERM, sig_handler)
-
-    is_tty = sys.stdout.isatty()
-    renderer = TerminalRenderer(raw_log_path=args.log_file, is_tty=is_tty)
 
     state = "INIT"
     header_lines = []
@@ -283,7 +278,6 @@ def main():
     def flush_codex_msg():
         nonlocal codex_msg_lines, last_codex_msg_clean
         if codex_msg_lines:
-            # 严格过滤任何混入的 diff 格式行
             clean_lines = []
             for l in codex_msg_lines:
                 if l.startswith("diff --git ") or l.startswith("index ") or l.startswith("--- ") or l.startswith("+++ ") or l.startswith("@@ "):
@@ -297,10 +291,8 @@ def main():
                     return
                 last_codex_msg_clean = norm_text
 
-                # 折叠文本内的过长代码块
                 text = fold_code_blocks(raw_text)
                 lines = text.splitlines()
-                # 消息整体过长时折叠
                 if len(lines) > 20:
                     shown = lines[:8] + [f"  {CLR_YELLOW}{CLR_DIM}┄┄┄ [已折叠 {len(lines)-12} 行说明，完整内容详见日志] ┄┄┄{CLR_RESET}"] + lines[-4:]
                 else:
@@ -341,7 +333,6 @@ def main():
                 should_print = True
                 last_reported_patch_files = set(uniq_files)
             elif uniq_files:
-                # 仅当出现未曾报告过的新文件修改时才打印环境 diff，避免检查命令前后反复刷同一批文件的 diff
                 if not set(uniq_files).issubset(last_reported_patch_files):
                     should_print = True
                     last_reported_patch_files.update(uniq_files)
@@ -409,22 +400,25 @@ def main():
         flush_patch_block()
         flush_ready_block()
 
+    buffered_lines = [first_line] if first_line else []
+
     try:
         renderer.set_status("正在与 Codex 建立连接...")
         while True:
-            line = sys.stdin.readline()
-            if not line:
-                break
+            if buffered_lines:
+                line = buffered_lines.pop(0)
+            else:
+                line = sys.stdin.readline()
+                if not line:
+                    break
             renderer.write_raw(line)
             stripped = line.rstrip("\r\n")
 
-            # 无论处于何种状态，只要出现 session id 即刻提取并持久化
             sess_match = re.search(r"session id:\s*([0-9a-fA-F-]+)", stripped, re.IGNORECASE)
             if sess_match:
                 captured_session_id = sess_match.group(1).strip()
                 save_session_id(captured_session_id)
 
-            # 捕捉 Codex 退出或中断标记
             if "turn interrupted" in stripped.lower():
                 turn_interrupted = True
                 is_interrupted = True
@@ -434,9 +428,6 @@ def main():
                 )
                 continue
 
-            # ------------------------------------------------------------------
-            # 1. 检测顶层段落切换标签
-            # ------------------------------------------------------------------
             if stripped == "user":
                 flush_all_blocks()
                 state = "USER"
@@ -461,9 +452,6 @@ def main():
                 renderer.set_status("正在应用代码补丁 (Patch)...")
                 continue
 
-            # ------------------------------------------------------------------
-            # 2. 全局 DIFF 检测 (捕获任何状态下出现的 git diff / patch 流)
-            # ------------------------------------------------------------------
             if is_diff_start(line):
                 if state == "CODEX":
                     flush_codex_msg()
@@ -472,12 +460,10 @@ def main():
                     renderer.set_status("正在整理代码补丁与变更...")
                     continue
                 elif state == "EXEC":
-                    # 命令后伴随的前置工作区 diff，保持命令缓冲，将 diff 转入 patch 收集
                     state = "EXEC_DIFF"
                     patch_lines.append(line)
                     continue
                 elif state == "EXEC_OUTPUT":
-                    # 命令输出后的工作区 diff，冲刷命令输出块并转入 patch 收集
                     flush_exec_block()
                     state = "PATCH"
                     patch_lines.append(line)
@@ -491,9 +477,6 @@ def main():
                     patch_lines.append(line)
                     continue
 
-            # ------------------------------------------------------------------
-            # 3. 补丁/Diff 收集状态处理
-            # ------------------------------------------------------------------
             if state == "PATCH":
                 if STATUS_RE.match(line):
                     flush_patch_block()
@@ -506,7 +489,6 @@ def main():
                 else:
                     flush_patch_block()
                     state = "READY"
-                    # fall through 继续在 READY 状态下处理当前行
 
             if state == "EXEC_DIFF":
                 if is_diff_line(line):
@@ -520,11 +502,7 @@ def main():
                         continue
                     else:
                         state = "EXEC"
-                        # fall through 继续在 EXEC 状态下处理当前行
 
-            # ------------------------------------------------------------------
-            # 4. 初始化与 Header 处理
-            # ------------------------------------------------------------------
             if state == "INIT":
                 if stripped.startswith("OpenAI Codex"):
                     header_lines.append(stripped)
@@ -558,22 +536,16 @@ def main():
                     state = "READY"
                 continue
 
-            # ------------------------------------------------------------------
-            # 5. 各业务状态处理
-            # ------------------------------------------------------------------
-            # 用户输入折叠
             if state == "USER":
                 if stripped:
                     user_prompt_lines.append(stripped)
                 continue
 
-            # Codex 答复
             if state == "CODEX":
                 codex_msg_lines.append(stripped)
                 renderer.set_status("Codex 正在组织回复...")
                 continue
 
-            # 命令执行处理
             if state == "EXEC":
                 if STATUS_RE.match(stripped):
                     cmd_status = stripped.strip()
@@ -587,10 +559,8 @@ def main():
                         renderer.set_status(f"正在执行: {short_cmd}")
                 continue
 
-            # 命令输出处理
             if state == "EXEC_OUTPUT":
                 if STATUS_RE.match(stripped):
-                    # 处理连续并发命令执行时后序返回的 status 行
                     flush_exec_block()
                     cmd_status = stripped.strip()
                     state = "EXEC_OUTPUT"
@@ -598,20 +568,17 @@ def main():
                     cmd_output_lines.append(stripped)
                 continue
 
-            # READY 状态下的非标签输出 (带折叠与防冗余保护)
             if state == "READY":
                 if STATUS_RE.match(line):
                     cmd_status = stripped.strip()
                     state = "EXEC_OUTPUT"
                     continue
                 if stripped:
-                    # 忽略末尾的 tokens used 统计及纯数字
                     if stripped.startswith("tokens used") or re.match(r"^[\d,]+$", stripped):
                         continue
                     ready_lines.append(stripped)
                 continue
 
-        # 循环结束，冲刷未输出内容
         flush_all_blocks()
 
         total_sec = int(time.time() - renderer.start_time)
@@ -626,7 +593,7 @@ def main():
                     f"{CLR_YELLOW}│{CLR_RESET} 原生退出状态: {CLR_BOLD}turn interrupted{CLR_RESET}\n"
                     f"{CLR_YELLOW}│{CLR_RESET}\n"
                     f"{CLR_YELLOW}│{CLR_RESET} 后续接着会话继续运行命令：\n"
-                    f"{CLR_YELLOW}│{CLR_RESET}   ▶ 自动化续跑:   {CLR_GREEN}{CLR_BOLD}./automation/run_autonomous_codex.sh --session {captured_session_id}{CLR_RESET}\n"
+                    f"{CLR_YELLOW}│{CLR_RESET}   ▶ 自动化续跑:   {CLR_GREEN}{CLR_BOLD}./automation/run_autonomous_codex.sh --agent codex --session {captured_session_id}{CLR_RESET}\n"
                     f"{CLR_YELLOW}│{CLR_RESET}   ▶ 交互式恢复:   {CLR_BLUE}{CLR_BOLD}codex resume {captured_session_id}{CLR_RESET}\n"
                     f"{CLR_YELLOW}│{CLR_RESET}   ▶ 针对性单次指令追加: {CLR_MAGENTA}{CLR_BOLD}codex exec resume {captured_session_id} \"指令\" {CLR_RESET}\n"
                     f"{CLR_YELLOW}╰───────────────────────────────────────────────────────────────────────────{CLR_RESET}\n"
@@ -638,6 +605,272 @@ def main():
             )
     finally:
         renderer.close()
+
+
+# ==============================================================================
+# Antigravity CLI (agy) 流式输出处理器 (NDJSON stream-json 模式)
+# ==============================================================================
+def process_agy_stream(renderer, args, first_line=""):
+    is_interrupted = False
+    captured_session_id = None
+    curr_response_chunks = []
+    has_shown_user = False
+
+    def sig_handler(sig, frame):
+        nonlocal is_interrupted
+        is_interrupted = True
+
+    signal.signal(signal.SIGINT, sig_handler)
+    signal.signal(signal.SIGTERM, sig_handler)
+
+    def save_session_id(sid):
+        nonlocal captured_session_id
+        if sid:
+            captured_session_id = sid.strip()
+            if args.session_file:
+                try:
+                    with open(args.session_file, "w", encoding="utf-8") as sf:
+                        sf.write(captured_session_id + "\n")
+                except Exception:
+                    pass
+
+    def save_last_msg(resp):
+        if resp and args.last_msg_file:
+            try:
+                with open(args.last_msg_file, "w", encoding="utf-8") as mf:
+                    mf.write(resp)
+            except Exception:
+                pass
+
+    def handle_json_obj(data):
+        nonlocal has_shown_user, curr_response_chunks, captured_session_id
+        event = data.get("event")
+
+        # 1. 会话初始化事件
+        if event == "init":
+            conv_id = data.get("conversation_id")
+            save_session_id(conv_id)
+            init_info = data.get("init", {})
+            perm_mode = init_info.get("permission_mode", "always-proceed")
+            banner = (
+                f"{CLR_BLUE}╭─ Antigravity (agy) 会话已就绪 ────────────────────────────────────────{CLR_RESET}\n"
+                f"{CLR_BLUE}│{CLR_RESET} 工具: {CLR_BOLD}Antigravity CLI{CLR_RESET} | 会话: {CLR_BOLD}{conv_id or 'unknown'}{CLR_RESET} | 权限: {CLR_GREEN}{perm_mode}{CLR_RESET}\n"
+                f"{CLR_BLUE}╰───────────────────────────────────────────────────────────────────────────{CLR_RESET}"
+            )
+            renderer.print_block(banner)
+            renderer.set_status("正在接收并解析任务指令...")
+            return
+
+        # 2. 单步状态推进事件
+        if event == "step_update":
+            update = data.get("step_update", {})
+            conv_id = update.get("conversation_id")
+            if conv_id and not captured_session_id:
+                save_session_id(conv_id)
+
+            step_type = update.get("step_type")
+            state = update.get("state")
+
+            # 用户输入
+            if step_type == "user_input":
+                if not has_shown_user:
+                    has_shown_user = True
+                    renderer.print_block(
+                        f"\n{CLR_BLUE}👤 [用户指令]{CLR_RESET} {CLR_BOLD}推进无人值守自动化架构重构与开发任务{CLR_RESET} {CLR_DIM}(指令已就绪){CLR_RESET}\n"
+                    )
+                return
+
+            # 模型思考
+            if step_type == "thinking":
+                renderer.set_status("Antigravity 正在深度思考分析...")
+                return
+
+            # 模型答复与文本流
+            if step_type == "agent_response":
+                if state == "ACTIVE":
+                    delta = update.get("text_delta", "")
+                    curr_response_chunks.append(delta)
+                    renderer.set_status("Antigravity 正在组织回复...")
+                elif state == "DONE":
+                    full_resp = "".join(curr_response_chunks).strip()
+                    curr_response_chunks = []
+                    if full_resp:
+                        text = fold_code_blocks(full_resp)
+                        lines = text.splitlines()
+                        if len(lines) > 20:
+                            shown = lines[:8] + [f"  {CLR_YELLOW}{CLR_DIM}┄┄┄ [已折叠 {len(lines)-12} 行说明，完整内容详见日志] ┄┄┄{CLR_RESET}"] + lines[-4:]
+                        else:
+                            shown = lines
+                        block = f"\n{CLR_CYAN}💬 [Antigravity 答复/分析]{CLR_RESET}\n"
+                        for line in shown:
+                            block += f"  {line}\n"
+                        renderer.print_block(block)
+                return
+
+            # 工具调用与结果
+            if step_type == "tool":
+                tool_name = update.get("tool_name", "")
+                tool_info = update.get("tool_info", {})
+                params = tool_info.get("parameters", {})
+
+                if state == "ACTIVE":
+                    if tool_name == "run_command":
+                        cmd = params.get("CommandLine", "")
+                        clean_cmd = clean_command_str(cmd)
+                        short_cmd = clean_cmd[:45] + "..." if len(clean_cmd) > 45 else clean_cmd
+                        renderer.set_status(f"正在执行: {short_cmd}")
+                    elif tool_name in ("replace_file_content", "write_to_file", "sed_file"):
+                        target = params.get("TargetFile") or params.get("file_path") or ""
+                        renderer.set_status(f"正在修改文件: {os.path.basename(target)}")
+                    elif tool_name in ("view_file", "grep_search", "find_by_name", "list_dir", "read_url_content"):
+                        target = params.get("AbsolutePath") or params.get("TargetFile") or params.get("path") or ""
+                        desc = os.path.basename(target) if target else tool_name
+                        renderer.set_status(f"正在检索/查看: {desc}")
+                    else:
+                        renderer.set_status(f"正在调用工具: {tool_name}")
+                elif state == "DONE":
+                    dur = update.get("duration_seconds")
+                    dur_str = f" ({dur:.2f}s)" if dur is not None else ""
+                    if tool_name == "run_command":
+                        cmd = params.get("CommandLine", "")
+                        clean_cmd = clean_command_str(cmd)
+                        output = tool_info.get("output", "")
+                        out_lines = [l.strip() for l in output.splitlines() if l.strip()]
+
+                        is_failed = bool(re.search(r"exited with code [1-9]\d*", output))
+                        if is_failed:
+                            icon = f"{CLR_RED}✖ [命令异常]{CLR_RESET}"
+                            header = f"{icon} {CLR_BOLD}{clean_cmd}{CLR_RESET}{CLR_RED}{dur_str}{CLR_RESET}"
+                        else:
+                            icon = f"{CLR_GREEN}✔ [命令成功]{CLR_RESET}"
+                            header = f"{icon} {CLR_BOLD}{clean_cmd}{CLR_RESET}{CLR_DIM}{dur_str}{CLR_RESET}"
+
+                        folded = fold_output_lines(out_lines, max_display=6)
+                        if folded:
+                            block = f"{header}\n" + "\n".join(folded)
+                        else:
+                            block = header
+                        renderer.print_block(block)
+                    elif tool_name in ("replace_file_content", "write_to_file", "sed_file"):
+                        target = params.get("TargetFile") or params.get("file_path") or "代码文件"
+                        action = "更新" if tool_name == "replace_file_content" else "写入"
+                        block = f"\n{CLR_MAGENTA}🔧 [代码补丁]{CLR_RESET} {CLR_BOLD}{action} {os.path.basename(target)}{CLR_RESET}{CLR_DIM}{dur_str}{CLR_RESET}\n"
+                        renderer.print_block(block)
+                    elif tool_name in ("view_file", "grep_search", "find_by_name", "list_dir"):
+                        target = params.get("AbsolutePath") or params.get("TargetFile") or params.get("path") or ""
+                        desc = os.path.basename(target) if target else tool_name
+                        renderer.print_block(f"{CLR_BLUE}• [代码查阅]{CLR_RESET} {desc}{CLR_DIM}{dur_str}{CLR_RESET}")
+                return
+
+        # 3. 最终轮次结果事件
+        if event == "result":
+            res = data.get("result", {})
+            conv_id = res.get("conversation_id")
+            if conv_id:
+                save_session_id(conv_id)
+            response_text = res.get("response", "")
+            save_last_msg(response_text)
+            return
+
+    buffered_lines = [first_line] if first_line else []
+    try:
+        renderer.set_status("正在与 Antigravity 建立连接...")
+        while True:
+            if buffered_lines:
+                line = buffered_lines.pop(0)
+            else:
+                line = sys.stdin.readline()
+                if not line:
+                    break
+
+            renderer.write_raw(line)
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            cid_match = re.search(r'"conversation_id"\s*:\s*"([0-9a-fA-F-]+)"', stripped)
+            if cid_match:
+                save_session_id(cid_match.group(1))
+
+            try:
+                obj = json.loads(stripped)
+                if isinstance(obj, dict) and "event" in obj:
+                    handle_json_obj(obj)
+            except json.JSONDecodeError:
+                if any(k in stripped.lower() for k in ("error", "fatal", "panic", "quota", "exhausted")):
+                    renderer.print_block(f"{CLR_RED}{stripped}{CLR_RESET}")
+
+        total_sec = int(time.time() - renderer.start_time)
+        if is_interrupted:
+            renderer.print_block(
+                f"{CLR_YELLOW}⚠ [交互已人工中断]{CLR_RESET} {CLR_DIM}已运行: {total_sec//60}分{total_sec%60}秒{CLR_RESET}"
+            )
+            if captured_session_id:
+                banner = (
+                    f"\n{CLR_YELLOW}╭─ Antigravity 会话中断信息 (Session Info) ───────────────────────────────{CLR_RESET}\n"
+                    f"{CLR_YELLOW}│{CLR_RESET} conversation id: {CLR_BOLD}{captured_session_id}{CLR_RESET}\n"
+                    f"{CLR_YELLOW}│{CLR_RESET}\n"
+                    f"{CLR_YELLOW}│{CLR_RESET} 后续接着会话继续运行命令：\n"
+                    f"{CLR_YELLOW}│{CLR_RESET}   ▶ 自动化续跑:   {CLR_GREEN}{CLR_BOLD}./automation/run_autonomous_codex.sh --agent agy --session {captured_session_id}{CLR_RESET}\n"
+                    f"{CLR_YELLOW}│{CLR_RESET}   ▶ 交互式恢复:   {CLR_BLUE}{CLR_BOLD}agy --conversation {captured_session_id}{CLR_RESET}\n"
+                    f"{CLR_YELLOW}│{CLR_RESET}   ▶ 针对性单次指令追加: {CLR_MAGENTA}{CLR_BOLD}agy --conversation {captured_session_id} -p \"指令\" {CLR_RESET}\n"
+                    f"{CLR_YELLOW}╰───────────────────────────────────────────────────────────────────────────{CLR_RESET}\n"
+                )
+                renderer.print_block(banner)
+        else:
+            renderer.print_block(
+                f"{CLR_GREEN}✔ [本轮交互完成]{CLR_RESET} {CLR_DIM}用时: {total_sec//60}分{total_sec%60}秒{CLR_RESET}"
+            )
+    finally:
+        renderer.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Autonomous Stream Formatter (Codex & Antigravity)")
+    parser.add_argument("--log-file", help="Path to write complete raw output")
+    parser.add_argument("--session-file", help="Path to write captured session id")
+    parser.add_argument("--last-msg-file", help="Path to write last agent response")
+    parser.add_argument("--agent", default="auto", choices=["auto", "codex", "agy", "antigravity"], help="Agent mode (auto|codex|agy)")
+    args = parser.parse_args()
+
+    is_tty = sys.stdout.isatty()
+    renderer = TerminalRenderer(raw_log_path=args.log_file, is_tty=is_tty)
+
+    # 预读第一行非空输出以决定解析器
+    first_line = ""
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        if line.strip():
+            first_line = line
+            break
+        else:
+            renderer.write_raw(line)
+
+    if not first_line:
+        renderer.close()
+        return
+
+    # 确定运行模式
+    agent_mode = args.agent
+    if agent_mode == "auto":
+        # 尝试检测第一行是否包含 JSON event
+        stripped = first_line.strip()
+        if stripped.startswith("{") and '"event"' in stripped:
+            try:
+                d = json.loads(stripped)
+                if isinstance(d, dict) and "event" in d:
+                    agent_mode = "agy"
+            except Exception:
+                pass
+        if agent_mode == "auto":
+            agent_mode = "codex"
+
+    if agent_mode in ("agy", "antigravity"):
+        process_agy_stream(renderer, args, first_line=first_line)
+    else:
+        process_codex_stream(renderer, args, first_line=first_line)
 
 
 if __name__ == "__main__":

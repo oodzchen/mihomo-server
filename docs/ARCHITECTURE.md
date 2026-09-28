@@ -63,6 +63,31 @@ then cover any remaining resource settings without duplicating Mihomo's updater.
 Verify actual TUN interface, routes and traffic when a Linux host with
 `/dev/net/tun` and the required privileges is available. Finish P1 before P2.
 
+## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
+
+The autonomous workbench (`automation/`) now supports both **OpenAI Codex CLI**
+and **Google Antigravity CLI (`agy`)** as interchangeable autonomous agent backends:
+
+1. **Agent selection**: `--agent codex` (default) and `--agent agy` / `--agent antigravity`
+   select the respective agent CLI engine. `run_autonomous.sh` symlink provides a
+   unified invocation entry point.
+2. **Permission and unattended execution**: Codex uses `-c approval_policy=never` with
+   networked `workspace-write` sandbox; Antigravity uses `--dangerously-skip-permissions`
+   with `--add-dir ../clash-verge-rev` for unattended execution and upstream reading.
+3. **Stream formatting & folding**: `format_codex_stream.py` auto-detects stream type,
+   providing native parsing for Antigravity's `stream-json` NDJSON events while retaining
+   full state-machine support for Codex text streams. Both produce consistent dynamic
+   Spinner loading, command/output folding, code patch summaries, and turn elapsed time.
+4. **Session persistence & isolation**: Sessions are tracked per agent (`.session_id_codex`
+   and `.session_id_agy`) as well as the active `.session_id`, preventing cross-engine
+   session collision when switching agents.
+5. **Rate-limit detection & smart cooldown**: Expanded regex and parser support both OpenAI
+   usage limits and Google/Gemini quota exhaustion, with accurate time-only and relative
+   countdown parsing (e.g. `try again at 4:17 PM`) to eliminate blind 5-hour waits.
+6. **Host Git atomic commits & progress tracking**: Both engines format standard
+   `COMMIT_START ... COMMIT_END` blocks for host-level conventional commits and enforce
+   `docs/ARCHITECTURE.md` synchronization and `$COMPLETION_FLAG` guards identically.
+
 ## Complete target architecture
 
 This tree describes target responsibilities. Pending entries are planned
@@ -312,12 +337,19 @@ mihomo-server/
 │   ├── Other platforms / containers / Alpha bundle seeds [Deferred]
 │   ├── Linux package license inventory              [Pending; P4]
 │   └── External publication                      [Deferred]
+├── automation/                                       [Implemented; multi-engine verified]
+│   ├── Host autonomous runner / multi-agent engine support (Codex & Antigravity agy) [Implemented; verified]
+│   ├── Unified TUI stream formatter / NDJSON & text parsing / output & diff folding [Implemented; verified]
+│   ├── Host-level Git conventional commit automation / AGENTS.md compliance [Implemented; verified]
+│   ├── Watchdog inactivity monitor / rate-limit detection / cooldown recovery [Implemented; verified]
+│   └── Session isolation / .session_id_codex & .session_id_agy persistence [Implemented; verified]
 └── Documentation and provenance                     [Implemented; maintained]
     ├── headless.md
     ├── docs/UPSTREAM.md
     ├── docs/ARCHITECTURE.md
     ├── docs/RUNNING.md
-    └── docs/DEPLOYMENT.md
+    ├── docs/DEPLOYMENT.md
+    └── automation/README.md
 ```
 
 The runtime boundary is a browser communicating over HTTP/WebSocket with one
