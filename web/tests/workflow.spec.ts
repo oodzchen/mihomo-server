@@ -1378,6 +1378,57 @@ test("proxy delay controls translate without losing the test URL or results", as
   expect(requests).toEqual([{ command: "delay_proxy", url }, { command: "delay_group", url }]);
 });
 
+test("proxy provider controls translate while an update is pending", async ({ page }) => {
+  const calls: string[] = [];
+  let releaseUpdate: () => void = () => {};
+  const firstUpdate = new Promise<void>((resolve) => { releaseUpdate = resolve; });
+  let holdFirstUpdate = true;
+  await page.route("**/api/commands", async (route) => {
+    const body = route.request().postDataJSON();
+    if (body?.command === "proxy_providers") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        providers: {
+          FixtureProvider: { name: "FixtureProvider", type: "Proxy", vehicleType: "HTTP", proxies: [{ name: "Alpha" }, { name: "Beta" }] },
+        },
+      }) });
+    } else if (body?.command === "update_proxy_provider" || body?.command === "healthcheck_proxy_provider") {
+      calls.push(body.command);
+      expect(body.name).toBe("FixtureProvider");
+      if (body.command === "update_proxy_provider" && holdFirstUpdate) {
+        holdFirstUpdate = false;
+        await firstUpdate;
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    } else {
+      await route.continue();
+    }
+  });
+  await page.goto(`${base}/proxies`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  const card = page.locator(".provider-card").filter({ hasText: "FixtureProvider" });
+  await expect(page.getByRole("heading", { name: "代理提供者 (Proxy Providers)" })).toBeVisible();
+  await expect(card).toContainText("节点数：2");
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("heading", { name: "Proxy Providers" })).toBeVisible();
+  await expect(page.getByText("External proxy collections: 1")).toBeVisible();
+  await expect(card).toContainText("Nodes: 2");
+  await card.getByRole("button", { name: "Update", exact: true }).click();
+  await expect(card.getByRole("button", { name: "Updating…" })).toBeVisible();
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(card.getByRole("button", { name: "更新中…" })).toBeVisible();
+  releaseUpdate();
+  await expect(card.getByRole("button", { name: "更新", exact: true })).toBeEnabled();
+  await card.getByRole("button", { name: "健康检查" }).click();
+  await expect.poll(() => calls.length).toBe(2);
+  await expect(card.getByRole("button", { name: "健康检查" })).toBeEnabled();
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await page.getByRole("button", { name: "Update all" }).click();
+  await expect.poll(() => calls.length).toBe(3);
+  await expect(card.getByRole("button", { name: "Update", exact: true })).toBeEnabled();
+  expect(calls).toEqual(["update_proxy_provider", "healthcheck_proxy_provider", "update_proxy_provider"]);
+});
+
 test("manual remote refresh keeps identity, applies active config and preserves failures across restart", async ({
   page,
 }) => {

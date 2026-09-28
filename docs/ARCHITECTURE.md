@@ -53,12 +53,13 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** proxy delay-test controls and badges now follow
-the browser's Chinese/English language choice. Switching languages preserves
-the test URL and numeric results while translating status badges, group test
-buttons and per-node test hints; authenticated delay commands are unchanged.
-**Next implementation task (P3):** translate proxy-provider inventory and
-update/healthcheck controls, then the rules, log, resource and upgrade views;
+**Latest completed task (P3):** the proxy-provider inventory and action
+controls now follow the browser's Chinese/English language choice. Provider
+names, transport types, node counts and update timestamps remain stable while
+pending update labels translate; authenticated update and healthcheck commands
+are unchanged.
+**Next implementation task (P3):** translate the rules page's rule list,
+search and table controls, then rule-provider, log, resource and upgrade views;
 service-message localization and additional browser languages remain pending.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
@@ -338,7 +339,8 @@ mihomo-server/
 │   ├── Global script editor zh/en JavaScript controls and reset confirmation [Implemented; P3; browser verified]
 │   ├── Proxy node list zh/en selection controls and group status [Implemented; P3; browser verified]
 │   ├── Proxy delay-test URL/actions/result badges zh/en [Implemented; P3; browser verified]
-│   ├── Proxy-provider controls, rules/log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
+│   ├── Proxy-provider inventory/update/healthcheck controls zh/en [Implemented; P3; browser verified]
+│   ├── Rules/log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4462,7 +4464,24 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: proxy delay-test localization
+## Current increment: proxy-provider inventory and actions localization
+
+Delivery step 9 (P3) now localizes the proxy-provider panel's title, collection
+and node counts, update-all and per-provider update/healthcheck actions, and
+their in-progress labels. Provider names, vehicle types and timestamps retain
+their source values. Changing browser language during an in-flight update
+relabels its pending action without changing the request. The authenticated
+provider operations and refresh behavior remain unchanged.
+
+Verification: `cargo check --workspace` and the Web production build pass. A
+Playwright workflow supplies a provider response, holds one update while
+switching languages, then exercises individual update, healthcheck and
+update-all commands. The full browser regression reports **44 passed and 4
+optional upgrade/repair workflows skipped**. The complete architecture tree
+above is synchronized. Next: translate the rules page's rule list, search and
+table controls.
+
+## Previous increment: proxy delay-test localization
 
 Delivery step 9 (P3) now localizes the proxy page's delay-test URL label and
 placeholder, group test button, per-node test hint and testing/untested/timeout

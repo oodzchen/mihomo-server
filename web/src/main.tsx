@@ -1926,14 +1926,14 @@ function ProxyPage({
         <section className="panel" style={{ marginBottom: "20px" }}>
           <div className="panel-title">
             <div>
-              <h2>代理提供者 (Proxy Providers)</h2>
-              <p className="muted">已接入 {providerList.length} 个外部代理集合</p>
+              <h2>{t(language, "proxyProviderTitle")}</h2>
+              <p className="muted">{t(language, "proxyProviderSummary").replace("{count}", String(providerList.length))}</p>
             </div>
             <button
               disabled={busy || loading || !!updatingProvider}
               onClick={() => void updateAllProviders()}
             >
-              全部更新
+              {t(language, "proxyProviderUpdateAll")}
             </button>
           </div>
           <div className="provider-grid">
@@ -1944,7 +1944,7 @@ function ProxyPage({
                   <span className="badge badge-info">{provider.vehicleType}</span>
                 </div>
                 <p className="muted" style={{ fontSize: "11px", margin: "4px 0" }}>
-                  节点数：{provider.proxies?.length ?? 0}
+                  {t(language, "proxyProviderNodes")}{provider.proxies?.length ?? 0}
                   {provider.updatedAt ? ` · ${provider.updatedAt.slice(0, 19).replace("T", " ")}` : ""}
                 </p>
                 <div className="card-actions" style={{ gap: "6px" }}>
@@ -1952,13 +1952,13 @@ function ProxyPage({
                     disabled={busy || updatingProvider === name}
                     onClick={() => void updateProvider(name)}
                   >
-                    {updatingProvider === name ? "更新中…" : "更新"}
+                    {t(language, updatingProvider === name ? "proxyProviderUpdating" : "proxyProviderUpdate")}
                   </button>
                   <button
                     disabled={busy || healthcheckingProvider === name}
                     onClick={() => void healthcheckProvider(name)}
                   >
-                    {healthcheckingProvider === name ? "检查中…" : "健康检查"}
+                    {t(language, healthcheckingProvider === name ? "proxyProviderChecking" : "proxyProviderHealthcheck")}
                   </button>
                 </div>
               </div>

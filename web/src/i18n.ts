@@ -155,6 +155,11 @@ const zh = {
   proxyDelayTesting: "测速中", proxyDelayUntested: "未测", proxyDelayTimeout: "超时",
   proxyDelayAction: "测速", proxyDelayWorking: "测速中…",
   proxyDelayNodeTitle: "测试 {node} 延迟",
+  proxyProviderTitle: "代理提供者 (Proxy Providers)",
+  proxyProviderSummary: "已接入 {count} 个外部代理集合",
+  proxyProviderNodes: "节点数：", proxyProviderUpdateAll: "全部更新",
+  proxyProviderUpdate: "更新", proxyProviderUpdating: "更新中…",
+  proxyProviderHealthcheck: "健康检查", proxyProviderChecking: "检查中…",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -293,6 +298,11 @@ const en: Record<keyof typeof zh, string> = {
   proxyDelayTesting: "Testing", proxyDelayUntested: "Not tested", proxyDelayTimeout: "Timed out",
   proxyDelayAction: "Test delay", proxyDelayWorking: "Testing…",
   proxyDelayNodeTitle: "Test {node} latency",
+  proxyProviderTitle: "Proxy Providers",
+  proxyProviderSummary: "External proxy collections: {count}",
+  proxyProviderNodes: "Nodes: ", proxyProviderUpdateAll: "Update all",
+  proxyProviderUpdate: "Update", proxyProviderUpdating: "Updating…",
+  proxyProviderHealthcheck: "Health check", proxyProviderChecking: "Checking…",
 };
 
 export type MessageKey = keyof typeof zh;
