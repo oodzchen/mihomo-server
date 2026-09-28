@@ -1,7 +1,7 @@
 use anyhow::Result;
 use headless_core::config::{
     runtime::{RuntimeStore, parse},
-    settings::{MAX_SETTINGS_BYTES, Mode, ServiceSettings, SettingsStore},
+    settings::{MAX_SETTINGS_BYTES, Mode, RuntimeSettings, ServiceSettings, SettingsStore},
 };
 use std::{fs, path::PathBuf};
 
@@ -872,5 +872,119 @@ fn hosts_reject_coerced_types_invalid_patterns_lists_and_alias_cycles() -> Resul
     ] {
         serde_yaml_ng::from_str::<RuntimeSettings>(valid)?;
     }
+    Ok(())
+}
+
+#[test]
+fn remaining_authoritative_settings_validate_and_enforce_authority() -> Result<()> {
+    for valid in [
+        "bind-address: '*'",
+        "bind-address: '127.0.0.1'",
+        "bind-address: '0.0.0.0'",
+        "bind-address: '::1'",
+        "bind-address: localhost",
+        "bind-address: ''",
+    ] {
+        let settings: RuntimeSettings = serde_yaml_ng::from_str(valid)?;
+        assert!(settings.validate().is_ok(), "{valid}");
+    }
+    for invalid in [
+        "bind-address: '127.0.0.1:8080'",
+        "bind-address: '256.0.0.1'",
+        "bind-address: 'has space'",
+    ] {
+        let settings: RuntimeSettings = serde_yaml_ng::from_str(invalid)?;
+        assert!(settings.validate().is_err(), "{invalid}");
+    }
+
+    for valid in [
+        "authentication: ['admin:123456']",
+        "authentication: ['alice:p1', 'bob:p2']",
+        "authentication: []",
+    ] {
+        let settings: RuntimeSettings = serde_yaml_ng::from_str(valid)?;
+        assert!(settings.validate().is_ok(), "{valid}");
+    }
+    for invalid in [
+        "authentication: ['no_colon']",
+        "authentication: [':no_user']",
+        "authentication: ['']",
+    ] {
+        let settings: RuntimeSettings = serde_yaml_ng::from_str(invalid)?;
+        assert!(settings.validate().is_err(), "{invalid}");
+    }
+
+    for valid in [
+        "skip-auth-prefixes: ['127.0.0.1/8', '::1/128']",
+        "lan-allowed-ips: ['192.168.0.0/16', '10.0.0.1']",
+        "lan-disallowed-ips: ['192.168.1.100/32']",
+        "skip-auth-prefixes: []\nlan-allowed-ips: []\nlan-disallowed-ips: []",
+    ] {
+        let settings: RuntimeSettings = serde_yaml_ng::from_str(valid)?;
+        assert!(settings.validate().is_ok(), "{valid}");
+    }
+    for invalid in [
+        "skip-auth-prefixes: ['invalid']",
+        "lan-allowed-ips: ['192.168.0.1/33']",
+        "lan-disallowed-ips: ['::1/129']",
+        "lan-allowed-ips: ['']",
+    ] {
+        let settings: RuntimeSettings = serde_yaml_ng::from_str(invalid)?;
+        assert!(settings.validate().is_err(), "{invalid}");
+    }
+
+    for valid in [
+        "inbound-tfo: true\ninbound-mptcp: false\nsniffing: true",
+        "inbound-tfo: false\ninbound-mptcp: true\nsniffing: false",
+    ] {
+        let settings: RuntimeSettings = serde_yaml_ng::from_str(valid)?;
+        assert!(settings.validate().is_ok(), "{valid}");
+    }
+
+    let base = parse(
+        "bind-address: 127.0.0.1\nauthentication: ['old:pass']\nskip-auth-prefixes: ['10.0.0.0/8']\nlan-allowed-ips: ['10.0.0.0/8']\nlan-disallowed-ips: ['10.0.0.1/32']\ninbound-tfo: true\ninbound-mptcp: true\nsniffing: true\ncustom: retained",
+    )?;
+
+    let runtime: RuntimeSettings = serde_yaml_ng::from_str(
+        "bind-address: '*'\nauthentication: ['admin:new_pass']\nskip-auth-prefixes: ['192.168.0.0/16']\nlan-allowed-ips: ['192.168.0.0/16']\nlan-disallowed-ips: []\ninbound-tfo: false\ninbound-mptcp: false\nsniffing: false",
+    )?;
+    let applied = runtime.enforce(base.clone())?;
+    assert_eq!(applied["bind-address"].as_str(), Some("*"));
+    assert_eq!(applied["authentication"][0].as_str(), Some("admin:new_pass"));
+    assert_eq!(applied["skip-auth-prefixes"][0].as_str(), Some("192.168.0.0/16"));
+    assert_eq!(applied["lan-allowed-ips"][0].as_str(), Some("192.168.0.0/16"));
+    assert!(applied["lan-disallowed-ips"].as_sequence().unwrap().is_empty());
+    assert_eq!(applied["inbound-tfo"].as_bool(), Some(false));
+    assert_eq!(applied["inbound-mptcp"].as_bool(), Some(false));
+    assert_eq!(applied["sniffing"].as_bool(), Some(false));
+    assert_eq!(applied["custom"].as_str(), Some("retained"));
+
+    let changed = runtime.overridden_fields(&base, &applied)?;
+    for key in [
+        "bind-address",
+        "authentication",
+        "skip-auth-prefixes",
+        "lan-allowed-ips",
+        "lan-disallowed-ips",
+        "inbound-tfo",
+        "inbound-mptcp",
+        "sniffing",
+    ] {
+        assert!(changed.contains(&key.to_owned()), "missing changed key {key}");
+    }
+
+    let clear_auth: RuntimeSettings = serde_yaml_ng::from_str("authentication: []")?;
+    let cleared = clear_auth.enforce(base.clone())?;
+    assert!(cleared["authentication"].as_sequence().unwrap().is_empty());
+    assert_eq!(cleared["inbound-tfo"].as_bool(), Some(true));
+
+    let empty = RuntimeSettings::default();
+    let inherited = empty.enforce(base.clone())?;
+    assert_eq!(inherited["bind-address"].as_str(), Some("127.0.0.1"));
+    assert_eq!(inherited["authentication"][0].as_str(), Some("old:pass"));
+    assert_eq!(inherited["inbound-tfo"].as_bool(), Some(true));
+    assert_eq!(inherited["sniffing"].as_bool(), Some(true));
+    assert!(empty.overridden_fields(&base, &inherited)?.is_empty());
+
     Ok(())
 }

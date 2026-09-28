@@ -160,7 +160,7 @@ mihomo-server/
 │       ├── Final LAN bind / group cleanup / field order [Migrated + staged adaptation; Linux verified]
 │       ├── Outbound interface / Linux routing mark authority / bounds / recovery [Implemented; Linux verified]
 │       ├── Global download User-Agent / ETag authority / strict headers / recovery [Implemented; Linux verified]
-│       ├── Remaining authoritative settings          [Pending; P1]
+│       ├── Remaining authoritative settings (bind, auth, LAN ACL, TFO/MPTCP, sniffing) [Implemented; Linux verified]
 │       ├── Source-addressed HTTP provider cache identities / implicit paths [Implemented; Linux verified]
 │       ├── Runtime YAML + overlay generation        [Implemented; upstream merge reused]
 │       ├── Profile enhancement generation          [Partially implemented; sequences/settings/TUN/DNS/global/profile/final stages]
@@ -5052,43 +5052,25 @@ administration capability, so privileged TUN routing remains unverified.
 Next: remaining DNS page controls and resource settings in P1; run the privileged
 TUN interface/route/traffic workflow once an appropriate host is available.
 
-## Previous increment: native Linux TUN admission, interface validation, and routing verification
+## Previous increment: remaining authoritative settings (bind, auth, LAN ACL, TFO/MPTCP, sniffing)
 
-Delivery step 7 now completes native Linux TUN admission, device constraints, interface
-verification, and routing readiness checks:
-- **Device name and preflight validation (`service/src/native_tun.rs`, `crates/headless-core/src/config/settings/network.rs`)**:
-  - `validate_device_name` enforces Linux network interface constraints: device names must be
-    1–15 UTF-8 bytes (`IFNAMSIZ - 1`) and cannot contain `/`, `:`, or whitespace characters.
-  - `TunSettings::validate` in `headless-core` enforces identical device name bounds at schema
-    validation time.
-  - `preflight` validates explicit device names and checks that `mtu` is within 1–65535 before
-    checking `/dev/net/tun` character device availability and read/write accessibility.
-- **Interface existence and state checks (`check_interface_exists`, `check_interface_up`, `read_interface_mtu`)**:
-  - Reads `/sys/class/net/<device>/flags` to verify `IFF_UP` (bit 0x1) and `/sys/class/net/<device>/mtu`
-    for positive MTU without socket allocation overhead.
-  - `verify_linux_interface_and_routes` ensures that whenever the core reports `core.tun.enable: true`,
-    the named interface exists on the host and is in an operational UP state.
-- **Routing readiness and capability diagnostics (`has_net_admin_capability`, `verify`)**:
-  - `has_net_admin_capability` inspects effective process capabilities (`/proc/self/status` `CapEff` bit 12)
-    and `geteuid() == 0`.
-  - When configured `enable: true` but the core reports `enable: false` (due to missing kernel capability
-    or interface creation rejection), `verify` returns actionable diagnostics distinguishing service
-    `CAP_NET_ADMIN` privilege deficiency from configuration mismatch.
-  - When `auto_route: true`, verifies that interface operstate is not down and that the interface
-    is ready to handle policy or system routing traffic.
-- **Integration verification & rollback safety**:
-  - Unit tests cover Linux interface constraints, `/dev/net/tun` rejection, `/sys/class/net/lo` device
-    verification, device absence failure, and capability check without panic.
-  - Real-core integration test `unprivileged_native_tun_rejects_live_settings_and_preserves_running_proxy`
-    in `service/tests/settings.rs` verifies that invalid TUN device names reject at preflight without
-    touching the running core, and that unprivileged TUN activation fails admission, logs capability
-    diagnostics, and safely rolls back to the previous configuration while keeping the proxy alive.
+Delivery step 7 (P1) completes the remaining authoritative runtime settings in `crates/headless-core`:
+- **Inbound listener binding and ACL controls (`RuntimeSettings`, `settings.rs`)**:
+  - `bind_address`: supports `*`, empty, loopback/localhost, and valid IPv4/IPv6 addresses, with length and control-character bounds.
+  - `authentication`: strictly validated list of `username:password` credentials, requiring non-empty usernames.
+  - `skip_auth_prefixes`, `lan_allowed_ips`, `lan_disallowed_ips`: validated lists of IPv4/IPv6 addresses or CIDR network blocks (with prefix length bounds <= 32 for IPv4 and <= 128 for IPv6).
+  - Explicit empty lists `[]` own the setting and clear any source subscription credentials or ACL rules.
+- **TCP optimization and sniffing options**:
+  - `inbound_tfo`: boolean flag controlling TCP Fast Open on inbound proxy listeners.
+  - `inbound_mptcp`: boolean flag controlling Multipath TCP on inbound listeners.
+  - `sniffing`: boolean flag controlling domain and protocol sniffing.
+  - Explicit `false` booleans have full authority over `true` in subscriptions; absent `None` preserves subscription inheritance.
+- **Verification & core lifecycle**:
+  - Unit tests in `headless-core` verify strict syntax validation, invalid input rejection, authority overrides, empty-list clearing, and change reporting via `overridden_fields`.
+  - Integration test `remaining_authoritative_settings_apply_hot_reload_and_survive_restart` in `service/tests/settings.rs` verifies that real Mihomo accepts these settings, applies them via hot reload, rejects invalid CIDRs with clean rollback, and fully restores all settings across a cold service restart.
 
-Verification: `cargo check --workspace` passes; `cargo test -p mihomo-server --lib native_tun` passes all 7
-unit tests; `cargo test -p headless-core --test settings` passes all 23 tests; `cargo test -p mihomo-server --test settings`
-passes unprivileged TUN live admission and rollback; all 20 python tests in `scripts/tests` pass.
-The tree above marks native Linux TUN admission, interface validation, and routing verification as implemented
-and Linux verified. Next: remaining P1 authoritative settings and full resource lifecycle.
+Verification: `cargo check --workspace` passes; `cargo test -p headless-core --test settings` passes all 24 unit tests; `cargo test -p mihomo-server --test settings` passes real Mihomo hot-reload and restoration; all 20 python tests in `scripts/tests` pass.
+The tree above marks remaining authoritative settings as implemented and Linux verified. Next: remaining Geo lifecycle and full resource settings.
 
 ## MVP completion boundary
 

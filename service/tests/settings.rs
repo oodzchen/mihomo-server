@@ -1314,3 +1314,58 @@ async fn hosts_dns_queries_authority_protection_rollback_and_restart() -> Result
     assert_eq!(fs::read("/etc/hosts")?, system_bytes);
     restored_result
 }
+
+#[tokio::test]
+async fn remaining_authoritative_settings_apply_hot_reload_and_survive_restart() -> Result<()> {
+    let dir = Directory::new()?;
+    let manager = CoreManager::spawn(dir.options()?)?;
+    let result = async {
+        manager.start().await?;
+        let before = manager.status();
+
+        let settings_yaml = "bind-address: 127.0.0.1\nauthentication: ['testuser:secret123']\nskip-auth-prefixes: ['127.0.0.1/8']\nlan-allowed-ips: ['192.168.0.0/16']\nlan-disallowed-ips: ['192.168.1.100/32']\ninbound-tfo: false\nsniffing: false";
+        manager.set_settings(serde_yaml_ng::from_str(settings_yaml)?).await?;
+
+        let applied = manager.runtime_config().await?;
+        assert_eq!(applied["bind-address"].as_str(), Some("127.0.0.1"));
+        assert_eq!(applied["authentication"][0].as_str(), Some("testuser:secret123"));
+        assert_eq!(applied["skip-auth-prefixes"][0].as_str(), Some("127.0.0.1/8"));
+        assert_eq!(applied["lan-allowed-ips"][0].as_str(), Some("192.168.0.0/16"));
+        assert_eq!(applied["lan-disallowed-ips"][0].as_str(), Some("192.168.1.100/32"));
+        assert_eq!(applied["inbound-tfo"].as_bool(), Some(false));
+        assert_eq!(applied["sniffing"].as_bool(), Some(false));
+
+        assert_eq!(manager.status().phase, CorePhase::Running);
+        assert_ne!(manager.status().config_revision, before.config_revision);
+
+        // Invalid update is rejected and rolls back
+        let invalid = serde_yaml_ng::from_str("lan-allowed-ips: ['invalid_cidr']")?;
+        assert!(manager.set_settings(invalid).await.is_err());
+        assert_eq!(manager.status().phase, CorePhase::Running);
+        assert_eq!(manager.runtime_config().await?, applied);
+
+        manager.stop().await?;
+        Ok::<_, anyhow::Error>(manager.settings().await?)
+    }.await;
+    let cleanup = manager.shutdown().await;
+    let saved_settings = result?;
+    cleanup?;
+
+    // Restart and verify restoration
+    let restored = CoreManager::spawn(dir.options()?)?;
+    let restore_result = async {
+        restored.start().await?;
+        assert_eq!(restored.settings().await?, saved_settings);
+        let restored_config = restored.runtime_config().await?;
+        assert_eq!(restored_config["bind-address"].as_str(), Some("127.0.0.1"));
+        assert_eq!(restored_config["authentication"][0].as_str(), Some("testuser:secret123"));
+        assert_eq!(restored_config["skip-auth-prefixes"][0].as_str(), Some("127.0.0.1/8"));
+        assert_eq!(restored_config["lan-allowed-ips"][0].as_str(), Some("192.168.0.0/16"));
+        assert_eq!(restored_config["lan-disallowed-ips"][0].as_str(), Some("192.168.1.100/32"));
+        assert_eq!(restored_config["inbound-tfo"].as_bool(), Some(false));
+        assert_eq!(restored_config["sniffing"].as_bool(), Some(false));
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let restore_cleanup = restored.shutdown().await;
+    restore_result.and(restore_cleanup)
+}

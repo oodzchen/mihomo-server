@@ -67,6 +67,42 @@ pub struct RuntimeSettings {
     pub mode: Option<Mode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_lan: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_string"
+    )]
+    pub bind_address: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_string_list"
+    )]
+    pub authentication: Option<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_string_list"
+    )]
+    pub skip_auth_prefixes: Option<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_string_list"
+    )]
+    pub lan_allowed_ips: Option<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_string_list"
+    )]
+    pub lan_disallowed_ips: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbound_tfo: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbound_mptcp: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sniffing: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ipv6: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -200,6 +236,58 @@ impl RuntimeSettings {
                 "global-ua must contain at most 1024 printable ASCII bytes"
             );
         }
+        if let Some(bind) = &self.bind_address {
+            ensure!(
+                bind.len() <= 255
+                    && !bind.chars().any(|c| c.is_whitespace() || c.is_control()),
+                "bind-address must not contain whitespace or control characters and must be at most 255 bytes"
+            );
+            ensure!(
+                bind == "*"
+                    || bind.is_empty()
+                    || bind.parse::<std::net::IpAddr>().is_ok()
+                    || bind.eq_ignore_ascii_case("localhost"),
+                "bind-address must be '*', empty, 'localhost', or a valid IP address"
+            );
+        }
+        if let Some(auth_list) = &self.authentication {
+            for entry in auth_list {
+                ensure!(
+                    !entry.trim().is_empty() && entry.contains(':'),
+                    "authentication entries must be formatted as 'username:password'"
+                );
+                let parts: Vec<&str> = entry.splitn(2, ':').collect();
+                ensure!(!parts[0].is_empty(), "authentication username must not be empty");
+            }
+        }
+        let validate_cidrs = |list: &Option<Vec<String>>, name: &str| -> Result<()> {
+            if let Some(cidrs) = list {
+                for item in cidrs {
+                    let trimmed = item.trim();
+                    ensure!(!trimmed.is_empty(), "{name} entries must not be empty");
+                    if let Some((ip_str, prefix_str)) = trimmed.split_once('/') {
+                        let ip = ip_str
+                            .parse::<std::net::IpAddr>()
+                            .with_context(|| format!("invalid IP '{ip_str}' in {name} CIDR '{trimmed}'"))?;
+                        let prefix = prefix_str
+                            .parse::<u8>()
+                            .with_context(|| format!("invalid prefix length '{prefix_str}' in {name} CIDR '{trimmed}'"))?;
+                        match ip {
+                            std::net::IpAddr::V4(_) => ensure!(prefix <= 32, "IPv4 prefix must be <= 32"),
+                            std::net::IpAddr::V6(_) => ensure!(prefix <= 128, "IPv6 prefix must be <= 128"),
+                        }
+                    } else {
+                        trimmed
+                            .parse::<std::net::IpAddr>()
+                            .with_context(|| format!("invalid IP address '{trimmed}' in {name}"))?;
+                    }
+                }
+            }
+            Ok(())
+        };
+        validate_cidrs(&self.skip_auth_prefixes, "skip-auth-prefixes")?;
+        validate_cidrs(&self.lan_allowed_ips, "lan-allowed-ips")?;
+        validate_cidrs(&self.lan_disallowed_ips, "lan-disallowed-ips")?;
         if let Some(urls) = &self.geox_url {
             urls.validate()?;
         }
