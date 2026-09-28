@@ -48,6 +48,11 @@ const zh = {
   getStarted: "开始使用", manageProfiles: "管理订阅 ↗",
   stepImport: "导入本地 YAML 订阅", stepUse: "使用订阅并启动内核", stepSelect: "选择节点，设置会自动保存",
   recentLogs: "最近日志", viewAll: "查看全部 ↗",
+  configTitle: "运行配置", configDirty: "有未应用的修改", configCompleteYaml: "完整 YAML",
+  configDescription: "编辑已提交的运行配置。应用前会执行内核校验；校验或应用失败会显示错误。",
+  configMissing: "尚无已提交配置，可粘贴 YAML 后应用。",
+  configApplied: "此配置已通过校验并提交。", configYamlLabel: "运行配置 YAML",
+  configLeaveHint: "离开此页面会丢弃尚未应用的编辑。", configApply: "校验并应用",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -79,6 +84,11 @@ const en: Record<keyof typeof zh, string> = {
   getStarted: "Get started", manageProfiles: "Manage profiles ↗",
   stepImport: "Import a local YAML profile", stepUse: "Activate the profile and start the core", stepSelect: "Select a node; the service saves your choice",
   recentLogs: "Recent logs", viewAll: "View all ↗",
+  configTitle: "Runtime configuration", configDirty: "Unapplied changes", configCompleteYaml: "Full YAML",
+  configDescription: "Edit the committed runtime configuration. The core checks it before application; validation or application errors appear here.",
+  configMissing: "No committed configuration yet. Paste YAML to apply it.",
+  configApplied: "Configuration validated and committed.", configYamlLabel: "Runtime configuration YAML",
+  configLeaveHint: "Leaving this page discards unapplied edits.", configApply: "Validate and apply",
 };
 
 export type MessageKey = keyof typeof zh;

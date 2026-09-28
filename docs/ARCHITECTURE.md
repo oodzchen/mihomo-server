@@ -53,12 +53,13 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** the browser now owns a persisted Chinese/English
-language choice. Login, navigation, the core action bar and the overview's main
-labels switch without changing service settings or restarting the event socket.
-**Next implementation task (P3):** translate the remaining configuration,
-profile, proxy, rules, log, resource and upgrade management views; service
-message localization and additional browser languages remain pending.
+**Latest completed task (P3):** the runtime configuration editor now uses the
+browser's Chinese/English language choice for its labels, instructions and local
+feedback. Switching languages preserves an unapplied YAML draft and updates
+existing feedback without changing service state.
+**Next implementation task (P3):** translate the profile and subscription
+management workflows, then proxy, rules, log, resource and upgrade views;
+service-message localization and additional browser languages remain pending.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -325,7 +326,8 @@ mihomo-server/
 │   ├── Rules and rule-provider management page      [Implemented; Linux verified]
 │   ├── Proxy providers and node delay views         [Implemented; Linux verified]
 │   ├── Browser-owned zh/en language selection, login/navigation/core shell/overview copy [Implemented; P3; browser verified]
-│   ├── Remaining management views, additional languages and service-message localization [Pending; P3]
+│   ├── Config editor zh/en copy and draft-safe switching [Implemented; P3; browser verified]
+│   ├── Profile/proxy/rules/log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4449,7 +4451,25 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: browser-owned language selection and management shell
+## Current increment: runtime configuration editor localization
+
+Delivery step 9 (P3) now localizes the runtime configuration editor's title,
+YAML field, validation action, instructions, unsaved-change status and local
+success/missing-configuration feedback through the browser-owned Chinese/English
+catalog. Feedback is stored by meaning and rendered in the selected language,
+so a language change updates an existing message. The editor component remains
+mounted across language changes and retains an unapplied YAML draft. Raw core
+validation errors are still shown as returned by the service; service-message
+localization is a separate pending P3 task.
+
+Verification: `cargo check --workspace` and the Web production build pass. A
+Playwright workflow switches English to Chinese with an unsaved YAML draft,
+checks translated missing-configuration feedback and confirms unchanged service
+generation. The full browser regression reports **32 passed and 4 optional
+upgrade/repair workflows skipped**. The complete architecture tree above is
+synchronized. Next: translate the profile and subscription management workflows.
+
+## Previous increment: browser-owned language selection and management shell
 
 Delivery step 9 (P3) now has a browser-local Chinese/English language setting.
 The selector appears before login and in the management sidebar. It follows the

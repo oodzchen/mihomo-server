@@ -406,7 +406,7 @@ function Manager({
             perform={perform}
           />
         ) : route === "/config" ? (
-          <ConfigPage token={token} busy={busy} perform={perform} />
+          <ConfigPage token={token} language={language} busy={busy} perform={perform} />
         ) : route === "/proxies" ? (
           <ProxyPage
             token={token}
@@ -1628,16 +1628,20 @@ function ProfilePage({
 
 function ConfigPage({
   token,
+  language,
   busy,
   perform,
 }: {
   token: string;
+  language: Language;
   busy: boolean;
   perform: Perform;
 }) {
   const [yaml, setYaml] = useState(""),
     [loading, setLoading] = useState(true),
-    [message, setMessage] = useState(""),
+    [message, setMessage] = useState<
+      { kind: "missing" } | { kind: "applied" } | { kind: "error"; detail: string } | null
+    >(null),
     [dirty, setDirty] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
@@ -1649,11 +1653,10 @@ function ConfigPage({
       .catch((error) => {
         if (!controller.signal.aborted) {
           setLoading(false);
-          setMessage(
-            describe(error).includes("no committed configuration")
-              ? "尚无已提交配置，可粘贴 YAML 后应用。"
-              : describe(error),
-          );
+          const detail = describe(error);
+          setMessage(detail.includes("no committed configuration")
+            ? { kind: "missing" }
+            : { kind: "error", detail });
         }
       });
     return () => controller.abort();
@@ -1663,22 +1666,25 @@ function ConfigPage({
     const result = await perform<CoreStatus>("edit_config", { yaml });
     if (result) {
       setDirty(false);
-      setMessage("此配置已通过校验并提交。");
+      setMessage({ kind: "applied" });
     }
   }
   return (
     <section className="panel">
       <div className="panel-title">
-        <h2>运行配置</h2>
-        <span>{dirty ? "有未应用的修改" : "完整 YAML"}</span>
+        <h2>{t(language, "configTitle")}</h2>
+        <span>{dirty ? t(language, "configDirty") : t(language, "configCompleteYaml")}</span>
       </div>
       <p className="muted">
-        编辑已提交的运行配置。应用前会执行内核校验；校验或应用失败会显示错误。
+        {t(language, "configDescription")}
       </p>
-      {message && <p className="info">{message}</p>}
+      {message && <p className="info">
+        {message.kind === "missing" ? t(language, "configMissing") :
+          message.kind === "applied" ? t(language, "configApplied") : message.detail}
+      </p>}
       <form onSubmit={apply}>
         <label>
-          运行配置 YAML
+          {t(language, "configYamlLabel")}
           <textarea
             className="code editor"
             value={yaml}
@@ -1692,12 +1698,12 @@ function ConfigPage({
           />
         </label>
         <div className="form-actions">
-          <p className="hint">离开此页面会丢弃尚未应用的编辑。</p>
+          <p className="hint">{t(language, "configLeaveHint")}</p>
           <button
             className="primary"
             disabled={loading || busy || !yaml.trim()}
           >
-            校验并应用
+            {t(language, "configApply")}
           </button>
         </div>
       </form>

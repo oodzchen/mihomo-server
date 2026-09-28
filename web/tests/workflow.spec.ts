@@ -230,6 +230,28 @@ test("browser language selection persists locally without changing service state
   }
 });
 
+test("configuration editor translates without losing an unapplied YAML draft", async ({ page }) => {
+  await page.goto(`${base}/config`);
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await page.getByLabel("Management token").fill(token);
+  await page.getByRole("button", { name: "Connect to service" }).click();
+  await expect(page.getByRole("heading", { name: "Runtime configuration" })).toBeVisible();
+  await expect(page.getByText("No committed configuration yet. Paste YAML to apply it.")).toBeVisible();
+  const editor = page.getByLabel("Runtime configuration YAML");
+  await editor.fill("mode: rule\n");
+  await expect(page.getByText("Unapplied changes")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Validate and apply" })).toBeEnabled();
+  const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(page.getByRole("heading", { name: "运行配置" })).toBeVisible();
+  await expect(page.getByText("尚无已提交配置，可粘贴 YAML 后应用。")).toBeVisible();
+  await expect(page.getByLabel("运行配置 YAML")).toHaveValue("mode: rule\n");
+  await expect(page.getByText("有未应用的修改")).toBeVisible();
+  const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  expect(after.generation).toBe(before.generation);
+});
+
 test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
   await page.goto(`${base}/settings`);
   await page.getByLabel("管理令牌").fill(token);
