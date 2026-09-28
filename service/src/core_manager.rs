@@ -19,6 +19,7 @@ use headless_core::config::{
         DEFAULT_GLOBAL_SCRIPT, EnhancementContent, EnhancementPlan, GenerationPlan, GlobalEnhancementKind,
         ProfilePatch, ProfileStore, RawContent, ScriptContent, SequenceKind,
     },
+    resources::validate_resource_declarations,
     runtime::{self, RuntimeStore},
     settings::{RuntimeSettings, ServiceSettings, SettingsStore},
 };
@@ -2643,6 +2644,7 @@ impl Actor {
             )
             .await?;
         } else {
+            self.validate_inactive_candidate(&config).await?;
             let result = (|| {
                 self.profile_store.begin_enhancement(plan, None)?;
                 self.profile_store.publish_enhancement()
@@ -2654,6 +2656,29 @@ impl Actor {
             recovery?;
         }
         Ok(self.profile_store.get_item(uid)?.clone())
+    }
+
+    async fn validate_inactive_candidate(&mut self, candidate: &ConfigCandidate) -> Result<()> {
+        let config = match candidate {
+            ConfigCandidate::Raw(config) => config.clone(),
+            ConfigCandidate::Enhanced { config, .. } => config.clone(),
+        };
+        let config = headless_core::enhance::finalize::finalize(config);
+        validate_resource_declarations(&config)?;
+        let validation_config = headless_core::config::resource_paths::prepare_owned(
+            config,
+            &self.options.data_dir,
+            &crate::validation::protected_paths(&self.options.data_dir, &self.options.config, &self.options.binary),
+        )?;
+        let validation = self.store.stage(validation_config)?;
+        crate::validation::validate(
+            &self.options.binary,
+            &self.options.data_dir,
+            &self.store.path(&validation)?,
+            &mut self.shutdown,
+            self.options.policy.validation_timeout,
+        )
+        .await
     }
 
     async fn set_global_enhancement(&mut self, kind: GlobalEnhancementKind, source: Option<String>) -> Result<PrfItem> {
@@ -2669,6 +2694,9 @@ impl Actor {
         } else {
             if kind == GlobalEnhancementKind::Script && source != DEFAULT_GLOBAL_SCRIPT {
                 self.check_script(source).await?;
+            } else if kind == GlobalEnhancementKind::Merge {
+                let merge_map = runtime::parse_profile(&source)?;
+                validate_resource_declarations(&merge_map)?;
             }
             ensure!(!*self.shutdown.borrow(), "global edit cancelled during shutdown");
             let result = (|| {
@@ -2889,6 +2917,7 @@ impl Actor {
             "profile raw revision changed; reload before saving"
         );
         let raw = runtime::parse_profile(&yaml)?;
+        validate_resource_declarations(&raw)?;
         // Upstream first validates original YAML even for an inactive profile.
         // Normalize only its probe copy; the submitted source is preserved.
         // An immutable validation revision changes no runtime manifest or catalog.
@@ -2991,6 +3020,7 @@ impl Actor {
         };
         let config = self.enforce_runtime_settings(config, &runtime)?;
         let config = headless_core::enhance::finalize::finalize(config);
+        validate_resource_declarations(&config)?;
         let config = headless_core::config::resource_paths::prepare_owned(
             config,
             &self.options.data_dir,

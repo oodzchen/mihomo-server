@@ -275,7 +275,7 @@ mihomo-server/
 │   │   ├── Runtime commit and interrupted-apply recovery [Implemented]
 │   │   ├── Active profile + runtime commit/recovery [Implemented]
 │   │   ├── Linked/global enhancement validation/apply/rollback [Implemented; Linux verified]
-│   │   └── Full enhancement/resource transaction    [Pending]
+│   │   └── Full enhancement/resource transaction    [Implemented; Linux verified]
 │   ├── Axum management API / command adapters       [Implemented; MVP allowlist]
 │   │   ├── State, logs, profiles, config, proxies queries [Implemented]
 │   │   ├── Lifecycle, YAML import/edit/overlay, profile edit/delete/import/refresh, linked read/set/clear, global read/set/reset, settings read/replace, profile DNS read/set, raw profile read/edit and node selection [Implemented]
@@ -5110,7 +5110,25 @@ Delivery step 7 (P1) completes the full resource settings and models in `crates/
   - Unit tests in `headless-core`: `tests/resources.rs` (9 comprehensive unit tests) covers valid/invalid provider declarations, section constraints, provider count limits, identifier length/character bounds, unsupported formats/behaviors/types, interval bounds, `ProviderSettings` validation, `GeoUpdatePolicy` evaluation/mismatch logic, freshness age evaluation, and `Inventory` serialization/deserialization roundtrips.
   - Workspace checks: `cargo check --workspace` passes; `cargo clippy --workspace --all-targets -- -D warnings` passes cleanly; `cargo test -p headless-core --test resources` passes (9 tests); `cargo test -p headless-core --test resource_paths` passes (9 tests); `cargo test -p headless-core --test settings` passes (25 tests); `cargo test -p mihomo-server --test settings` passes; all 20 python tests in `scripts/tests` pass.
 
-The tree above marks Full resource settings as implemented and Linux verified. Next: Full enhancement/resource transaction.
+The tree above marks Full resource settings as implemented and Linux verified.
+
+## P1 increment: full enhancement/resource transaction
+
+Delivery step 7 (P1) completes the full enhancement and resource transaction in `service/src/core_manager.rs`:
+- **Candidate Resource Declaration Validation (`core_manager.rs`)**:
+  - Enforced `validate_resource_declarations` across candidate staging pipelines (`stage`, `update_profile_raw`, `set_enhancement`, and `set_global_enhancement`).
+  - Provider declarations (mapping structures, maximum count limit of 512, identifier length 1–512 bytes without control characters, supported types `http`/`file`/`inline`, bounded non-negative intervals up to $2^{31}-1$, valid formats, and rule behaviors) are validated before staging revisions and before resource path allocation.
+- **Inactive Profile Enhancement Preflight Validation**:
+  - Implemented `validate_inactive_candidate(&mut self, candidate: &ConfigCandidate)` to finalize and validate candidate enhancements for non-active profiles through `validate_resource_declarations`, `prepare_owned` resource protection, staging, and `mihomo -t` core validation before recording changes into the profile catalog.
+  - Global merge enhancements without active profiles validate YAML syntax and resource declarations before publication.
+- **Atomic Rollback & Resource Safety**:
+  - When an enhancement introduces invalid provider declarations, collision paths (such as targeting Geo assets or reserved `provider-cache`), or unparseable configurations, the transaction fails fast prior to journal commitment or core reload.
+  - Multi-layer transactional rollback (`store.restore`, `settings_store.recover`, `profile_store.recover_enhancement`) guarantees memory, disk revision, catalog, and running core state preservation without abandoned journals or leaked temporary files.
+- **Verification**:
+  - `service/tests/enhancements.rs`: validates rejection of invalid provider types, intervals exceeding $2^{31}-1$, Geo asset collisions, and inactive profile invalid declarations, while confirming that valid provider merges allocate paths under `provider-cache/v1/` and preserve running state upon failure.
+  - Workspace checks: `cargo check --workspace` and `cargo check --workspace --tests` pass cleanly; `cargo clippy --workspace --all-targets -- -D warnings` passes with 0 warnings; `cargo test -p headless-core` passes all unit tests; `cargo test -p mihomo-server --test raw_profiles` passes; all 20 python tests in `scripts/tests` pass.
+
+The tree above marks Full enhancement/resource transaction as implemented and Linux verified. Next: Remaining full settings/resource lifecycle UI (P1).
 
 ## MVP completion boundary
 
