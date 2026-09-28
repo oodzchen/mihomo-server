@@ -7,7 +7,7 @@ mod websocket;
 use crate::core_manager::{CoreManager, CorePhase};
 use anyhow::{Result, ensure};
 use auth::Authentication;
-use headless_core::config::{profile_store::SequenceKind, runtime};
+use headless_core::config::{ProviderAction, ProviderOperationReceipt, profile_store::SequenceKind, runtime};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -56,6 +56,27 @@ pub enum ManagementCommand {
     RuleProviders {},
     UpdateRuleProvider {
         name: String,
+    },
+    ProxyProviders {},
+    UpdateProxyProvider {
+        name: String,
+    },
+    HealthcheckProxyProvider {
+        name: String,
+    },
+    DelayProxy {
+        name: String,
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default)]
+        timeout: Option<u32>,
+    },
+    DelayGroup {
+        group: String,
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default)]
+        timeout: Option<u32>,
     },
     GeoSettings {},
     ConnectionSettings {},
@@ -336,7 +357,35 @@ impl Management {
             ManagementCommand::RuleProviders {} => serde_json::to_value(self.manager.rule_providers().await?)?,
             ManagementCommand::UpdateRuleProvider { name } => {
                 self.manager.update_rule_provider(&name).await?;
-                serde_json::json!({ "name": name, "updated": true })
+                serde_json::json!({
+                    "name": name,
+                    "action": "update",
+                    "success": true,
+                    "updated": true,
+                })
+            }
+            ManagementCommand::ProxyProviders {} => serde_json::to_value(self.manager.proxy_providers().await?)?,
+            ManagementCommand::UpdateProxyProvider { name } => {
+                self.manager.update_proxy_provider(&name).await?;
+                serde_json::to_value(ProviderOperationReceipt {
+                    name,
+                    action: ProviderAction::Update,
+                    success: true,
+                })?
+            }
+            ManagementCommand::HealthcheckProxyProvider { name } => {
+                self.manager.healthcheck_proxy_provider(&name).await?;
+                serde_json::to_value(ProviderOperationReceipt {
+                    name,
+                    action: ProviderAction::Healthcheck,
+                    success: true,
+                })?
+            }
+            ManagementCommand::DelayProxy { name, url, timeout } => {
+                serde_json::to_value(self.manager.delay_proxy(&name, url.as_deref(), timeout).await?)?
+            }
+            ManagementCommand::DelayGroup { group, url, timeout } => {
+                serde_json::to_value(self.manager.delay_group(&group, url.as_deref(), timeout).await?)?
             }
             ManagementCommand::ProxyAccess {} => crate::proxy_access::inspect(&self.manager).await?,
             ManagementCommand::SetSettings { runtime } => {

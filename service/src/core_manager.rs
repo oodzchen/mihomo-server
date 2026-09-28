@@ -841,6 +841,72 @@ impl CoreManager {
         .with_context(|| format!("failed to update rule provider '{name}'"))
     }
 
+    pub async fn proxy_providers(&self) -> Result<mihomo_client::models::ProxyProviders> {
+        ensure!(self.status().phase == CorePhase::Running, "core is not running");
+        tokio::time::timeout(std::time::Duration::from_secs(10), self.client.get_proxy_providers())
+            .await
+            .map_err(|_| anyhow::anyhow!("proxy providers query timed out"))?
+            .context("failed to query proxy providers from core")
+    }
+
+    pub async fn update_proxy_provider(&self, name: &str) -> Result<()> {
+        ensure!(self.status().phase == CorePhase::Running, "core is not running");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            self.client.update_proxy_provider(name),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("update proxy provider timed out"))?
+        .with_context(|| format!("failed to update proxy provider '{name}'"))
+    }
+
+    pub async fn healthcheck_proxy_provider(&self, name: &str) -> Result<()> {
+        ensure!(self.status().phase == CorePhase::Running, "core is not running");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            self.client.healthcheck_proxy_provider(name),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("healthcheck proxy provider timed out"))?
+        .with_context(|| format!("failed to healthcheck proxy provider '{name}'"))
+    }
+
+    pub async fn delay_proxy(
+        &self,
+        name: &str,
+        test_url: Option<&str>,
+        timeout_ms: Option<u32>,
+    ) -> Result<mihomo_client::models::ProxyDelay> {
+        ensure!(self.status().phase == CorePhase::Running, "core is not running");
+        let url = test_url
+            .filter(|u| !u.trim().is_empty())
+            .unwrap_or("http://www.gstatic.com/generate_204");
+        let timeout = timeout_ms.unwrap_or(5000).max(100);
+        let req_timeout = std::time::Duration::from_millis(timeout as u64) + std::time::Duration::from_secs(5);
+        tokio::time::timeout(req_timeout, self.client.delay_proxy_by_name(name, url, timeout))
+            .await
+            .map_err(|_| anyhow::anyhow!("delay proxy query timed out"))?
+            .with_context(|| format!("failed to test delay for proxy '{name}'"))
+    }
+
+    pub async fn delay_group(
+        &self,
+        group: &str,
+        test_url: Option<&str>,
+        timeout_ms: Option<u32>,
+    ) -> Result<std::collections::HashMap<String, u32>> {
+        ensure!(self.status().phase == CorePhase::Running, "core is not running");
+        let url = test_url
+            .filter(|u| !u.trim().is_empty())
+            .unwrap_or("http://www.gstatic.com/generate_204");
+        let timeout = timeout_ms.unwrap_or(5000).max(100);
+        let req_timeout = std::time::Duration::from_millis(timeout as u64) + std::time::Duration::from_secs(10);
+        tokio::time::timeout(req_timeout, self.client.delay_group(group, url, timeout))
+            .await
+            .map_err(|_| anyhow::anyhow!("delay group query timed out"))?
+            .with_context(|| format!("failed to test delay for group '{group}'"))
+    }
+
     pub fn profiles(&self) -> IProfiles {
         self.profiles.borrow().clone()
     }

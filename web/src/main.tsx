@@ -20,6 +20,9 @@ import type {
   Profile,
   Profiles,
   Proxies,
+  ProxyDelay,
+  ProxyProvider,
+  ProxyProviders,
 } from "./types";
 import "./style.css";
 
@@ -1691,21 +1694,34 @@ function ProxyPage({
   perform: Perform;
 }) {
   const [proxies, setProxies] = useState<Proxies>(),
+    [providers, setProviders] = useState<ProxyProviders>(),
+    [delays, setDelays] = useState<Record<string, number>>({}),
+    [testingGroup, setTestingGroup] = useState<string | null>(null),
+    [testingNode, setTestingNode] = useState<string | null>(null),
+    [updatingProvider, setUpdatingProvider] = useState<string | null>(null),
+    [healthcheckingProvider, setHealthcheckingProvider] = useState<string | null>(null),
+    [testUrl, setTestUrl] = useState("http://www.gstatic.com/generate_204"),
     [error, setError] = useState(""),
     [revision, refresh] = useState(0),
     [loading, setLoading] = useState(false);
+
   useEffect(() => {
     if (status.phase !== "running") {
       setProxies(undefined);
+      setProviders(undefined);
       return;
     }
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    command<Proxies>(token, "proxies", {}, controller.signal)
-      .then((value) => {
+    Promise.all([
+      command<Proxies>(token, "proxies", {}, controller.signal),
+      command<ProxyProviders>(token, "proxy_providers", {}, controller.signal).catch(() => ({ providers: {} })),
+    ])
+      .then(([proxiesData, providersData]) => {
         if (!controller.signal.aborted) {
-          setProxies(value);
+          setProxies(proxiesData);
+          setProviders(providersData);
           setLoading(false);
         }
       })
@@ -1725,19 +1741,141 @@ function ProxyPage({
     status.selection_pending?.join("\0"),
     revision,
   ]);
+
   const groups = Object.entries(proxies?.proxies || {}).filter(([, group]) =>
     ["Selector", "URLTest", "Fallback", "LoadBalance"].includes(group.type),
   );
+
   async function select(name: string, fields: Record<string, unknown>) {
     await perform(name, fields);
     refresh((value) => value + 1);
   }
+
+  async function testGroupDelay(group: string) {
+    if (testingGroup || busy) return;
+    setTestingGroup(group);
+    setError("");
+    try {
+      const results = await command<Record<string, number>>(token, "delay_group", {
+        group,
+        url: testUrl,
+        timeout: 5000,
+      });
+      setDelays((prev) => ({ ...prev, ...results }));
+    } catch (e) {
+      setError(describe(e));
+    } finally {
+      setTestingGroup(null);
+    }
+  }
+
+  async function testNodeDelay(node: string) {
+    if (testingNode || busy) return;
+    setTestingNode(node);
+    setError("");
+    try {
+      const res = await command<ProxyDelay>(token, "delay_proxy", {
+        name: node,
+        url: testUrl,
+        timeout: 5000,
+      });
+      setDelays((prev) => ({ ...prev, [node]: res.delay }));
+    } catch (e) {
+      setError(describe(e));
+    } finally {
+      setTestingNode(null);
+    }
+  }
+
+  async function updateProvider(name: string) {
+    if (updatingProvider || busy) return;
+    setUpdatingProvider(name);
+    setError("");
+    try {
+      await perform("update_proxy_provider", { name });
+      refresh((v) => v + 1);
+    } catch (e) {
+      setError(describe(e));
+    } finally {
+      setUpdatingProvider(null);
+    }
+  }
+
+  async function healthcheckProvider(name: string) {
+    if (healthcheckingProvider || busy) return;
+    setHealthcheckingProvider(name);
+    setError("");
+    try {
+      await perform("healthcheck_proxy_provider", { name });
+      refresh((v) => v + 1);
+    } catch (e) {
+      setError(describe(e));
+    } finally {
+      setHealthcheckingProvider(null);
+    }
+  }
+
+  async function updateAllProviders() {
+    if (!providers || busy) return;
+    const names = Object.keys(providers.providers);
+    for (const name of names) {
+      await updateProvider(name);
+    }
+  }
+
+  function getNodeDelay(node: string): number | undefined {
+    if (node in delays) {
+      return delays[node];
+    }
+    const history = proxies?.proxies[node]?.history;
+    if (history && history.length > 0) {
+      return history[history.length - 1].delay;
+    }
+    return undefined;
+  }
+
+  function renderDelayBadge(delay: number | undefined, isTesting: boolean) {
+    if (isTesting) {
+      return <span className="delay-badge delay-testing">测速中</span>;
+    }
+    if (delay === undefined || delay < 0) {
+      return <span className="delay-badge delay-untested">未测</span>;
+    }
+    if (delay === 0 || delay >= 10000) {
+      return <span className="delay-badge delay-timeout">超时</span>;
+    }
+    if (delay < 300) {
+      return <span className="delay-badge delay-fast">{delay}ms</span>;
+    }
+    if (delay < 600) {
+      return <span className="delay-badge delay-medium">{delay}ms</span>;
+    }
+    return <span className="delay-badge delay-slow">{delay}ms</span>;
+  }
+
+  const providerList = Object.entries(providers?.providers || {});
+
   return (
     <>
       <div className="section-title">
-        <p className="muted">
-          节点选择按订阅保存，内核与服务重启后会尝试恢复。
-        </p>
+        <div>
+          <p className="muted">
+            节点选择按订阅保存，内核与服务重启后会尝试恢复。
+          </p>
+          <div className="delay-url-bar">
+            <label htmlFor="delay-test-url" className="muted" style={{ fontSize: "12px", marginRight: "6px" }}>
+              测速链接:
+            </label>
+            <input
+              id="delay-test-url"
+              type="text"
+              value={testUrl}
+              onChange={(e) => setTestUrl(e.target.value)}
+              placeholder="测速 URL"
+              style={{ width: "320px", display: "inline-block", padding: "4px 8px", fontSize: "12px" }}
+            />
+          </div>
+        </div>
         <button
           disabled={busy || loading || status.phase !== "running"}
           onClick={() => refresh((value) => value + 1)}
@@ -1756,7 +1894,53 @@ function ProxyPage({
           {error}
         </p>
       )}
-      {loading && <p className="info">加载节点…</p>}
+      {loading && <p className="info">加载节点与代理集…</p>}
+
+      {providerList.length > 0 && (
+        <section className="panel" style={{ marginBottom: "20px" }}>
+          <div className="panel-title">
+            <div>
+              <h2>代理提供者 (Proxy Providers)</h2>
+              <p className="muted">已接入 {providerList.length} 个外部代理集合</p>
+            </div>
+            <button
+              disabled={busy || loading || !!updatingProvider}
+              onClick={() => void updateAllProviders()}
+            >
+              全部更新
+            </button>
+          </div>
+          <div className="provider-grid">
+            {providerList.map(([name, provider]) => (
+              <div className="provider-card" key={name}>
+                <div className="provider-header">
+                  <strong>{name}</strong>
+                  <span className="badge badge-info">{provider.vehicleType}</span>
+                </div>
+                <p className="muted" style={{ fontSize: "11px", margin: "4px 0" }}>
+                  节点数：{provider.proxies?.length ?? 0}
+                  {provider.updatedAt ? ` · ${provider.updatedAt.slice(0, 19).replace("T", " ")}` : ""}
+                </p>
+                <div className="card-actions" style={{ gap: "6px" }}>
+                  <button
+                    disabled={busy || updatingProvider === name}
+                    onClick={() => void updateProvider(name)}
+                  >
+                    {updatingProvider === name ? "更新中…" : "更新"}
+                  </button>
+                  <button
+                    disabled={busy || healthcheckingProvider === name}
+                    onClick={() => void healthcheckProvider(name)}
+                  >
+                    {healthcheckingProvider === name ? "检查中…" : "健康检查"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {groups.map(([name, group]) => (
         <section className="panel" key={name}>
           <div className="panel-title">
@@ -1767,35 +1951,60 @@ function ProxyPage({
                 {group.fixed || group.now || "等待分组加载"}
               </p>
             </div>
-            {group.type !== "Selector" && (
+            <div className="panel-actions">
               <button
-                disabled={busy || !status.active_profile}
-                onClick={() => void select("unfix_node", { group: name })}
+                type="button"
+                disabled={busy || loading || testingGroup === name}
+                onClick={() => void testGroupDelay(name)}
               >
-                取消固定
+                {testingGroup === name ? "测速中…" : "测速"}
               </button>
-            )}
+              {group.type !== "Selector" && (
+                <button
+                  disabled={busy || !status.active_profile}
+                  onClick={() => void select("unfix_node", { group: name })}
+                >
+                  取消固定
+                </button>
+              )}
+            </div>
           </div>
           <div className="nodes">
-            {group.all?.map((node) => (
-              <button
-                key={node}
-                aria-label={`选择 ${name} / ${node}`}
-                aria-pressed={(group.fixed || group.now) === node}
-                className={
-                  (group.fixed || group.now) === node ? "selected" : ""
-                }
-                disabled={busy || !status.active_profile}
-                onClick={() =>
-                  void select("select_node", { group: name, node })
-                }
-              >
-                {node}
-                <span>
-                  {(group.fixed || group.now) === node ? "已选择" : "选择"}
-                </span>
-              </button>
-            ))}
+            {group.all?.map((node) => {
+              const isSelected = (group.fixed || group.now) === node;
+              const delay = getNodeDelay(node);
+              const isTesting = testingNode === node || testingGroup === name;
+              return (
+                <button
+                  key={node}
+                  aria-label={`选择 ${name} / ${node}`}
+                  aria-pressed={isSelected}
+                  className={isSelected ? "selected" : ""}
+                  disabled={busy || !status.active_profile}
+                  onClick={() =>
+                    void select("select_node", { group: name, node })
+                  }
+                >
+                  <span style={{ fontWeight: isSelected ? 600 : 400 }}>{node}</span>
+                  <div className="node-meta">
+                    {renderDelayBadge(delay, isTesting)}
+                    <span
+                      className="node-test-btn"
+                      title={`测试 ${node} 延迟`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void testNodeDelay(node);
+                      }}
+                    >
+                      ⚡
+                    </span>
+                    <span>
+                      {isSelected ? "已选择" : "选择"}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
           {!group.all?.length && (
             <p className="empty">分组尚未加载节点，请稍后刷新。</p>

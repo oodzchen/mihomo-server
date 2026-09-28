@@ -896,3 +896,73 @@ footer {
   display: flex;
   justify-content: flex-end;
 }
+.node-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.delay-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 600;
+  display: inline-block;
+  line-height: 1.3;
+}
+.delay-fast {
+  background: #e6f7ec;
+  color: #1b7a42;
+  border: 1px solid #b7e4c7;
+}
+.delay-medium {
+  background: #fff8e6;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+.delay-slow {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+.delay-timeout {
+  background: #f3f4f6;
+  color: #6b7280;
+  border: 1px solid #d1d5db;
+}
+.delay-untested {
+  background: #f8fafc;
+  color: #94a3b8;
+  border: 1px solid #e2e8f0;
+}
+.delay-testing {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+.node-test-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 10px;
+  opacity: 0.65;
+  transition: opacity 0.15s, background 0.15s;
+}
+.node-test-btn:hover {
+  opacity: 1;
+  background: #d6e8de;
+}
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.delay-url-bar {
+  display: flex;
+  align-items: center;
+  margin-top: 6px;
+}
+

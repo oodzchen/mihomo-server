@@ -41,15 +41,42 @@ export interface CoreLog {
   stream: string;
   message: string;
 }
+export interface ProxyHistory {
+  time: string;
+  delay: number;
+}
 export interface Proxy {
   name: string;
   type: string;
   all?: string[];
   now?: string;
   fixed?: string;
+  history?: ProxyHistory[];
+  alive?: boolean;
 }
 export interface Proxies {
   proxies: Record<string, Proxy>;
+}
+export interface ProxyProvider {
+  name: string;
+  type: string;
+  vehicleType: string;
+  proxies?: Proxy[];
+  testUrl?: string;
+  expectedStatus?: string;
+  updatedAt?: string;
+  subscriptionInfo?: {
+    upload: number;
+    download: number;
+    total: number;
+    expire: number;
+  };
+}
+export interface ProxyProviders {
+  providers: Record<string, ProxyProvider>;
+}
+export interface ProxyDelay {
+  delay: number;
 }
 export type EventMessage = {
   type: string;

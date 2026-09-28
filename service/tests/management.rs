@@ -1843,3 +1843,86 @@ async fn rules_and_provider_commands_reject_when_unauthorized_or_core_stopped() 
 
     manager.shutdown().await
 }
+
+#[tokio::test]
+async fn proxy_provider_and_delay_commands_reject_when_unauthorized_or_core_stopped() -> Result<()> {
+    let directory = Directory::new()?;
+    let manager = directory.manager()?;
+    let app = router(HttpState::new(Management::new(
+        manager.clone(),
+        directory.authentication()?,
+    )));
+    let token = directory.token()?;
+
+    for cmd in [
+        json!({"command": "proxy_providers"}),
+        json!({"command": "update_proxy_provider", "name": "test_provider"}),
+        json!({"command": "healthcheck_proxy_provider", "name": "test_provider"}),
+        json!({"command": "delay_proxy", "name": "test_proxy"}),
+        json!({"command": "delay_group", "group": "test_group"}),
+    ] {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/commands")
+            .header(header::HOST, "127.0.0.1:9090")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(cmd.to_string()))?;
+        let (status, _) = response(&app, req).await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    for cmd in [
+        json!({"command": "proxy_providers"}),
+        json!({"command": "update_proxy_provider", "name": "test_provider"}),
+        json!({"command": "healthcheck_proxy_provider", "name": "test_provider"}),
+        json!({"command": "delay_proxy", "name": "test_proxy"}),
+        json!({"command": "delay_group", "group": "test_group"}),
+    ] {
+        let (status, err) = response(&app, request(&token, "/api/commands", Some(cmd))?).await?;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(err.to_string().contains("core is not running"), "{err}");
+    }
+
+    assert!(
+        manager
+            .proxy_providers()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("core is not running")
+    );
+    assert!(
+        manager
+            .update_proxy_provider("test")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("core is not running")
+    );
+    assert!(
+        manager
+            .healthcheck_proxy_provider("test")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("core is not running")
+    );
+    assert!(
+        manager
+            .delay_proxy("test", None, None)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("core is not running")
+    );
+    assert!(
+        manager
+            .delay_group("test", None, None)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("core is not running")
+    );
+
+    manager.shutdown().await
+}
