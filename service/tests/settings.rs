@@ -819,7 +819,7 @@ async fn geo_settings_enforce_scripts_rollback_failed_probe_and_survive_service_
         manager.start().await?;
         let readback = manager.geo_settings().await?;
         assert!(readback.running && readback.error.is_none());
-        assert!(readback.fields.iter().all(|f| !f.mismatch && f.setting == f.configured && f.configured == f.actual));
+        assert!(readback.fields.iter().all(|f| !f.mismatch && f.setting == f.configured && f.configured == f.actual), "{:?}", readback.fields);
         let mut succinct = runtime.clone();
         succinct.geosite_matcher = Some(headless_core::config::settings::GeositeMatcher::Succinct);
         manager.set_settings(succinct).await?;

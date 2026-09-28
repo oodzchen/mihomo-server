@@ -2326,7 +2326,7 @@ impl Actor {
                                     let config = if revision.is_some() { Some(self.store.read_current()?) } else { None };
                                     let running = self.status.borrow().phase == CorePhase::Running;
                                     let actual = if running {
-                                        timeout(Duration::from_secs(3), self.client.get_base_config()).await.ok().and_then(Result::ok)
+                                        timeout(Duration::from_secs(3), self.client.get_geo_config()).await.ok().and_then(Result::ok)
                                     } else { None };
                                     crate::geo_settings::snapshot(&self.settings.runtime, config.as_ref(), revision, running, actual.as_ref())
                                 }.await;

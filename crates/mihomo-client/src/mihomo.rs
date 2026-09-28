@@ -1047,6 +1047,15 @@ impl Mihomo {
         Ok(response.json::<crate::models::ConnectionConfig>().await?)
     }
 
+    /// GET /configs with Geo field presence retained for mixed-version cores.
+    pub async fn get_geo_config(&self) -> Result<crate::models::GeoConfig> {
+        let response = self.load_ctx().build_request(Method::GET, "/configs")?.send().await?;
+        if !response.status().is_success() {
+            ret_failed_resp!("Geo settings read failed");
+        }
+        Ok(response.json::<crate::models::GeoConfig>().await?)
+    }
+
     /// 重新加载配置
     pub async fn reload_config(&self, force: bool, config_path: &str) -> Result<()> {
         let response = self

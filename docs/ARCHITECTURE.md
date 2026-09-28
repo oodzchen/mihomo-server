@@ -53,12 +53,13 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** the remaining DNS page controls
-`respect-rules`, `prefer-h3` and `fake-ip-filter-mode` now flow through typed
-schema-one settings, candidate generation, management/API validation and Web
-editing. False DNS switches retain the established source-inheritance rule.
-**Next implementation task (P1):** continue resource-management settings and
-lifecycle, starting with the remaining Geo resource update policy/readback.
+**Latest completed task (P1):** Geo settings now use a presence-preserving
+`GET /configs` projection. The service distinguishes a missing core Geo field
+or URL leaf from an explicit false, zero or empty value, while accepting the
+core's `geo-site` URL alias. Real-core readback and actual-node traffic pass.
+**Next implementation task (P1):** continue Geo resource update lifecycle:
+inspect and expose the effective automatic-update state and resource freshness,
+then cover any remaining resource settings without duplicating Mihomo's updater.
 Verify actual TUN interface, routes and traffic when a Linux host with
 `/dev/net/tun` and the required privileges is available. Finish P1 before P2.
 
@@ -83,6 +84,7 @@ mihomo-server/
 │   │   ├── Unix socket / explicit loopback HTTP      [Migrated]
 │   │   ├── API methods, response models, errors      [Migrated]
 │   │   ├── Presence-preserving connection/outbound/download GET /configs projection [Implemented; Linux verified]
+│   │   ├── Presence-preserving Geo GET /configs projection and URL aliases [Implemented; Linux verified]
 │   │   └── Realtime feeds, cancellation, reconnect   [Migrated]
 <!--│   │   └── Windows Named Pipe runtime validation    [Deferred; code retained; Windows compatibility postponed] -->
 │   └── headless-core/                               [Partially migrated]
@@ -163,7 +165,7 @@ mihomo-server/
 │   │   ├── Pinned Geo seed schema / bounded staging / no-overwrite bootstrap / orphan recovery [Implemented; Linux verified]
 │   │   ├── Read-only MMDB verification / pinned parser / metadata-only compatibility outcome [Implemented; Linux verified]
 │   │   ├── Stopped-core pinned MMDB replacement / digest guards / atomic commit / orphan recovery [Implemented; Linux verified]
-│   │   ├── Geo actor settings/config/core comparison / geosite matcher / bounded readback / URL model aliases [Implemented; Linux verified]
+│   │   ├── Geo actor settings/config/core comparison / presence-preserving bounded readback / URL model aliases [Implemented; Linux verified]
 │   │   ├── Connection/outbound/download comparison / nine presence-preserving fields / shared snapshot envelope [Implemented; Linux verified]
 │   │   ├── dat_validation.rs / bounded protobuf / CIDR-domain-attribute checks / CN diagnostics [Implemented; Linux verified]
 │   │   ├── Read-only DAT snapshots / aggregate reports / core compatibility warning [Implemented; Linux verified]
@@ -4396,7 +4398,30 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: remaining DNS page controls
+## Current increment: presence-preserving Geo update-policy readback
+
+Delivery step 7 now reads the nine Geo settings from a dedicated, optional-field
+`GET /configs` projection instead of the legacy `BaseConfig` defaults. A core
+that omits `geo-auto-update`, `geo-update-interval`, a Geo URL leaf or another
+Geo field now reports that actual value as unknown, without an invented
+`false`, `0` or empty string or a false mismatch. Explicit values remain
+comparable. The projection accepts both the `geoip`/`geo-ip` and
+`geosite`/`geo-site` URL spellings; a real Mihomo build returns `geo-site`.
+The settings store, candidate generation and browser contract are unchanged.
+Mihomo still owns the configured automatic update timer; the service's
+resource validation and explicit online replacement remain separate.
+
+Verification: `cargo check --workspace` and the serial workspace suite pass
+with **386 passed, 87 opt-in ignored and zero failures**. Targeted partial-core
+tests cover missing leaves and explicit false/zero/empty values. The opt-in
+real-Mihomo Geo application, rollback and restart test passes, and the
+actual-node workflow returns HTTPS 204 through private copies of `data`.
+The complete architecture tree above is synchronized. The Linux MVP remains
+runnable. Next: inspect and expose effective automatic Geo update state and
+resource freshness, followed by remaining P1 resource settings and privileged
+TUN route verification. P2–P4 and deferred work remain incomplete.
+
+## P1 increment: remaining DNS page controls
 
 Delivery step 7 now includes `fake-ip-filter-mode` (`blacklist`/`whitelist`),
 `prefer-h3` and `respect-rules` in the existing DNS settings object. The two

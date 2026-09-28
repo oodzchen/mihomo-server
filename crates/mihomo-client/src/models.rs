@@ -142,6 +142,30 @@ pub struct ConnectionConfig {
     pub etag_support: Option<bool>,
 }
 
+/// Presence-preserving Geo projection of GET /configs. A missing field in an
+/// older core is unknown, including individual leaves of `geox-url`.
+#[derive(Debug, Deserialize, Default)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct GeoConfig {
+    pub geodata_mode: Option<bool>,
+    pub geodata_loader: Option<String>,
+    pub geo_auto_update: Option<bool>,
+    pub geo_update_interval: Option<i64>,
+    pub geox_url: Option<GeoConfigUrls>,
+    pub geosite_matcher: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct GeoConfigUrls {
+    #[serde(rename = "geoip", alias = "geo-ip")]
+    pub geoip: Option<String>,
+    #[serde(alias = "geo-site")]
+    pub geosite: Option<String>,
+    pub mmdb: Option<String>,
+    pub asn: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, rename_all(serialize = "camelCase", deserialize = "kebab-case"))]
 pub struct TunConfig {
