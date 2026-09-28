@@ -117,6 +117,12 @@ const zh = {
   mergeEditorHelp: "为 {name} 合并 YAML。当前订阅会先校验并应用；其他订阅在下次使用时应用。",
   mergeEditorYaml: "合并增强 YAML", mergeEditorSave: "保存增强",
   mergeEditorRemove: "移除增强", mergeEditorCancel: "取消增强编辑",
+  sequenceEditorTitle: "序列增强",
+  sequenceEditorHelp: "为 {name} 前置、追加或删除规则、代理及代理组。当前订阅会校验并应用；其他订阅在使用时应用。切换类型会丢弃未保存内容。",
+  sequenceEditorKind: "序列增强类型", sequenceRules: "规则",
+  sequenceProxies: "代理", sequenceGroups: "代理组",
+  sequenceEditorYaml: "序列增强 YAML", sequenceEditorSave: "保存序列增强",
+  sequenceEditorRemove: "移除序列增强", sequenceEditorCancel: "取消序列编辑",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -217,6 +223,12 @@ const en: Record<keyof typeof zh, string> = {
   mergeEditorHelp: "Merge YAML into {name}. The active profile is validated and applied now; other profiles apply it when next used.",
   mergeEditorYaml: "Config merge YAML", mergeEditorSave: "Save merge",
   mergeEditorRemove: "Remove merge", mergeEditorCancel: "Cancel merge editing",
+  sequenceEditorTitle: "Sequence enhancement",
+  sequenceEditorHelp: "Prepend, append or delete rules, proxies and proxy groups for {name}. The active profile is validated and applied now; other profiles apply changes when used. Switching type discards unsaved content.",
+  sequenceEditorKind: "Sequence type", sequenceRules: "Rules",
+  sequenceProxies: "Proxies", sequenceGroups: "Proxy groups",
+  sequenceEditorYaml: "Sequence YAML", sequenceEditorSave: "Save sequence",
+  sequenceEditorRemove: "Remove sequence", sequenceEditorCancel: "Cancel sequence editing",
 };
 
 export type MessageKey = keyof typeof zh;

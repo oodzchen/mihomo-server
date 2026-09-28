@@ -455,6 +455,50 @@ test("profile merge editor keeps its YAML draft when language changes", async ({
   await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
 });
 
+test("profile sequence editor localizes kinds and keeps YAML across language changes", async ({ page }) => {
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByLabel("订阅名称", { exact: true }).fill("SequenceLanguage");
+  await page.getByLabel("订阅 YAML", { exact: true }).fill("proxies: []\nmode: direct\n");
+  await page.getByRole("button", { name: "导入订阅", exact: true }).click();
+  const profile = page.locator("article.profile").filter({ has: page.getByRole("heading", { name: "SequenceLanguage" }) });
+  await expect(profile).toBeVisible();
+  const uid = await profile.locator(".mono").textContent();
+  const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  await profile.getByRole("button", { name: "序列增强 SequenceLanguage" }).click();
+  const rules = "prepend: ['DOMAIN,language.test,DIRECT']\nappend: []\ndelete: []\n";
+  await page.getByLabel("序列增强 YAML").fill(rules);
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("heading", { name: "Sequence enhancement" })).toBeVisible();
+  await expect(page.getByLabel("Sequence YAML")).toHaveValue(rules);
+  await expect(page.getByLabel("Sequence type").locator("option")).toHaveText(["Rules", "Proxies", "Proxy groups"]);
+  await page.getByRole("button", { name: "Save sequence" }).click();
+  await expect(profile).toContainText("Sequence linked");
+  const response = await fetch(`${base}/api/commands`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ command: "profile_sequence", uid, kind: "rules" }),
+  });
+  expect(response.ok).toBe(true);
+  expect((await response.json()).yaml).toBe(rules);
+  await profile.getByRole("button", { name: "Sequence enhancement SequenceLanguage" }).click();
+  await page.getByLabel("Sequence type").selectOption("groups");
+  await expect(page.getByLabel("Sequence type")).toHaveValue("groups");
+  await page.getByLabel("Sequence type").selectOption("rules");
+  await expect(page.getByLabel("Sequence YAML")).toHaveValue(rules);
+  await page.getByRole("button", { name: "Remove sequence" }).click();
+  await expect(page.getByLabel("Sequence YAML")).toHaveCount(0);
+  await profile.getByRole("button", { name: "Sequence enhancement SequenceLanguage" }).click();
+  await expect(page.getByRole("button", { name: "Remove sequence" })).toBeDisabled();
+  await page.getByRole("button", { name: "Cancel sequence editing" }).click();
+  const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  expect(after.generation).toBe(before.generation);
+  await profile.getByRole("button", { name: "Delete profile SequenceLanguage" }).click();
+  await profile.getByRole("button", { name: "Confirm deletion SequenceLanguage" }).click();
+  await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
+});
+
 test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
   await page.goto(`${base}/settings`);
   await page.getByLabel("管理令牌").fill(token);

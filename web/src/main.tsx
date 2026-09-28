@@ -1115,6 +1115,7 @@ function ScriptEditor({
 
 function SequenceEditor({
   item,
+  language,
   kind,
   content,
   busy,
@@ -1123,6 +1124,7 @@ function SequenceEditor({
   onClose,
 }: {
   item: Profile;
+  language: Language;
   kind: SequenceKind;
   content: { uid?: string; yaml?: string };
   busy: boolean;
@@ -1152,26 +1154,23 @@ function SequenceEditor({
   }
   return (
     <section className="panel">
-      <h2>序列增强</h2>
-      <p className="muted">
-        为 {item.name || item.uid}{" "}
-        前置、追加或删除规则、代理及代理组。当前订阅会校验并应用；其他订阅在使用时应用。切换类型会丢弃未保存内容。
-      </p>
+      <h2>{t(language, "sequenceEditorTitle")}</h2>
+      <p className="muted">{t(language, "sequenceEditorHelp").replace("{name}", item.name || item.uid)}</p>
       <label>
-        序列增强类型
+        {t(language, "sequenceEditorKind")}
         <select
           value={kind}
           disabled={busy}
           onChange={(event) => onKind(event.target.value as SequenceKind)}
         >
-          <option value="rules">规则</option>
-          <option value="proxies">代理</option>
-          <option value="groups">代理组</option>
+          <option value="rules">{t(language, "sequenceRules")}</option>
+          <option value="proxies">{t(language, "sequenceProxies")}</option>
+          <option value="groups">{t(language, "sequenceGroups")}</option>
         </select>
       </label>
       <form onSubmit={save}>
         <label>
-          序列增强 YAML
+          {t(language, "sequenceEditorYaml")}
           <textarea
             className="code"
             rows={12}
@@ -1184,17 +1183,17 @@ function SequenceEditor({
         </label>
         <div className="form-actions">
           <button className="primary" disabled={busy}>
-            保存序列增强
+            {t(language, "sequenceEditorSave")}
           </button>
           <button
             type="button"
             disabled={busy || !content.uid}
             onClick={() => void clear()}
           >
-            移除序列增强
+            {t(language, "sequenceEditorRemove")}
           </button>
           <button type="button" disabled={busy} onClick={onClose}>
-            取消序列编辑
+            {t(language, "sequenceEditorCancel")}
           </button>
         </div>
       </form>
@@ -1479,6 +1478,7 @@ function ProfilePage({
           <SequenceEditor
             key={`${sequenceEditing.item.uid}-${sequenceEditing.kind}`}
             item={sequenceEditing.item}
+            language={language}
             kind={sequenceEditing.kind}
             content={sequenceEditing.content}
             busy={busy}
