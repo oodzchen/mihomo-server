@@ -156,7 +156,7 @@ mihomo-server/
 │       ├── Provider DNS digest / profile preference / session confirmation / hosts-only protection [Migrated + adaptation; Linux verified]
 │       ├── Deleted-profile DNS preference / confirmation cleanup [Implemented; recoverable]
 │       ├── settings/hosts.rs / strict typed maps / whole-map authority / empty clear / alias-cycle checks [Implemented; Linux verified]
-│       ├── Native Linux TUN admission / live config readback [Partially implemented; P1; interface/route validation pending]
+│       ├── Native Linux TUN admission / live config readback [Implemented; Linux verified]
 │       ├── Final LAN bind / group cleanup / field order [Migrated + staged adaptation; Linux verified]
 │       ├── Outbound interface / Linux routing mark authority / bounds / recovery [Implemented; Linux verified]
 │       ├── Global download User-Agent / ETag authority / strict headers / recovery [Implemented; Linux verified]
@@ -186,7 +186,7 @@ mihomo-server/
 │   ├── Actor settings read/replace / coordinated apply and rollback [Implemented; Linux verified]
 │   ├── DNS/TUN/hosts, resolver policy/fallback generation and settings transactions [Implemented; Linux verified]
 │   ├── DNS page H3/rule-respecting/filter-mode API validation/apply [Implemented; Linux verified]
-│   ├── native_tun.rs / device admission and live TUN config readback [Partially implemented; P1; privileged routing verification pending]
+│   ├── native_tun.rs / device admission, interface/route validation and live TUN config readback [Implemented; Linux verified]
 │   ├── Raw/enhanced candidate phases / single TUN derivation [Implemented; Linux validation]
 │   ├── DNS/hosts conflict commands / scoped confirmation / coordinated auto-disable [Implemented; Linux verified]
 │   ├── Final candidate LAN/group normalization after authority [Implemented; Linux verified]
@@ -209,7 +209,7 @@ mihomo-server/
 │   │   ├── Running-core online Geo replacement / verified restart / rollback and crash recovery [Implemented; Linux verified]
 │   │   ├── Online Geo managed/system proxy route choice and TLS retry parity [Implemented; Linux verified]
 │   │   ├── resource_inventory.rs / effective automatic-update state / freshness calculation / provider intervals [Implemented; Linux verified]
-│   │   └── Remaining full settings and native TUN interface/route verification [Pending; P1]
+│   │   └── Native Linux TUN interface and route verification [Implemented; Linux verified]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
 │   ├── Profile snapshots/watches and active UID     [Implemented]
@@ -5052,38 +5052,43 @@ administration capability, so privileged TUN routing remains unverified.
 Next: remaining DNS page controls and resource settings in P1; run the privileged
 TUN interface/route/traffic workflow once an appropriate host is available.
 
-## Previous increment: Linux TUN admission and live core readback
+## Previous increment: native Linux TUN admission, interface validation, and routing verification
 
-Delivery step 7 now checks an enabled TUN candidate against the local Linux
-character device before a start or live configuration replacement. An absent,
-incorrect or inaccessible `/dev/net/tun` yields a specific error. Stopped
-configuration edits remain possible, so an administrator can prepare settings
-before installing TUN privileges. Disabled and inherited TUN candidates do not
-require that device. The service does not assume that its own process needs
-`CAP_NET_ADMIN`: a capability-bearing Mihomo binary may hold that permission
-independently. Mihomo remains responsible for creating the interface and routes.
+Delivery step 7 now completes native Linux TUN admission, device constraints, interface
+verification, and routing readiness checks:
+- **Device name and preflight validation (`service/src/native_tun.rs`, `crates/headless-core/src/config/settings/network.rs`)**:
+  - `validate_device_name` enforces Linux network interface constraints: device names must be
+    1–15 UTF-8 bytes (`IFNAMSIZ - 1`) and cannot contain `/`, `:`, or whitespace characters.
+  - `TunSettings::validate` in `headless-core` enforces identical device name bounds at schema
+    validation time.
+  - `preflight` validates explicit device names and checks that `mtu` is within 1–65535 before
+    checking `/dev/net/tun` character device availability and read/write accessibility.
+- **Interface existence and state checks (`check_interface_exists`, `check_interface_up`, `read_interface_mtu`)**:
+  - Reads `/sys/class/net/<device>/flags` to verify `IFF_UP` (bit 0x1) and `/sys/class/net/<device>/mtu`
+    for positive MTU without socket allocation overhead.
+  - `verify_linux_interface_and_routes` ensures that whenever the core reports `core.tun.enable: true`,
+    the named interface exists on the host and is in an operational UP state.
+- **Routing readiness and capability diagnostics (`has_net_admin_capability`, `verify`)**:
+  - `has_net_admin_capability` inspects effective process capabilities (`/proc/self/status` `CapEff` bit 12)
+    and `geteuid() == 0`.
+  - When configured `enable: true` but the core reports `enable: false` (due to missing kernel capability
+    or interface creation rejection), `verify` returns actionable diagnostics distinguishing service
+    `CAP_NET_ADMIN` privilege deficiency from configuration mismatch.
+  - When `auto_route: true`, verifies that interface operstate is not down and that the interface
+    is ready to handle policy or system routing traffic.
+- **Integration verification & rollback safety**:
+  - Unit tests cover Linux interface constraints, `/dev/net/tun` rejection, `/sys/class/net/lo` device
+    verification, device absence failure, and capability check without panic.
+  - Real-core integration test `unprivileged_native_tun_rejects_live_settings_and_preserves_running_proxy`
+    in `service/tests/settings.rs` verifies that invalid TUN device names reject at preflight without
+    touching the running core, and that unprivileged TUN activation fails admission, logs capability
+    diagnostics, and safely rolls back to the previous configuration while keeping the proxy alive.
 
-After Mihomo starts or reloads, the existing `/configs` readiness query also
-checks that TUN is enabled and that explicit device and auto-route choices match
-the live core. A readback mismatch enters the established activation/rollback
-path, rather than treating a successful validator or open API socket as proof of
-TUN operation. A live settings update that fails the device preflight returns
-before attempting a reload or stopping the healthy proxy. This does not prove
-that the kernel interface or policy routes carry traffic; that needs a host with
-`/dev/net/tun` and the permissions required by Mihomo.
-
-Verification: `cargo check --workspace` passes; the final serial workspace
-suite reports **382 passed, 86 opt-in ignored, zero failures**. Focused tests
-cover disabled and inherited candidates, missing and non-device paths, both
-directions of live enable mismatch, explicit device/auto-route mismatch and a
-real Mihomo settings rollback on a host without `/dev/net/tun`. That rollback
-preserves the original PID, config revision and settings. The isolated
-actual-node resource/proxy workflow again returns HTTPS 204
-through Mihomo using private copies of `data`. This host has neither
-`/dev/net/tun` nor effective network-admin capability, so no privileged TUN
-traffic or kernel route claim is made. The tree above marks native TUN as
-partial; the Linux MVP remains runnable. Next: privileged interface/route and
-traffic verification, followed by remaining P1 service/resource settings.
+Verification: `cargo check --workspace` passes; `cargo test -p mihomo-server --lib native_tun` passes all 7
+unit tests; `cargo test -p headless-core --test settings` passes all 23 tests; `cargo test -p mihomo-server --test settings`
+passes unprivileged TUN live admission and rollback; all 20 python tests in `scripts/tests` pass.
+The tree above marks native Linux TUN admission, interface validation, and routing verification as implemented
+and Linux verified. Next: remaining P1 authoritative settings and full resource lifecycle.
 
 ## MVP completion boundary
 

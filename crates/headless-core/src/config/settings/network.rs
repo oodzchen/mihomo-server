@@ -133,6 +133,16 @@ impl TunSettings {
             self.device.as_ref().is_none_or(|v| !v.is_empty()),
             "tun.device must not be empty"
         );
+        if let Some(dev) = &self.device {
+            ensure!(
+                dev.len() <= 15,
+                "tun.device must be 1 to 15 bytes for Linux network interface compatibility"
+            );
+            ensure!(
+                !dev.contains('/') && !dev.contains(':') && !dev.chars().any(char::is_whitespace),
+                "tun.device must not contain '/', ':', or whitespace"
+            );
+        }
         Ok(())
     }
 }

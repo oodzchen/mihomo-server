@@ -72,6 +72,56 @@ async fn unavailable_native_tun_rejects_live_settings_without_stopping_proxy() -
 }
 
 #[tokio::test]
+async fn unprivileged_native_tun_rejects_live_settings_and_preserves_running_proxy() -> Result<()> {
+    if !std::path::Path::new("/dev/net/tun").exists() {
+        return Ok(());
+    }
+    let dir = Directory::new()?;
+    let manager = CoreManager::spawn(dir.options()?)?;
+    let result = async {
+        manager.start().await?;
+        let before = manager.status();
+        let config = manager.runtime_config().await?;
+        let settings = manager.settings().await?;
+
+        let preflight_err = manager
+            .set_settings(serde_yaml_ng::from_str("tun: {enable: true, device: 'invalid:device:name'}")?)
+            .await
+            .unwrap_err();
+        assert!(format!("{preflight_err:#}").contains("tun.device"), "{preflight_err:#}");
+        assert_eq!(manager.status().phase, CorePhase::Running);
+        assert_eq!(manager.status().pid, before.pid);
+        assert_eq!(manager.runtime_config().await?, config);
+
+        let error = manager
+            .set_settings(serde_yaml_ng::from_str("tun: {enable: true, auto-route: false}")?)
+            .await;
+        match error {
+            Ok(_) => {
+                assert_eq!(manager.status().phase, CorePhase::Running);
+                manager.set_settings(serde_yaml_ng::from_str("tun: {enable: false}")?).await?;
+            }
+            Err(err) => {
+                let msg = format!("{err:#}");
+                assert!(
+                    msg.contains("CAP_NET_ADMIN") || msg.contains("TUN enable mismatch") || msg.contains("/dev/net/tun"),
+                    "unexpected error: {msg}"
+                );
+                assert_eq!(manager.status().phase, CorePhase::Running);
+                assert!(manager.status().pid.is_some());
+                assert_eq!(manager.status().config_revision, before.config_revision);
+                assert_eq!(manager.runtime_config().await?, config);
+                assert_eq!(manager.settings().await?, settings);
+            }
+        }
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
 #[ignore = "requires real Mihomo and bounded script worker"]
 async fn provider_dns_confirmation_is_scoped_rolls_back_and_expires_after_restart() -> Result<()> {
     use headless_core::config::dns::DnsOverrideOutcome;
@@ -549,8 +599,14 @@ impl Directory {
             &source,
             "mode: direct\nmixed-port: 0\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']",
         )?;
-        let binary = std::env::var_os("MIHOMO_TEST_BINARY").context("set MIHOMO_TEST_BINARY")?;
-        let mut options = CoreOptions::new(binary.into(), self.0.clone(), source);
+        let binary = std::env::var_os("MIHOMO_TEST_BINARY")
+            .map(PathBuf::from)
+            .or_else(|| {
+                let p = PathBuf::from("/usr/bin/verge-mihomo");
+                if p.exists() { Some(p) } else { None }
+            })
+            .context("set MIHOMO_TEST_BINARY or install /usr/bin/verge-mihomo")?;
+        let mut options = CoreOptions::new(binary, self.0.clone(), source);
         options.script_worker = Some(PathBuf::from(env!("CARGO_BIN_EXE_mihomo-server")));
         Ok(options)
     }
