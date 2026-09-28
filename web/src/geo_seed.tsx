@@ -37,6 +37,7 @@ export function GeoSeedAction({ name, token, status, connection, logout, install
         }, abort.signal);
         if (version !== epoch.current) return;
         if (dat && receipt.core_load_verified !== true) throw new Error("服务未确认 DAT 隔离内核规则加载。");
+        setSeed(undefined);
         installed(`${name}：${receipt.changed ? "已安装打包资源" : "当前文件已与打包资源一致"} · ${dat ? "DAT 结构及隔离内核规则加载通过；实际配置匹配效果仍需验证" : receipt.validation.verified ? "MMDB 结构校验通过" : "描述为空，完整结构未验证"} · SHA-256 ${receipt.validation.sha256}${!receipt.durable || receipt.cleanup_pending ? " · 目录同步或暂存清理未完成，请核对文件状态" : ""}`);
       } else {
         const next = await command<Seed>(token, "geo_seed", { name }, abort.signal);

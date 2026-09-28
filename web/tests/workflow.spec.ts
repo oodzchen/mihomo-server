@@ -388,7 +388,7 @@ test("pinned DAT install requires a fresh stopped-core inspection and shows core
   await page.unroute("**/api/commands"); await page.getByRole("button", { name: "退出登录" }).click();
 });
 
-test("online Geo update uses inspected source and file digests with stopped-core retry", async ({ page }) => {
+test("online Geo update preserves inspection across running-core restart and retries failures", async ({ page }) => {
   let phase: (value: string) => void = () => { throw new Error("socket not ready"); };
   let reads = 0, updates = 0;
   const sourceHash = "a".repeat(64), oldHash = "b".repeat(64), newHash = "c".repeat(64);
@@ -409,6 +409,7 @@ test("online Geo update uses inspected source and file digests with stopped-core
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ name: body.name, current_sha256: oldHash, source_sha256: sourceHash }) });
     } else if (body.command === "update_geo_online") {
       updates++; expect(body).toEqual({ command: "update_geo_online", name: "geosite.dat", expected_current_sha256: oldHash, expected_source_sha256: sourceHash, expected_download_sha256: newHash, accept_metadata_only: false });
+      if (updates === 2) { phase("stopping"); phase("starting"); phase("running"); }
       await route.fulfill({ status: updates === 1 ? 422 : 200, contentType: "application/json", body: JSON.stringify(updates === 1 ? { error: { message: "Geo download SHA-256 differs from expected pin" } } : { changed: true, durable: true, cleanup_pending: false, core_load_verified: true, validation: { verified: true, sha256: newHash, format: "dat" } }) });
     } else await route.continue();
   });
@@ -417,10 +418,9 @@ test("online Geo update uses inspected source and file digests with stopped-core
   const read = panel.getByRole("button", { name: "读取 geosite.dat 在线来源", exact: true });
   await read.click();
   const update = panel.getByRole("button", { name: "更新 geosite.dat 在线资源", exact: true });
-  await expect(update).toBeDisabled();
+  await expect(update).toBeEnabled();
+  await expect(panel).toContainText("短暂停止核心");
   await expect(panel).toContainText(sourceHash);
-  phase("stopped"); await expect(update).toHaveCount(0);
-  await read.click();
   await panel.getByRole("textbox", { name: "可选下载 SHA-256" }).fill("bad");
   await update.click(); await expect(panel.getByRole("alert")).toContainText("64 位十六进制");
   expect(updates).toBe(0);
@@ -430,7 +430,7 @@ test("online Geo update uses inspected source and file digests with stopped-core
   await read.click(); await panel.getByRole("textbox", { name: "可选下载 SHA-256" }).fill(newHash);
   await update.click(); await expect(panel.getByRole("status")).toContainText("已安装在线资源");
   await expect(panel.getByRole("status")).toContainText(newHash);
-  expect(reads).toBe(3); expect(updates).toBe(2);
+  expect(reads).toBe(2); expect(updates).toBe(2);
   await page.unroute("**/api/commands"); await page.getByRole("button", { name: "退出登录" }).click();
 });
 

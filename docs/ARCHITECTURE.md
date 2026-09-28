@@ -53,14 +53,14 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** explicit stopped-core Geo online update from
-committed `geox-url` leaves. Source/current fingerprints guard a bounded direct
-download, optional content pin, format staging, DAT core-load probe and atomic
-publication; failures preserve old files and active runtime revisions.
-**Next implementation task (P1):** controlled running-core Geo replacement with
-verified reload/restart, rollback and crash recovery. Proxy-aware Geo download
-routing, remaining full settings and native TUN still belong to P1; finish this
-priority before starting P2.
+**Latest completed task (P1):** running-core online Geo replacement from committed
+`geox-url` leaves. Candidates pass existing structural/DAT load checks before a
+durable rollback journal, core stop, atomic publication, verified restart and
+commit. Failed activation restores the previous file and core; interrupted
+transactions recover before resource seeding at service startup.
+**Next implementation task (P1):** proxy-aware Geo download routing and TLS
+retry parity with subscription downloads. Remaining full settings and native TUN
+also belong to P1; finish this priority before starting P2.
 
 ## Complete target architecture
 
@@ -166,7 +166,8 @@ mihomo-server/
 │   │   ├── Stopped-core pinned DAT installation / four-mode core load proof / digest guards / orphan recovery [Implemented; Linux verified]
 │   │   ├── geo_online.rs / committed-source inspection / 128 MiB direct download / optional content pin [Implemented; Linux verified]
 │   │   ├── Stopped-core online MMDB/DAT update / staged validation / four-mode DAT load proof / digest guards [Implemented; Linux verified]
-│   │   ├── Running-core Geo replacement / verified reload or restart / rollback and crash recovery [Pending; next P1 task]
+│   │   ├── geo_live.rs / durable rollback journal / startup recovery / guarded cleanup [Implemented; Linux verified]
+│   │   ├── Running-core online Geo replacement / verified restart / rollback and crash recovery [Implemented; Linux verified]
 │   │   ├── Online Geo managed/system proxy route choice and TLS retry parity [Pending; P1]
 │   │   └── Remaining full settings and native TUN [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
@@ -287,7 +288,7 @@ mihomo-server/
 │   ├── Geo/Provider inventory / metadata states / refresh and retry [Implemented; Linux verified]
 │   ├── Explicit MMDB/DAT checks / aggregate diagnostics / compatibility warnings / stale-result clearing [Implemented; Linux verified]
 │   ├── Pinned MMDB/DAT bundle inspection / stopped-state install / DAT core load proof / MMDB metadata-only choice [Implemented; Linux verified]
-│   ├── Configured-source Geo inspection / stopped-core online update / fresh-hash retry [Implemented; Linux verified]
+│   ├── Configured-source Geo inspection / stopped and running-core online update / fresh-hash retry [Implemented; Linux verified]
 │   ├── Geo field editor incl. geosite matcher / per-URL inheritance / saved-configured-actual readback / retry [Implemented; Linux verified]
 │   ├── Remaining full settings/resource lifecycle UI [Pending; P1]
 │   └── Backup UI [Deferred; outside active scope]
@@ -4295,6 +4296,52 @@ The complete architecture tree above is synchronized and the Linux MVP remains
 runnable. Next: P1 running-core Geo replacement with verified activation, rollback
 and interruption recovery. Proxy-aware Geo download routing, remaining full
 settings/native TUN remain P1; P2 rules/
+provider/delay, P3 i18n/signals and P4 actual systemd installation remain
+incomplete. Deferred work stays deferred. Git submission is left to the external
+host script.
+
+## Increment: running-core online Geo replacement and recovery (P1)
+
+`update_geo_online` now accepts a settled running core as well as a stopped one.
+It retains committed-source/current-file fingerprints, bounded direct download,
+MMDB validation and four DAT loader/matcher probes. The running path finishes
+candidate validation before interrupting traffic. Changed bytes create a private
+`.geo-live` rollback record with a private previous-file copy and durable pending
+marker; the actor then stops and reaps Mihomo, atomically publishes the candidate,
+restarts the core, verifies readiness/listener readback, a second health response
+and the installed file digest, and removes the marker as the commit point. Identical bytes skip the
+restart. Failed publication or activation reaps the candidate, restores the old
+file and restarts the prior core. If recovery cannot safely confirm the file hash,
+it leaves the journal intact and blocks startup rather than overwriting an
+unexpected external change. Startup recovers an interrupted pending transaction
+under the data lock before optional bundle Geo seeding.
+
+The Web action remains mounted while the core transitions through stopping and
+starting, so a successful live update can display its receipt. It allows only
+settled running/stopped phases and explains the brief proxy interruption. The
+resource inventory refresh no longer discards the current panel during a status
+transition. `docs/RUNNING.md` describes live and stopped semantics and the
+remaining rule-level verification limit.
+
+Verification:
+
+- Workspace compilation and Web production build succeed. Workspace tests report
+  **377 passed, 85 opt-in ignored**, including three journal rollback/commit and
+  external-change protection cases.
+- An explicitly enabled real Mihomo test exercises a running GeoSite DAT update,
+  a candidate whose groups conflict with the committed rule configuration,
+  old-file/core rollback, and startup recovery of a simulated interrupted
+  pending journal. Existing stopped-core source/digest and DAT checks remain in
+  the same workflow.
+- Full Chromium regression reports **30 passed, 4 optional bundle upgrade/repair
+  workflows skipped**. It covers live phase changes without losing the receipt,
+  required reinspection after success/failure, and the retained bundle-install
+  behavior. The actual-node test uses private `data` profile copies and returns
+  HTTPS 204 through a selected proxy; original node files remain untouched.
+
+The complete architecture tree above is synchronized and the Linux MVP remains
+runnable. Next: P1 proxy-aware Geo download routing and TLS retry parity with
+subscription downloads. Remaining full settings/native TUN remain P1; P2 rules/
 provider/delay, P3 i18n/signals and P4 actual systemd installation remain
 incomplete. Deferred work stays deferred. Git submission is left to the external
 host script.

@@ -43,7 +43,7 @@ export function ResourcesPanel({ token, status, connection, logout }: {
   const [checks, setChecks] = useState<Record<string, { message: string; error?: boolean }>>({});
   const [checking, setChecking] = useState<string>();
   const [notice, setNotice] = useState("");
-  useEffect(() => { setNotice(""); }, [token, status.phase, status.generation, status.config_revision, connection]);
+  useEffect(() => { setNotice(""); }, [token, status.config_revision, connection]);
   const [value, setValue] = useState<Inventory>();
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
@@ -52,9 +52,8 @@ export function ResourcesPanel({ token, status, connection, logout }: {
     validationController.current?.abort();
     setChecks({});
     setChecking(undefined);
-    setValue(undefined);
     setError("");
-    if (connection !== "已连接") return;
+    if (connection !== "已连接") { setValue(undefined); return; }
     let active = true;
     const controller = new AbortController();
     void command<Inventory>(token, "resources", {}, controller.signal).then(next => {
@@ -114,7 +113,7 @@ export function ResourcesPanel({ token, status, connection, logout }: {
       {!value.config_revision && <p className="info">尚无已提交配置，导入并使用订阅后显示 Provider 声明。</p>}
       <h3>Geo 文件</h3>{rows(value.geo)}
       <h3>Provider 文件与缓存</h3>{value.providers.length ? rows(value.providers) : <p className="muted">当前已提交配置没有 Provider 声明。</p>}
-      <p className="hint">路径相对于运行数据目录。文件存在仅表示元数据可读取，尚未验证内容格式。MMDB 和 DAT 可手动校验结构；打包资源可在停止内核后按摘要显式安装。已提交配置中的 Geo URL 可用于停止内核后的显式在线更新，先读取来源及当前文件指纹，再下载、校验并安装。DAT 安装执行隔离内核规则加载检查，但不保证实际代理匹配效果。失败或请求中断后请重新读取状态；运行中替换待实现。Geo 文件是否必需取决于配置规则。Provider 声明来自已提交配置，内核下载后可刷新清单核对文件状态。</p>
+      <p className="hint">路径相对于运行数据目录。文件存在仅表示元数据可读取，尚未验证内容格式。MMDB 和 DAT 可手动校验结构；打包资源可在停止内核后按摘要显式安装。已提交配置中的 Geo URL 可用于停止或运行中核心的显式在线更新：先读取来源及当前文件指纹，再下载、校验并安装。运行中更新会短暂停止并重启核心；失败时恢复旧资源。DAT 安装执行隔离内核规则加载检查，但不保证实际代理匹配效果。失败或请求中断后请重新读取状态。Geo 文件是否必需取决于配置规则。Provider 声明来自已提交配置，内核下载后可刷新清单核对文件状态。</p>
     </>}
   </section>;
 }

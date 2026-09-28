@@ -3,7 +3,7 @@
 mod dat;
 use anyhow::Result;
 use mihomo_server::{
-    core_manager::{CoreManager, CoreOptions},
+    core_manager::{CoreManager, CoreOptions, CorePhase},
     geo_online::Request,
 };
 use std::{
@@ -21,7 +21,7 @@ impl Drop for Directory {
 
 #[tokio::test]
 #[ignore = "requires real Mihomo; local online Geo sources and isolated DAT core probes"]
-async fn stopped_online_dat_update_guards_source_download_and_old_files_then_starts() -> Result<()> {
+async fn online_dat_update_guards_inputs_and_recovers_running_core_and_startup_journal() -> Result<()> {
     let dir = Directory(std::env::temp_dir().join(format!(
             "ms-geo-online-{}-{}",
             std::process::id(),
@@ -103,11 +103,65 @@ async fn stopped_online_dat_update_guards_source_download_and_old_files_then_sta
         manager.apply_config(config).await?;
         manager.start().await?;
         assert!(manager.status().pid.is_some());
-        assert!(manager.update_geo_online(request).await.is_err());
+        let running_before = manager.status();
+        let mut changed_site = dat::geosite();
+        changed_site.extend(dat::group(b"extra", &[dat::domain(3, b"new.example.test")]));
+        *site.lock().unwrap() = changed_site.clone();
+        let live_info = manager.geo_online_info("geosite.dat".into()).await?;
+        let live_request = Request { name: "geosite.dat".into(), expected_current_sha256: live_info.current_sha256, expected_source_sha256: live_info.source_sha256, expected_download_sha256: None, accept_metadata_only: false };
+        let live = manager.update_geo_online(live_request).await?;
+        assert!(live.changed && live.durable && live.core_load_verified == Some(true));
+        assert_eq!(manager.status().phase, CorePhase::Running);
+        assert_ne!(manager.status().pid, running_before.pid);
+        assert_eq!(manager.status().config_revision, running_before.config_revision);
+        assert_eq!(fs::read(dir.0.join("geosite.dat"))?, changed_site);
+        assert!(!dir.0.join(".geo-live").exists());
+
+        let mut incompatible = dat::group(b"other", &[dat::domain(3, b"unreferenced.example")]);
+        incompatible.extend(dat::group(b"CN", &[dat::domain(3, b"bootstrap.invalid")]));
+        *site.lock().unwrap() = incompatible;
+        let failed_info = manager.geo_online_info("geosite.dat".into()).await?;
+        let failed_request = Request { name: "geosite.dat".into(), expected_current_sha256: failed_info.current_sha256, expected_source_sha256: failed_info.source_sha256, expected_download_sha256: None, accept_metadata_only: false };
+        assert!(manager.update_geo_online(failed_request).await.is_err());
+        assert_eq!(manager.status().phase, CorePhase::Running);
+        assert_eq!(fs::read(dir.0.join("geosite.dat"))?, changed_site);
+        assert!(!dir.0.join(".geo-live").exists());
         manager.stop().await?;
         Ok::<_, anyhow::Error>(())
     }.await;
     let cleanup = manager.shutdown().await;
+    if result.is_ok() && cleanup.is_ok() {
+        use std::os::unix::fs::DirBuilderExt as _;
+        let name = "geosite.dat";
+        let old = fs::read(dir.0.join(name))?;
+        let old_hash = ring::digest::digest(&ring::digest::SHA256, &old)
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let candidate = b"interrupted candidate";
+        let candidate_hash = ring::digest::digest(&ring::digest::SHA256, candidate)
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let journal = dir.0.join(".geo-live");
+        fs::DirBuilder::new().mode(0o700).create(&journal)?;
+        fs::write(journal.join(name), &old)?;
+        fs::write(
+            journal.join("pending"),
+            serde_json::json!({
+                "name": name, "previous_sha256": old_hash, "candidate_sha256": candidate_hash,
+            })
+            .to_string(),
+        )?;
+        fs::write(dir.0.join("replacement.tmp"), candidate)?;
+        fs::rename(dir.0.join("replacement.tmp"), dir.0.join(name))?;
+        let recovered = CoreManager::spawn(options)?;
+        assert_eq!(fs::read(dir.0.join(name))?, old);
+        assert!(!journal.exists());
+        recovered.shutdown().await?;
+    }
     server.abort();
     result.and(cleanup)
 }

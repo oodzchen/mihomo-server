@@ -227,6 +227,8 @@ impl CoreOptions {
         }
         let lock = open.open(self.data_dir.join(".mihomo-server.lock"))?;
         lock.try_lock().context("another service owns this data directory")?;
+        #[cfg(unix)]
+        crate::geo_live::recover(&self.data_dir).context("live Geo rollback recovery failed")?;
         if let Some(resources) = &self.resources {
             let core_directory = self.core_dir.clone().unwrap_or_else(|| self.data_dir.join("core"));
             crate::core_upgrade::recover(&core_directory).context("managed core upgrade recovery failed")?;
@@ -1560,11 +1562,11 @@ fn drain<R: AsyncRead + Unpin + Send + 'static>(reader: R, logs: Logs, stream: &
 
 impl Actor {
     #[cfg(unix)]
-    async fn publish_prepared_geo(
+    async fn verify_prepared_geo(
         &mut self,
         mut prepared: crate::geo_update::Prepared,
         name: &str,
-    ) -> Result<crate::geo_update::Receipt> {
+    ) -> Result<crate::geo_update::Prepared> {
         if crate::dat_validation::DAT_FILES.contains(&name) {
             let (next, probe) = tokio::task::spawn_blocking(move || {
                 let probe = prepared.probe()?;
@@ -1592,9 +1594,101 @@ impl Actor {
             probe.verify_input()?;
             prepared.mark_core_load_verified();
         }
+        Ok(prepared)
+    }
+
+    #[cfg(unix)]
+    async fn publish_prepared_geo(
+        &mut self,
+        prepared: crate::geo_update::Prepared,
+        name: &str,
+    ) -> Result<crate::geo_update::Receipt> {
+        let prepared = self.verify_prepared_geo(prepared, name).await?;
         tokio::task::spawn_blocking(move || prepared.publish())
             .await
             .context("Geo publication worker failed")?
+    }
+
+    #[cfg(unix)]
+    async fn publish_live_geo(
+        &mut self,
+        prepared: crate::geo_update::Prepared,
+        name: &str,
+    ) -> Result<crate::geo_update::Receipt> {
+        let prepared = self.verify_prepared_geo(prepared, name).await?;
+        if prepared.previous_sha256() == Some(prepared.candidate_sha256()) {
+            return tokio::task::spawn_blocking(move || prepared.publish())
+                .await
+                .context("Geo no-change publication worker failed")?;
+        }
+        let data = self.options.data_dir.clone();
+        crate::geo_live::begin(&data, name, prepared.previous_sha256(), prepared.candidate_sha256())?;
+        self.retry_at = None;
+        self.publish(CorePhase::Stopping, None);
+        let result = async {
+            self.stop_process().await?;
+            let receipt = tokio::task::spawn_blocking(move || prepared.publish())
+                .await
+                .context("live Geo publication worker failed")??;
+            ensure!(receipt.durable, "Geo publication directory sync failed");
+            self.publish(CorePhase::Starting, None);
+            self.start_inner().await?;
+            tokio::select! {biased;
+                _ = closing(&mut self.shutdown) => anyhow::bail!("Geo activation cancelled during shutdown"),
+                _ = sleep(self.options.policy.probe_interval) => {},
+            }
+            self.observe_exit().await?;
+            ensure!(
+                self.status.borrow().phase == CorePhase::Running,
+                "Geo candidate exited during activation health check"
+            );
+            timeout(self.options.policy.probe_timeout, self.client.get_version())
+                .await
+                .context("Geo activation health check timed out")??;
+            let on_disk =
+                crate::geo_validation::snapshot(&data, name)?.map(|bytes| crate::geo_validation::sha256(&bytes));
+            ensure!(
+                on_disk.as_deref() == Some(receipt.validation.sha256.as_str()),
+                "Geo file changed during activation"
+            );
+            let commit = crate::geo_live::commit(&data)?;
+            Ok::<_, anyhow::Error>((receipt, commit))
+        }
+        .await;
+        match result {
+            Ok((mut receipt, (durable, cleanup_pending))) => {
+                receipt.durable &= durable;
+                receipt.cleanup_pending |= cleanup_pending;
+                self.begin_restoration(false).await;
+                Ok(receipt)
+            }
+            Err(error) => {
+                self.publish(CorePhase::Stopping, None);
+                if let Err(stop) = self.stop_process().await {
+                    self.publish(CorePhase::Failed, Some("Geo rollback requires core cleanup".into()));
+                    return Err(error.context(format!("Geo candidate cleanup failed: {stop:#}")));
+                }
+                if let Err(recovery) = crate::geo_live::recover(&data) {
+                    self.publish(CorePhase::Failed, Some("Geo rollback recovery required".into()));
+                    return Err(error.context(format!("Geo rollback failed: {recovery:#}")));
+                }
+                self.publish(CorePhase::Stopped, None);
+                if !*self.shutdown.borrow() {
+                    self.publish(CorePhase::Starting, None);
+                    if let Err(restart) = self.start_inner().await {
+                        let _ = self.stop_process().await;
+                        self.publish(
+                            CorePhase::Failed,
+                            Some("previous Geo restored but core restart failed".into()),
+                        );
+                        self.schedule_recovery();
+                        return Err(error.context(format!("previous core restart failed: {restart:#}")));
+                    }
+                    self.begin_restoration(false).await;
+                }
+                Err(error.context("Geo activation failed; previous file restored"))
+            }
+        }
     }
 
     fn cancel_restoration(&mut self) {
@@ -2146,7 +2240,8 @@ impl Actor {
                         CommandMessage::UpdateGeoOnline { request, reply } => {
                             if !reply.is_closed() {
                                 let result = async {
-                                    ensure!(self.status.borrow().phase == CorePhase::Stopped && self.process.is_none(), "stop the core before updating a Geo file online");
+                                    let running = self.status.borrow().phase == CorePhase::Running && self.process.is_some();
+                                    ensure!(running || (self.status.borrow().phase == CorePhase::Stopped && self.process.is_none()), "Geo online update requires a running or stopped core");
                                     let config = self.store.read_current()?;
                                     let (url, source_sha256) = crate::geo_online::source(&config, &request.name)?;
                                     ensure!(request.expected_source_sha256.eq_ignore_ascii_case(&source_sha256), "Geo source changed since inspection; inspect again");
@@ -2175,7 +2270,11 @@ impl Actor {
                                         };
                                         crate::geo_update::prepare(&downloaded.directory, &data, &downloaded.seed, &install)
                                     }).await.context("online Geo staging worker failed")??;
-                                    self.publish_prepared_geo(prepared, &name).await
+                                    if running {
+                                        self.publish_live_geo(prepared, &name).await
+                                    } else {
+                                        self.publish_prepared_geo(prepared, &name).await
+                                    }
                                 }.await;
                                 let _ = reply.send(result);
                             }

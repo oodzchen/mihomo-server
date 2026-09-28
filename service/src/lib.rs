@@ -5,6 +5,8 @@ pub mod core_release;
 pub mod core_upgrade;
 mod dat_validation;
 #[cfg(unix)]
+mod geo_live;
+#[cfg(unix)]
 pub mod geo_online;
 #[cfg(unix)]
 mod geo_resources;

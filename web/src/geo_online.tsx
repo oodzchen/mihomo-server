@@ -21,7 +21,7 @@ export function GeoOnlineAction({ name, token, status, connection, logout, insta
     epoch.current++; controller.current?.abort();
     setInfo(undefined); setPin(""); setAccept(false); setError(""); setBusy(false);
     return () => { epoch.current++; controller.current?.abort(); };
-  }, [name, token, status.phase, status.generation, status.config_revision, connection]);
+  }, [name, token, status.config_revision, connection]);
 
   async function run(update: boolean) {
     if (busy || (update && !info)) return;
@@ -42,7 +42,8 @@ export function GeoOnlineAction({ name, token, status, connection, logout, insta
         }, abort.signal);
         if (version !== epoch.current) return;
         if (dat && receipt.core_load_verified !== true) throw new Error("服务未确认 DAT 隔离内核规则加载。");
-        installed(`${name}：${receipt.changed ? "已安装在线资源" : "当前文件已与下载资源一致"} · ${dat ? "DAT 结构及隔离内核规则加载通过" : receipt.validation.verified ? "MMDB 结构校验通过" : "描述为空，完整结构未验证"} · SHA-256 ${receipt.validation.sha256}${!receipt.durable || receipt.cleanup_pending ? " · 目录同步或暂存清理未完成，请核对文件状态" : ""}`);
+        setInfo(undefined);
+        installed(`${name}：${receipt.changed ? "已安装在线资源" : "当前文件已与下载资源一致"}${status.phase === "running" && receipt.changed ? " · 核心已重启验证" : ""} · ${dat ? "DAT 结构及隔离内核规则加载通过" : receipt.validation.verified ? "MMDB 结构校验通过" : "描述为空，完整结构未验证"} · SHA-256 ${receipt.validation.sha256}${!receipt.durable || receipt.cleanup_pending ? " · 目录同步或暂存清理未完成，请核对文件状态" : ""}`);
       } else {
         const next = await command<Info>(token, "geo_online_info", { name }, abort.signal);
         if (version === epoch.current) setInfo(next);
@@ -63,8 +64,9 @@ export function GeoOnlineAction({ name, token, status, connection, logout, insta
       <p>当前文件：<code>{info.current_sha256 || "文件缺失"}</code></p>
       <label>可选下载 SHA-256 <input value={pin} disabled={busy} onChange={event => setPin(event.target.value.trim())} /></label>
       {!dat && <label><input type="checkbox" checked={accept} disabled={busy} onChange={event => setAccept(event.target.checked)} />允许安装描述为空、完整结构未验证的 MMDB</label>}
-      {status.phase !== "stopped" && <p className="info">停止内核后可下载并安装在线 Geo 资源。</p>}
-      <button type="button" disabled={busy || connection !== "已连接" || status.phase !== "stopped"} onClick={() => void run(true)}>更新 {name} 在线资源</button>
+      {status.phase === "running" && <p className="info">更新时将短暂停止核心，验证新资源后重启；失败会尝试恢复旧文件和核心。</p>}
+      {!(["running", "stopped"] as string[]).includes(status.phase) && <p className="info">核心进入运行或停止状态后才能更新在线 Geo 资源。</p>}
+      <button type="button" disabled={busy || connection !== "已连接" || !(["running", "stopped"] as string[]).includes(status.phase)} onClick={() => void run(true)}>更新 {name} 在线资源</button>
     </>}
     {busy && <p role="status">正在处理在线 Geo 资源…</p>}
     {error && <p role="alert" className="alert">在线 Geo 更新失败：{error}</p>}

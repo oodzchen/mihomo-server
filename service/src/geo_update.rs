@@ -159,6 +159,12 @@ pub(crate) fn prepare(source: &Path, data: &Path, seed: &Seed, request: &Install
 }
 
 impl Prepared {
+    pub(crate) fn previous_sha256(&self) -> Option<&str> {
+        self.previous.as_deref()
+    }
+    pub(crate) fn candidate_sha256(&self) -> &str {
+        &self.seed.sha256
+    }
     pub(crate) fn mark_core_load_verified(&mut self) {
         self.core_load_verified = true;
     }
