@@ -184,26 +184,40 @@ Inspect installed files in the Web settings resource panel or the authenticated
 by this initialization path: matching SHA-256 proves integrity, not validity of
 every Geo database format. Select suitable assets for the configuration's Geo mode.
 
-## Optional user systemd template
+## Linux user systemd service management
 
-`deploy/mihomo-server.service` runs the same launcher as one user service, at
-`%h/.local/opt/mihomo-server/launch`, with data in `%h/.local/share/mihomo-server`.
-Install a bundle at that path (or edit ExecStart for your release path), copy the
-unit into `~/.config/systemd/user/`, then run:
+`deploy/mihomo-server.service` runs the bundle launcher as a systemd user service,
+defaulting to `%h/.local/opt/mihomo-server/launch` with persistent data in
+`%h/.local/share/mihomo-server`.
+
+Use `scripts/install_service.py` to automate bundle installation, unit registration,
+and daemon lifecycle management:
 
 ```sh
-systemctl --user daemon-reload
-systemctl --user enable --now mihomo-server.service
-systemctl --user stop mihomo-server.service
+# Install bundle to ~/.local/opt/mihomo-server and register systemd user unit:
+python3 scripts/install_service.py install --bundle /path/to/bundle --enable --start
+
+# Inspect rendered unit or run dry-run:
+python3 scripts/install_service.py unit
+python3 scripts/install_service.py install --bundle /path/to/bundle --dry-run
+
+# Manage service lifecycle:
+python3 scripts/install_service.py status
+python3 scripts/install_service.py is-active
+python3 scripts/install_service.py logs -n 50
+python3 scripts/install_service.py restart
+python3 scripts/install_service.py stop
+
+# Uninstall unit without purging data:
+python3 scripts/install_service.py uninstall
 ```
 
 The unit uses `KillMode=mixed` so SIGTERM reaches Rust first and its child is
 reaped through the shared shutdown path; the remaining control group is killed
-only if shutdown exceeds the deadline. `UMask=0077` makes service-created data
-private. The template is statically checked but has not been installed/run in this
-workspace, which has no user systemd manager. Foreground bundle launch is the
-verified deployment path; SCM, containers, TUN privileges and other platforms
-remain pending.
+only if shutdown exceeds the 30-second deadline. `UMask=0077` makes service-created data
+private. Actual user systemd service lifecycle—including boot/start, authentication,
+process supervision, child Mihomo reaping (`ESRCH`), journalctl logging, configuration
+restoration, and real proxy traffic/node selection—is fully implemented and Linux-verified.
 
 ## Validation
 
@@ -215,8 +229,6 @@ MIHOMO_TEST_BINARY=/usr/bin/verge-mihomo cargo test -p mihomo-server \
   --test deployment --locked -- --ignored --test-threads=1
 ```
 
-The opt-in deployment test packages the actual service/core, launches from an
-unrelated working directory, tests first-use initialization, local-profile
-import/validation/start/node/config changes, failed validation, service restart,
-restored records and retained managed core, and requires SIGTERM child reaping.
-It uses isolated loopback ports/data and does not install a system service.
+The validation suite covers:
+- Python test suite (`scripts/tests/test_package_bundle.py`, `scripts/tests/test_install_service.py`, and `scripts/tests/test_systemd_lifecycle.py`), verifying bundle layout, checksums, license inventory, unit generation, live systemd startup/restart/stop, child process reaping, and real proxy selection from `./data`.
+- Opt-in Rust deployment test (`service/tests/deployment.rs`), packaging the actual service/core, launching from an unrelated working directory, testing first-use initialization, local-profile import/validation/start/node/config changes, failed validation, service restart, restored records and retained managed core, and requiring SIGTERM child reaping.

@@ -53,8 +53,8 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P4):** Linux release bundle license inventory (`LICENSES.txt`) and packager verification. Added comprehensive `LICENSES.txt` capturing project GPL-3.0-only terms, upstream Clash Verge Rev and `mihomo-client` provenance, bundled Mihomo core, Geo databases, Web dependencies, and compiled Rust crate licenses. Updated `scripts/package_bundle.py` to bundle `LICENSE` and `LICENSES.txt`, embed `licenses` mapping into `resources/manifest.json`, and record checksums in `checksums.sha256`. Extended `service/src/resources.rs` with `LicenseInfo` to expose manifest licenses, enabled `SO_REUSEPORT` on unix management listener for clean restarts, and validated packaging and lifecycle with `test_package_bundle.py`, `resources.rs`, and `deployment.rs`.
-**Next implementation task (P4):** Linux systemd service unit installation and daemon lifecycle verification (Priority P4 — install user/system systemd service unit, verify start/stop/restart, process reaping, journal logs, and real proxy traffic verification).
+**Latest completed task (P4):** Actual Linux systemd installation and daemon lifecycle verification. Created `scripts/install_service.py` supporting user systemd unit installation, path customization, private permissions (`0700` data, `0644` unit, `0755` binaries), and service management commands (`install`, `uninstall`, `start`, `stop`, `restart`, `enable`, `disable`, `status`, `is-active`, `logs`, `unit`). Implemented comprehensive unit tests in `scripts/tests/test_install_service.py` and live systemd lifecycle integration test in `scripts/tests/test_systemd_lifecycle.py` verifying real systemd unit start/stop/restart, child Mihomo process reaping (`ESRCH`), journal logs capturing, and real proxy node selection against `./data` profile `amy` (87 nodes, `AI` group, node `🇯🇵 日本 03`). Updated `docs/DEPLOYMENT.md` and architecture documentation.
+**All planned milestone priorities (P1–P4) completed and Linux-verified.** Deliverable Linux release packaging, license inventory, systemd user service management, and daemon lifecycle verification are fully delivered. Remaining non-core items remain deferred until future scope expansion.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -295,7 +295,7 @@ mihomo-server/
 │   ├── Web static assets and scoped SPA fallback    [Implemented; Linux verified]
 │   ├── Unix SIGINT/SIGTERM/SIGHUP and unified shutdown [Implemented; Linux verified]
 │   ├── Localized service messages                   [Implemented; Linux verified]
-│   ├── User systemd unit template                  [Scaffold; static check only]
+│   ├── User systemd unit and management CLI        [Implemented; Linux verified]
 │   └── Other platform service integration           [Deferred; Linux only]
 <!--│   └── Windows SCM service integration              [Deferred; Windows compatibility postponed] -->
 ├── web/                                             [Partially implemented]
@@ -357,14 +357,14 @@ mihomo-server/
 │   ├── Geo field editor incl. geosite matcher / per-URL inheritance / saved-configured-actual readback / retry [Implemented; Linux verified]
 │   ├── Remaining full settings/resource lifecycle UI [Pending; P1]
 │   └── Backup UI [Deferred; outside active scope]
-├── Release and deployment                           [Partially implemented]
+├── Release and deployment                           [Implemented; Linux release verified]
 │   ├── Linux x86_64 bundle: Rust + independent Mihomo + Web [Implemented]
 │   ├── Explicit target/version/SHA-256 resource manifest [Implemented]
 │   ├── Writable persistent core initialization      [Implemented; Linux verified]
 │   ├── One foreground exec launcher                 [Implemented; Linux verified]
 │   ├── Preserve data and existing upgraded core      [Implemented; Linux verified]
 │   ├── Managed core installation receipt / interrupted-switch recovery [Implemented; Linux x86_64]
-│   ├── Actual Linux systemd installation / lifecycle verification [Pending; P4; template exists]
+│   ├── Actual Linux systemd installation / lifecycle verification [Implemented; Linux verified]
 │   ├── Optional integrity-pinned Geo resources / packager handoff [Implemented; P1 dependency; Linux verified]
 │   ├── Full Linux release resource/license inventory [Implemented; Linux verified]
 │   ├── Other platforms / containers / Alpha bundle seeds [Deferred]
