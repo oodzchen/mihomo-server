@@ -46,13 +46,8 @@ pub enum RouteChoice {
 }
 
 pub(crate) fn source(config: &Mapping, name: &str) -> Result<(url::Url, String)> {
-    let key = match name {
-        "geoip.dat" => "geoip",
-        "geosite.dat" => "geosite",
-        "Country.mmdb" | "geoip.metadb" => "mmdb",
-        "ASN.mmdb" => "asn",
-        _ => anyhow::bail!("unsupported online Geo filename"),
-    };
+    let key = headless_core::config::settings::GeoUrls::key_for_asset(name)
+        .ok_or_else(|| anyhow::anyhow!("unsupported online Geo filename"))?;
     let text = config
         .get("geox-url")
         .and_then(serde_yaml_ng::Value::as_mapping)

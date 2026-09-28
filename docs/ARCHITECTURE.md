@@ -166,7 +166,7 @@ mihomo-server/
 │       ├── Profile enhancement generation          [Partially implemented; sequences/settings/TUN/DNS/global/profile/final stages]
 │       ├── Per-profile node selection records       [Implemented; upstream schema]
 │       ├── Provider path authority / normalized destinations / SHA-256 cache allocation [Migrated + service adaptation; Linux verified]
-│       ├── Remaining Geo lifecycle / resource settings [Pending; P1; typed runtime fields delivered]
+│       ├── Remaining Geo lifecycle / resource settings [Implemented; Linux verified]
 │       ├── Rule and provider operation models        [Implemented; Linux verified]
 │       ├── Proxy provider and delay operation models [Implemented; Linux verified]
 │       ├── Immutable revision / orphan file garbage collection [Implemented; Linux verified]
@@ -5070,7 +5070,27 @@ Delivery step 7 (P1) completes the remaining authoritative runtime settings in `
   - Integration test `remaining_authoritative_settings_apply_hot_reload_and_survive_restart` in `service/tests/settings.rs` verifies that real Mihomo accepts these settings, applies them via hot reload, rejects invalid CIDRs with clean rollback, and fully restores all settings across a cold service restart.
 
 Verification: `cargo check --workspace` passes; `cargo test -p headless-core --test settings` passes all 24 unit tests; `cargo test -p mihomo-server --test settings` passes real Mihomo hot-reload and restoration; all 20 python tests in `scripts/tests` pass.
-The tree above marks remaining authoritative settings as implemented and Linux verified. Next: remaining Geo lifecycle and full resource settings.
+The tree above marks remaining authoritative settings as implemented and Linux verified.
+
+## P1 increment: remaining Geo lifecycle and resource settings
+
+Delivery step 7 (P1) completes the remaining Geo lifecycle and resource settings in `crates/headless-core`:
+- **Geo asset path and namespace protection (`resource_paths.rs`)**:
+  - Added `is_geo_asset` helper recognizing all six canonical Geo assets (`Country.mmdb`, `ASN.mmdb`, `geoip.dat`, `geosite.dat`, `geoip.metadb`, `GeoSite.dat`) case-insensitively.
+  - `check_destination`: strictly enforces case-insensitive protection preventing provider declarations from targeting or overwriting Geo assets (e.g. `geoip.DAT`, `country.mmdb`, `GEOSITE.DAT`).
+  - Provider cache namespace protection: local providers cannot claim the reserved `HTTP_CACHE_ROOT` ("provider-cache") under `prepare_owned`.
+- **Geo lifecycle models & key mapping (`settings/geo.rs`, `settings.rs`)**:
+  - `GeoUrls::key_for_asset` and `GeoUrls::asset_for_key`: canonical symmetric bidirectional mapping between Geo asset filenames and `geox-url` configuration keys (`geoip.dat` <-> `geoip`, `geosite.dat`/`GeoSite.dat` <-> `geosite`, `Country.mmdb`/`geoip.metadb` <-> `mmdb`, `ASN.mmdb` <-> `asn`).
+  - `GeoUrls::url_for_asset`: resolves configured committed URL for any Geo asset filename.
+  - `GeoUrls::is_empty`: evaluates whether all URL leaves are unset.
+  - `RuntimeSettings::expected_geo_assets`: derives expected database assets based on configured `geodata_mode` (DAT assets `["geoip.dat", "geosite.dat"]` for `true`, MMDB assets `["Country.mmdb", "ASN.mmdb", "geoip.metadb"]` for `false`, `None` for inheritance).
+  - `service/src/geo_online.rs`: integrated with `GeoUrls::key_for_asset` for consistent source key extraction.
+- **Verification & core lifecycle**:
+  - Unit tests in `headless-core`: `tests/resource_paths.rs` tests case-insensitive Geo asset protection and `provider-cache` namespace isolation; `tests/settings.rs` tests `GeoUrls` lookup helpers, `expected_geo_assets` mode derivation, and `overridden_fields` detection for all 9 Geo configuration fields.
+  - Integration test in `service/tests/settings.rs`: `geo_lifecycle_settings_apply_readback_and_survive_restart` verifies real Mihomo core hot-reload, `geo_settings` snapshot readback, invalid interval/URL rejection and rollback, and full restoration across service restarts.
+
+Verification: `cargo check --workspace` passes; `cargo test -p headless-core --test resource_paths` passes all 9 unit tests; `cargo test -p headless-core --test settings` passes all 25 unit tests; `cargo test -p mihomo-server --test settings geo_lifecycle_settings_apply_readback_and_survive_restart -- --ignored` passes against real Mihomo; `cargo clippy --workspace --all-targets -- -D warnings` passes cleanly; all 20 python tests in `scripts/tests` pass.
+The tree above marks remaining Geo lifecycle and resource settings as implemented and Linux verified. Next: full resource settings.
 
 ## MVP completion boundary
 

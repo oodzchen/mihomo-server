@@ -202,6 +202,19 @@ impl RuntimeSettings {
         Ok(config)
     }
 
+    /// Return the expected Geo asset filenames for the configured geodata mode.
+    /// Returns DAT assets for `geodata_mode: true`, MMDB assets for `geodata_mode: false`,
+    /// or None if inherited/unspecified.
+    pub fn expected_geo_assets(&self) -> Option<&'static [&'static str]> {
+        self.geodata_mode.map(|dat_mode| {
+            if dat_mode {
+                &["geoip.dat", "geosite.dat"][..]
+            } else {
+                &["Country.mmdb", "ASN.mmdb", "geoip.metadb"][..]
+            }
+        })
+    }
+
     pub fn validate(&self) -> Result<()> {
         ensure!(
             cfg!(not(target_os = "windows")) || self.redir_port.is_none(),

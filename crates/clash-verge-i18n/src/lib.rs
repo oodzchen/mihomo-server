@@ -133,10 +133,10 @@ pub fn resolve_accept_language(header_value: &str) -> Option<Cow<'static, str>> 
         let mut quality = 1.0f32;
         for param in subparts {
             let param = param.trim();
-            if let Some(rest) = param.strip_prefix("q=") {
-                if let Ok(q) = rest.trim().parse::<f32>() {
-                    quality = q;
-                }
+            if let Some(rest) = param.strip_prefix("q=")
+                && let Ok(q) = rest.trim().parse::<f32>()
+            {
+                quality = q;
             }
         }
         if quality > 0.0 {

@@ -988,3 +988,111 @@ fn remaining_authoritative_settings_validate_and_enforce_authority() -> Result<(
 
     Ok(())
 }
+
+#[test]
+fn geo_lifecycle_and_resource_settings_helpers_and_mode_derivation() -> Result<()> {
+    use headless_core::config::settings::GeoUrls;
+
+    // Test canonical key and asset mapping
+    for (asset, expected_key) in [
+        ("geoip.dat", "geoip"),
+        ("geosite.dat", "geosite"),
+        ("GeoSite.dat", "geosite"),
+        ("Country.mmdb", "mmdb"),
+        ("geoip.metadb", "mmdb"),
+        ("ASN.mmdb", "asn"),
+    ] {
+        assert_eq!(GeoUrls::key_for_asset(asset), Some(expected_key));
+    }
+    assert_eq!(GeoUrls::key_for_asset("unknown.dat"), None);
+
+    for (key, expected_asset) in [
+        ("geoip", "geoip.dat"),
+        ("geosite", "geosite.dat"),
+        ("mmdb", "Country.mmdb"),
+        ("asn", "ASN.mmdb"),
+    ] {
+        assert_eq!(GeoUrls::asset_for_key(key), Some(expected_asset));
+    }
+    assert_eq!(GeoUrls::asset_for_key("unknown"), None);
+
+    // Test url_for_asset and is_empty
+    let empty_urls = GeoUrls::default();
+    assert!(empty_urls.is_empty());
+    assert_eq!(empty_urls.url_for_asset("geoip.dat"), None);
+
+    let configured_urls = GeoUrls {
+        geoip: Some("https://example.org/geoip.dat".into()),
+        geosite: Some("https://example.org/geosite.dat".into()),
+        mmdb: Some("https://example.org/Country.mmdb".into()),
+        asn: Some("https://example.org/ASN.mmdb".into()),
+    };
+    assert!(!configured_urls.is_empty());
+    assert_eq!(
+        configured_urls.url_for_asset("geoip.dat"),
+        Some("https://example.org/geoip.dat")
+    );
+    assert_eq!(
+        configured_urls.url_for_asset("geosite.dat"),
+        Some("https://example.org/geosite.dat")
+    );
+    assert_eq!(
+        configured_urls.url_for_asset("GeoSite.dat"),
+        Some("https://example.org/geosite.dat")
+    );
+    assert_eq!(
+        configured_urls.url_for_asset("Country.mmdb"),
+        Some("https://example.org/Country.mmdb")
+    );
+    assert_eq!(
+        configured_urls.url_for_asset("geoip.metadb"),
+        Some("https://example.org/Country.mmdb")
+    );
+    assert_eq!(
+        configured_urls.url_for_asset("ASN.mmdb"),
+        Some("https://example.org/ASN.mmdb")
+    );
+    assert_eq!(configured_urls.url_for_asset("unknown.dat"), None);
+
+    // Test RuntimeSettings expected_geo_assets
+    let mut runtime = RuntimeSettings::default();
+    assert_eq!(runtime.expected_geo_assets(), None);
+
+    runtime.geodata_mode = Some(true); // DAT mode
+    assert_eq!(runtime.expected_geo_assets(), Some(&["geoip.dat", "geosite.dat"][..]));
+
+    runtime.geodata_mode = Some(false); // MMDB mode
+    assert_eq!(
+        runtime.expected_geo_assets(),
+        Some(&["Country.mmdb", "ASN.mmdb", "geoip.metadb"][..])
+    );
+
+    // Test overridden_fields across all 9 Geo fields
+    let before: serde_yaml_ng::Mapping = serde_yaml_ng::from_str(
+        "geodata-mode: false\ngeodata-loader: standard\ngeosite-matcher: succinct\ngeo-auto-update: false\ngeo-update-interval: 24\ngeox-url: {geoip: 'https://old.invalid/ip', geosite: 'https://old.invalid/site', mmdb: 'https://old.invalid/db', asn: 'https://old.invalid/asn'}",
+    )?;
+    let settings_yaml = "geodata-mode: true\ngeodata-loader: memconservative\ngeosite-matcher: mph\ngeo-auto-update: true\ngeo-update-interval: 48\ngeox-url: {geoip: 'https://new.invalid/ip', geosite: 'https://new.invalid/site', mmdb: 'https://new.invalid/db', asn: 'https://new.invalid/asn'}";
+    let candidate: RuntimeSettings = serde_yaml_ng::from_str(settings_yaml)?;
+    let after = candidate.enforce(before.clone())?;
+
+    let changed = candidate.overridden_fields(&before, &after)?;
+    for expected in [
+        "geodata-mode",
+        "geodata-loader",
+        "geosite-matcher",
+        "geo-auto-update",
+        "geo-update-interval",
+        "geox-url.geoip",
+        "geox-url.geosite",
+        "geox-url.mmdb",
+        "geox-url.asn",
+    ] {
+        assert!(
+            changed.contains(&expected.to_owned()),
+            "missing changed field {expected} in {changed:?}"
+        );
+    }
+
+    Ok(())
+}
+

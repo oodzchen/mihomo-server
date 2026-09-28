@@ -16,6 +16,11 @@ pub const GEO_ASSETS: &[&str] = &[
     "geoip.metadb",
     "GeoSite.dat",
 ];
+
+/// Check if a filename matches any recognized Geo asset (case-insensitively).
+pub fn is_geo_asset(name: &str) -> bool {
+    GEO_ASSETS.iter().any(|asset| asset.eq_ignore_ascii_case(name))
+}
 pub const MAX_PROVIDERS: usize = 512;
 /// Reserved for source-addressed HTTP caches; never used by local providers.
 pub const HTTP_CACHE_ROOT: &str = "provider-cache";
@@ -253,7 +258,7 @@ fn check_destination(root: &Path, path: &Path, protected: &[PathBuf]) -> Result<
         ]
         .contains(&first.as_ref())
             && !first.starts_with("profile-")
-            && !GEO_ASSETS.contains(&first.as_ref())
+            && !is_geo_asset(&first)
             && !path
                 .components()
                 .any(|part| part.as_os_str().to_string_lossy().starts_with('.')),

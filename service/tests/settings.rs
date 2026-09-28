@@ -1345,7 +1345,7 @@ async fn remaining_authoritative_settings_apply_hot_reload_and_survive_restart()
         assert_eq!(manager.runtime_config().await?, applied);
 
         manager.stop().await?;
-        Ok::<_, anyhow::Error>(manager.settings().await?)
+        manager.settings().await
     }.await;
     let cleanup = manager.shutdown().await;
     let saved_settings = result?;
@@ -1369,3 +1369,78 @@ async fn remaining_authoritative_settings_apply_hot_reload_and_survive_restart()
     let restore_cleanup = restored.shutdown().await;
     restore_result.and(restore_cleanup)
 }
+
+#[tokio::test]
+#[ignore = "requires real Mihomo"]
+async fn geo_lifecycle_settings_apply_readback_and_survive_restart() -> Result<()> {
+    let dir = Directory::new()?;
+    let manager = CoreManager::spawn(dir.options()?)?;
+    let result = async {
+        manager.start().await?;
+        let before = manager.status();
+
+        let settings_yaml = "geodata-mode: false\ngeodata-loader: standard\ngeosite-matcher: succinct\ngeo-auto-update: false\ngeo-update-interval: 48\ngeox-url: {mmdb: 'http://127.0.0.1:0/Country.mmdb', geoip: 'http://127.0.0.1:0/geoip.dat'}";
+        manager.set_settings(serde_yaml_ng::from_str(settings_yaml)?).await?;
+
+        let applied = manager.runtime_config().await?;
+        assert_eq!(applied["geodata-mode"].as_bool(), Some(false));
+        assert_eq!(applied["geodata-loader"].as_str(), Some("standard"));
+        assert_eq!(applied["geosite-matcher"].as_str(), Some("succinct"));
+        assert_eq!(applied["geo-auto-update"].as_bool(), Some(false));
+        assert_eq!(applied["geo-update-interval"].as_u64(), Some(48));
+        assert_eq!(applied["geox-url"]["mmdb"].as_str(), Some("http://127.0.0.1:0/Country.mmdb"));
+        assert_eq!(applied["geox-url"]["geoip"].as_str(), Some("http://127.0.0.1:0/geoip.dat"));
+
+        // Geo settings snapshot readback
+        let geo_snap = manager.geo_settings().await?;
+        assert!(geo_snap.error.is_none());
+        assert!(!geo_snap.fields.is_empty());
+
+        assert_eq!(manager.status().phase, CorePhase::Running);
+        assert_ne!(manager.status().config_revision, before.config_revision);
+
+        // Invalid update interval is rejected and rolls back
+        let invalid = serde_yaml_ng::from_str("geo-update-interval: 0")?;
+        assert!(manager.set_settings(invalid).await.is_err());
+        assert_eq!(manager.status().phase, CorePhase::Running);
+        assert_eq!(manager.runtime_config().await?, applied);
+
+        // Invalid URL scheme is rejected and rolls back
+        let invalid_url = serde_yaml_ng::from_str("geox-url: {mmdb: 'ftp://example.org/db'}")?;
+        assert!(manager.set_settings(invalid_url).await.is_err());
+        assert_eq!(manager.status().phase, CorePhase::Running);
+        assert_eq!(manager.runtime_config().await?, applied);
+
+        manager.stop().await?;
+        manager.settings().await
+    }.await;
+    let cleanup = manager.shutdown().await;
+    let saved_settings = result?;
+    cleanup?;
+
+    // Restart and verify restoration
+    let restored = CoreManager::spawn(dir.options()?)?;
+    let restore_result = async {
+        restored.start().await?;
+        assert_eq!(restored.settings().await?, saved_settings);
+        let restored_config = restored.runtime_config().await?;
+        assert_eq!(restored_config["geodata-mode"].as_bool(), Some(false));
+        assert_eq!(restored_config["geodata-loader"].as_str(), Some("standard"));
+        assert_eq!(restored_config["geosite-matcher"].as_str(), Some("succinct"));
+        assert_eq!(restored_config["geo-auto-update"].as_bool(), Some(false));
+        assert_eq!(restored_config["geo-update-interval"].as_u64(), Some(48));
+        assert_eq!(
+            restored_config["geox-url"]["mmdb"].as_str(),
+            Some("http://127.0.0.1:0/Country.mmdb")
+        );
+        assert_eq!(
+            restored_config["geox-url"]["geoip"].as_str(),
+            Some("http://127.0.0.1:0/geoip.dat")
+        );
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let restore_cleanup = restored.shutdown().await;
+    restore_result.and(restore_cleanup)
+}
+

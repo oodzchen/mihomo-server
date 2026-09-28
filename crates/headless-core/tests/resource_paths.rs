@@ -273,3 +273,68 @@ fn declarations_are_bounded_and_filesystem_changes_are_rechecked_before_start() 
     assert!(dir.prepare(&yaml).is_err());
     Ok(())
 }
+
+#[test]
+fn geo_asset_paths_and_casing_variations_are_strictly_protected_from_provider_hijack() -> Result<()> {
+    use headless_core::config::resource_paths::is_geo_asset;
+
+    // Check helper recognizes all assets and casing variations
+    for name in [
+        "Country.mmdb",
+        "country.mmdb",
+        "COUNTRY.MMDB",
+        "ASN.mmdb",
+        "asn.mmdb",
+        "geoip.dat",
+        "geoip.DAT",
+        "GEOIP.dat",
+        "geosite.dat",
+        "GeoSite.dat",
+        "GEOSITE.DAT",
+        "geoip.metadb",
+        "GEOIP.METADB",
+    ] {
+        assert!(is_geo_asset(name), "failed to recognize Geo asset: {name}");
+    }
+    for non_geo in ["other.dat", "geo.dat", "country.yaml", "", "geoip.dat.bak"] {
+        assert!(!is_geo_asset(non_geo), "false positive Geo asset: {non_geo}");
+    }
+
+    let dir = Directory::new()?;
+    for candidate in [
+        "geoip.DAT",
+        "country.mmdb",
+        "COUNTRY.MMDB",
+        "GEOSITE.DAT",
+        "geoip.dat",
+        "Country.mmdb",
+        "ASN.mmdb",
+        "geoip.metadb",
+    ] {
+        let http_yaml = format!(
+            "proxy-providers: {{a: {{type: http, path: '{candidate}', url: 'https://remote.invalid'}}}}"
+        );
+        assert!(
+            dir.prepare(&http_yaml).is_err(),
+            "accepted HTTP provider path targeting Geo asset: {candidate}"
+        );
+
+        let file_yaml = format!("proxy-providers: {{a: {{type: file, path: '{candidate}'}}}}");
+        assert!(
+            dir.prepare(&file_yaml).is_err(),
+            "accepted file provider path targeting Geo asset: {candidate}"
+        );
+    }
+
+    // Local provider cannot claim the provider-cache root or subdirectory under prepare_owned
+    let local_cache1: Mapping =
+        serde_yaml_ng::from_str("proxy-providers: {a: {type: file, path: 'provider-cache/local.yaml'}}")?;
+    assert!(prepare_owned(local_cache1, &dir.0, &[]).is_err());
+    let local_cache2: Mapping =
+        serde_yaml_ng::from_str("proxy-providers: {a: {type: file, path: 'provider-cache/v1/cache.cache'}}")?;
+    assert!(prepare_owned(local_cache2, &dir.0, &[]).is_err());
+
+    Ok(())
+}
+
+

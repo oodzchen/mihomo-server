@@ -55,4 +55,42 @@ impl GeoUrls {
         }
         Ok(())
     }
+
+    /// Return the committed URL for a specific Geo asset filename if configured.
+    pub fn url_for_asset(&self, name: &str) -> Option<&str> {
+        match name {
+            "geoip.dat" => self.geoip.as_deref(),
+            "geosite.dat" | "GeoSite.dat" => self.geosite.as_deref(),
+            "Country.mmdb" | "geoip.metadb" => self.mmdb.as_deref(),
+            "ASN.mmdb" => self.asn.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Map a config key to its standard Geo asset filename.
+    pub fn asset_for_key(key: &str) -> Option<&'static str> {
+        match key {
+            "geoip" => Some("geoip.dat"),
+            "geosite" => Some("geosite.dat"),
+            "mmdb" => Some("Country.mmdb"),
+            "asn" => Some("ASN.mmdb"),
+            _ => None,
+        }
+    }
+
+    /// Map a Geo asset filename to its config key in geox-url.
+    pub fn key_for_asset(name: &str) -> Option<&'static str> {
+        match name {
+            "geoip.dat" => Some("geoip"),
+            "geosite.dat" | "GeoSite.dat" => Some("geosite"),
+            "Country.mmdb" | "geoip.metadb" => Some("mmdb"),
+            "ASN.mmdb" => Some("asn"),
+            _ => None,
+        }
+    }
+
+    /// Returns true if all configured URLs are empty/None.
+    pub fn is_empty(&self) -> bool {
+        self.geoip.is_none() && self.geosite.is_none() && self.mmdb.is_none() && self.asn.is_none()
+    }
 }
