@@ -8,8 +8,9 @@
 # 1. 实时动态 Loading 动画 (Spinner + 当前操作说明 + 耗时计时器)
 # 2. 长命令输出与大文本折叠显示 (避免终端平铺刷屏，超长输出仅保留首尾若干行)
 # 3. 原始数据 100% 实时原样落盘至日志文件 (保证看门狗与限额检测正常工作)
-# 4. 健壮的状态机：准确识别多行复合命令、精准匹配 succeeded/exited 状态行、识别 apply patch
-# 5. 美化 Codex 答复、指令执行和代码补丁展示
+# 4. 全状态覆盖的补丁/Git Diff 自动折叠捕获 (杜绝任何代码差异泄露导致刷屏覆盖进度)
+# 5. 健壮的状态机：准确识别多行复合命令、精准匹配 succeeded/exited 状态行、识别 apply patch 与环境 diff
+# 6. 美化 Codex 答复、指令执行和代码补丁展示，智能去重冗余环境 diff 输出
 # ==============================================================================
 
 import os
@@ -171,6 +172,56 @@ def fold_output_lines(lines, max_display=6):
     return result
 
 
+def is_diff_start(line):
+    """检测是否为补丁或 unified git diff 的起始行"""
+    s = line.strip()
+    return s.startswith("diff --git ") or s == "apply patch" or s.startswith("apply patch ") or s == "patch: completed"
+
+
+def is_diff_line(raw_line):
+    """判断当前行是否属于正在进行的 unified git diff 或 patch 流"""
+    if STATUS_RE.match(raw_line):
+        return False
+    s = raw_line.strip()
+    if s in ("user", "codex", "exec"):
+        return False
+    if s.startswith("tokens used") or s.startswith("OpenAI Codex"):
+        return False
+    if raw_line.startswith("diff --git ") or s.startswith("diff --git "):
+        return True
+    if raw_line.startswith("index ") or raw_line.startswith("--- ") or raw_line.startswith("+++ "):
+        return True
+    if raw_line.startswith("@@ ") or (raw_line.startswith("@@") and "@@" in raw_line[2:]):
+        return True
+    if any(raw_line.startswith(k) for k in ("old mode ", "new mode ", "new file mode ", "deleted file mode ", "similarity index ", "rename from ", "rename to ")):
+        return True
+    if raw_line.startswith("Binary files ") and "differ" in raw_line:
+        return True
+    if raw_line.startswith("\\ No newline at end of file"):
+        return True
+    if raw_line.startswith("+") or raw_line.startswith("-"):
+        return True
+    if raw_line.startswith(" ") or raw_line == "\n" or raw_line == "\r\n":
+        return True
+    if s == "patch: completed" or s.startswith("apply patch"):
+        return True
+    if s.startswith("/") and not s.startswith("//") and (" " not in s) and ("/" in s):
+        return True
+    return False
+
+
+def fold_code_blocks(text):
+    """折叠文本中过长的 markdown 代码块 (```...```)"""
+    def replacer(match):
+        code = match.group(1)
+        clines = code.splitlines()
+        if len(clines) > 8:
+            kept = clines[:2] + [f"    ┄┄┄ [已折叠 {len(clines)-4} 行代码块] ┄┄┄"] + clines[-2:]
+            return "```\n" + "\n".join(kept) + "\n```"
+        return match.group(0)
+    return re.sub(r"```[^\n]*\n(.*?)\n```", replacer, text, flags=re.DOTALL)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Codex Stream Formatter")
     parser.add_argument("--log-file", help="Path to write complete raw output")
@@ -198,6 +249,12 @@ def main():
     cmd_status = ""
     cmd_output_lines = []
     patch_lines = []
+    ready_lines = []
+
+    last_patch_signature = None
+    is_explicit_patch = False
+    last_reported_patch_files = set()
+    last_codex_msg_clean = ""
 
     captured_session_id = None
     captured_model_name = "Codex"
@@ -224,24 +281,48 @@ def main():
             user_prompt_lines = []
 
     def flush_codex_msg():
-        nonlocal codex_msg_lines
+        nonlocal codex_msg_lines, last_codex_msg_clean
         if codex_msg_lines:
-            text = "\n".join(codex_msg_lines).strip()
-            if text:
+            # 严格过滤任何混入的 diff 格式行
+            clean_lines = []
+            for l in codex_msg_lines:
+                if l.startswith("diff --git ") or l.startswith("index ") or l.startswith("--- ") or l.startswith("+++ ") or l.startswith("@@ "):
+                    continue
+                clean_lines.append(l)
+            raw_text = "\n".join(clean_lines).strip()
+            if raw_text:
+                norm_text = re.sub(r"\s+", " ", raw_text)
+                if norm_text == last_codex_msg_clean:
+                    codex_msg_lines = []
+                    return
+                last_codex_msg_clean = norm_text
+
+                # 折叠文本内的过长代码块
+                text = fold_code_blocks(raw_text)
+                lines = text.splitlines()
+                # 消息整体过长时折叠
+                if len(lines) > 20:
+                    shown = lines[:8] + [f"  {CLR_YELLOW}{CLR_DIM}┄┄┄ [已折叠 {len(lines)-12} 行说明，完整内容详见日志] ┄┄┄{CLR_RESET}"] + lines[-4:]
+                else:
+                    shown = lines
                 block = f"\n{CLR_CYAN}💬 [Codex 答复/分析]{CLR_RESET}\n"
-                for line in text.splitlines():
+                for line in shown:
                     block += f"  {line}\n"
                 renderer.print_block(block)
             codex_msg_lines = []
 
     def flush_patch_block():
-        nonlocal patch_lines
+        nonlocal patch_lines, last_patch_signature, is_explicit_patch, last_reported_patch_files
         if patch_lines:
             files = []
             for l in patch_lines:
                 l_str = l.strip()
                 if l_str.startswith("+++ b/"):
                     files.append(l_str[6:].strip())
+                elif l_str.startswith("diff --git a/"):
+                    m = re.search(r"diff --git a/(.*?) b/", l_str)
+                    if m:
+                        files.append(m.group(1).strip())
                 elif l_str.startswith("/") and not l_str.startswith("//") and not l_str.startswith("---") and not l_str.startswith("+++") and " " not in l_str:
                     parts = l_str.split("/")
                     if any(k in parts for k in ["service", "crates", "web"]):
@@ -253,9 +334,28 @@ def main():
             uniq_files = [f for f in files if not (f in seen or seen.add(f))]
             file_summary = ", ".join(uniq_files) if uniq_files else "代码文件"
             line_count = len(patch_lines)
-            block = f"\n{CLR_MAGENTA}🔧 [代码补丁]{CLR_RESET} {CLR_BOLD}更新 {file_summary}{CLR_RESET} {CLR_DIM}(补丁差异共 {line_count} 行已折叠){CLR_RESET}\n"
-            renderer.print_block(block)
+            sig = (tuple(uniq_files), line_count)
+
+            should_print = False
+            if is_explicit_patch:
+                should_print = True
+                last_reported_patch_files = set(uniq_files)
+            elif uniq_files:
+                # 仅当出现未曾报告过的新文件修改时才打印环境 diff，避免检查命令前后反复刷同一批文件的 diff
+                if not set(uniq_files).issubset(last_reported_patch_files):
+                    should_print = True
+                    last_reported_patch_files.update(uniq_files)
+                elif sig != last_patch_signature and not last_reported_patch_files:
+                    should_print = True
+                    last_reported_patch_files.update(uniq_files)
+
+            if should_print and sig != last_patch_signature:
+                last_patch_signature = sig
+                block = f"\n{CLR_MAGENTA}🔧 [代码补丁]{CLR_RESET} {CLR_BOLD}更新 {file_summary}{CLR_RESET} {CLR_DIM}(补丁差异共 {line_count} 行已折叠){CLR_RESET}\n"
+                renderer.print_block(block)
+
             patch_lines = []
+            is_explicit_patch = False
 
     def flush_exec_block():
         nonlocal current_cmd_lines, cmd_status, cmd_output_lines
@@ -289,11 +389,25 @@ def main():
             cmd_status = ""
             cmd_output_lines = []
 
+    def flush_ready_block():
+        nonlocal ready_lines
+        if ready_lines:
+            ready_text = "\n".join(ready_lines).strip()
+            norm_ready = re.sub(r"\s+", " ", ready_text)
+            if norm_ready and norm_ready == last_codex_msg_clean:
+                ready_lines = []
+                return
+            out_text = "\n".join(fold_output_lines(ready_lines, max_display=4))
+            if out_text:
+                renderer.print_block(out_text)
+            ready_lines = []
+
     def flush_all_blocks():
         flush_user_prompt()
         flush_codex_msg()
         flush_exec_block()
         flush_patch_block()
+        flush_ready_block()
 
     try:
         renderer.set_status("正在与 Codex 建立连接...")
@@ -321,38 +435,107 @@ def main():
                 continue
 
             # ------------------------------------------------------------------
-            # 状态机解析
+            # 1. 检测顶层段落切换标签
+            # ------------------------------------------------------------------
+            if stripped == "user":
+                flush_all_blocks()
+                state = "USER"
+                user_prompt_lines = []
+                renderer.set_status("正在接收处理指令...")
+                continue
+            elif stripped == "codex":
+                flush_all_blocks()
+                state = "CODEX"
+                renderer.set_status("Codex 正在思考与生成...")
+                continue
+            elif stripped == "exec":
+                flush_all_blocks()
+                state = "EXEC"
+                renderer.set_status("正在准备执行终端操作...")
+                continue
+            elif stripped == "apply patch" or stripped.startswith("apply patch"):
+                flush_all_blocks()
+                state = "PATCH"
+                is_explicit_patch = True
+                patch_lines.append(stripped)
+                renderer.set_status("正在应用代码补丁 (Patch)...")
+                continue
+
+            # ------------------------------------------------------------------
+            # 2. 全局 DIFF 检测 (捕获任何状态下出现的 git diff / patch 流)
+            # ------------------------------------------------------------------
+            if is_diff_start(line):
+                if state == "CODEX":
+                    flush_codex_msg()
+                    state = "PATCH"
+                    patch_lines.append(line)
+                    renderer.set_status("正在整理代码补丁与变更...")
+                    continue
+                elif state == "EXEC":
+                    # 命令后伴随的前置工作区 diff，保持命令缓冲，将 diff 转入 patch 收集
+                    state = "EXEC_DIFF"
+                    patch_lines.append(line)
+                    continue
+                elif state == "EXEC_OUTPUT":
+                    # 命令输出后的工作区 diff，冲刷命令输出块并转入 patch 收集
+                    flush_exec_block()
+                    state = "PATCH"
+                    patch_lines.append(line)
+                    continue
+                elif state in ("PATCH", "EXEC_DIFF"):
+                    patch_lines.append(line)
+                    continue
+                elif state in ("READY", "INIT"):
+                    flush_ready_block()
+                    state = "PATCH"
+                    patch_lines.append(line)
+                    continue
+
+            # ------------------------------------------------------------------
+            # 3. 补丁/Diff 收集状态处理
+            # ------------------------------------------------------------------
+            if state == "PATCH":
+                if STATUS_RE.match(line):
+                    flush_patch_block()
+                    cmd_status = stripped.strip()
+                    state = "EXEC_OUTPUT"
+                    continue
+                elif is_diff_line(line):
+                    patch_lines.append(line)
+                    continue
+                else:
+                    flush_patch_block()
+                    state = "READY"
+                    # fall through 继续在 READY 状态下处理当前行
+
+            if state == "EXEC_DIFF":
+                if is_diff_line(line):
+                    patch_lines.append(line)
+                    continue
+                else:
+                    flush_patch_block()
+                    if STATUS_RE.match(stripped):
+                        cmd_status = stripped.strip()
+                        state = "EXEC_OUTPUT"
+                        continue
+                    else:
+                        state = "EXEC"
+                        # fall through 继续在 EXEC 状态下处理当前行
+
+            # ------------------------------------------------------------------
+            # 4. 初始化与 Header 处理
             # ------------------------------------------------------------------
             if state == "INIT":
                 if stripped.startswith("OpenAI Codex"):
                     header_lines.append(stripped)
                     state = "HEADER"
                     continue
-                elif stripped == "user":
-                    state = "USER"
-                    user_prompt_lines = []
-                    continue
-                elif stripped == "codex":
-                    state = "CODEX"
-                    renderer.set_status("Codex 正在生成分析与答复...")
-                    continue
-                elif stripped == "exec":
-                    state = "EXEC"
-                    renderer.set_status("准备执行系统命令...")
-                    continue
-                elif stripped == "apply patch" or stripped.startswith("apply patch"):
-                    state = "PATCH"
-                    renderer.set_status("准备应用代码补丁...")
-                    continue
-                else:
-                    if stripped:
-                        renderer.print_block(f"  {CLR_DIM}{stripped}{CLR_RESET}")
+                elif stripped:
                     continue
 
             if state == "HEADER":
                 header_lines.append(stripped)
                 if stripped == "--------" and len(header_lines) > 2:
-                    # 提炼 Header 关键信息展示徽标 (保留完整的 36 位 UUID 会话 ID)
                     model_match = re.search(r"model:\s*(\S+)", "\n".join(header_lines))
                     sess_hdr_match = re.search(r"session id:\s*([0-9a-fA-F-]+)", "\n".join(header_lines), re.IGNORECASE)
                     if model_match:
@@ -375,29 +558,9 @@ def main():
                     state = "READY"
                 continue
 
-            # 检测段落切换标签
-            if stripped == "user":
-                flush_all_blocks()
-                state = "USER"
-                user_prompt_lines = []
-                renderer.set_status("正在接收处理指令...")
-                continue
-            elif stripped == "codex":
-                flush_all_blocks()
-                state = "CODEX"
-                renderer.set_status("Codex 正在思考与生成...")
-                continue
-            elif stripped == "exec":
-                flush_all_blocks()
-                state = "EXEC"
-                renderer.set_status("正在准备执行终端操作...")
-                continue
-            elif stripped == "apply patch" or stripped.startswith("apply patch"):
-                flush_all_blocks()
-                state = "PATCH"
-                renderer.set_status("正在应用代码补丁 (Patch)...")
-                continue
-
+            # ------------------------------------------------------------------
+            # 5. 各业务状态处理
+            # ------------------------------------------------------------------
             # 用户输入折叠
             if state == "USER":
                 if stripped:
@@ -410,20 +573,13 @@ def main():
                 renderer.set_status("Codex 正在组织回复...")
                 continue
 
-            # 补丁处理
-            if state == "PATCH":
-                patch_lines.append(stripped)
-                continue
-
             # 命令执行处理
             if state == "EXEC":
-                # 检查是否匹配到真实状态行
                 if STATUS_RE.match(stripped):
                     cmd_status = stripped.strip()
                     state = "EXEC_OUTPUT"
                 else:
                     current_cmd_lines.append(stripped)
-                    # 动态更新当前操作提示
                     if current_cmd_lines:
                         short_cmd = clean_command_str(current_cmd_lines[0])
                         if len(short_cmd) > 40:
@@ -431,14 +587,28 @@ def main():
                         renderer.set_status(f"正在执行: {short_cmd}")
                 continue
 
+            # 命令输出处理
             if state == "EXEC_OUTPUT":
-                cmd_output_lines.append(stripped)
+                if STATUS_RE.match(stripped):
+                    # 处理连续并发命令执行时后序返回的 status 行
+                    flush_exec_block()
+                    cmd_status = stripped.strip()
+                    state = "EXEC_OUTPUT"
+                else:
+                    cmd_output_lines.append(stripped)
                 continue
 
-            # READY 状态下的非标签输出 (如错误日志、告警等)
+            # READY 状态下的非标签输出 (带折叠与防冗余保护)
             if state == "READY":
+                if STATUS_RE.match(line):
+                    cmd_status = stripped.strip()
+                    state = "EXEC_OUTPUT"
+                    continue
                 if stripped:
-                    renderer.print_block(f"  {CLR_DIM}{stripped}{CLR_RESET}")
+                    # 忽略末尾的 tokens used 统计及纯数字
+                    if stripped.startswith("tokens used") or re.match(r"^[\d,]+$", stripped):
+                        continue
+                    ready_lines.append(stripped)
                 continue
 
         # 循环结束，冲刷未输出内容
@@ -458,6 +628,7 @@ def main():
                     f"{CLR_YELLOW}│{CLR_RESET} 后续接着会话继续运行命令：\n"
                     f"{CLR_YELLOW}│{CLR_RESET}   ▶ 自动化续跑:   {CLR_GREEN}{CLR_BOLD}./automation/run_autonomous_codex.sh --session {captured_session_id}{CLR_RESET}\n"
                     f"{CLR_YELLOW}│{CLR_RESET}   ▶ 交互式恢复:   {CLR_BLUE}{CLR_BOLD}codex resume {captured_session_id}{CLR_RESET}\n"
+                    f"{CLR_YELLOW}│{CLR_RESET}   ▶ 针对性单次指令追加: {CLR_MAGENTA}{CLR_BOLD}codex exec resume {captured_session_id} \"指令\" {CLR_RESET}\n"
                     f"{CLR_YELLOW}╰───────────────────────────────────────────────────────────────────────────{CLR_RESET}\n"
                 )
                 renderer.print_block(banner)
