@@ -76,6 +76,7 @@ CARGO_JOBS="${CARGO_JOBS:-$DEFAULT_CARGO_JOBS}"             # Cargo 编译与测
 LOG_DIR="${SCRIPT_DIR}/logs"
 mkdir -p "$LOG_DIR"
 SESSION_FILE="${SCRIPT_DIR}/.session_id"
+LAST_AGENT_FILE="${SCRIPT_DIR}/.last_agent"
 MAX_RETAINED_LOGS="${MAX_RETAINED_LOGS:-5}"        # 最多保留的历史轮次全量日志数
 MAX_LOG_DIR_MB="${MAX_LOG_DIR_MB:-15}"             # logs 目录空间占用上限 (MB)
 AUTO_COMPRESS_LOGS="${AUTO_COMPRESS_LOGS:-1}"      # 是否在轮次完成后自动 gzip 压缩全量日志
@@ -300,6 +301,8 @@ handle_manual_interrupt() {
     else
         log_box "已成功安全中断并退出无人值守工作流程。" "$CLR_YELLOW"
     fi
+
+    echo "$AGENT_TYPE" > "$LAST_AGENT_FILE"
 
     exit 130
 }
@@ -740,10 +743,80 @@ PYEOF
 }
 
 # ------------------------------------------------------------------------------
-# 5. 提示词构造 (Prompt Generator)
+# 5. 提示词构造与跨 Agent 状态交接桥 (Prompt Generator & Cross-Agent Handover)
 # ------------------------------------------------------------------------------
+build_handover_context() {
+    local target_agent="$1"
+    local prev_agent="上一任 Agent"
+    if [ -f "$LAST_AGENT_FILE" ]; then
+        local recorded_last
+        recorded_last=$(cat "$LAST_AGENT_FILE" 2>/dev/null | tr -d '[:space:]')
+        if [ "$recorded_last" = "codex" ]; then
+            prev_agent="OpenAI Codex"
+        elif [ "$recorded_last" = "agy" ]; then
+            prev_agent="Google Antigravity CLI (agy)"
+        fi
+    else
+        [ "$target_agent" = "agy" ] && prev_agent="OpenAI Codex"
+        [ "$target_agent" = "codex" ] && prev_agent="Google Antigravity CLI (agy)"
+    fi
+
+    # 1. 查找最近一轮的交付总结文件
+    local last_msg_file
+    last_msg_file=$(find "$LOG_DIR" -maxdepth 1 -name "turn_*_last_msg.txt" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -n 1 | awk '{print $2}')
+    local last_msg_content=""
+    local last_turn_num="未知"
+    if [ -n "$last_msg_file" ] && [ -f "$last_msg_file" ]; then
+        last_turn_num=$(basename "$last_msg_file" | grep -oE '[0-9]+' | head -n 1)
+        last_msg_content=$(cat "$last_msg_file")
+    fi
+
+    # 2. 检查当前工作区未提交的文件
+    local unstaged_status
+    unstaged_status=$(git -C "$PROJECT_ROOT" status -s -- ':!automation' 2>/dev/null || true)
+
+    # 3. 提取最近 5 次 Git 提交
+    local recent_commits
+    recent_commits=$(git -C "$PROJECT_ROOT" log -n 5 --oneline 2>/dev/null || true)
+
+    local handover_block=""
+    handover_block+="================================================================================\n"
+    handover_block+="【关键任务交接简报 - 跨 Agent 会话记忆与状态延续】\n"
+    handover_block+="你当前正在接替 ${prev_agent} 继续推进本项目的无人值守自动化重构与开发工作。\n"
+    handover_block+="为确保开发节奏、未完工代码与架构进度与前序轮次 100% 保持无缝延续，请特别注意以下交接事实：\n"
+    handover_block+="--------------------------------------------------------------------------------\n"
+
+    if [ -n "$unstaged_status" ]; then
+        handover_block+="▶ 1. 【在途未提交代码警报 (In-Flight Worktree Changes)】：\n"
+        handover_block+="当前工作区中保留了 ${prev_agent} 在上一轮中断前正在进行但未及完成提交的代码修改：\n"
+        handover_block+="\`\`\`text\n${unstaged_status}\n\`\`\`\n"
+        handover_block+="【交接核心要求】：请优先检查上述文件，运行 \`cargo check --workspace\` 和相关测试评估当前完成度。\n"
+        handover_block+="如果这部分改动符合架构设计，请直接在此基础上补全测试并完成该子任务，切勿盲目丢弃或推倒重来！\n\n"
+    else
+        handover_block+="▶ 1. 当前工作区处于干净状态，所有前序子任务均已完成原子提交。\n\n"
+    fi
+
+    if [ -n "$last_msg_content" ]; then
+        handover_block+="▶ 2. 【${prev_agent} 最近一轮 (Turn #${last_turn_num}) 的交付总结与后续任务指引】：\n"
+        handover_block+="\`\`\`markdown\n${last_msg_content}\n\`\`\`\n\n"
+    fi
+
+    if [ -n "$recent_commits" ]; then
+        handover_block+="▶ 3. 【近期 5 个切片的 Git 提交历史】：\n"
+        handover_block+="\`\`\`text\n${recent_commits}\n\`\`\`\n"
+    fi
+    handover_block+="================================================================================\n"
+
+    echo -e "$handover_block"
+}
+
 generate_initial_prompt() {
+    local handover_info
+    handover_info=$(build_handover_context "$AGENT_TYPE")
+
     cat <<EOF
+$handover_info
+
 你正在以完全无人值守、高自主性的方式推进本项目的架构重构与开发工作。
 请仔细阅读并严格结合 ./headless.md 和 ./docs/ARCHITECTURE.md 中的要求执行工作。
 
@@ -780,8 +853,19 @@ EOF
 
 generate_continuation_prompt() {
     local extra_warning="$1"
+    local handover_block=""
+    if [ "${turn_count:-1}" -eq 1 ]; then
+        local unstaged_status
+        unstaged_status=$(git -C "$PROJECT_ROOT" status -s -- ':!automation' 2>/dev/null || true)
+        local recorded_last=""
+        [ -f "$LAST_AGENT_FILE" ] && recorded_last=$(cat "$LAST_AGENT_FILE" 2>/dev/null | tr -d '[:space:]')
+        if [ -n "$unstaged_status" ] || [ -n "$recorded_last" -a "$recorded_last" != "$AGENT_TYPE" ]; then
+            handover_block=$(build_handover_context "$AGENT_TYPE")
+        fi
+    fi
+
     cat <<EOF
-继续推进无人值守自动化重构与编程任务。
+${handover_block:+$handover_block\n}继续推进无人值守自动化重构与编程任务。
 $extra_warning
 
 【执行步骤】
@@ -982,6 +1066,8 @@ run_single_turn() {
     if [ -n "$new_session_id" ]; then
         save_session_id "$new_session_id"
     fi
+
+    echo "$AGENT_TYPE" > "$LAST_AGENT_FILE"
 
     LAST_EXIT_CODE=$exit_code
     LAST_WAS_TIMEOUT=$was_timeout

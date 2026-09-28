@@ -89,6 +89,12 @@ and **Google Antigravity CLI (`agy`)** as interchangeable autonomous agent backe
 6. **Host Git atomic commits & progress tracking**: Both engines format standard
    `COMMIT_START ... COMMIT_END` blocks for host-level conventional commits and enforce
    `docs/ARCHITECTURE.md` synchronization and `$COMPLETION_FLAG` guards identically.
+7. **Cross-Agent Handover Bridge**: Resolves session discontinuity when switching agents (e.g.,
+   when Codex hits its 5-hour quota). The host scheduler automatically synthesizes an in-flight
+   worktree diff (`git status -s`), the predecessor's latest turn summary (`turn_*_last_msg.txt`)
+   with explicit next-task directives, and recent Git commits into a structured handover briefing.
+   This ensures the successor agent (`agy`) picks up in-progress code immediately, verifies build
+   and tests, and maintains identical development cadence without discarding work.
 
 ## Complete target architecture
 
