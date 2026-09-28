@@ -1,10 +1,24 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, command, type Perform } from "./api";
+import { t, type Language, type MessageKey } from "./i18n";
 import type { Profile } from "./types";
 
 type Content = { uid: string; revision: string; yaml: string };
+type RawMessage = { key: MessageKey; detail?: string; detailKey?: MessageKey };
+class InvalidRawContentError extends Error {}
 const explain = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
+function renderMessage(language: Language, message: RawMessage): string {
+  return t(language, message.key).replace(
+    "{detail}",
+    message.detailKey ? t(language, message.detailKey) : message.detail ?? "",
+  );
+}
+function failure(key: MessageKey, error: unknown): RawMessage {
+  return error instanceof InvalidRawContentError
+    ? { key, detailKey: "rawInvalidResponse" }
+    : { key, detail: explain(error) };
+}
 function decode(value: unknown, uid: string): Content {
   const content = value as Content;
   if (
@@ -16,13 +30,14 @@ function decode(value: unknown, uid: string): Content {
     typeof content.yaml !== "string" ||
     new TextEncoder().encode(content.yaml).length > 8 * 1024 * 1024
   )
-    throw new Error("服务返回的原始订阅内容无效。");
+    throw new InvalidRawContentError();
   return content;
 }
 
 export function RawEditor({
   item,
   active,
+  language,
   token,
   busy,
   perform,
@@ -31,6 +46,7 @@ export function RawEditor({
 }: {
   item: Profile;
   active: boolean;
+  language: Language;
   token: string;
   busy: boolean;
   perform: Perform;
@@ -42,11 +58,13 @@ export function RawEditor({
   const [yaml, setYaml] = useState("");
   const [working, setWorking] = useState(false),
     [uncertain, setUncertain] = useState(true);
-  const [error, setError] = useState(""),
-    [notice, setNotice] = useState("");
+  const [error, setError] = useState<RawMessage | null>(null),
+    [notice, setNotice] = useState<RawMessage | null>(null);
   const [confirmation, setConfirmation] = useState<"reload" | "close">();
   const alive = useRef(true),
+    languageRef = useRef(language),
     requests = useRef(new Set<AbortController>());
+  languageRef.current = language;
   const disabled = busy || working;
   const dirty = !!base && yaml !== base.yaml;
   const conflict =
@@ -68,7 +86,7 @@ export function RawEditor({
       );
     } catch (error) {
       if (alive.current && error instanceof ApiError && error.status === 401)
-        logout("认证失效，请重新输入令牌。");
+        logout(t(languageRef.current, "expiredToken"));
       throw error;
     } finally {
       requests.current.delete(controller);
@@ -77,8 +95,8 @@ export function RawEditor({
   async function reload() {
     setWorking(true);
     setUncertain(true);
-    setError("");
-    setNotice("");
+    setError(null);
+    setNotice(null);
     setConfirmation(undefined);
     try {
       const next = await read();
@@ -90,7 +108,7 @@ export function RawEditor({
       }
     } catch (error) {
       if (alive.current)
-        setError(`读取原始订阅失败：${explain(error)}。草稿未被替换。`);
+        setError(failure("rawReadFailed", error));
     } finally {
       if (alive.current) setWorking(false);
     }
@@ -106,8 +124,8 @@ export function RawEditor({
   async function verify() {
     setWorking(true);
     setUncertain(true);
-    setError("");
-    setNotice("");
+    setError(null);
+    setNotice(null);
     setConfirmation(undefined);
     try {
       const next = await read();
@@ -116,15 +134,13 @@ export function RawEditor({
         setUncertain(false);
         if (next.yaml === yaml) {
           setBase(next);
-          setNotice("已核对：服务已保存当前原始订阅草稿。");
+          setNotice({ key: "rawVerifiedSame" });
         } else
-          setNotice(
-            "已核对：服务内容与草稿不同，草稿已保留。版本变化时请重新读取后再编辑。",
-          );
+          setNotice({ key: "rawVerifiedDifferent" });
       }
     } catch (error) {
       if (alive.current)
-        setError(`核对原始订阅失败：${explain(error)}。请核对后再提交。`);
+        setError(failure("rawVerifyFailed", error));
     } finally {
       if (alive.current) setWorking(false);
     }
@@ -133,14 +149,14 @@ export function RawEditor({
     event.preventDefault();
     if (!base || disabled || uncertain || conflict) return;
     if (new TextEncoder().encode(yaml).length > 8 * 1024 * 1024) {
-      setError("原始订阅不能超过 8 MiB。");
+      setError({ key: "rawTooLarge" });
       return;
     }
     const requested = yaml;
     setWorking(true);
     setUncertain(true);
-    setError("");
-    setNotice("");
+    setError(null);
+    setNotice(null);
     setConfirmation(undefined);
     const result = await perform<unknown>("set_profile_raw", {
       uid: item.uid,
@@ -155,58 +171,48 @@ export function RawEditor({
       setUncertain(false);
       if (next.yaml === requested) {
         setBase(next);
-        setNotice(
-          result
-            ? "原始订阅保存结果已核对。"
-            : "请求报告错误，但服务已保存此草稿，已核对，无需重复提交。",
-        );
+        setNotice({ key: result ? "rawSaved" : "rawSavedDespiteError" });
       } else
-        setNotice(
-          "服务原始订阅与提交内容不同，草稿已保留。请检查错误；版本变化时需重新读取。",
-        );
+        setNotice({ key: "rawSavedDifferent" });
     } catch (error) {
       if (alive.current)
-        setError(
-          `保存结果尚未核对：${explain(error)}。草稿已保留，请先核对原始订阅。`,
-        );
+        setError(failure("rawSaveUnverified", error));
     } finally {
       if (alive.current) setWorking(false);
     }
   }
   return (
-    <section className="panel" aria-label="原始订阅编辑器">
-      <h2>原始订阅 YAML</h2>
+    <section className="panel" aria-label={t(language, "rawEditorRegion")}>
+      <h2>{t(language, "rawEditorTitle")}</h2>
       <p className="muted">
-        编辑 {item.name || item.uid} 的原始内容。
+        {t(language, "rawEditorIntro").replace("{name}", item.name || item.uid)}
         {active
-          ? "当前订阅保存前会校验原始 YAML，重新生成增强配置并应用；已停止的内核保持停止。"
-          : "此订阅保存前会校验原始 YAML；下次使用时生成增强配置。"}
+          ? t(language, "rawEditorActive")
+          : t(language, "rawEditorInactive")}
       </p>
-      <p className="hint">
-        保留名称、链接、用量、节点记录和增强关联。远程订阅下次刷新会替换手动内容。保存失败保留草稿；重新读取会替换草稿。离开订阅页会丢弃草稿。
-      </p>
+      <p className="hint">{t(language, "rawEditorHint")}</p>
       {error && (
         <p className="alert" role="alert">
-          {error}
+          {renderMessage(language, error)}
         </p>
       )}
       {notice && (
         <p className="info" role="status">
-          {notice}
+          {renderMessage(language, notice)}
         </p>
       )}
       {conflict && (
         <p className="alert" role="alert">
-          原始订阅版本已变化。为避免覆盖其他修改，请重新读取后再编辑。
+          {t(language, "rawConflict")}
         </p>
       )}
-      {uncertain && <p className="hint">原始订阅状态待核对，提交暂不可用。</p>}
+      {uncertain && <p className="hint">{t(language, "rawUncertain")}</p>}
       {base && (
-        <form onSubmit={save} aria-label="原始订阅表单">
+        <form onSubmit={save} aria-label={t(language, "rawForm")}>
           <label>
-            原始订阅 YAML
+            {t(language, "rawYaml")}
             <textarea
-              aria-label="原始订阅 YAML"
+              aria-label={t(language, "rawYaml")}
               className="code"
               rows={18}
               disabled={disabled}
@@ -214,8 +220,8 @@ export function RawEditor({
               spellCheck={false}
               onChange={(event) => {
                 setYaml(event.target.value);
-                setError("");
-                setNotice("");
+                setError(null);
+                setNotice(null);
                 setConfirmation(undefined);
               }}
             />
@@ -225,14 +231,14 @@ export function RawEditor({
               className="primary"
               disabled={disabled || uncertain || conflict || !dirty}
             >
-              保存原始订阅
+              {t(language, "rawSave")}
             </button>
             <button
               type="button"
               disabled={disabled}
               onClick={() => void verify()}
             >
-              核对原始订阅
+              {t(language, "rawVerify")}
             </button>
           </div>
         </form>
@@ -246,25 +252,25 @@ export function RawEditor({
               : void reload()
           }
         >
-          {base ? "重新读取原始订阅" : "重试读取原始订阅"}
+          {base ? t(language, "rawReload") : t(language, "rawRetry")}
         </button>
         <button
           disabled={disabled}
           onClick={() => (dirty ? setConfirmation("close") : onClose())}
         >
-          关闭原始编辑器
+          {t(language, "rawClose")}
         </button>
       </div>
       {confirmation && (
         <div
           className="reset-confirmation"
           role="group"
-          aria-label="原始订阅草稿替换确认"
+          aria-label={t(language, "rawConfirmRegion")}
         >
           <p>
             {confirmation === "reload"
-              ? "重新读取会用服务当前原始内容替换草稿。"
-              : "关闭会丢弃未保存的原始订阅草稿。"}
+              ? t(language, "rawReloadWarning")
+              : t(language, "rawCloseWarning")}
           </p>
           <div className="actions">
             <button
@@ -274,14 +280,14 @@ export function RawEditor({
               }
             >
               {confirmation === "reload"
-                ? "确认重新读取原始订阅"
-                : "确认丢弃原始草稿"}
+                ? t(language, "rawConfirmReload")
+                : t(language, "rawConfirmClose")}
             </button>
             <button
               disabled={disabled}
               onClick={() => setConfirmation(undefined)}
             >
-              继续编辑原始订阅
+              {t(language, "rawKeepEditing")}
             </button>
           </div>
         </div>

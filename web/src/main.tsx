@@ -1453,6 +1453,7 @@ function ProfilePage({
             key={rawEditing}
             item={profiles.items.find((item) => item.uid === rawEditing)!}
             active={status.active_profile === rawEditing}
+            language={language}
             token={token}
             busy={busy}
             perform={perform}

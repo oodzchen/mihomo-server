@@ -370,6 +370,53 @@ test("profile metadata editor keeps remote draft across language changes and sav
   await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
 });
 
+test("raw profile editor retranslates feedback and preserves draft across language changes", async ({ page }) => {
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByLabel("订阅名称", { exact: true }).fill("RawLanguage");
+  await page.getByLabel("订阅 YAML", { exact: true }).fill("proxies: []\nmode: direct\n");
+  await page.getByRole("button", { name: "导入订阅", exact: true }).click();
+  const profile = page.locator("article.profile").filter({ has: page.getByRole("heading", { name: "RawLanguage" }) });
+  await expect(profile).toBeVisible();
+  const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  const failRead = async (route: import("@playwright/test").Route) => {
+    if (route.request().postDataJSON()?.command === "profile_raw")
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture raw read failed" } }) });
+    else await route.continue();
+  };
+  await page.route("**/api/commands", failRead);
+  await profile.getByRole("button", { name: "编辑原始订阅 RawLanguage" }).click();
+  await expect(page.getByRole("region", { name: "原始订阅编辑器" }).getByRole("alert")).toContainText("读取原始订阅失败");
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  const english = page.getByRole("region", { name: "Raw profile editor" });
+  await expect(english.getByRole("alert")).toContainText("Failed to read the raw profile: fixture raw read failed");
+  await page.unroute("**/api/commands", failRead);
+  await english.getByRole("button", { name: "Retry reading raw profile" }).click();
+  const draft = "# translated draft\nproxies: []\nmode: direct\n";
+  await english.getByRole("textbox", { name: "Raw profile YAML" }).fill(draft);
+  await english.getByRole("button", { name: "Reload raw profile" }).click();
+  await expect(english.getByRole("group", { name: "Confirm raw draft replacement" })).toContainText("Reloading replaces the draft");
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  const chinese = page.getByRole("region", { name: "原始订阅编辑器" });
+  await expect(chinese.getByRole("group", { name: "原始订阅草稿替换确认" })).toContainText("重新读取会用服务当前原始内容替换草稿。");
+  await expect(chinese.getByRole("textbox", { name: "原始订阅 YAML" })).toHaveValue(draft);
+  await chinese.getByRole("button", { name: "继续编辑原始订阅" }).click();
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await english.getByRole("button", { name: "Verify raw profile" }).click();
+  await expect(english.getByRole("status")).toContainText("service content differs from the draft");
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(chinese.getByRole("status")).toContainText("服务内容与草稿不同");
+  await expect(chinese.getByRole("textbox", { name: "原始订阅 YAML" })).toHaveValue(draft);
+  const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  expect(after.generation).toBe(before.generation);
+  await chinese.getByRole("button", { name: "关闭原始编辑器" }).click();
+  await chinese.getByRole("button", { name: "确认丢弃原始草稿" }).click();
+  await profile.getByRole("button", { name: "删除订阅 RawLanguage" }).click();
+  await profile.getByRole("button", { name: "确认删除 RawLanguage" }).click();
+  await expect(page.getByText("还没有订阅。导入一个 YAML 文件开始使用。")).toBeVisible();
+});
+
 test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
   await page.goto(`${base}/settings`);
   await page.getByLabel("管理令牌").fill(token);
