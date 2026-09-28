@@ -119,7 +119,7 @@ mihomo-server/
 │   │   ├── Presence-preserving Geo GET /configs projection and URL aliases [Implemented; Linux verified]
 │   │   └── Realtime feeds, cancellation, reconnect   [Migrated]
 <!--│   │   └── Windows Named Pipe runtime validation    [Deferred; code retained; Windows compatibility postponed] -->
-│   └── headless-core/                               [Partially migrated]
+│   └── headless-core/                               [Implemented; Linux verified]
 │       ├── Draft and limiter type re-exports        [Implemented]
 │       ├── Subscription models and YAML schema     [Migrated]
 │       ├── Runtime revisions, manifest, commit/recovery
@@ -163,7 +163,7 @@ mihomo-server/
 │       ├── Remaining authoritative settings (bind, auth, LAN ACL, TFO/MPTCP, sniffing) [Implemented; Linux verified]
 │       ├── Source-addressed HTTP provider cache identities / implicit paths [Implemented; Linux verified]
 │       ├── Runtime YAML + overlay generation        [Implemented; upstream merge reused]
-│       ├── Profile enhancement generation          [Partially implemented; sequences/settings/TUN/DNS/global/profile/final stages]
+│       ├── Profile enhancement generation          [Implemented; sequences/settings/TUN/DNS/global/profile/final stages; Linux verified]
 │       ├── Per-profile node selection records       [Implemented; upstream schema]
 │       ├── Provider path authority / normalized destinations / SHA-256 cache allocation [Migrated + service adaptation; Linux verified]
 │       ├── Remaining Geo lifecycle / resource settings [Implemented; Linux verified]
@@ -176,7 +176,7 @@ mihomo-server/
 │       ├── Retained backup metadata / list / create-delete receipt models [Implemented]
 │       ├── Full resource settings                       [Implemented; Linux verified]
 │       └── Automatic retention models               [Deferred; outside active scope]
-├── service/                                         [Partially implemented]
+├── service/                                         [Implemented; Linux verified]
 │   ├── Persistent foreground entry point            [Implemented]
 │   ├── Binary/data/config/import args, directory lock [Implemented]
 │   ├── Listen/public-origin args and private token [Implemented; Linux verified]
@@ -232,7 +232,7 @@ mihomo-server/
 │   │   ├── TLS platform/static roots / explicit certificate option [Migrated + adaptation; Linux verified]
 │   │   ├── Scheduled refresh / retirement / bounded workers / drain [Migrated + adaptation; Linux verified]
 │   │   └── SOCKS/PAC                               [Deferred; outside active scope]
-│   ├── Core release preparation / stable and Alpha activation [Partially implemented; Linux x86_64]
+│   ├── Core release preparation / stable and Alpha activation [Implemented; Linux x86_64 verified]
 │   │   ├── Official stable/Alpha metadata and platform asset [Implemented; Linux x86_64]
 │   │   ├── Bounded compressed download / SHA-256 / private atomic cache [Implemented]
 │   │   ├── Authenticated preparation/readback / cancellation [Implemented]
@@ -251,7 +251,7 @@ mihomo-server/
 │   ├── Node selection / unfix / persistence rollback [Implemented; Linux verified]
 │   ├── Selection reconciliation and restoration    [Migrated + actor adaptation]
 │   │   └── Startup keep-records, apply repair, bounded provider retries
-│   ├── Local backup export, inspection, restoration and retained storage [Partially implemented; Linux verified]
+│   ├── Local backup export, inspection, restoration and retained storage [Implemented; Linux verified]
 │   │   ├── Actor snapshot / bounded ZIP / digest manifest [Implemented]
 │   │   ├── Authenticated binary download / single body-owned admission [Implemented]
 │   │   ├── Strict ZIP structure / CRC / SHA-256 / catalog and settings references [Implemented; Linux verified]
@@ -5152,6 +5152,14 @@ Delivery step 7 (P1) completes the remaining full settings and resource lifecycl
   - Workspace checks: `cargo check --workspace --tests` and `cargo clippy --workspace --all-targets -- -D warnings` pass with 0 warnings; all 20 python tests in `scripts/tests` pass.
 
 The tree above marks Remaining full settings/resource lifecycle UI as implemented and browser verified. All active P1, P2, P3, and P4 tasks are now fully delivered and verified.
+
+## Final status synchronization: active scope completion
+
+With the delivery of the authoritative listener/access control settings and provider lifecycle UI, all active scope priorities defined under P1, P2, P3, and P4 have been fully implemented and verified on Linux x86_64:
+- `headless-core/` and its enhancement generation stages are marked as `[Implemented; Linux verified]`.
+- `service/` and its Linux-scoped subsystems (core release preparation and local backup export/inspection/restore) are marked as `[Implemented; Linux verified]`.
+- Non-active capabilities (Windows compatibility, automatic retention / scheduled backups, full connection dashboards, PAC/SOCKS) remain explicitly marked as `[Deferred]`.
+- Verification across the full workspace passes without errors or warnings (`cargo check`, `cargo clippy`, `cargo test`, `tsc`, `vite build`, `scripts/tests`).
 
 ## MVP completion boundary
 
