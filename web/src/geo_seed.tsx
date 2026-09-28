@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, command } from "./api";
+import { t, type Language } from "./i18n";
 import type { CoreStatus } from "./types";
 
 type Seed = { name: string; current_sha256: string | null; seed_sha256: string; seed_bytes: number };
 type Receipt = { changed: boolean; durable: boolean; cleanup_pending: boolean; core_load_verified?: boolean; validation: { verified: boolean; sha256: string } };
 
-export function GeoSeedAction({ name, token, status, connection, logout, installed }: {
+export function GeoSeedAction({ name, token, status, connection, logout, installed, language = "zh" }: {
   name: string; token: string; status: CoreStatus; connection: string;
   logout: (reason?: string) => void; installed: (message: string) => void;
+  language?: Language;
 }) {
   const dat = name.endsWith(".dat");
   const [seed, setSeed] = useState<Seed>();
@@ -36,16 +38,19 @@ export function GeoSeedAction({ name, token, status, connection, logout, install
           expected_seed_sha256: seed.seed_sha256, accept_metadata_only: accept,
         }, abort.signal);
         if (version !== epoch.current) return;
-        if (dat && receipt.core_load_verified !== true) throw new Error("服务未确认 DAT 隔离内核规则加载。");
+        if (dat && receipt.core_load_verified !== true) throw new Error(t(language, "geoSeedDatProbeFailed"));
         setSeed(undefined);
-        installed(`${name}：${receipt.changed ? "已安装打包资源" : "当前文件已与打包资源一致"} · ${dat ? "DAT 结构及隔离内核规则加载通过；实际配置匹配效果仍需验证" : receipt.validation.verified ? "MMDB 结构校验通过" : "描述为空，完整结构未验证"} · SHA-256 ${receipt.validation.sha256}${!receipt.durable || receipt.cleanup_pending ? " · 目录同步或暂存清理未完成，请核对文件状态" : ""}`);
+        const changeStatus = receipt.changed ? t(language, "geoSeedChanged") : t(language, "geoSeedUnchanged");
+        const structureStatus = dat ? t(language, "geoSeedDatStatus") : receipt.validation.verified ? t(language, "geoSeedMmdbVerified") : t(language, "geoSeedMmdbUnverified");
+        const syncStatus = !receipt.durable || receipt.cleanup_pending ? t(language, "geoSeedSyncPending") : "";
+        installed(t(language, "geoSeedInstalled", { name, changeStatus, structureStatus, sha256: receipt.validation.sha256, syncStatus }));
       } else {
         const next = await command<Seed>(token, "geo_seed", { name }, abort.signal);
         if (version === epoch.current) setSeed(next);
       }
     } catch (error) {
       if (version !== epoch.current) return;
-      if (error instanceof ApiError && error.status === 401) logout("认证失效，请重新输入令牌。");
+      if (error instanceof ApiError && error.status === 401) logout(t(language, "expiredToken"));
       else setError(error instanceof Error ? error.message : String(error));
       // A failed/ambiguous install must be inspected again, never retried with stale state.
       if (install) setSeed(undefined);
@@ -54,15 +59,15 @@ export function GeoSeedAction({ name, token, status, connection, logout, install
     }
   }
   return <div>
-    <button type="button" disabled={busy || connection !== "已连接"} onClick={() => void run(false)}>读取 {name} 打包更新</button>
+    <button type="button" disabled={busy || connection !== "已连接"} onClick={() => void run(false)}>{t(language, "geoSeedRead", { name })}</button>
     {seed && <>
-      <p>候选：{seed.seed_bytes} 字节 · SHA-256 <code>{seed.seed_sha256}</code></p>
-      <p>当前：<code>{seed.current_sha256 || "文件缺失"}</code></p>
-      {!dat && <label><input type="checkbox" checked={accept} disabled={busy} onChange={event => setAccept(event.target.checked)} />允许安装描述为空、完整结构未验证的 MMDB</label>}
-      {status.phase !== "stopped" && <p className="info">停止内核后可安装打包资源。</p>}
-      <button type="button" disabled={busy || connection !== "已连接" || status.phase !== "stopped"} onClick={() => void run(true)}>安装 {name} 打包资源</button>
+      <p>{t(language, "geoSeedCandidate", { bytes: seed.seed_bytes })}<code>{seed.seed_sha256}</code></p>
+      <p>{t(language, "geoSeedCurrent")}<code>{seed.current_sha256 || t(language, "geoSeedFileMissing")}</code></p>
+      {!dat && <label><input type="checkbox" checked={accept} disabled={busy} onChange={event => setAccept(event.target.checked)} />{t(language, "geoSeedAllowEmptyMmdb")}</label>}
+      {status.phase !== "stopped" && <p className="info">{t(language, "geoSeedStoppedNotice")}</p>}
+      <button type="button" disabled={busy || connection !== "已连接" || status.phase !== "stopped"} onClick={() => void run(true)}>{t(language, "geoSeedInstall", { name })}</button>
     </>}
-    {busy && <p role="status">正在处理打包资源…</p>}
-    {error && <p role="alert" className="alert">打包资源操作失败：{error}</p>}
+    {busy && <p role="status">{t(language, "geoSeedWorking")}</p>}
+    {error && <p role="alert" className="alert">{t(language, "geoSeedFailed", { message: error })}</p>}
   </div>;
 }

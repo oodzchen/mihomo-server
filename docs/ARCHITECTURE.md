@@ -53,16 +53,17 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** the core upgrade view (`CoreUpgradePage`) now
-follows the browser's Chinese/English language selection: channel switcher
-(Stable/Alpha), release and install status summaries, version details, action
-buttons (check updates, upgrade, force reinstall with confirmation dialog),
-in-progress notices, report banners, mismatch warnings, and operational hints.
-Switching channels and languages dynamically updates titles, notices, and button
-labels without unmounting or triggering duplicate network requests.
-**Next implementation task (P3):** translate resource views (Geo and provider
-management panels and offline/online update actions), followed by
-service-message localization and additional browser languages.
+**Latest completed task (P3):** the resource inventory panel (`ResourcesPanel`),
+offline bundle actions (`GeoSeedAction`), and online Geo update actions (`GeoOnlineAction`)
+now follow the browser's Chinese/English language selection: runtime data and bundle
+directory labels, auto-update policy status, core effective readback, freshness and
+file state tags, structure validation summaries (MMDB and DAT records, groups, regex,
+attributes, and CN group status), candidate and current fingerprint displays,
+download route choices, certificate error bypass advisories, busy indicators, and
+installation receipts. Switching languages dynamically translates all active
+cards, readouts, and status notices without losing loaded resources or in-flight operations.
+**Next implementation task (P3):** translate service-message errors and notifications,
+followed by additional browser languages and signals verification.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -346,7 +347,8 @@ mihomo-server/
 │   ├── Rule-provider inventory/update controls and status feedback zh/en [Implemented; P3; browser verified]
 │   ├── Log view zh/en heading, filter input, clear action and empty/unmatched states [Implemented; P3; browser verified]
 │   ├── Core upgrade view zh/en channels, release info, install records and action dialogs [Implemented; P3; browser verified]
-│   ├── Resource views, additional languages and service-message localization [Pending; P3]
+│   ├── Resource views zh/en inventory, auto-update policy, validation and seed/online actions [Implemented; P3; browser verified]
+│   ├── Additional languages and service-message localization [Pending; P3]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4470,7 +4472,35 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: core upgrade view localization
+## Current increment: resource views and Geo action localization
+
+Delivery step 9 (P3) now localizes the runtime resource inventory panel
+(`ResourcesPanel`), offline seed installation controls (`GeoSeedAction`), and
+online Geo download controls (`GeoOnlineAction`): section titles, refresh
+actions, data/bundle directory prefixes, Geo auto-update policy statuses
+(active, disabled, stopped, indeterminate), core effective readback, freshness
+badges (fresh, stale, indeterminate), file metadata labels (file exists,
+missing, empty, unreadable, etc.), relative file modification timestamps,
+MMDB/DAT structural validation messages with detailed group/record/attribute
+counts and CN group detection, seed candidate and current file fingerprints,
+download route options (direct, system proxy, managed proxy), certificate
+verification warnings, empty-description MMDB installation allowances, in-flight
+progress indicators, and detailed completion receipts. All dynamic placeholders
+interpolate via `t()`. Switching between Chinese and English preserves loaded
+inventory, open seed/online cards, and in-flight operations without unmounting
+or triggering redundant requests.
+
+Verification: `cargo check --workspace` and the Web production build pass. A
+Playwright workflow navigates to the settings page, mocks resource inventory
+and seed/online endpoints, verifies Chinese labels, validation buttons, and
+expanded seed/online forms, switches to English and confirms all translated
+headers, policy statuses, file state tags, action buttons, and route dropdowns,
+and switches back to Chinese. The full browser regression test suite reports
+**49 passed and 4 optional upgrade workflows skipped**. The complete architecture
+tree above is synchronized. Next: translate service-message errors and
+notifications, followed by additional browser languages and signals verification.
+
+## Previous increment: core upgrade view localization
 
 Delivery step 9 (P3) now localizes the core upgrade panel (`CoreUpgradePage`):
 channel selector (Stable / Alpha), panel titles, install info refresh action,

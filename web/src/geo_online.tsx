@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, command } from "./api";
+import { t, type Language } from "./i18n";
 import type { CoreStatus } from "./types";
 
 type Info = { name: string; current_sha256: string | null; source_sha256: string };
 type Receipt = { changed: boolean; durable: boolean; cleanup_pending: boolean; core_load_verified?: boolean; validation: { verified: boolean; sha256: string; format: string } };
 type Route = "direct" | "system" | "managed";
 
-export function GeoOnlineAction({ name, token, status, connection, logout, installed }: {
+export function GeoOnlineAction({ name, token, status, connection, logout, installed, language = "zh" }: {
   name: string; token: string; status: CoreStatus; connection: string;
   logout: (reason?: string) => void; installed: (message: string) => void;
+  language?: Language;
 }) {
   const [info, setInfo] = useState<Info>();
   const [pin, setPin] = useState("");
@@ -29,7 +31,7 @@ export function GeoOnlineAction({ name, token, status, connection, logout, insta
   async function run(update: boolean) {
     if (busy || (update && !info)) return;
     if (update && pin && !/^[a-fA-F0-9]{64}$/.test(pin)) {
-      setError("下载 SHA-256 必须是 64 位十六进制值。"); return;
+      setError(t(language, "geoOnlineHexError")); return;
     }
     const version = epoch.current;
     const abort = new AbortController(); controller.current = abort;
@@ -46,16 +48,20 @@ export function GeoOnlineAction({ name, token, status, connection, logout, insta
           danger_accept_invalid_certs: invalidCerts,
         }, abort.signal);
         if (version !== epoch.current) return;
-        if (dat && receipt.core_load_verified !== true) throw new Error("服务未确认 DAT 隔离内核规则加载。");
+        if (dat && receipt.core_load_verified !== true) throw new Error(t(language, "geoSeedDatProbeFailed"));
         setInfo(undefined);
-        installed(`${name}：${receipt.changed ? "已安装在线资源" : "当前文件已与下载资源一致"}${status.phase === "running" && receipt.changed ? " · 核心已重启验证" : ""} · ${dat ? "DAT 结构及隔离内核规则加载通过" : receipt.validation.verified ? "MMDB 结构校验通过" : "描述为空，完整结构未验证"} · SHA-256 ${receipt.validation.sha256}${!receipt.durable || receipt.cleanup_pending ? " · 目录同步或暂存清理未完成，请核对文件状态" : ""}`);
+        const changeStatus = receipt.changed ? t(language, "geoOnlineChanged") : t(language, "geoOnlineUnchanged");
+        const restartedStatus = status.phase === "running" && receipt.changed ? t(language, "geoOnlineRestarted") : "";
+        const structureStatus = dat ? t(language, "geoOnlineDatStatus") : receipt.validation.verified ? t(language, "geoSeedMmdbVerified") : t(language, "geoSeedMmdbUnverified");
+        const syncStatus = !receipt.durable || receipt.cleanup_pending ? t(language, "geoSeedSyncPending") : "";
+        installed(t(language, "geoOnlineInstalled", { name, changeStatus, restartedStatus, structureStatus, sha256: receipt.validation.sha256, syncStatus }));
       } else {
         const next = await command<Info>(token, "geo_online_info", { name }, abort.signal);
         if (version === epoch.current) setInfo(next);
       }
     } catch (cause) {
       if (version !== epoch.current) return;
-      if (cause instanceof ApiError && cause.status === 401) logout("认证失效，请重新输入令牌。");
+      if (cause instanceof ApiError && cause.status === 401) logout(t(language, "expiredToken"));
       else setError(cause instanceof Error ? cause.message : String(cause));
       if (update) setInfo(undefined);
     } finally {
@@ -63,22 +69,22 @@ export function GeoOnlineAction({ name, token, status, connection, logout, insta
     }
   }
   return <div>
-    <button type="button" disabled={busy || connection !== "已连接"} onClick={() => void run(false)}>读取 {name} 在线来源</button>
+    <button type="button" disabled={busy || connection !== "已连接"} onClick={() => void run(false)}>{t(language, "geoOnlineRead", { name })}</button>
     {info && <>
-      <p>已提交来源指纹：<code>{info.source_sha256}</code></p>
-      <p>当前文件：<code>{info.current_sha256 || "文件缺失"}</code></p>
-      <label>可选下载 SHA-256 <input value={pin} disabled={busy} onChange={event => setPin(event.target.value.trim())} /></label>
-      <label>下载路由 <select value={route} disabled={busy} onChange={event => setRoute(event.target.value as Route)}>
-        <option value="direct">直连</option><option value="system">服务系统代理</option><option value="managed" disabled={status.phase !== "running"}>运行中核心代理</option>
+      <p>{t(language, "geoOnlineCommittedFingerprint")}<code>{info.source_sha256}</code></p>
+      <p>{t(language, "geoOnlineCurrentFile")}<code>{info.current_sha256 || t(language, "geoSeedFileMissing")}</code></p>
+      <label>{t(language, "geoOnlineOptionalSha256")} <input value={pin} disabled={busy} onChange={event => setPin(event.target.value.trim())} /></label>
+      <label>{t(language, "geoOnlineDownloadRoute")} <select value={route} disabled={busy} onChange={event => setRoute(event.target.value as Route)}>
+        <option value="direct">{t(language, "geoOnlineRouteDirect")}</option><option value="system">{t(language, "geoOnlineRouteSystem")}</option><option value="managed" disabled={status.phase !== "running"}>{t(language, "geoOnlineRouteManaged")}</option>
       </select></label>
-      <label><input type="checkbox" checked={invalidCerts} disabled={busy} onChange={event => setInvalidCerts(event.target.checked)} />显式忽略下载来源证书错误</label>
-      <p className="info">默认验证平台证书，证书链失败时会尝试静态根证书。忽略证书错误仅用于可信来源。</p>
-      {!dat && <label><input type="checkbox" checked={accept} disabled={busy} onChange={event => setAccept(event.target.checked)} />允许安装描述为空、完整结构未验证的 MMDB</label>}
-      {status.phase === "running" && <p className="info">更新时将短暂停止核心，验证新资源后重启；失败会尝试恢复旧文件和核心。</p>}
-      {!(["running", "stopped"] as string[]).includes(status.phase) && <p className="info">核心进入运行或停止状态后才能更新在线 Geo 资源。</p>}
-      <button type="button" disabled={busy || connection !== "已连接" || !(["running", "stopped"] as string[]).includes(status.phase) || (route === "managed" && status.phase !== "running")} onClick={() => void run(true)}>更新 {name} 在线资源</button>
+      <label><input type="checkbox" checked={invalidCerts} disabled={busy} onChange={event => setInvalidCerts(event.target.checked)} />{t(language, "geoOnlineIgnoreCerts")}</label>
+      <p className="info">{t(language, "geoOnlineCertNotice")}</p>
+      {!dat && <label><input type="checkbox" checked={accept} disabled={busy} onChange={event => setAccept(event.target.checked)} />{t(language, "geoSeedAllowEmptyMmdb")}</label>}
+      {status.phase === "running" && <p className="info">{t(language, "geoOnlineRunningNotice")}</p>}
+      {!(["running", "stopped"] as string[]).includes(status.phase) && <p className="info">{t(language, "geoOnlinePhaseNotice")}</p>}
+      <button type="button" disabled={busy || connection !== "已连接" || !(["running", "stopped"] as string[]).includes(status.phase) || (route === "managed" && status.phase !== "running")} onClick={() => void run(true)}>{t(language, "geoOnlineUpdate", { name })}</button>
     </>}
-    {busy && <p role="status">正在处理在线 Geo 资源…</p>}
-    {error && <p role="alert" className="alert">在线 Geo 更新失败：{error}</p>}
+    {busy && <p role="status">{t(language, "geoOnlineWorking")}</p>}
+    {error && <p role="alert" className="alert">{t(language, "geoOnlineFailed", { message: error })}</p>}
   </div>;
 }

@@ -17,6 +17,7 @@ import { DOWNLOAD_KEYS, DownloadFields, downloadDraft, downloadRuntime, validate
 import { HostsFields, hostsDraft, hostsRuntime, validateHosts } from "./hosts-settings";
 import { SettingsReadback } from "./settings-readback";
 import { ResourcesPanel } from "./resources";
+import type { Language } from "./i18n";
 
 type Settings = { schema_version: number; runtime: Runtime };
 const fields = [
@@ -162,6 +163,7 @@ const explain = (error: unknown) =>
 
 export function SettingsPage({
   token,
+  language = "zh",
   status,
   connection,
   busy,
@@ -169,6 +171,7 @@ export function SettingsPage({
   logout,
 }: {
   token: string;
+  language?: Language;
   status: CoreStatus;
   connection: string;
   busy: boolean;
@@ -525,7 +528,7 @@ export function SettingsPage({
       <div className="settings-side">
         <SettingsReadback label="连接设置读回" operation="connection_settings" hint="显示核心报告的设置，不保证已识别进程或改善连接速度。未指定项可能使用核心默认值。路由标记可能以有符号 32 位整数读回，同一位模式视为一致。" token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
         <GeoReadback token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
-        <ResourcesPanel token={token} status={status} connection={connection} logout={logout} />
+        <ResourcesPanel token={token} status={status} connection={connection} logout={logout} language={language} />
         <ProfileDnsPanel
           key={`${token}:${status.active_profile ?? ""}`}
           token={token}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, command } from "./api";
 import { GeoSeedAction } from "./geo_seed";
 import { GeoOnlineAction } from "./geo_online";
+import { t, type Language, type MessageKey } from "./i18n";
 import type { CoreStatus } from "./types";
 
 type FreshnessState = "fresh" | "stale" | "indeterminate";
@@ -37,45 +38,55 @@ type Inventory = {
   geo: Resource[];
   providers: Resource[];
 };
-const labels: Record<string, string> = {
-  available: "文件存在",
-  missing: "文件缺失",
-  empty: "空文件",
-  unsafe_path: "路径不安全",
-  not_file: "不是普通文件",
-  unreadable: "无法读取元数据",
-  inline: "内联资源",
-  core_managed: "内核管理缓存路径",
-  invalid_declaration: "声明无效",
+const labelKeys: Record<string, MessageKey> = {
+  available: "resourceStateAvailable",
+  missing: "resourceStateMissing",
+  empty: "resourceStateEmpty",
+  unsafe_path: "resourceStateUnsafePath",
+  not_file: "resourceStateNotFile",
+  unreadable: "resourceStateUnreadable",
+  inline: "resourceStateInline",
+  core_managed: "resourceStateCoreManaged",
+  invalid_declaration: "resourceStateInvalidDeclaration",
 };
-const autoUpdateStateLabels: Record<AutoUpdateState, string> = {
-  active: "活跃（自动更新中）",
-  disabled: "已禁用",
-  stopped: "核心未运行（已停止）",
-  indeterminate: "状态未知（未确认）",
+const autoUpdateStateKeys: Record<AutoUpdateState, MessageKey> = {
+  active: "resourceAutoUpdateActive",
+  disabled: "resourceAutoUpdateDisabled",
+  stopped: "resourceAutoUpdateStopped",
+  indeterminate: "resourceAutoUpdateIndeterminate",
 };
-const freshnessLabels: Record<FreshnessState, { label: string; className?: string }> = {
-  fresh: { label: "最新（更新周期内）", className: "info" },
-  stale: { label: "已过期（需更新）", className: "alert" },
-  indeterminate: { label: "未指定更新周期" },
+const freshnessKeys: Record<FreshnessState, { key: MessageKey; className?: string }> = {
+  fresh: { key: "resourceFreshnessFresh", className: "info" },
+  stale: { key: "resourceFreshnessStale", className: "alert" },
+  indeterminate: { key: "resourceFreshnessIndeterminate" },
 };
-const enabledLabel = (value: boolean | null) => value === null ? "未指定" : value ? "启用" : "禁用";
-const intervalLabel = (value: number | null) => value === null ? "未指定" : `${value} 小时`;
-function modifiedLabel(seconds?: number | null) {
+const enabledLabel = (language: Language, value: boolean | null) =>
+  value === null ? t(language, "resourceUnspecified") : value ? t(language, "resourceEnabled") : t(language, "resourceDisabled");
+const intervalLabel = (language: Language, value: number | null) =>
+  value === null ? t(language, "resourceUnspecified") : t(language, "resourceHours", { count: value });
+
+function modifiedLabel(language: Language, seconds?: number | null) {
   if (seconds == null || !Number.isSafeInteger(seconds) || seconds < 0) return null;
   const milliseconds = seconds * 1000;
   const date = new Date(milliseconds);
   if (Number.isNaN(date.getTime())) return null;
   const elapsedMinutes = Math.floor((Date.now() - milliseconds) / 60000);
-  const age = elapsedMinutes < 0 ? "晚于本机时钟" : elapsedMinutes >= 1440 ? `${Math.floor(elapsedMinutes / 1440)} 天前` : elapsedMinutes >= 60 ? `${Math.floor(elapsedMinutes / 60)} 小时前` : `${elapsedMinutes} 分钟前`;
-  return `文件修改时间：${date.toLocaleString("zh-CN", { hour12: false })}（${age}）`;
+  const age = elapsedMinutes < 0
+    ? t(language, "resourceModifiedFuture")
+    : elapsedMinutes >= 1440
+      ? t(language, "resourceModifiedDaysAgo", { count: Math.floor(elapsedMinutes / 1440) })
+      : elapsedMinutes >= 60
+        ? t(language, "resourceModifiedHoursAgo", { count: Math.floor(elapsedMinutes / 60) })
+        : t(language, "resourceModifiedMinutesAgo", { count: elapsedMinutes });
+  return `${t(language, "resourceModifiedPrefix")}${date.toLocaleString(language === "en" ? "en-US" : "zh-CN", { hour12: false })}（${age}）`;
 }
 
-export function ResourcesPanel({ token, status, connection, logout }: {
+export function ResourcesPanel({ token, status, connection, logout, language = "zh" }: {
   token: string;
   status: CoreStatus;
   connection: string;
   logout: (reason?: string) => void;
+  language?: Language;
 }) {
   const validationController = useRef<AbortController | null>(null);
   const epoch = useRef(0);
@@ -99,32 +110,52 @@ export function ResourcesPanel({ token, status, connection, logout }: {
       if (active) setValue(next);
     }).catch(error => {
       if (!active) return;
-      if (error instanceof ApiError && error.status === 401) logout("认证失效，请重新输入令牌。");
+      if (error instanceof ApiError && error.status === 401) logout(t(language, "expiredToken"));
       else setError(error instanceof Error ? error.message : String(error));
     });
     return () => { active = false; controller.abort(); epoch.current++; validationController.current?.abort(); };
-  }, [token, status.phase, status.generation, status.config_revision, connection, refresh, logout]);
+  }, [token, status.phase, status.generation, status.config_revision, connection, refresh, logout, language]);
 
   async function validate(name: string) {
     const currentEpoch = epoch.current;
     const controller = new AbortController();
     validationController.current = controller;
     setChecking(name);
-    setChecks(previous => ({ ...previous, [name]: { message: `正在校验 ${name.endsWith(".dat") ? "DAT" : "MMDB"}…` } }));
+    setChecks(previous => ({ ...previous, [name]: { message: t(language, "resourceValidating", { type: name.endsWith(".dat") ? "DAT" : "MMDB" }) } }));
     try {
       const report = await command<{ verified: boolean; warning: string | null; sha256: string; bytes: number; ip_version: number; node_count: number; dat?: { group_count: number; record_count: number; ipv4_count: number; ipv6_count: number; regex_count: number; attribute_count: number; empty_group_count: number; unknown_field_count: number; has_cn_group: boolean; core_matching_verified: boolean } }>(token, "validate_geo", { name }, controller.signal);
       if (currentEpoch !== epoch.current) return;
       let message: string;
       if (name.endsWith(".dat")) {
         const dat = report.dat;
-        if (!dat) throw new Error("服务返回的 DAT 诊断无效。");
-        message = `${report.verified ? "DAT 已知结构校验通过" : "DAT 包含未知字段，完整结构未验证"} · ${dat.group_count} 分组 · ${dat.record_count} 记录 · IPv4 ${dat.ipv4_count} / IPv6 ${dat.ipv6_count} · 正则 ${dat.regex_count} · 属性 ${dat.attribute_count} · 空分组 ${dat.empty_group_count} · 未知字段 ${dat.unknown_field_count} · ${dat.has_cn_group ? "含 CN 分组" : "缺少 CN 分组，核心初始化可能删除并重新下载"} · 核心规则匹配与正则语法兼容性未验证`;
-      } else message = `${report.verified ? "MMDB 结构校验通过" : "MMDB 元数据可读，完整结构未验证（缺少数据库描述）"} · IPv${report.ip_version} · ${report.node_count} 节点`;
-      setChecks(previous => ({ ...previous, [name]: { message: `${message} · ${report.bytes} 字节 · SHA-256 ${report.sha256}` } }));
+        if (!dat) throw new Error(t(language, "resourceDatInvalidDiagnostic"));
+        const status = report.verified ? t(language, "resourceDatVerified") : t(language, "resourceDatUnverified");
+        const cnGroup = dat.has_cn_group ? t(language, "resourceDatHasCn") : t(language, "resourceDatMissingCn");
+        message = t(language, "resourceDatSummary", {
+          status,
+          groups: dat.group_count,
+          records: dat.record_count,
+          ipv4: dat.ipv4_count,
+          ipv6: dat.ipv6_count,
+          regex: dat.regex_count,
+          attributes: dat.attribute_count,
+          emptyGroups: dat.empty_group_count,
+          unknownFields: dat.unknown_field_count,
+          cnGroup,
+        });
+      } else {
+        const status = report.verified ? t(language, "resourceMmdbVerified") : t(language, "resourceMmdbUnverified");
+        message = t(language, "resourceMmdbSummary", {
+          status,
+          ipVersion: report.ip_version,
+          nodes: report.node_count,
+        });
+      }
+      setChecks(previous => ({ ...previous, [name]: { message: t(language, "resourceValidationReport", { message, bytes: report.bytes, sha256: report.sha256 }) } }));
     } catch (error) {
       if (currentEpoch !== epoch.current) return;
-      if (error instanceof ApiError && error.status === 401) logout("认证失效，请重新输入令牌。");
-      else setChecks(previous => ({ ...previous, [name]: { message: `校验失败：${error instanceof Error ? error.message : String(error)}`, error: true } }));
+      if (error instanceof ApiError && error.status === 401) logout(t(language, "expiredToken"));
+      else setChecks(previous => ({ ...previous, [name]: { message: t(language, "resourceValidationFailed", { message: error instanceof Error ? error.message : String(error) }), error: true } }));
     } finally {
       if (currentEpoch === epoch.current) setChecking(undefined);
     }
@@ -132,40 +163,40 @@ export function ResourcesPanel({ token, status, connection, logout }: {
 
   function rows(items: Resource[]) {
     return <ul className="resource-list">{items.map(item => <li key={`${item.section}:${item.name}`}>
-      <strong>{item.name}</strong> · {item.section === "proxy-providers" ? "代理 Provider" : item.section === "rule-providers" ? "规则 Provider" : "Geo"}
-      <p>{labels[item.state] || "未知状态"}{item.bytes !== null ? ` · ${item.bytes} 字节` : ""}{item.provider_type ? ` · ${item.provider_type}` : ""}</p>
-      {modifiedLabel(item.modified_unix_seconds) && <p>{modifiedLabel(item.modified_unix_seconds)}</p>}
+      <strong>{item.name}</strong> · {item.section === "proxy-providers" ? t(language, "resourceSectionProxy") : item.section === "rule-providers" ? t(language, "resourceSectionRule") : t(language, "resourceSectionGeo")}
+      <p>{(labelKeys[item.state] ? t(language, labelKeys[item.state]) : t(language, "resourceStateUnknown"))}{item.bytes !== null ? t(language, "resourceBytes", { bytes: item.bytes }) : ""}{item.provider_type ? ` · ${item.provider_type}` : ""}</p>
+      {modifiedLabel(language, item.modified_unix_seconds) && <p>{modifiedLabel(language, item.modified_unix_seconds)}</p>}
       {item.freshness && item.state === "available" && item.freshness !== "indeterminate" && (
-        <p className={freshnessLabels[item.freshness]?.className || "hint"}>
-          资源新鲜度：{freshnessLabels[item.freshness]?.label || item.freshness}
+        <p className={freshnessKeys[item.freshness]?.className || "hint"}>
+          {t(language, "resourceFreshnessLabel")}{freshnessKeys[item.freshness]?.key ? t(language, freshnessKeys[item.freshness].key) : item.freshness}
         </p>
       )}
       {item.path && <code>{item.path}</code>}
-      {item.section === "geo" && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && item.state === "available" && <button type="button" disabled={!!checking} onClick={() => void validate(item.name)}>校验 {item.name}</button>}
+      {item.section === "geo" && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && item.state === "available" && <button type="button" disabled={!!checking} onClick={() => void validate(item.name)}>{t(language, "resourceValidate", { name: item.name })}</button>}
       {item.section === "geo" && checks[item.name] && <p role={checks[item.name].error ? "alert" : "status"} className={checks[item.name].error ? "alert" : "info"}>{checks[item.name].message}</p>}
-      {item.section === "geo" && value?.bundle_dir && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && <GeoSeedAction name={item.name} token={token} status={status} connection={connection} logout={logout} installed={message => { setNotice(message); setRefresh(previous => previous + 1); }} />}
-      {item.section === "geo" && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && <GeoOnlineAction name={item.name} token={token} status={status} connection={connection} logout={logout} installed={message => { setNotice(message); setRefresh(previous => previous + 1); }} />}
-      {item.conflict && <p className="alert">多个资源声明共用此路径，请检查缓存是否冲突。</p>}
+      {item.section === "geo" && value?.bundle_dir && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && <GeoSeedAction name={item.name} token={token} status={status} connection={connection} logout={logout} language={language} installed={message => { setNotice(message); setRefresh(previous => previous + 1); }} />}
+      {item.section === "geo" && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && <GeoOnlineAction name={item.name} token={token} status={status} connection={connection} logout={logout} language={language} installed={message => { setNotice(message); setRefresh(previous => previous + 1); }} />}
+      {item.conflict && <p className="alert">{t(language, "resourceConflict")}</p>}
     </li>)}</ul>;
   }
 
-  return <section className="panel" aria-label="运行资源清单">
-    <div className="panel-title"><h2>Geo / Provider 资源</h2><button type="button" disabled={connection !== "已连接"} onClick={() => setRefresh(value => value + 1)}>刷新资源清单</button></div>
+  return <section className="panel" aria-label={t(language, "resourceRegion")}>
+    <div className="panel-title"><h2>{t(language, "resourceTitle")}</h2><button type="button" disabled={connection !== "已连接"} onClick={() => setRefresh(value => value + 1)}>{t(language, "resourceRefresh")}</button></div>
     {notice && <p role="status" className="info">{notice}</p>}
-    {connection !== "已连接" ? <p className="info">服务连接中断，资源状态待重新核对。</p> : error ? <p className="alert" role="alert">读取资源失败：{error}</p> : !value ? <p className="muted">正在读取资源清单…</p> : <>
-      <p>运行数据目录：<code>{value.data_dir}</code></p>
-      {value.bundle_dir && <p>打包资源目录：<code>{value.bundle_dir}</code></p>}
-      {!value.config_revision && <p className="info">尚无已提交配置，导入并使用订阅后显示 Provider 声明。</p>}
-      <h3>Geo 自动更新策略</h3>
+    {connection !== "已连接" ? <p className="info">{t(language, "resourceDisconnected")}</p> : error ? <p className="alert" role="alert">{t(language, "resourceReadFailed", { message: error })}</p> : !value ? <p className="muted">{t(language, "resourceReading")}</p> : <>
+      <p>{t(language, "resourceDataDir")}<code>{value.data_dir}</code></p>
+      {value.bundle_dir && <p>{t(language, "resourceBundleDir")}<code>{value.bundle_dir}</code></p>}
+      {!value.config_revision && <p className="info">{t(language, "resourceNoConfig")}</p>}
+      <h3>{t(language, "resourceGeoPolicy")}</h3>
       {value.geo_update ? <>
-        {value.geo_update.auto_update_state && <p>自动更新运行状态：<strong>{autoUpdateStateLabels[value.geo_update.auto_update_state] || value.geo_update.auto_update_state}</strong></p>}
-        <p>已提交配置：{enabledLabel(value.geo_update.configured_enabled)} · 更新间隔：{intervalLabel(value.geo_update.configured_interval_hours)}</p>
-        <p>内核实际状态：{!value.geo_update.core_running ? "内核未运行，未确认" : value.geo_update.readback_error ? "读取失败，请重试" : value.geo_update.effective_enabled === null ? "内核未报告" : enabledLabel(value.geo_update.effective_enabled)} · 更新间隔：{value.geo_update.core_running && !value.geo_update.readback_error ? intervalLabel(value.geo_update.effective_interval_hours) : "未确认"}</p>
-        {value.geo_update.mismatch && <p className="alert">已提交策略与内核实际值不一致，请重新应用配置或检查内核。</p>}
-      </> : <p className="muted">Geo 自动更新状态暂不可用。</p>}
-      <h3>Geo 文件</h3>{rows(value.geo)}
-      <h3>Provider 文件与缓存</h3>{value.providers.length ? rows(value.providers) : <p className="muted">当前已提交配置没有 Provider 声明。</p>}
-      <p className="hint">路径相对于运行数据目录。文件存在仅表示元数据可读取，尚未验证内容格式；文件修改时间只反映文件系统元数据，不能证明最近一次自动更新成功、内容有效或已被规则加载。自动更新由 Mihomo 自行执行，不经过服务侧更新回滚。MMDB 和 DAT 可手动校验结构；打包资源可在停止内核后按摘要显式安装。已提交配置中的 Geo URL 可用于停止或运行中核心的显式在线更新：先读取来源及当前文件指纹，再下载、校验并安装。运行中更新会短暂停止并重启核心；失败时恢复旧资源。DAT 安装执行隔离内核规则加载检查，但不保证实际代理匹配效果。失败或请求中断后请重新读取状态。Geo 文件是否必需取决于配置规则。Provider 声明来自已提交配置，内核下载后可刷新清单核对文件状态。</p>
+        {value.geo_update.auto_update_state && <p>{t(language, "resourceAutoUpdateStatus")}<strong>{autoUpdateStateKeys[value.geo_update.auto_update_state] ? t(language, autoUpdateStateKeys[value.geo_update.auto_update_state]) : value.geo_update.auto_update_state}</strong></p>}
+        <p>{t(language, "resourceCommittedConfig")}{enabledLabel(language, value.geo_update.configured_enabled)} · {t(language, "resourceUpdateInterval")}{intervalLabel(language, value.geo_update.configured_interval_hours)}</p>
+        <p>{t(language, "resourceCoreEffective")}{!value.geo_update.core_running ? t(language, "resourceCoreNotRunning") : value.geo_update.readback_error ? t(language, "resourceReadFailedRetry") : value.geo_update.effective_enabled === null ? t(language, "resourceCoreNotReported") : enabledLabel(language, value.geo_update.effective_enabled)} · {t(language, "resourceUpdateInterval")}{value.geo_update.core_running && !value.geo_update.readback_error ? intervalLabel(language, value.geo_update.effective_interval_hours) : t(language, "resourceUnconfirmed")}</p>
+        {value.geo_update.mismatch && <p className="alert">{t(language, "resourcePolicyMismatch")}</p>}
+      </> : <p className="muted">{t(language, "resourcePolicyUnavailable")}</p>}
+      <h3>{t(language, "resourceGeoFiles")}</h3>{rows(value.geo)}
+      <h3>{t(language, "resourceProviderFiles")}</h3>{value.providers.length ? rows(value.providers) : <p className="muted">{t(language, "resourceNoProviders")}</p>}
+      <p className="hint">{t(language, "resourceHint")}</p>
     </>}
   </section>;
 }

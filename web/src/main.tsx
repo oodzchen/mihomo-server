@@ -439,6 +439,7 @@ function Manager({
         ) : route === "/settings" ? (
           <SettingsPage
             token={token}
+            language={language}
             status={status}
             connection={connection}
             busy={busy}

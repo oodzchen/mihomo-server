@@ -1612,6 +1612,103 @@ test("core upgrade page controls and channels translate across language changes"
   await expect(page.getByRole("heading", { name: "稳定版内核升级" })).toBeVisible();
 });
 
+test("resources panel, geo seed and online actions translate across language changes", async ({ page }) => {
+  await page.route("**/api/commands", async (route) => {
+    const body = route.request().postDataJSON();
+    if (body?.command === "resources") {
+      await route.fulfill({
+        json: {
+          data_dir: "/mock/data",
+          bundle_dir: "/mock/bundle",
+          config_revision: "mock-rev",
+          geo_update: {
+            core_running: true,
+            readback_error: false,
+            configured_enabled: true,
+            configured_interval_hours: 24,
+            effective_enabled: true,
+            effective_interval_hours: 24,
+            auto_update_state: "active",
+            mismatch: false,
+          },
+          geo: [
+            {
+              section: "geo",
+              name: "Country.mmdb",
+              state: "available",
+              path: "Country.mmdb",
+              provider_type: null,
+              bytes: 4096,
+              conflict: false,
+              freshness: "fresh",
+            },
+          ],
+          providers: [],
+        },
+      });
+      return;
+    }
+    if (body?.command === "geo_seed") {
+      await route.fulfill({
+        json: {
+          name: "Country.mmdb",
+          current_sha256: "1111111111111111111111111111111111111111111111111111111111111111",
+          seed_sha256: "2222222222222222222222222222222222222222222222222222222222222222",
+          seed_bytes: 4096,
+        },
+      });
+      return;
+    }
+    if (body?.command === "geo_online_info") {
+      await route.fulfill({
+        json: {
+          name: "Country.mmdb",
+          current_sha256: "1111111111111111111111111111111111111111111111111111111111111111",
+          source_sha256: "3333333333333333333333333333333333333333333333333333333333333333",
+        },
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto(`${base}/settings`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务", exact: true }).click();
+
+  const panel = page.getByRole("region", { name: "运行资源清单" });
+  await expect(panel.getByRole("heading", { name: "Geo / Provider 资源" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "刷新资源清单" })).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "Geo 自动更新策略" })).toBeVisible();
+  await expect(panel.getByText("活跃（自动更新中）")).toBeVisible();
+  await expect(panel.getByText("文件存在 · 4096 字节")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "校验 Country.mmdb" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "读取 Country.mmdb 打包更新" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "读取 Country.mmdb 在线来源" })).toBeVisible();
+
+  await panel.getByRole("button", { name: "读取 Country.mmdb 打包更新" }).click();
+  await expect(panel.getByRole("checkbox", { name: "允许安装描述为空、完整结构未验证的 MMDB" })).toBeVisible();
+
+  await panel.getByRole("button", { name: "读取 Country.mmdb 在线来源" }).click();
+  await expect(panel.getByLabel("下载路由")).toBeVisible();
+  await expect(panel.getByRole("checkbox", { name: "显式忽略下载来源证书错误" })).toBeVisible();
+
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  const enPanel = page.getByRole("region", { name: "Runtime resource inventory" });
+  await expect(enPanel.getByRole("heading", { name: "Geo / Provider resources" })).toBeVisible();
+  await expect(enPanel.getByRole("button", { name: "Refresh resource list" })).toBeVisible();
+  await expect(enPanel.getByRole("heading", { name: "Geo auto-update policy" })).toBeVisible();
+  await expect(enPanel.getByText("Active (auto-updating)")).toBeVisible();
+  await expect(enPanel.getByText("File exists · 4096 bytes")).toBeVisible();
+  await expect(enPanel.getByRole("button", { name: "Validate Country.mmdb" })).toBeVisible();
+  await expect(enPanel.getByRole("button", { name: "Read Country.mmdb bundle update" })).toBeVisible();
+  await expect(enPanel.getByRole("button", { name: "Read Country.mmdb online source" })).toBeVisible();
+  await expect(enPanel.getByLabel("Download route")).toBeVisible();
+  await expect(enPanel.getByRole("checkbox", { name: "Explicitly ignore download source certificate errors" })).toBeVisible();
+
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(page.getByRole("region", { name: "运行资源清单" })).toBeVisible();
+});
+
 test("manual remote refresh keeps identity, applies active config and preserves failures across restart", async ({
   page,
 }) => {
