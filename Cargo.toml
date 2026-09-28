@@ -1,5 +1,13 @@
 [workspace]
-members = ["crates/clash-verge-draft", "crates/clash-verge-limiter", "crates/headless-core", "crates/mihomo-client", "service"]
+members = [
+    "crates/clash-verge-draft",
+    "crates/clash-verge-i18n",
+    "crates/clash-verge-limiter",
+    "crates/clash-verge-signal",
+    "crates/headless-core",
+    "crates/mihomo-client",
+    "service",
+]
 default-members = ["service"]
 resolver = "2"
 
@@ -12,7 +20,9 @@ publish = false
 
 [workspace.dependencies]
 clash-verge-draft = { path = "crates/clash-verge-draft" }
+clash-verge-i18n = { path = "crates/clash-verge-i18n" }
 clash-verge-limiter = { path = "crates/clash-verge-limiter" }
+clash-verge-signal = { path = "crates/clash-verge-signal" }
 headless-core = { path = "crates/headless-core" }
 mihomo-client = { path = "crates/mihomo-client" }
 anyhow = "1.0.104"

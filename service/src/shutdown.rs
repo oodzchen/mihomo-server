@@ -1,23 +1,28 @@
 use anyhow::Result;
+pub use clash_verge_signal::{SHUTDOWN_LATCH, ShutdownLatch, ShutdownOutcome};
 
 #[cfg(unix)]
 pub struct ShutdownSignals {
-    terminate: tokio::signal::unix::Signal,
-    interrupt: tokio::signal::unix::Signal,
+    signals: clash_verge_signal::UnixSignals,
 }
 
 #[cfg(unix)]
 impl ShutdownSignals {
     pub fn register() -> Result<Self> {
-        use tokio::signal::unix::{SignalKind, signal};
         Ok(Self {
-            terminate: signal(SignalKind::terminate())?,
-            interrupt: signal(SignalKind::interrupt())?,
+            signals: clash_verge_signal::UnixSignals::new()?,
         })
     }
 
-    pub async fn wait(&mut self) {
-        tokio::select! { _ = self.terminate.recv() => {}, _ = self.interrupt.recv() => {} }
+    pub async fn wait(&mut self) -> &'static str {
+        loop {
+            let sig = self.signals.recv().await;
+            if !SHUTDOWN_LATCH.try_begin() {
+                eprintln!("[signal] already shutting down, ignoring repeated {sig}");
+                continue;
+            }
+            return sig;
+        }
     }
 }
 
@@ -36,8 +41,18 @@ impl ShutdownSignals {
         })
     }
 
-    pub async fn wait(&mut self) {
-        tokio::select! { _ = self.interrupt.recv() => {}, _ = self.close.recv() => {} }
+    pub async fn wait(&mut self) -> &'static str {
+        loop {
+            let sig = tokio::select! {
+                _ = self.interrupt.recv() => "CtrlC",
+                _ = self.close.recv() => "CtrlClose",
+            };
+            if !SHUTDOWN_LATCH.try_begin() {
+                eprintln!("[signal] already shutting down, ignoring repeated {sig}");
+                continue;
+            }
+            return sig;
+        }
     }
 }
 

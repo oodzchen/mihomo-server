@@ -8,6 +8,8 @@ publish.workspace = true
 description = "Single service entry point for headless Mihomo management"
 
 [dependencies]
+clash-verge-i18n.workspace = true
+clash-verge-signal.workspace = true
 headless-core.workspace = true
 mihomo-client.workspace = true
 anyhow.workspace = true

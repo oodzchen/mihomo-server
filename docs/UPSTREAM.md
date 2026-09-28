@@ -26,6 +26,10 @@ adaptations here.
 | `crates/clash-verge-draft/Cargo.toml` | `crates/clash-verge-draft/Cargo.toml` | `b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b` | Inherit package metadata and dependencies from the new workspace |
 | `crates/clash-verge-limiter/src/lib.rs` | `crates/clash-verge-limiter/src/lib.rs` | `b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b` | None; includes the two existing behavior tests |
 | `crates/clash-verge-limiter/Cargo.toml` | `crates/clash-verge-limiter/Cargo.toml` | `b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b` | Inherit package metadata; omit upstream workspace lint inheritance |
+| `crates/clash-verge-i18n/locales/*.yml` | `crates/clash-verge-i18n/locales/*.yml` | `b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b` | Thirteen locale files copied unchanged; browser integration remains pending |
+| `crates/clash-verge-i18n/src/lib.rs` | `crates/clash-verge-i18n/src/lib.rs` | `b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b` | Preserve locale aliases, fallback and translation API; replace desktop `rust_i18n`/`sys_locale` dependencies with embedded YAML and explicit per-caller lookup; validate every embedded locale |
+| `crates/clash-verge-signal/src/lib.rs` | `crates/clash-verge-signal/src/lib.rs` | `b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b` | Retain the shutdown latch/outcome; omit Tauri logging and separate runtime; Windows adapter deferred |
+| `crates/clash-verge-signal/src/unix.rs` | `crates/clash-verge-signal/src/unix.rs` | `b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b` | Retain SIGTERM/SIGINT/SIGHUP selection on the existing service Tokio runtime; return signal names to the foreground supervisor |
 | `src-tauri/src/enhance/field.rs` | `crates/headless-core/src/enhance/field.rs` | `b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b` | None; pure field processing |
 | `src-tauri/src/enhance/merge.rs` | `crates/headless-core/src/enhance/merge.rs` | `b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b` | None; includes the existing merge test |
 | `src-tauri/src/enhance/seq.rs` | `crates/headless-core/src/enhance/seq.rs` | `b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b` | None; includes `SeqMap` and the three existing sequence tests |
@@ -47,6 +51,11 @@ subscription metadata, enhancement references, and persisted node selections
 round-trip through upstream-format YAML, while transient uploaded content is
 not persisted. Pure configuration tests are reused from upstream rather than
 reimplementing the algorithms or inventing a new processing order.
+
+The P3 `service/src/shutdown.rs` change is an original headless adapter to the
+extracted Unix signal listener, not a copied upstream file. It preserves the
+existing service supervisor, HTTP/WebSocket drain and managed child reaping.
+Browser language integration and localized service messages remain pending.
 
 ## DNS resolver policy settings reference
 

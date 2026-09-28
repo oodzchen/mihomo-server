@@ -492,8 +492,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "clash-verge-i18n"
+version = "0.1.0"
+dependencies = [
+ "parking_lot",
+ "serde",
+ "serde_yaml_ng",
+]
+
+[[package]]
 name = "clash-verge-limiter"
 version = "0.1.0"
+
+[[package]]
+name = "clash-verge-signal"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "tokio",
+]
 
 [[package]]
 name = "clashcore"
@@ -1629,6 +1646,8 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "clash-verge-i18n",
+ "clash-verge-signal",
  "flate2",
  "futures-util",
  "getrandom 0.4.3",

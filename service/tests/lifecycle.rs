@@ -231,6 +231,7 @@ async fn live_service_signals_reap_the_child_and_failed_start_keeps_service_aliv
     for (signal, fail, import) in [
         (libc::SIGTERM, false, false),
         (libc::SIGINT, false, false),
+        (libc::SIGHUP, false, false),
         (libc::SIGTERM, true, false),
         (libc::SIGTERM, false, true),
     ] {

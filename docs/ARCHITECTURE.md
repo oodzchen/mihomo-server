@@ -53,19 +53,13 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P2):** Rules, providers, and delay testing are fully
-delivered and verified. The service core manager implements `delay_group`,
-`delay_proxy`, `proxy_providers`, `update_proxy_provider`, and
-`healthcheck_proxy_provider` with stopped-core checks and bounded timeouts;
-management commands dispatch token-authenticated queries and updates; and the Web
-proxies view displays color-coded latency badges (`<300ms`, `<600ms`, `slow`,
-`timeout`, `untested`), group and per-node delay testing actions, and external
-proxy provider management cards. Real-core readback, live delay tests, and
-actual-node proxy traffic pass.
-**Next implementation task (P3):** i18n and service signals. Migrate
-backend/browser language resources and signal behavior needed by this Linux
-service. Keep browser language independent of service-global state and preserve
-the already working unified Unix shutdown.
+**Latest completed task (P3):** the shared locale catalog and Unix signal/latch
+components have been extracted from the pinned upstream tree. Explicit locale
+lookup does not mutate service-global state; SIGTERM, SIGINT and SIGHUP use the
+existing foreground shutdown and reap the managed core. Browser language and
+service message integration are still pending.
+**Next implementation task (P3):** add browser-owned language selection and
+translate the management UI without changing service-global locale.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -119,8 +113,9 @@ mihomo-server/
 │   │   └── Snapshots, drafts, transactions, tests, benchmarks
 │   ├── clash-verge-limiter/                          [Migrated]
 │   │   └── Period checks, concurrent admission, existing tests
-│   ├── Shared upstream components                   [Pending; i18n/signals P3, unrelated expansion deferred]
-│   │   ├── i18n and service signals                 [Pending; P3]
+│   ├── Shared upstream components                   [Partially migrated; P3]
+│   │   ├── Thirteen i18n locale assets / aliases / explicit lookup [Migrated + headless adaptation; browser integration pending]
+│   │   ├── Unix SIGTERM/SIGINT/SIGHUP listener and shutdown latch [Migrated + headless adaptation; Linux verified]
 │   │   └── Additional logging / media unlock         [Deferred; outside active scope]
 │   ├── mihomo-client/                               [Migrated; Linux verified]
 │   │   ├── Unix socket / explicit loopback HTTP      [Migrated]
@@ -303,7 +298,8 @@ mihomo-server/
 │   │   ├── Traffic, memory, connections/count, core logs [Implemented]
 │   │   └── Per-session cancellation, bounded queues/retry/drain [Implemented]
 │   ├── Web static assets and scoped SPA fallback    [Implemented; Linux verified]
-│   ├── Unix SIGINT/SIGTERM and unified shutdown     [Implemented]
+│   ├── Unix SIGINT/SIGTERM/SIGHUP and unified shutdown [Implemented; Linux verified]
+│   ├── Localized service messages                   [Pending; P3]
 │   ├── User systemd unit template                  [Scaffold; static check only]
 │   └── Other platform service integration           [Deferred; Linux only]
 <!--│   └── Windows SCM service integration              [Deferred; Windows compatibility postponed] -->
@@ -329,6 +325,7 @@ mihomo-server/
 │   ├── Traffic, memory and connection-count overview [Implemented; MVP]
 │   ├── Rules and rule-provider management page      [Implemented; Linux verified]
 │   ├── Proxy providers and node delay views         [Implemented; Linux verified]
+│   ├── Browser-owned language selection and translated management UI [Pending; P3]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4452,7 +4449,31 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: proxy providers and latency delay testing
+## Current increment: shared locale catalog and Linux service signals
+
+Delivery step 9 (P3) begins with the in-flight upstream shared-component
+extraction. `clash-verge-i18n` embeds the thirteen pinned YAML locale files,
+retains upstream aliases and fallback behavior, and offers an explicit
+`translate_for` lookup that does not change the process-wide backend locale.
+Embedded locale parse errors now fail visibly rather than silently creating an
+empty catalog. The browser does not yet consume this catalog or offer language
+selection. `clash-verge-signal` retains the upstream shutdown latch and Unix
+SIGTERM/SIGINT/SIGHUP selection, using the existing Tokio runtime. The foreground
+service consumes that listener and retains its one supervisor, HTTP/WebSocket
+drain and managed Mihomo child reaping. No desktop event loop or second runtime
+is introduced; non-Linux signal adaptation remains deferred.
+
+Verification: offline `cargo check --workspace` and the serial workspace suite
+pass with **400 passed, 89 opt-in ignored and zero failures**. All embedded
+locale files parse, and explicit English/Chinese lookups do not mutate backend
+locale. A real-Mihomo process test confirms
+SIGTERM, SIGINT and SIGHUP exit successfully, reap the managed child, and keep
+the management service alive after a failed core start. The complete tree above
+is synchronized; the Linux MVP remains runnable. Next: browser-owned language
+selection and translation of the management UI, followed by service-message
+localization and P4 systemd installation. P3 is partial.
+
+## Previous increment: proxy providers and latency delay testing
 
 Delivery step 8 (P2) completes proxy providers and delay testing for the managed
 service and Web interface:

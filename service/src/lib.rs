@@ -25,3 +25,6 @@ mod selections;
 mod settings_readback;
 pub mod shutdown;
 mod validation;
+
+pub use clash_verge_i18n as i18n;
+pub use clash_verge_signal as signal;
