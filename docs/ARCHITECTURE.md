@@ -71,9 +71,11 @@ and **Google Antigravity CLI (`agy`)** as interchangeable autonomous agent backe
 1. **Agent selection**: `--agent codex` (default) and `--agent agy` / `--agent antigravity`
    select the respective agent CLI engine. `run_autonomous.sh` symlink provides a
    unified invocation entry point.
-2. **Permission and unattended execution**: Codex uses `-c approval_policy=never` with
-   networked `workspace-write` sandbox; Antigravity uses `--dangerously-skip-permissions`
-   with `--add-dir ../clash-verge-rev` for unattended execution and upstream reading.
+2. **Permission, sandbox & unattended execution**: Both engines run inside Linux isolation
+   sandboxes by default (Codex via Bubblewrap `workspace-write`, Antigravity via Linux namespace
+   `--sandbox` with read-only host protection). Auto-approvals (`approval_policy=never` /
+   `--dangerously-skip-permissions`) and `--add-dir ../clash-verge-rev` upstream cross-repo mounts
+   are preserved, with optional `--no-sandbox` bypass.
 3. **Stream formatting & folding**: `format_codex_stream.py` auto-detects stream type,
    providing native parsing for Antigravity's `stream-json` NDJSON events while retaining
    full state-machine support for Codex text streams. Both produce consistent dynamic

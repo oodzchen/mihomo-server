@@ -46,7 +46,8 @@ INACTIVITY_TIMEOUT="${INACTIVITY_TIMEOUT:-600}"          # 请求无响应超时
 RATE_LIMIT_COOLDOWN="${RATE_LIMIT_COOLDOWN:-18000}"       # 5 小时限额冷却时间 (秒, 默认 5*3600 = 18000 秒)
 MAX_TIMEOUT_RETRIES="${MAX_TIMEOUT_RETRIES:-5}"           # 单个小任务连续超时重试最大次数
 SANDBOX_MODE="${SANDBOX_MODE:-workspace-write}"          # Codex 沙箱模式: workspace-write
-APPROVAL_POLICY="${APPROVAL_POLICY:-never}"              # Codex 审批模式: never
+ENABLE_SANDBOX="${ENABLE_SANDBOX:-1}"                    # 是否启用隔离沙箱模式 (0=禁用, 1=启用; codex 与 agy 均生效)
+APPROVAL_POLICY="${APPROVAL_POLICY:-never}"              # 审批模式: never (无人值守自动审批)
 COMPLETION_FLAG="${COMPLETION_FLAG:-===ALL_TASKS_COMPLETED_SUCCESSFULLY===}" # 全部任务完成标志
 
 # ------------------------------------------------------------------------------
@@ -849,7 +850,9 @@ run_single_turn() {
         elif [ "$mode" = "fork" ]; then
             cmd+=("fork" "$target_session")
         else
-            cmd+=("-s" "$SANDBOX_MODE")
+            if [ "$ENABLE_SANDBOX" -eq 1 ]; then
+                cmd+=("-s" "$SANDBOX_MODE")
+            fi
             if [ -d "$UPSTREAM_DIR" ]; then
                 cmd+=("--add-dir" "$UPSTREAM_DIR")
             fi
@@ -876,6 +879,9 @@ run_single_turn() {
         fi
         if [ -d "$UPSTREAM_DIR" ]; then
             cmd+=("--add-dir" "$UPSTREAM_DIR")
+        fi
+        if [ "$ENABLE_SANDBOX" -eq 1 ]; then
+            cmd+=("--sandbox")
         fi
         cmd+=(
             "--dangerously-skip-permissions"
@@ -1065,6 +1071,10 @@ main() {
                 ENABLE_RESOURCE_LIMITS=0
                 shift
                 ;;
+            --no-sandbox)
+                ENABLE_SANDBOX=0
+                shift
+                ;;
             -h|--help)
                 echo "用法: $0 [选项]"
                 echo "选项:"
@@ -1079,6 +1089,7 @@ main() {
                 echo "  --cargo-jobs <并发数>  设置 Cargo 编译与测试最大并发数 (16核默认: 12)"
                 echo "  --nice <数值>          设置 CPU 调度优先级 Nice 值 (默认: 10，温和让位)"
                 echo "  --no-limit             禁用全部 CPU 与资源调度限制"
+                echo "  --no-sandbox           禁用隔离沙箱模式 (允许直接访问宿主系统，注意安全)"
                 echo "  --upstream <目录>      指定上游代码库路径 (默认: ../clash-verge-rev)"
                 echo "  --timeout <秒>         设置单次请求无响应超时时限 (默认: 600 秒)"
                 echo "  --cooldown <秒>        设置遭遇 5 小时 Limit 时的等待时限 (默认: 18000 秒)"
@@ -1108,7 +1119,9 @@ main() {
     log_info "代理工具引擎: ${CLR_BOLD}${agent_label}${CLR_RESET} (--agent $AGENT_TYPE)"
     log_info "工作区目录: $PROJECT_ROOT"
     log_info "上游源码库: $UPSTREAM_DIR $([ -d "$UPSTREAM_DIR" ] && echo -e "${CLR_GREEN}[有效目录，已开放跨库读取]${CLR_RESET}" || echo -e "${CLR_YELLOW}[未找到该目录]${CLR_RESET}")"
-    log_info "运行配置: 自动审批=always/never | 无响应超时=${INACTIVITY_TIMEOUT}s | 冷却时限=${RATE_LIMIT_COOLDOWN}s | 日志保留=${MAX_RETAINED_LOGS}轮"
+    local sandbox_display="已启用 (隔离工作区保护)"
+    [ "$ENABLE_SANDBOX" -ne 1 ] && sandbox_display="已禁用 (直接宿主访问，注意安全)"
+    log_info "运行配置: 沙箱=${sandbox_display} | 自动审批=always/never | 无响应超时=${INACTIVITY_TIMEOUT}s | 冷却时限=${RATE_LIMIT_COOLDOWN}s | 日志保留=${MAX_RETAINED_LOGS}轮"
     local res_status="已禁用"
     [ "$ENABLE_RESOURCE_LIMITS" -eq 1 ] && res_status="已启用 (CPU亲和度: ${CPU_AFFINITY:-全部}, Nice: $PROCESS_NICE, IOClass: $PROCESS_IONICE_CLASS, Cargo并发: $CARGO_JOBS)"
     log_info "资源调度限制: $res_status"

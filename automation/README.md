@@ -97,7 +97,8 @@ export AGENT_TOOL=agy
 | 维度 | OpenAI Codex 引擎 | Google Antigravity CLI 引擎 | 调度器统一表现 |
 | :--- | :--- | :--- | :--- |
 | **执行权限** | `-c approval_policy=never` 自动批准 | `--dangerously-skip-permissions` 自动批准 | 全程无人值守，无任何审批阻塞 |
-| **沙箱与上游** | `--sandbox workspace-write` + `--add-dir ../clash-verge-rev` | 开放工作区读写 + `--add-dir ../clash-verge-rev` | 安全读写本项目并只读查阅上游源码 |
+| **隔离沙箱与安全** | `--sandbox workspace-write` (Bubblewrap 命名空间隔离) | `--sandbox` (Linux 命名空间隔离，系统只读保护) | 双引擎默认全部开启隔离沙箱，外部系统只读保护，防止越权逃逸；支持 `--no-sandbox` 显式关闭 |
+| **上游跨库只读** | `--add-dir ../clash-verge-rev` | `--add-dir ../clash-verge-rev` | 跨库只读查阅上游核心实现，禁止修改 |
 | **终端 TUI 流式渲染** | 正则匹配状态机、代码 Diff 折叠与命令去重 | 原生解析 `stream-json` NDJSON 事件流 | 统一动态 Spinner、耗时统计、命令与代码折叠展示 |
 | **会话隔离** | `.session_id_codex` | `.session_id_agy` | 双引擎各自持久化最新会话，互不干扰 |
 | **10分钟看门狗** | 监测 `turn_log` 文件 mtime，超时安全中断重试 | 同左 | 避免任何死循环、网络悬挂或长时间无响应 |
