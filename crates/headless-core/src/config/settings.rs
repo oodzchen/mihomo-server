@@ -227,15 +227,15 @@ impl RuntimeSettings {
                     .and_then(|v| v.as_mapping().cloned())
                     .unwrap_or_default();
                 let mut owned = value.as_mapping().context("invalid nested settings mapping")?.clone();
-                if section == "dns" {
-                    if let Some(filter) = owned.remove("fallback-filter") {
-                        let mut merged = nested
-                            .remove("fallback-filter")
-                            .and_then(|value| value.as_mapping().cloned())
-                            .unwrap_or_default();
-                        merged.extend(filter.as_mapping().context("invalid fallback filter mapping")?.clone());
-                        nested.insert("fallback-filter".into(), merged.into());
-                    }
+                if section == "dns"
+                    && let Some(filter) = owned.remove("fallback-filter")
+                {
+                    let mut merged = nested
+                        .remove("fallback-filter")
+                        .and_then(|value| value.as_mapping().cloned())
+                        .unwrap_or_default();
+                    merged.extend(filter.as_mapping().context("invalid fallback filter mapping")?.clone());
+                    nested.insert("fallback-filter".into(), merged.into());
                 }
                 nested.extend(owned);
                 config.insert(section.into(), nested.into());

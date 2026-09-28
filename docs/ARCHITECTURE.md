@@ -53,15 +53,16 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** Geo settings now use a presence-preserving
-`GET /configs` projection. The service distinguishes a missing core Geo field
-or URL leaf from an explicit false, zero or empty value, while accepting the
-core's `geo-site` URL alias. Real-core readback and actual-node traffic pass.
-**Next implementation task (P1):** continue Geo resource update lifecycle:
-inspect and expose the effective automatic-update state and resource freshness,
-then cover any remaining resource settings without duplicating Mihomo's updater.
-Verify actual TUN interface, routes and traffic when a Linux host with
-`/dev/net/tun` and the required privileges is available. Finish P1 before P2.
+**Latest completed task (P1):** The resource inventory now inspects and exposes
+the effective automatic-update state (`Active`, `Disabled`, `Stopped`, `Indeterminate`)
+and resource freshness (`Fresh`, `Stale`, `Indeterminate`) against effective/configured
+intervals without duplicating Mihomo's updater. The Web resource panel displays the
+running auto-update state and per-resource freshness diagnostics. Real-core readback
+and actual-node traffic pass.
+**Next implementation task (P1):** verify actual TUN interface, routes and traffic
+when a Linux host with `/dev/net/tun` and the required privileges is available, and
+complete any remaining P1 authoritative resource/service validations before proceeding
+to P2 (rules, providers, and delay testing).
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -213,6 +214,7 @@ mihomo-server/
 │   │   ├── geo_live.rs / durable rollback journal / startup recovery / guarded cleanup [Implemented; Linux verified]
 │   │   ├── Running-core online Geo replacement / verified restart / rollback and crash recovery [Implemented; Linux verified]
 │   │   ├── Online Geo managed/system proxy route choice and TLS retry parity [Implemented; Linux verified]
+│   │   ├── resource_inventory.rs / effective automatic-update state / freshness calculation / provider intervals [Implemented; Linux verified]
 │   │   └── Remaining full settings and native TUN interface/route verification [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
@@ -330,7 +332,7 @@ mihomo-server/
 │   ├── hosts-settings.tsx / typed JSON editor / explicit empty / canonical save comparison / snapshot [Implemented; Linux verified]
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
-│   ├── Geo/Provider inventory / metadata states / refresh and retry [Implemented; Linux verified]
+│   ├── Geo/Provider inventory / metadata states / auto-update state / freshness diagnostics / refresh and retry [Implemented; Linux verified]
 │   ├── Explicit MMDB/DAT checks / aggregate diagnostics / compatibility warnings / stale-result clearing [Implemented; Linux verified]
 │   ├── Pinned MMDB/DAT bundle inspection / stopped-state install / DAT core load proof / MMDB metadata-only choice [Implemented; Linux verified]
 │   ├── Configured-source Geo inspection / explicit download route and TLS choice / stopped and running-core update / fresh-hash retry [Implemented; Linux verified]
@@ -4443,7 +4445,37 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: presence-preserving Geo update-policy readback
+## Current increment: effective automatic-update state and resource freshness
+
+Delivery step 7 now inspects and exposes the effective automatic-update state
+(`Active`, `Disabled`, `Stopped`, `Indeterminate`) and resource freshness (`Fresh`,
+`Stale`, `Indeterminate`) on the committed resource inventory without duplicating
+Mihomo's background updater. `GeoUpdatePolicy` derives its runtime state by
+combining core execution status, readback success, explicit/effective enable flags,
+and zero/non-zero update intervals. When the core is stopped, auto-update is
+marked `Stopped`; when readback fails, `Indeterminate`; when disabled or configured
+with a zero interval, `Disabled`; and when running with a positive interval,
+`Active`.
+
+Each available Geo and provider file now evaluates its age against its effective
+update interval (hours for Geo assets, seconds for HTTP providers). Resources
+modified within the interval are marked `Fresh`; resources older than the interval
+are marked `Stale`; and resources that are empty, missing, unmanaged, or have future
+mtimes due to clock skew are marked `Indeterminate`. The Web resource panel displays
+the auto-update running state alongside submitted and core policy readback, and renders
+color-coded freshness diagnostics for available resources.
+
+Verification: `cargo check --workspace` and the serial workspace suite pass with
+**387 passed, 87 opt-in ignored and zero failures** (including a new targeted
+freshness and interval evaluation test). Clippy with `-D warnings` and `cargo fmt`
+pass cleanly. The real-Mihomo live resource inventory test (`resource_inventory_live`)
+passes against private copies of actual `data` and verifies HTTPS 204 proxy traffic.
+The Playwright browser suite reports **30 passed, 4 optional upgrade/repair workflows
+skipped**. The complete architecture tree is synchronized. Next: privileged Linux
+TUN interface/route/traffic verification when `/dev/net/tun` is available, followed
+by remaining P1 resource validations before P2.
+
+## Previous increment: presence-preserving Geo update-policy readback
 
 Delivery step 7 now reads the nine Geo settings from a dedicated, optional-field
 `GET /configs` projection instead of the legacy `BaseConfig` defaults. A core

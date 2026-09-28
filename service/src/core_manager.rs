@@ -423,7 +423,7 @@ enum CommandMessage {
     ReadSettings(oneshot::Sender<Result<ServiceSettings>>),
     ReadResources(oneshot::Sender<Result<crate::resource_inventory::Inventory>>),
     SetSettings {
-        runtime: RuntimeSettings,
+        runtime: Box<RuntimeSettings>,
         reply: oneshot::Sender<Result<ServiceSettings>>,
     },
     ReadEnhancement {
@@ -1419,7 +1419,10 @@ impl CoreManager {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         let (reply, result) = oneshot::channel();
         self.commands
-            .send(CommandMessage::SetSettings { runtime, reply })
+            .send(CommandMessage::SetSettings {
+                runtime: Box::new(runtime),
+                reply,
+            })
             .await
             .context("core manager stopped")?;
         result.await.context("settings update cancelled during shutdown")?
@@ -2170,7 +2173,7 @@ impl Actor {
                         CommandMessage::ReadSettings(reply) => { let _ = reply.send(Ok(self.settings.clone())); }
                         CommandMessage::SetSettings { runtime, reply } => {
                             if !reply.is_closed() {
-                                let result = self.update_settings(runtime).await;
+                                let result = self.update_settings(*runtime).await;
                                 if let Err(error) = &result { self.status.send_modify(|state| state.error = Some(format!("{error:#}"))); }
                                 let _ = reply.send(result);
                             }
@@ -2361,9 +2364,14 @@ impl Actor {
                                 let config = if revision.is_some() { self.store.read_current() } else { Ok(Mapping::new()) };
                                 let result = match config {
                                     Ok(config) => {
+                                        let running = self.status.borrow().phase == CorePhase::Running;
+                                        let actual = if running {
+                                            timeout(Duration::from_secs(3), self.client.get_geo_config()).await.ok().and_then(Result::ok)
+                                        } else { None };
+                                        let geo_update = crate::resource_inventory::GeoUpdatePolicy::from_config(&config, running, actual.as_ref());
                                         let data = self.options.data_dir.clone();
                                         let bundle = self.options.resources.as_ref().map(|resources| resources.directory().to_path_buf());
-                                        tokio::task::spawn_blocking(move || crate::resource_inventory::inspect(data, bundle, revision, config)).await.context("resource inventory worker failed").and_then(|result| result)
+                                        tokio::task::spawn_blocking(move || crate::resource_inventory::inspect(data, bundle, revision, config, geo_update)).await.context("resource inventory worker failed").and_then(|result| result)
                                     },
                                     Err(error) => Err(error),
                                 };

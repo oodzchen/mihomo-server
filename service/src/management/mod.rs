@@ -97,7 +97,7 @@ pub enum ManagementCommand {
         confirmation: Option<String>,
     },
     SetSettings {
-        runtime: headless_core::config::settings::RuntimeSettings,
+        runtime: Box<headless_core::config::settings::RuntimeSettings>,
     },
     Proxies {},
     Start {},
@@ -329,7 +329,7 @@ impl Management {
             ManagementCommand::Resources {} => serde_json::to_value(self.manager.resource_inventory().await?)?,
             ManagementCommand::ProxyAccess {} => crate::proxy_access::inspect(&self.manager).await?,
             ManagementCommand::SetSettings { runtime } => {
-                serde_json::to_value(self.manager.set_settings(runtime).await?)?
+                serde_json::to_value(self.manager.set_settings(*runtime).await?)?
             }
             ManagementCommand::Config {} => {
                 serde_json::json!({"yaml": serde_yaml_ng::to_string(&self.manager.runtime_config().await?)?})
