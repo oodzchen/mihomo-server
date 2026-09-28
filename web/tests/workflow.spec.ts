@@ -1524,6 +1524,31 @@ test("rule provider inventory and update controls translate while an update is p
   expect(calls).toEqual(["update_rule_provider", "update_rule_provider"]);
 });
 
+test("logs page controls and empty/filter states translate across language changes", async ({ page }) => {
+  await page.goto(`${base}/logs`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await expect(page.getByRole("heading", { name: "内核日志" })).toBeVisible();
+  await expect(page.getByText("最近 200 条输出，实时更新。重连后重新读取日志尾部。")).toBeVisible();
+  const filterInput = page.getByRole("textbox", { name: "筛选日志" });
+  await expect(filterInput).toHaveAttribute("placeholder", "筛选日志…");
+  await filterInput.fill("time=");
+  await expect(page.getByRole("log")).toContainText("time=");
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("heading", { name: "Core logs" })).toBeVisible();
+  await expect(page.getByText("Recent 200 log entries, updated in real time. Re-fetches log tail upon reconnect.")).toBeVisible();
+  const enFilterInput = page.getByRole("textbox", { name: "Filter logs" });
+  await expect(enFilterInput).toHaveValue("time=");
+  await expect(enFilterInput).toHaveAttribute("placeholder", "Filter logs…");
+  await expect(page.getByRole("log")).toContainText("time=");
+  await enFilterInput.fill("nonexistent_log_entry_pattern_xyz");
+  await expect(page.getByText("No matching log entries found.")).toBeVisible();
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(page.getByText("没有找到匹配的日志。")).toBeVisible();
+  await page.getByRole("button", { name: "清除" }).click();
+  await expect(page.getByRole("log")).toContainText("time=");
+});
+
 test("manual remote refresh keeps identity, applies active config and preserves failures across restart", async ({
   page,
 }) => {

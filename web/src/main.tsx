@@ -425,7 +425,7 @@ function Manager({
             perform={perform}
           />
         ) : route === "/logs" ? (
-          <LogPage logs={logs} />
+          <LogPage logs={logs} language={language} />
         ) : route === "/core" ? (
           <CoreUpgradePage
             token={token}
@@ -597,7 +597,7 @@ function Overview({
             {t(language, "viewAll")}
           </a>
         </div>
-        <LogLines logs={logs.slice(-8)} />
+        <LogLines logs={logs.slice(-8)} language={language} />
       </section>
     </>
   );
@@ -2042,9 +2042,9 @@ function ProxyPage({
   );
 }
 
-function LogLines({ logs }: { logs: CoreLog[] }) {
+function LogLines({ logs, language }: { logs: CoreLog[]; language: Language }) {
   return (
-    <div className="log-lines" role="log" aria-label="内核日志">
+    <div className="log-lines" role="log" aria-label={t(language, "logsAria")}>
       {logs.length ? (
         logs.map((log, index) => (
           <div key={index}>
@@ -2053,34 +2053,42 @@ function LogLines({ logs }: { logs: CoreLog[] }) {
           </div>
         ))
       ) : (
-        <p className="empty">暂无日志。内核启动后，输出会显示在这里。</p>
+        <p className="empty">{t(language, "logsEmpty")}</p>
       )}
     </div>
   );
 }
-function LogPage({ logs }: { logs: CoreLog[] }) {
+function LogPage({ logs, language }: { logs: CoreLog[]; language: Language }) {
   const [filter, setFilter] = useState("");
+  const filtered = logs.filter((log) =>
+    log.message.toLowerCase().includes(filter.toLowerCase()),
+  );
   return (
-    <section className="panel">
+    <section className="panel" aria-label={t(language, "logsTitle")}>
       <div className="panel-title">
         <div>
-          <h2>内核日志</h2>
-          <p className="muted">
-            最近 200 条输出，实时更新。重连后重新读取日志尾部。
-          </p>
+          <h2>{t(language, "logsTitle")}</h2>
+          <p className="muted">{t(language, "logsSubtitle")}</p>
         </div>
-        <input
-          aria-label="筛选日志"
-          placeholder="筛选日志…"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-        />
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <input
+            aria-label={t(language, "logsFilterAria")}
+            placeholder={t(language, "logsFilterPlaceholder")}
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+          />
+          {filter && (
+            <button className="quiet" onClick={() => setFilter("")}>
+              {t(language, "logsClear")}
+            </button>
+          )}
+        </div>
       </div>
-      <LogLines
-        logs={logs.filter((log) =>
-          log.message.toLowerCase().includes(filter.toLowerCase()),
-        )}
-      />
+      {logs.length > 0 && !filtered.length ? (
+        <p className="empty">{t(language, "logsNoMatches")}</p>
+      ) : (
+        <LogLines logs={filtered} language={language} />
+      )}
     </section>
   );
 }

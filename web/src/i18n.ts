@@ -182,6 +182,12 @@ const zh = {
   ruleProviderUpdated: "规则集 {name} 更新完成",
   ruleProviderUpdateFailed: "更新 {name} 失败: {error}",
   ruleProvidersUpdatedAll: "所有规则集更新完毕",
+  logsTitle: "内核日志",
+  logsSubtitle: "最近 200 条输出，实时更新。重连后重新读取日志尾部。",
+  logsFilterAria: "筛选日志", logsFilterPlaceholder: "筛选日志…",
+  logsClear: "清除", logsAria: "内核日志",
+  logsEmpty: "暂无日志。内核启动后，输出会显示在这里。",
+  logsNoMatches: "没有找到匹配的日志。",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -347,6 +353,12 @@ const en: Record<keyof typeof zh, string> = {
   ruleProviderUpdated: "Rule provider {name} updated",
   ruleProviderUpdateFailed: "Failed to update {name}: {error}",
   ruleProvidersUpdatedAll: "All rule providers updated",
+  logsTitle: "Core logs",
+  logsSubtitle: "Recent 200 log entries, updated in real time. Re-fetches log tail upon reconnect.",
+  logsFilterAria: "Filter logs", logsFilterPlaceholder: "Filter logs…",
+  logsClear: "Clear", logsAria: "Core logs",
+  logsEmpty: "No logs yet. Output will appear here once the core starts.",
+  logsNoMatches: "No matching log entries found.",
 };
 
 export type MessageKey = keyof typeof zh;

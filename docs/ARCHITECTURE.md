@@ -53,13 +53,13 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** the rule-provider inventory, format/type metadata,
-and update feedback on the rules page now follow the browser's Chinese/English
-language choice. Switching languages preserves pending update button states and
-status notices; provider names and core rule counts remain unchanged.
-**Next implementation task (P3):** translate the logs view controls and status
-indicators, then resource and upgrade views; service-message localization and
-additional browser languages remain pending.
+**Latest completed task (P3):** the logs view heading, subtitle, search/filter controls,
+clear action, and empty/unmatched state messages now follow the browser's
+Chinese/English language choice. Switching languages preserves active filter text
+and matched log lines without losing real-time event updates; core log stream tags
+and message text remain unchanged.
+**Next implementation task (P3):** translate resource and upgrade views,
+followed by service-message localization and additional browser languages.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -341,7 +341,8 @@ mihomo-server/
 │   ├── Proxy-provider inventory/update/healthcheck controls zh/en [Implemented; P3; browser verified]
 │   ├── Rule list zh/en search, counts, table and empty/loading states [Implemented; P3; browser verified]
 │   ├── Rule-provider inventory/update controls and status feedback zh/en [Implemented; P3; browser verified]
-│   ├── Log, resource, upgrade views, additional languages and service-message localization [Pending; P3]
+│   ├── Log view zh/en heading, filter input, clear action and empty/unmatched states [Implemented; P3; browser verified]
+│   ├── Resource, upgrade views, additional languages and service-message localization [Pending; P3]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4465,7 +4466,26 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: rule-provider inventory and update localization
+## Current increment: logs view and filter localization
+
+Delivery step 9 (P3) now localizes the core logs panel (`LogPage`) and log line
+container (`LogLines`): section heading, update/reconnect subtitle, filter input
+aria-label and placeholder, filter clear action, log region accessibility labels,
+initial empty state, and empty search/filter result notices. Mihomo stream badges
+(`stdout`, `stderr`) and log payload messages remain raw core outputs. Changing
+browser language retains active filter input and visible filtered entries without
+re-fetching or interrupting realtime log events.
+
+Verification: `cargo check --workspace` and the Web production build pass. A
+Playwright workflow navigates to the logs page, tests Chinese controls, filters
+by active log content, switches to English, verifies translated labels and preserved
+filter text, tests an unmatched filter string with empty-result feedback, switches
+back to Chinese to verify translated empty feedback, and clears the filter using
+the clear button. The full browser regression test suite reports **47 passed and
+4 optional upgrade workflows skipped**. The complete architecture tree above is
+synchronized. Next: translate resource and upgrade views.
+
+## Previous increment: rule-provider inventory and update localization
 
 Delivery step 9 (P3) now localizes the external rule-provider panel on the rules
 page: section title, subtitle, update-all button, provider card format/type labels,
