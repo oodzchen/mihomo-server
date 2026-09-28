@@ -127,7 +127,7 @@ mihomo-server/
 │       ├── Profile catalog, files, local import     [Implemented; upstream schema]
 │       ├── Versioned settings store / explicit runtime fields [Implemented; Linux verified]
 │       ├── Settings/runtime journal / interrupted-update recovery [Implemented; Linux verified]
-│       ├── Full service settings and resource paths  [Partially implemented; network/Geo authority and provider paths delivered]
+│       ├── Full service settings and resource paths  [Implemented; Linux verified]
 │       ├── Profile selection / current mirror      [Implemented]
 │       ├── Source controller removal / original YAML preservation [Implemented; Linux verified]
 │       ├── Remote URL/YAML/header processing        [Migrated + adaptation]
@@ -174,7 +174,7 @@ mihomo-server/
 │       ├── Backup manifest / bounded entries / inspection, validation, runtime policy and restore receipt models [Implemented; upstream ZIP adaptation]
 │       ├── Opaque restore plan / durable catalog-settings journal / runtime commit recovery [Implemented; Linux verified]
 │       ├── Retained backup metadata / list / create-delete receipt models [Implemented]
-│       ├── Full resource settings                       [Pending; P1]
+│       ├── Full resource settings                       [Implemented; Linux verified]
 │       └── Automatic retention models               [Deferred; outside active scope]
 ├── service/                                         [Partially implemented]
 │   ├── Persistent foreground entry point            [Implemented]
@@ -190,7 +190,7 @@ mihomo-server/
 │   ├── Raw/enhanced candidate phases / single TUN derivation [Implemented; Linux validation]
 │   ├── DNS/hosts conflict commands / scoped confirmation / coordinated auto-disable [Implemented; Linux verified]
 │   ├── Final candidate LAN/group normalization after authority [Implemented; Linux verified]
-│   ├── Geo/provider resources / full settings       [Partially implemented; P1]
+│   ├── Geo/provider resources / full settings       [Implemented; Linux verified]
 │   │   ├── Committed resource inventory / confined metadata / shared-path diagnostics [Implemented; Linux verified]
 │   │   ├── Final candidate provider normalization / conflict allocation / preserved source YAML [Implemented; Linux verified]
 │   │   ├── Probe/start/reload resource-path checks / service-file protection [Implemented; Linux verified]
@@ -5090,7 +5090,27 @@ Delivery step 7 (P1) completes the remaining Geo lifecycle and resource settings
   - Integration test in `service/tests/settings.rs`: `geo_lifecycle_settings_apply_readback_and_survive_restart` verifies real Mihomo core hot-reload, `geo_settings` snapshot readback, invalid interval/URL rejection and rollback, and full restoration across service restarts.
 
 Verification: `cargo check --workspace` passes; `cargo test -p headless-core --test resource_paths` passes all 9 unit tests; `cargo test -p headless-core --test settings` passes all 25 unit tests; `cargo test -p mihomo-server --test settings geo_lifecycle_settings_apply_readback_and_survive_restart -- --ignored` passes against real Mihomo; `cargo clippy --workspace --all-targets -- -D warnings` passes cleanly; all 20 python tests in `scripts/tests` pass.
-The tree above marks remaining Geo lifecycle and resource settings as implemented and Linux verified. Next: full resource settings.
+The tree above marks remaining Geo lifecycle and resource settings as implemented and Linux verified.
+
+## P1 increment: full resource settings
+
+Delivery step 7 (P1) completes the full resource settings and models in `crates/headless-core`:
+- **Unified resource models (`crates/headless-core/src/config/resources.rs`)**:
+  - `Inventory`: Canonical model representing complete resource inventory for committed runtime configurations, including data/bundle paths, revision, Geo update policies, and resource lists.
+  - `GeoUpdatePolicy`: Bidirectional policy evaluation (`evaluate`, `from_config_and_actual`) combining configured YAML values and running core reported status, computing effective auto-update states (`Active`, `Disabled`, `Stopped`, `Indeterminate`) and configuration mismatches.
+  - `AutoUpdateState`, `FreshnessState`, `FileState`: Strictly typed enums for resource update lifecycles, freshness assessment (`Fresh`, `Stale`, `Indeterminate`), and disk presence verification.
+  - `Resource`: Serialized record describing managed Geo database or proxy/rule provider files with size, mtime, age, and collision states.
+  - `ProviderSettings`: Typed schema and validation (`validate`) for proxy/rule providers enforcing HTTP URL scheme/host/length boundaries, file path limits, format allowances (`yaml`, `json`, `text`, `mrs`), behaviors (`classical`, `domain`, `ipcidr`), and non-negative interval limits.
+  - `validate_resource_declarations`: Structural configuration validator enforcing mapping sections, maximum provider limits (`MAX_PROVIDERS = 512`), identifier bounds (1–512 bytes, no control chars), valid types, formats, behaviors, and bounded intervals.
+- **Service layer integration (`service/src/resource_inventory.rs`, `service/src/core_manager.rs`)**:
+  - Re-exported and consumed canonical models from `headless_core::config::resources`.
+  - Added structural validation `validate_resource_declarations` to inventory inspection before processing.
+  - Adapted `GeoUpdatePolicyFromCore` and `geo_update_policy_from_config` for clean core integration.
+- **Verification**:
+  - Unit tests in `headless-core`: `tests/resources.rs` (9 comprehensive unit tests) covers valid/invalid provider declarations, section constraints, provider count limits, identifier length/character bounds, unsupported formats/behaviors/types, interval bounds, `ProviderSettings` validation, `GeoUpdatePolicy` evaluation/mismatch logic, freshness age evaluation, and `Inventory` serialization/deserialization roundtrips.
+  - Workspace checks: `cargo check --workspace` passes; `cargo clippy --workspace --all-targets -- -D warnings` passes cleanly; `cargo test -p headless-core --test resources` passes (9 tests); `cargo test -p headless-core --test resource_paths` passes (9 tests); `cargo test -p headless-core --test settings` passes (25 tests); `cargo test -p mihomo-server --test settings` passes; all 20 python tests in `scripts/tests` pass.
+
+The tree above marks Full resource settings as implemented and Linux verified. Next: Full enhancement/resource transaction.
 
 ## MVP completion boundary
 

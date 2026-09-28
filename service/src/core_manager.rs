@@ -2461,7 +2461,7 @@ impl Actor {
                                         let actual = if running {
                                             timeout(Duration::from_secs(3), self.client.get_geo_config()).await.ok().and_then(Result::ok)
                                         } else { None };
-                                        let geo_update = crate::resource_inventory::GeoUpdatePolicy::from_config(&config, running, actual.as_ref());
+                                        let geo_update = crate::resource_inventory::geo_update_policy_from_config(&config, running, actual.as_ref());
                                         let data = self.options.data_dir.clone();
                                         let bundle = self.options.resources.as_ref().map(|resources| resources.directory().to_path_buf());
                                         tokio::task::spawn_blocking(move || crate::resource_inventory::inspect(data, bundle, revision, config, geo_update)).await.context("resource inventory worker failed").and_then(|result| result)

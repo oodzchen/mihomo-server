@@ -2,7 +2,6 @@
 //! Provider URLs, headers, inline content and file contents never enter the report.
 use anyhow::{Result, ensure};
 use mihomo_client::models::GeoConfig;
-use serde::Serialize;
 use serde_yaml_ng::{Mapping, Value};
 use std::{
     collections::HashMap,
@@ -10,129 +9,41 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-pub use headless_core::config::resource_paths::GEO_ASSETS;
-use headless_core::config::resource_paths::{MAX_PROVIDERS, metadata_below, relative_path};
+pub use headless_core::config::resources::{
+    AutoUpdateState, FileState, FreshnessState, GEO_ASSETS, GeoUpdatePolicy, HTTP_CACHE_ROOT,
+    Inventory, MAX_PROVIDERS, ProviderSettings, Resource, is_geo_asset,
+    validate_resource_declarations,
+};
+use headless_core::config::resource_paths::{metadata_below, relative_path};
 
-#[derive(Debug, Serialize)]
-pub struct Inventory {
-    pub data_dir: PathBuf,
-    pub bundle_dir: Option<PathBuf>,
-    pub config_revision: Option<String>,
-    pub geo_update: GeoUpdatePolicy,
-    pub geo: Vec<Resource>,
-    pub providers: Vec<Resource>,
+pub trait GeoUpdatePolicyFromCore {
+    fn from_config(config: &Mapping, core_running: bool, actual: Option<&GeoConfig>) -> Self;
 }
 
-/// Committed policy and the running core's reported policy. `None` never
-/// implies disabled: the field may be inherited or absent in an older core.
-#[derive(Debug, Serialize)]
-pub struct GeoUpdatePolicy {
-    pub core_running: bool,
-    pub readback_error: bool,
-    pub configured_enabled: Option<bool>,
-    pub configured_interval_hours: Option<i64>,
-    pub effective_enabled: Option<bool>,
-    pub effective_interval_hours: Option<i64>,
-    pub auto_update_state: AutoUpdateState,
-    pub mismatch: bool,
-}
-
-#[derive(Debug, Serialize, PartialEq, Eq, Clone, Copy)]
-#[serde(rename_all = "snake_case")]
-pub enum AutoUpdateState {
-    Active,
-    Disabled,
-    Stopped,
-    Indeterminate,
-}
-
-impl GeoUpdatePolicy {
-    pub fn from_config(config: &Mapping, core_running: bool, actual: Option<&GeoConfig>) -> Self {
-        let configured_enabled = config.get("geo-auto-update").and_then(Value::as_bool);
-        let configured_interval_hours = config.get("geo-update-interval").and_then(Value::as_i64);
-        let effective_enabled = actual.and_then(|core| core.geo_auto_update);
-        let effective_interval_hours = actual.and_then(|core| core.geo_update_interval);
-        let mismatch = configured_enabled
-            .zip(effective_enabled)
-            .is_some_and(|(configured, effective)| configured != effective)
-            || configured_interval_hours
-                .zip(effective_interval_hours)
-                .is_some_and(|(configured, effective)| configured != effective);
-
-        let auto_update_state = if !core_running {
-            AutoUpdateState::Stopped
-        } else if actual.is_none() {
-            AutoUpdateState::Indeterminate
-        } else if effective_enabled == Some(false) {
-            AutoUpdateState::Disabled
-        } else if effective_enabled == Some(true) {
-            if effective_interval_hours.is_some_and(|h| h <= 0) {
-                AutoUpdateState::Disabled
-            } else {
-                AutoUpdateState::Active
-            }
-        } else {
-            match configured_enabled {
-                Some(true) => {
-                    if configured_interval_hours.is_some_and(|h| h <= 0) {
-                        AutoUpdateState::Disabled
-                    } else {
-                        AutoUpdateState::Active
-                    }
-                }
-                Some(false) | None => AutoUpdateState::Disabled,
-            }
-        };
-
-        Self {
-            core_running,
-            readback_error: core_running && actual.is_none(),
-            configured_enabled,
-            configured_interval_hours,
-            effective_enabled,
-            effective_interval_hours,
-            auto_update_state,
-            mismatch,
-        }
+impl GeoUpdatePolicyFromCore for GeoUpdatePolicy {
+    fn from_config(config: &Mapping, core_running: bool, actual: Option<&GeoConfig>) -> Self {
+        geo_update_policy_from_config(config, core_running, actual)
     }
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq, Clone, Copy)]
-#[serde(rename_all = "snake_case")]
-pub enum FreshnessState {
-    Fresh,
-    Stale,
-    Indeterminate,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Resource {
-    pub section: String,
-    pub name: String,
-    pub provider_type: Option<String>,
-    /// Normalized path relative to the Mihomo data directory; absent for unsafe paths.
-    pub path: Option<String>,
-    pub state: FileState,
-    pub bytes: Option<u64>,
-    /// Filesystem mtime, not proof of a successful automatic download.
-    pub modified_unix_seconds: Option<u64>,
-    pub age_seconds: Option<u64>,
-    pub freshness: FreshnessState,
-    pub conflict: bool,
-}
-
-#[derive(Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum FileState {
-    Available,
-    Missing,
-    Empty,
-    UnsafePath,
-    NotFile,
-    Unreadable,
-    Inline,
-    CoreManaged,
-    InvalidDeclaration,
+pub fn geo_update_policy_from_config(
+    config: &Mapping,
+    core_running: bool,
+    actual: Option<&GeoConfig>,
+) -> GeoUpdatePolicy {
+    let configured_enabled = config.get("geo-auto-update").and_then(Value::as_bool);
+    let configured_interval_hours = config.get("geo-update-interval").and_then(Value::as_i64);
+    let effective_enabled = actual.and_then(|core| core.geo_auto_update);
+    let effective_interval_hours = actual.and_then(|core| core.geo_update_interval);
+    let readback_error = core_running && actual.is_none();
+    GeoUpdatePolicy::evaluate(
+        configured_enabled,
+        configured_interval_hours,
+        effective_enabled,
+        effective_interval_hours,
+        core_running,
+        readback_error,
+    )
 }
 
 pub(crate) fn inspect(
@@ -157,6 +68,7 @@ pub(crate) fn inspect_with_now(
     geo_update: GeoUpdatePolicy,
     now_unix_seconds: Option<u64>,
 ) -> Result<Inventory> {
+    validate_resource_declarations(&config)?;
     let mut providers = Vec::new();
     for section in ["proxy-providers", "rule-providers"] {
         let Some(declarations) = config.get(section) else {
