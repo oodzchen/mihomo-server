@@ -417,6 +417,44 @@ test("raw profile editor retranslates feedback and preserves draft across langua
   await expect(page.getByText("还没有订阅。导入一个 YAML 文件开始使用。")).toBeVisible();
 });
 
+test("profile merge editor keeps its YAML draft when language changes", async ({ page }) => {
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByLabel("订阅名称", { exact: true }).fill("MergeLanguage");
+  await page.getByLabel("订阅 YAML", { exact: true }).fill("proxies: []\nmode: direct\n");
+  await page.getByRole("button", { name: "导入订阅", exact: true }).click();
+  const profile = page.locator("article.profile").filter({ has: page.getByRole("heading", { name: "MergeLanguage" }) });
+  await expect(profile).toBeVisible();
+  const uid = await profile.locator(".mono").textContent();
+  const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  await profile.getByRole("button", { name: "合并增强 MergeLanguage" }).click();
+  const merge = "mode: direct\n";
+  await page.getByLabel("合并增强 YAML").fill(merge);
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("heading", { name: "Config merge" })).toBeVisible();
+  await expect(page.getByText("Merge YAML into MergeLanguage.", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("Config merge YAML")).toHaveValue(merge);
+  await page.getByRole("button", { name: "Save merge" }).click();
+  await expect(profile).toContainText("Config merge linked");
+  const response = await fetch(`${base}/api/commands`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ command: "profile_merge", uid }),
+  });
+  expect(response.ok).toBe(true);
+  expect((await response.json()).yaml).toBe(merge);
+  await profile.getByRole("button", { name: "Config merge MergeLanguage" }).click();
+  await expect(page.getByLabel("Config merge YAML")).toHaveValue(merge);
+  await page.getByRole("button", { name: "Remove merge" }).click();
+  await expect(profile.getByText("Config merge linked")).toHaveCount(0);
+  const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  expect(after.generation).toBe(before.generation);
+  await profile.getByRole("button", { name: "Delete profile MergeLanguage" }).click();
+  await profile.getByRole("button", { name: "Confirm deletion MergeLanguage" }).click();
+  await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
+});
+
 test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
   await page.goto(`${base}/settings`);
   await page.getByLabel("管理令牌").fill(token);

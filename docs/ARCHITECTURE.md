@@ -53,14 +53,14 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** the raw subscription YAML editor now follows the
-browser's Chinese/English language choice for its controls, confirmations,
-conflict diagnostics and read/verify/save feedback. Switching languages retains
-the draft and re-renders existing feedback without changing service generation.
-**Next implementation task (P3):** translate the profile-linked merge editor,
-then the other extension editors and proxy, rules, log, resource and upgrade
-views; service-message localization and additional browser languages remain
-pending.
+**Latest completed task (P3):** the profile-linked merge editor now follows the
+browser's Chinese/English language choice for its instructions, YAML field and
+save/remove/cancel controls. Switching languages retains the YAML draft; English
+save and removal use the existing service flow without changing core generation.
+**Next implementation task (P3):** translate the profile-linked sequence editor,
+then the script and global extension editors and proxy, rules, log, resource and
+upgrade views; service-message localization and additional browser languages
+remain pending.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -332,7 +332,8 @@ mihomo-server/
 │   ├── Local YAML and remote URL import forms / file-size feedback [Implemented; P3; browser verified]
 │   ├── Profile metadata editor zh/en fields/options/draft-safe switching [Implemented; P3; browser verified]
 │   ├── Raw subscription YAML editor zh/en feedback/confirmation [Implemented; P3; browser verified]
-│   ├── Profile extension editors, proxy/rules/log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
+│   ├── Profile-linked merge editor zh/en YAML controls [Implemented; P3; browser verified]
+│   ├── Profile sequence/script and global extension editors, proxy/rules/log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4456,7 +4457,24 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: raw subscription YAML editor localization
+## Current increment: profile-linked merge editor localization
+
+Delivery step 9 (P3) now localizes the profile-linked merge editor's title,
+profile-specific instructions, YAML field and save/remove/cancel controls. The
+browser-owned language change preserves the editor component and unsaved YAML.
+The existing authenticated set/clear commands and active-versus-inactive profile
+behavior are unchanged. Profile-linked sequence/script and global extension
+editors still contain Chinese-only copy.
+
+Verification: `cargo check --workspace` and the Web production build pass. A
+Playwright workflow imports an inactive local profile, edits merge YAML,
+switches to English, saves and reads back the linked content, removes it, and
+confirms unchanged core generation before deleting the fixture. The full
+browser regression reports **37 passed and 4 optional upgrade/repair workflows
+skipped**. The complete architecture tree above is synchronized. Next:
+translate the profile-linked sequence editor.
+
+## Previous increment: raw subscription YAML editor localization
 
 Delivery step 9 (P3) now localizes the raw editor's instructions, controls,
 accessible names, conflict and uncertain-state warnings, and read/verify/save

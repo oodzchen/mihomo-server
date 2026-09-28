@@ -787,12 +787,14 @@ function ProfileEditor({
 
 function MergeEditor({
   item,
+  language,
   content,
   busy,
   perform,
   onClose,
 }: {
   item: Profile;
+  language: Language;
   content: { uid?: string; yaml?: string };
   busy: boolean;
   perform: Perform;
@@ -810,14 +812,11 @@ function MergeEditor({
   }
   return (
     <section className="panel">
-      <h2>合并增强</h2>
-      <p className="muted">
-        为 {item.name || item.uid} 合并
-        YAML。当前订阅会先校验并应用；其他订阅在下次使用时应用。
-      </p>
+      <h2>{t(language, "mergeEditorTitle")}</h2>
+      <p className="muted">{t(language, "mergeEditorHelp").replace("{name}", item.name || item.uid)}</p>
       <form onSubmit={save}>
         <label>
-          合并增强 YAML
+          {t(language, "mergeEditorYaml")}
           <textarea
             className="code"
             rows={12}
@@ -830,17 +829,17 @@ function MergeEditor({
         </label>
         <div className="form-actions">
           <button className="primary" disabled={busy}>
-            保存增强
+            {t(language, "mergeEditorSave")}
           </button>
           <button
             type="button"
             disabled={busy || !content.uid}
             onClick={() => void clear()}
           >
-            移除增强
+            {t(language, "mergeEditorRemove")}
           </button>
           <button type="button" disabled={busy} onClick={onClose}>
-            取消增强编辑
+            {t(language, "mergeEditorCancel")}
           </button>
         </div>
       </form>
@@ -1466,6 +1465,7 @@ function ProfilePage({
           <MergeEditor
             key={mergeEditing.item.uid}
             item={mergeEditing.item}
+            language={language}
             content={mergeEditing.content}
             busy={busy}
             perform={perform}

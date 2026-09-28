@@ -113,6 +113,10 @@ const zh = {
   rawCloseWarning: "关闭会丢弃未保存的原始订阅草稿。",
   rawConfirmReload: "确认重新读取原始订阅", rawConfirmClose: "确认丢弃原始草稿",
   rawKeepEditing: "继续编辑原始订阅",
+  mergeEditorTitle: "合并增强",
+  mergeEditorHelp: "为 {name} 合并 YAML。当前订阅会先校验并应用；其他订阅在下次使用时应用。",
+  mergeEditorYaml: "合并增强 YAML", mergeEditorSave: "保存增强",
+  mergeEditorRemove: "移除增强", mergeEditorCancel: "取消增强编辑",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -209,6 +213,10 @@ const en: Record<keyof typeof zh, string> = {
   rawCloseWarning: "Closing discards the unsaved raw profile draft.",
   rawConfirmReload: "Confirm raw profile reload", rawConfirmClose: "Confirm discarding raw draft",
   rawKeepEditing: "Keep editing raw profile",
+  mergeEditorTitle: "Config merge",
+  mergeEditorHelp: "Merge YAML into {name}. The active profile is validated and applied now; other profiles apply it when next used.",
+  mergeEditorYaml: "Config merge YAML", mergeEditorSave: "Save merge",
+  mergeEditorRemove: "Remove merge", mergeEditorCancel: "Cancel merge editing",
 };
 
 export type MessageKey = keyof typeof zh;
