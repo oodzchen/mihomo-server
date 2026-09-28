@@ -537,6 +537,48 @@ test("profile script editor preserves JavaScript draft across language changes",
   await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
 });
 
+test("global merge editor translates without replacing its draft or reset confirmation", async ({ page }) => {
+  const headers = { Authorization: `Bearer ${token}` };
+  const readMerge = async () => {
+    const response = await fetch(`${base}/api/commands`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "global_merge" }),
+    });
+    expect(response.ok).toBe(true);
+    return (await response.json()).yaml as string;
+  };
+  const original = await readMerge();
+  const before = await fetch(`${base}/api/status`, { headers }).then(response => response.json());
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByRole("button", { name: "编辑全局合并" }).click();
+  const merge = "# bilingual global merge\nmode: direct\n";
+  await page.getByLabel("全局合并 YAML").fill(merge);
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("region", { name: "Global enhancements" })).toBeVisible();
+  await expect(page.getByRole("form", { name: "Global merge enhancement" })).toBeVisible();
+  await expect(page.getByLabel("Global merge YAML")).toHaveValue(merge);
+  await page.getByRole("button", { name: "Restore default global merge" }).click();
+  await expect(page.getByRole("group", { name: "Confirm restoring default" })).toContainText("replacing the saved merge and current input");
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(page.getByRole("group", { name: "恢复默认确认" })).toContainText("替换已保存的合并和当前输入");
+  await expect(page.getByLabel("全局合并 YAML")).toHaveValue(merge);
+  await page.getByRole("button", { name: "继续编辑" }).click();
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await page.getByRole("button", { name: "Save global merge" }).click();
+  await expect(page.getByLabel("Global merge YAML")).toHaveCount(0);
+  expect(await readMerge()).toBe(merge);
+  await page.getByRole("button", { name: "Edit global merge" }).click();
+  await expect(page.getByLabel("Global merge YAML")).toHaveValue(merge);
+  await page.getByRole("button", { name: "Restore default global merge" }).click();
+  await page.getByRole("button", { name: "Confirm restore default" }).click();
+  expect(await readMerge()).toBe(original);
+  const after = await fetch(`${base}/api/status`, { headers }).then(response => response.json());
+  expect(after.generation).toBe(before.generation);
+});
+
 test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
   await page.goto(`${base}/settings`);
   await page.getByLabel("管理令牌").fill(token);

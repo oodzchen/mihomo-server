@@ -852,10 +852,12 @@ type SequenceKind = "rules" | "proxies" | "groups";
 type GlobalKind = "merge" | "script";
 
 function GlobalEnhancements({
+  language,
   status,
   busy,
   perform,
 }: {
+  language: Language;
   status: CoreStatus;
   busy: boolean;
   perform: Perform;
@@ -880,15 +882,15 @@ function GlobalEnhancements({
     });
   }
   return (
-    <section className="panel global-enhancements" aria-label="全局增强">
+    <section className="panel global-enhancements" aria-label={t(language, "globalPanelTitle")}>
       <div className="panel-title">
-        <h2>全局增强</h2>
+        <h2>{t(language, "globalPanelTitle")}</h2>
         <div className="actions">
           <button
             disabled={busy || editing !== null}
             onClick={() => void open("merge")}
           >
-            编辑全局合并
+            {t(language, "globalMergeOpen")}
           </button>
           <button
             disabled={busy || editing !== null}
@@ -898,18 +900,16 @@ function GlobalEnhancements({
           </button>
         </div>
       </div>
-      <p className="muted">
-        应用于所有订阅，先执行全局合并和脚本，再执行订阅自身的合并和脚本。
-        未设置订阅增强链接时，对应阶段会再次使用全局增强，脚本可能执行两次。
-      </p>
+      <p className="muted">{t(language, "globalPanelHelp")}</p>
       <p className="hint">
         {status.active_profile
-          ? "保存会重新生成、校验并应用当前订阅；失败时保留原配置，已停止的内核保持停止。"
-          : "当前未选择订阅。保存不会改变正在运行的独立配置；脚本仅检查语法，使用订阅时再执行并校验。"}
+          ? t(language, "globalPanelActive")
+          : t(language, "globalPanelInactive")}
       </p>
       {editing && (
         <GlobalEditor
           key={editing.version}
+          language={language}
           kind={editing.kind}
           initial={editing.content}
           loaded={editing.loaded}
@@ -924,6 +924,7 @@ function GlobalEnhancements({
 }
 
 function GlobalEditor({
+  language,
   kind,
   initial,
   loaded,
@@ -932,6 +933,7 @@ function GlobalEditor({
   onRetry,
   onClose,
 }: {
+  language: Language;
   kind: GlobalKind;
   initial: string;
   loaded: boolean;
@@ -942,15 +944,15 @@ function GlobalEditor({
 }) {
   const [content, setContent] = useState(initial);
   const [resetting, setResetting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<"script-large" | "merge-large" | null>(null);
   const script = kind === "script";
-  const title = script ? "全局脚本增强" : "全局合并增强";
+  const title = script ? "全局脚本增强" : t(language, "globalMergeTitle");
   async function save(event: FormEvent) {
     event.preventDefault();
-    setError("");
+    setError(null);
     const limit = (script ? 1 : 8) * 1024 ** 2;
     if (new TextEncoder().encode(content).length > limit) {
-      setError(script ? "脚本不能超过 1 MiB。" : "合并 YAML 不能超过 8 MiB。");
+      setError(script ? "script-large" : "merge-large");
       return;
     }
     if (
@@ -962,7 +964,7 @@ function GlobalEditor({
       onClose();
   }
   async function reset() {
-    setError("");
+    setError(null);
     if (await perform<Profile>(`reset_global_${kind}`)) onClose();
   }
   return (
@@ -971,15 +973,15 @@ function GlobalEditor({
       <p className="muted">
         {script
           ? "编写 main(config, name)，返回配置对象。脚本错误会显示在页面上，console 输出可在「日志」中查看。"
-          : "合并 YAML 映射；映射会合并，数组会替换。服务的私有控制器配置由服务管理。"}
+          : t(language, "globalMergeHelp")}
       </p>
       {!loaded && (
         <p className="info">
-          未读取到已保存内容。可重试读取、粘贴完整内容替换，或恢复默认。
+          {script ? "未读取到已保存内容。可重试读取、粘贴完整内容替换，或恢复默认。" : t(language, "globalReadMissing")}
         </p>
       )}
       <label>
-        {script ? "全局脚本 JavaScript" : "全局合并 YAML"}
+        {script ? "全局脚本 JavaScript" : t(language, "globalMergeYaml")}
         <textarea
           className="code"
           rows={12}
@@ -987,7 +989,7 @@ function GlobalEditor({
           disabled={busy}
           onChange={(event) => {
             setContent(event.target.value);
-            setError("");
+            setError(null);
             setResetting(false);
           }}
           spellCheck={false}
@@ -996,50 +998,50 @@ function GlobalEditor({
       </label>
       {error && (
         <p className="alert" role="alert">
-          {error}
+          {error === "script-large" ? "脚本不能超过 1 MiB。" : t(language, "globalMergeTooLarge")}
         </p>
       )}
       <div className="actions">
         <button className="primary" disabled={busy || !content.trim()}>
-          {script ? "保存全局脚本" : "保存全局合并"}
+          {script ? "保存全局脚本" : t(language, "globalMergeSave")}
         </button>
         <button
           type="button"
           disabled={busy}
           onClick={() => setResetting(true)}
         >
-          {script ? "恢复默认全局脚本" : "恢复默认全局合并"}
+          {script ? "恢复默认全局脚本" : t(language, "globalMergeReset")}
         </button>
         {!loaded && !content && (
           <button type="button" disabled={busy} onClick={onRetry}>
-            重试读取全局增强
+            {script ? "重试读取全局增强" : t(language, "globalRetry")}
           </button>
         )}
         <button type="button" disabled={busy} onClick={onClose}>
-          取消全局编辑
+          {script ? "取消全局编辑" : t(language, "globalCancel")}
         </button>
       </div>
       {resetting && (
         <div
           className="reset-confirmation"
           role="group"
-          aria-label="恢复默认确认"
+          aria-label={script ? "恢复默认确认" : t(language, "globalResetConfirmRegion")}
         >
           <p className="muted">
             {script
               ? "将恢复返回原配置的默认脚本，替换已保存的脚本和当前输入。"
-              : "将恢复启用节点选择记录的默认合并，替换已保存的合并和当前输入。"}
+              : t(language, "globalMergeResetWarning")}
           </p>
           <div className="actions">
             <button type="button" disabled={busy} onClick={() => void reset()}>
-              确认恢复默认
+              {script ? "确认恢复默认" : t(language, "globalResetConfirm")}
             </button>
             <button
               type="button"
               disabled={busy}
               onClick={() => setResetting(false)}
             >
-              继续编辑
+              {script ? "继续编辑" : t(language, "globalKeepEditing")}
             </button>
           </div>
         </div>
@@ -1319,7 +1321,7 @@ function ProfilePage({
   }
   return (
     <div className="two-column">
-      <GlobalEnhancements status={status} busy={busy} perform={perform} />
+      <GlobalEnhancements language={language} status={status} busy={busy} perform={perform} />
       <section className="panel">
         <div className="panel-title">
           <h2>{t(language, "profileListTitle")}</h2>

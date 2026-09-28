@@ -127,6 +127,18 @@ const zh = {
   scriptEditorHelp: "为 {name} 编写 main(config, name)，返回配置对象。脚本在序列与合并增强之后执行。保存前会运行脚本；当前订阅会校验并应用配置。执行失败会保留旧配置，输出显示在日志中。",
   scriptEditorSource: "脚本增强 JavaScript", scriptEditorSave: "保存脚本增强",
   scriptEditorRemove: "移除脚本增强", scriptEditorCancel: "取消脚本编辑",
+  globalPanelTitle: "全局增强", globalMergeOpen: "编辑全局合并",
+  globalPanelHelp: "应用于所有订阅，先执行全局合并和脚本，再执行订阅自身的合并和脚本。未设置订阅增强链接时，对应阶段会再次使用全局增强，脚本可能执行两次。",
+  globalPanelActive: "保存会重新生成、校验并应用当前订阅；失败时保留原配置，已停止的内核保持停止。",
+  globalPanelInactive: "当前未选择订阅。保存不会改变正在运行的独立配置；脚本仅检查语法，使用订阅时再执行并校验。",
+  globalMergeTitle: "全局合并增强", globalMergeHelp: "合并 YAML 映射；映射会合并，数组会替换。服务的私有控制器配置由服务管理。",
+  globalMergeYaml: "全局合并 YAML", globalMergeTooLarge: "合并 YAML 不能超过 8 MiB。",
+  globalMergeSave: "保存全局合并", globalMergeReset: "恢复默认全局合并",
+  globalMergeResetWarning: "将恢复启用节点选择记录的默认合并，替换已保存的合并和当前输入。",
+  globalReadMissing: "未读取到已保存内容。可重试读取、粘贴完整内容替换，或恢复默认。",
+  globalRetry: "重试读取全局增强", globalCancel: "取消全局编辑",
+  globalResetConfirmRegion: "恢复默认确认", globalResetConfirm: "确认恢复默认",
+  globalKeepEditing: "继续编辑",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -237,6 +249,18 @@ const en: Record<keyof typeof zh, string> = {
   scriptEditorHelp: "Write main(config, name) for {name} and return a configuration object. The script runs after sequence and merge enhancements. It runs before saving; the active profile is then validated and applied. Failures keep the previous configuration, with output shown in Logs.",
   scriptEditorSource: "Script enhancement JavaScript", scriptEditorSave: "Save script enhancement",
   scriptEditorRemove: "Remove script enhancement", scriptEditorCancel: "Cancel script editing",
+  globalPanelTitle: "Global enhancements", globalMergeOpen: "Edit global merge",
+  globalPanelHelp: "Applied to every profile: global merge and script run before the profile's own merge and script. If a profile has no linked enhancement, that stage uses the global one again, so a script may run twice.",
+  globalPanelActive: "Saving regenerates, validates and applies the active profile. Failures keep the previous configuration, and a stopped core stays stopped.",
+  globalPanelInactive: "No profile is selected. Saving does not change a running standalone configuration; scripts are checked for syntax and run when a profile is used.",
+  globalMergeTitle: "Global merge enhancement", globalMergeHelp: "Merge YAML mappings; mappings combine and arrays replace. The service manages its private controller configuration.",
+  globalMergeYaml: "Global merge YAML", globalMergeTooLarge: "Merge YAML must not exceed 8 MiB.",
+  globalMergeSave: "Save global merge", globalMergeReset: "Restore default global merge",
+  globalMergeResetWarning: "Restore the default merge that records node selections, replacing the saved merge and current input.",
+  globalReadMissing: "Saved content could not be read. Retry, paste complete replacement content, or restore the default.",
+  globalRetry: "Retry reading global enhancement", globalCancel: "Cancel global editing",
+  globalResetConfirmRegion: "Confirm restoring default", globalResetConfirm: "Confirm restore default",
+  globalKeepEditing: "Keep editing",
 };
 
 export type MessageKey = keyof typeof zh;
