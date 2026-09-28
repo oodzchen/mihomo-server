@@ -399,6 +399,7 @@ function Manager({
         {route === "/profiles" ? (
           <ProfilePage
             token={token}
+            language={language}
             logout={logout}
             profiles={profiles}
             status={status}
@@ -1210,6 +1211,7 @@ function SequenceEditor({
 
 function ProfilePage({
   token,
+  language,
   logout,
   profiles,
   status,
@@ -1217,6 +1219,7 @@ function ProfilePage({
   perform,
 }: {
   token: string;
+  language: Language;
   logout: (reason?: string) => void;
   profiles: Profiles;
   status: CoreStatus;
@@ -1325,11 +1328,11 @@ function ProfilePage({
       <GlobalEnhancements status={status} busy={busy} perform={perform} />
       <section className="panel">
         <div className="panel-title">
-          <h2>订阅列表</h2>
-          <span>{baseProfiles?.length || 0} 个</span>
+          <h2>{t(language, "profileListTitle")}</h2>
+          <span>{t(language, baseProfiles?.length === 1 ? "profileCountOne" : "profileCountOther").replace("{count}", String(baseProfiles?.length || 0))}</span>
         </div>
         {!baseProfiles?.length && (
-          <p className="empty">还没有订阅。导入一个 YAML 文件开始使用。</p>
+          <p className="empty">{t(language, "profileEmpty")}</p>
         )}
         {baseProfiles?.map((item) => (
           <article className="profile" key={item.uid}>
@@ -1337,40 +1340,40 @@ function ProfilePage({
               <h3>{item.name || item.uid}</h3>
               <p className="mono">{item.uid}</p>
               <p className="muted">
-                {item.type === "remote" ? "远程订阅" : "本地订阅"}
+                {item.type === "remote" ? t(language, "profileRemote") : t(language, "profileLocal")}
               </p>
-              {item.option?.merge && <p className="muted">已关联合并增强</p>}
-              {item.option?.script && <p className="muted">已关联脚本增强</p>}
+              {item.option?.merge && <p className="muted">{t(language, "profileLinkedMerge")}</p>}
+              {item.option?.script && <p className="muted">{t(language, "profileLinkedScript")}</p>}
               {(item.option?.rules ||
                 item.option?.proxies ||
-                item.option?.groups) && <p className="muted">已关联序列增强</p>}
+                item.option?.groups) && <p className="muted">{t(language, "profileLinkedSequence")}</p>}
               {item.desc && (
                 <p className="muted profile-description">{item.desc}</p>
               )}
               {item.extra && (
                 <p className="muted">
-                  已用 {bytes(item.extra.upload + item.extra.download)} /{" "}
+                  {t(language, "profileUsed")} {bytes(item.extra.upload + item.extra.download)} /{" "}
                   {bytes(item.extra.total)}
                 </p>
               )}
               {status.active_profile === item.uid && (
-                <span className="badge good">当前订阅</span>
+                <span className="badge good">{t(language, "profileCurrent")}</span>
               )}
               {deleting === item.uid && (
                 <div className="delete-confirmation">
                   <p>
-                    删除此订阅、独占的辅助配置和 DNS 偏好？共享辅助配置会保留。
+                    {t(language, "profileDeleteWarning")}
                   </p>
                   <div className="form-actions">
                     <button
                       disabled={busy}
                       onClick={() => void remove(item)}
-                      aria-label={`确认删除 ${item.name || item.uid}`}
+                      aria-label={`${t(language, "profileConfirmDelete")} ${item.name || item.uid}`}
                     >
-                      确认删除
+                      {t(language, "profileConfirmDelete")}
                     </button>
                     <button disabled={busy} onClick={() => setDeleting(null)}>
-                      取消删除
+                      {t(language, "profileCancelDelete")}
                     </button>
                   </div>
                 </div>
@@ -1379,48 +1382,48 @@ function ProfilePage({
             <div className="profile-actions">
               <button
                 disabled={busy}
-                aria-label={`脚本增强 ${item.name || item.uid}`}
+                aria-label={`${t(language, "profileScript")} ${item.name || item.uid}`}
                 onClick={() => void openScript(item)}
               >
-                脚本增强
+                {t(language, "profileScript")}
               </button>
               <button
                 disabled={busy}
-                aria-label={`序列增强 ${item.name || item.uid}`}
+                aria-label={`${t(language, "profileSequence")} ${item.name || item.uid}`}
                 onClick={() => void openSequence(item)}
               >
-                序列增强
+                {t(language, "profileSequence")}
               </button>
               <button
                 disabled={busy}
-                aria-label={`合并增强 ${item.name || item.uid}`}
+                aria-label={`${t(language, "profileMerge")} ${item.name || item.uid}`}
                 onClick={() => void openMerge(item)}
               >
-                合并增强
+                {t(language, "profileMerge")}
               </button>
               <button
                 disabled={busy || rawEditing !== undefined}
-                aria-label={`编辑原始订阅 ${item.name || item.uid}`}
+                aria-label={`${t(language, "profileEditRawNamed")} ${item.name || item.uid}`}
                 onClick={() => setRawEditing(item.uid)}
               >
-                原始 YAML
+                {t(language, "profileRawYaml")}
               </button>
               <button
                 disabled={busy}
-                aria-label={`编辑订阅 ${item.name || item.uid}`}
+                aria-label={`${t(language, "profileEditNamed")} ${item.name || item.uid}`}
                 onClick={() => setEditing(item)}
               >
-                编辑
+                {t(language, "profileEdit")}
               </button>
               {item.type === "remote" && (
                 <button
                   disabled={busy}
-                  aria-label={`刷新订阅 ${item.name || item.uid}`}
+                  aria-label={`${t(language, "profileRefresh")} ${item.name || item.uid}`}
                   onClick={() =>
                     void perform("refresh_profile", { uid: item.uid })
                   }
                 >
-                  刷新订阅
+                  {t(language, "profileRefresh")}
                 </button>
               )}
               <button
@@ -1429,19 +1432,19 @@ function ProfilePage({
                   void perform("select_profile", { uid: item.uid })
                 }
               >
-                {status.active_profile === item.uid ? "重新应用" : "使用订阅"}
+                {status.active_profile === item.uid ? t(language, "profileReapply") : t(language, "profileUse")}
               </button>
               <button
                 disabled={busy || status.active_profile === item.uid}
-                aria-label={`删除订阅 ${item.name || item.uid}`}
+                aria-label={`${t(language, "profileDeleteNamed")} ${item.name || item.uid}`}
                 title={
                   status.active_profile === item.uid
-                    ? "请先使用其他订阅"
+                    ? t(language, "profileSwitchFirst")
                     : undefined
                 }
                 onClick={() => setDeleting(item.uid)}
               >
-                删除
+                {t(language, "profileDelete")}
               </button>
             </div>
           </article>

@@ -53,13 +53,14 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** the runtime configuration editor now uses the
-browser's Chinese/English language choice for its labels, instructions and local
-feedback. Switching languages preserves an unapplied YAML draft and updates
-existing feedback without changing service state.
-**Next implementation task (P3):** translate the profile and subscription
-management workflows, then proxy, rules, log, resource and upgrade views;
-service-message localization and additional browser languages remain pending.
+**Latest completed task (P3):** the profile list now follows the browser's
+Chinese/English language choice for its empty state, type and usage labels,
+actions and deletion confirmation. Switching languages keeps a pending deletion
+confirmation and does not change service generation.
+**Next implementation task (P3):** translate the local YAML and remote URL
+subscription import forms, then the profile editors and proxy, rules, log,
+resource and upgrade views; service-message localization and additional browser
+languages remain pending.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -327,7 +328,8 @@ mihomo-server/
 │   ├── Proxy providers and node delay views         [Implemented; Linux verified]
 │   ├── Browser-owned zh/en language selection, login/navigation/core shell/overview copy [Implemented; P3; browser verified]
 │   ├── Config editor zh/en copy and draft-safe switching [Implemented; P3; browser verified]
-│   ├── Profile/proxy/rules/log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
+│   ├── Profile list zh/en labels/actions/deletion confirmation [Implemented; P3; browser verified]
+│   ├── Profile import/forms/editors, proxy/rules/log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4451,7 +4453,25 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: runtime configuration editor localization
+## Current increment: profile list localization
+
+Delivery step 9 (P3) now localizes the profile list's empty state, count,
+local/remote type, linked-enhancement and usage labels, active badge, actions,
+accessible action names, and deletion confirmation through the browser-owned
+Chinese/English catalog. The selected browser language changes these labels
+without remounting the page, clearing its pending deletion state or modifying
+service settings. The import forms, profile detail/extension editors and other
+management views still contain Chinese-only copy and remain separate P3 work.
+
+Verification: `cargo check --workspace` and the Web production build pass. A
+Playwright workflow creates a temporary local profile, checks English list and
+action labels, switches back to Chinese while deletion is pending, deletes the
+fixture and checks unchanged service generation. The full browser regression
+reports **33 passed and 4 optional upgrade/repair workflows skipped**. The
+complete architecture tree above is synchronized. Next: translate local YAML
+and remote URL subscription import forms.
+
+## Previous increment: runtime configuration editor localization
 
 Delivery step 9 (P3) now localizes the runtime configuration editor's title,
 YAML field, validation action, instructions, unsaved-change status and local

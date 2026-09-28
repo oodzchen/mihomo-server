@@ -252,6 +252,35 @@ test("configuration editor translates without losing an unapplied YAML draft", a
   expect(after.generation).toBe(before.generation);
 });
 
+test("profile list switches language while keeping deletion confirmation", async ({ page }) => {
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await expect(page.getByRole("heading", { name: "订阅列表" })).toBeVisible();
+  await expect(page.getByText("还没有订阅。导入一个 YAML 文件开始使用。")).toBeVisible();
+  await page.getByLabel("订阅名称", { exact: true }).fill("LanguageFixture");
+  await page.getByLabel("订阅 YAML", { exact: true }).fill("proxies: []\nmode: direct\n");
+  await page.getByRole("button", { name: "导入订阅", exact: true }).click();
+  const item = page.locator("article.profile").filter({ has: page.getByRole("heading", { name: "LanguageFixture" }) });
+  await expect(item).toContainText("本地订阅");
+  const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("heading", { name: "Profile list" })).toBeVisible();
+  await expect(page.getByText("1 profile", { exact: true })).toBeVisible();
+  await expect(item).toContainText("Local profile");
+  await expect(item.getByRole("button", { name: "Use profile" })).toBeVisible();
+  await item.getByRole("button", { name: "Delete profile LanguageFixture" }).click();
+  await expect(item.getByText("Delete this profile, its exclusive auxiliary configurations and DNS preferences? Shared auxiliary configurations will remain.")).toBeVisible();
+
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(item.getByText("删除此订阅、独占的辅助配置和 DNS 偏好？共享辅助配置会保留。")).toBeVisible();
+  await item.getByRole("button", { name: "确认删除 LanguageFixture" }).click();
+  await expect(page.getByText("还没有订阅。导入一个 YAML 文件开始使用。")).toBeVisible();
+  const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  expect(after.generation).toBe(before.generation);
+});
+
 test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
   await page.goto(`${base}/settings`);
   await page.getByLabel("管理令牌").fill(token);

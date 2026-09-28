@@ -53,6 +53,18 @@ const zh = {
   configMissing: "尚无已提交配置，可粘贴 YAML 后应用。",
   configApplied: "此配置已通过校验并提交。", configYamlLabel: "运行配置 YAML",
   configLeaveHint: "离开此页面会丢弃尚未应用的编辑。", configApply: "校验并应用",
+  profileListTitle: "订阅列表", profileCountOne: "{count} 个", profileCountOther: "{count} 个",
+  profileEmpty: "还没有订阅。导入一个 YAML 文件开始使用。",
+  profileRemote: "远程订阅", profileLocal: "本地订阅",
+  profileLinkedMerge: "已关联合并增强", profileLinkedScript: "已关联脚本增强",
+  profileLinkedSequence: "已关联序列增强", profileUsed: "已用", profileCurrent: "当前订阅",
+  profileDeleteWarning: "删除此订阅、独占的辅助配置和 DNS 偏好？共享辅助配置会保留。",
+  profileConfirmDelete: "确认删除", profileCancelDelete: "取消删除",
+  profileScript: "脚本增强", profileSequence: "序列增强", profileMerge: "合并增强",
+  profileRawYaml: "原始 YAML", profileEdit: "编辑", profileRefresh: "刷新订阅",
+  profileReapply: "重新应用", profileUse: "使用订阅", profileDelete: "删除",
+  profileEditRawNamed: "编辑原始订阅", profileEditNamed: "编辑订阅",
+  profileDeleteNamed: "删除订阅", profileSwitchFirst: "请先使用其他订阅",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -89,6 +101,18 @@ const en: Record<keyof typeof zh, string> = {
   configMissing: "No committed configuration yet. Paste YAML to apply it.",
   configApplied: "Configuration validated and committed.", configYamlLabel: "Runtime configuration YAML",
   configLeaveHint: "Leaving this page discards unapplied edits.", configApply: "Validate and apply",
+  profileListTitle: "Profile list", profileCountOne: "{count} profile", profileCountOther: "{count} profiles",
+  profileEmpty: "No profiles yet. Import a YAML file to get started.",
+  profileRemote: "Remote profile", profileLocal: "Local profile",
+  profileLinkedMerge: "Config merge linked", profileLinkedScript: "Script linked",
+  profileLinkedSequence: "Sequence linked", profileUsed: "Used", profileCurrent: "Current profile",
+  profileDeleteWarning: "Delete this profile, its exclusive auxiliary configurations and DNS preferences? Shared auxiliary configurations will remain.",
+  profileConfirmDelete: "Confirm deletion", profileCancelDelete: "Cancel deletion",
+  profileScript: "Script enhancement", profileSequence: "Sequence enhancement", profileMerge: "Config merge",
+  profileRawYaml: "Raw YAML", profileEdit: "Edit", profileRefresh: "Refresh profile",
+  profileReapply: "Reapply", profileUse: "Use profile", profileDelete: "Delete",
+  profileEditRawNamed: "Edit raw profile", profileEditNamed: "Edit profile",
+  profileDeleteNamed: "Delete profile", profileSwitchFirst: "Use another profile first",
 };
 
 export type MessageKey = keyof typeof zh;
