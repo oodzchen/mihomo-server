@@ -14,6 +14,13 @@ pub enum DnsMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+pub enum FakeIpFilterMode {
+    Blacklist,
+    Whitelist,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TunStack {
     Gvisor,
     System,
@@ -31,6 +38,12 @@ pub struct DnsSettings {
     pub listen: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enhanced_mode: Option<DnsMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fake_ip_filter_mode: Option<FakeIpFilterMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefer_h3: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub respect_rules: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fake_ip_range: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

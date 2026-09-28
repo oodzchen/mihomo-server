@@ -361,6 +361,48 @@ fn resolver_policies_and_fallback_filter_reject_invalid_saved_shapes() -> Result
 }
 
 #[test]
+fn remaining_dns_page_switches_follow_false_inheritance_and_enum_authority() -> Result<()> {
+    use headless_core::config::settings::RuntimeSettings;
+    let source = parse(
+        "dns: {enable: true, enhanced-mode: fake-ip, fake-ip-filter-mode: whitelist, prefer-h3: true, respect-rules: true, nameserver: [9.9.9.9]}",
+    )?;
+    let false_switches: RuntimeSettings =
+        serde_yaml_ng::from_str("dns: {fake-ip-filter-mode: blacklist, prefer-h3: false, respect-rules: false}")?;
+    let applied = false_switches.prepare(source.clone())?;
+    assert_eq!(applied["dns"]["fake-ip-filter-mode"].as_str(), Some("blacklist"));
+    assert_eq!(applied["dns"]["prefer-h3"].as_bool(), Some(true));
+    assert_eq!(applied["dns"]["respect-rules"].as_bool(), Some(true));
+    assert_eq!(applied["dns"]["nameserver"], source["dns"]["nameserver"]);
+    assert_eq!(
+        false_switches.overridden_fields(&source, &applied)?,
+        ["dns.fake-ip-filter-mode"]
+    );
+    let true_switches: RuntimeSettings =
+        serde_yaml_ng::from_str("dns: {fake-ip-filter-mode: whitelist, prefer-h3: true, respect-rules: true}")?;
+    let disabled_source = parse("dns: {fake-ip-filter-mode: blacklist, prefer-h3: false, respect-rules: false}")?;
+    let applied = true_switches.enforce(disabled_source)?;
+    for key in ["prefer-h3", "respect-rules"] {
+        assert_eq!(applied["dns"][key].as_bool(), Some(true));
+    }
+    assert_eq!(applied["dns"]["fake-ip-filter-mode"].as_str(), Some("whitelist"));
+    for value in ["invalid", "BLACKLIST", "", "false", "123"] {
+        assert!(
+            serde_yaml_ng::from_str::<RuntimeSettings>(&format!("dns: {{fake-ip-filter-mode: '{value}'}}")).is_err()
+        );
+    }
+    for invalid in ["dns: {prefer-h3: 'true'}", "dns: {respect-rules: 1}"] {
+        assert!(serde_yaml_ng::from_str::<RuntimeSettings>(invalid).is_err());
+    }
+    let dir = Directory::new()?;
+    let mut store = SettingsStore::open(&dir.0)?;
+    let mut saved = store.snapshot();
+    saved.runtime = true_switches;
+    store.replace(saved.clone())?;
+    assert_eq!(SettingsStore::open(&dir.0)?.snapshot(), saved);
+    Ok(())
+}
+
+#[test]
 fn geo_authority_is_per_url_leaf_false_is_explicit_and_empty_maps_inherit() -> Result<()> {
     use headless_core::config::settings::RuntimeSettings;
     let base = parse(

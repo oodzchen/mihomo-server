@@ -2387,6 +2387,9 @@ test("network editor preserves all supported fields and explicitly confirms chan
       "use-hosts": false,
       listen: "",
       "enhanced-mode": "redir-host",
+      "fake-ip-filter-mode": "whitelist",
+      "prefer-h3": true,
+      "respect-rules": true,
       "fake-ip-range": "198.18.0.1/16",
       "fake-ip-range6": "2001:2::0/64",
       "default-nameserver": ["1.1.1.1"],
@@ -2416,6 +2419,9 @@ test("network editor preserves all supported fields and explicitly confirms chan
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务", exact: true }).click();
   await expect(input("DNS 解析服务器")).toHaveValue('["1.1.1.1"]');
+  await expect(select("DNS Fake-IP 过滤模式")).toHaveValue("whitelist");
+  await expect(select("DNS 优先 HTTP/3")).toHaveValue("true");
+  await expect(select("DNS 遵循代理规则")).toHaveValue("true");
   await expect(input("DNS 域名解析策略")).toHaveValue('{"owned.test":["1.1.1.1"]}');
   await expect(input("DNS 后备过滤条件")).toHaveValue('{"geoip":false,"geoip-code":"CN"}');
   await expect(input("DNS 监听地址")).toHaveValue("");

@@ -50,7 +50,8 @@ reimplementing the algorithms or inventing a new processing order.
 
 ## DNS resolver policy settings reference
 
-The P1 DNS policy controls follow the saved shapes and editor fields in
+The P1 DNS policy and remaining DNS page controls (`fake-ip-filter-mode`,
+`prefer-h3`, `respect-rules`) follow the saved shapes and editor fields in
 `src/components/setting/mods/dns-viewer.tsx` and the provider conflict fields in
 `src-tauri/src/config/dns.rs` at pinned revision
 `b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b`. New service code lives in

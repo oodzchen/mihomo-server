@@ -1355,6 +1355,7 @@ runtime object. Read it back after either success or failure. For example:
 ```
 
 DNS supports enable, ipv6, listen, enhanced-mode (`fake-ip`/`redir-host`),
+fake-ip-filter-mode (`blacklist`/`whitelist`), prefer-h3, respect-rules,
 fake-ip-range/range6, use-hosts, use-system-hosts, default-nameserver, nameserver,
 fallback, fake-ip-filter, proxy-server-nameserver, direct-nameserver,
 direct-nameserver-follow-policy, nameserver-policy,

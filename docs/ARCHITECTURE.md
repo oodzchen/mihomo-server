@@ -53,14 +53,13 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** service-owned DNS resolver policies, direct/proxy
-resolver lists and fallback-filter leaves now flow through schema-one settings,
-candidate generation, rollback and Web editing. Nonempty policy maps replace
-source policy maps; individual fallback-filter fields merge with the source.
-**Next implementation task (P1):** add the remaining DNS page controls
-(`respect-rules`, `prefer-h3`, `fake-ip-filter-mode`) with authoritative settings
-and Web editing, then continue resource settings. Verify actual TUN interface,
-routes and traffic when a Linux host with
+**Latest completed task (P1):** the remaining DNS page controls
+`respect-rules`, `prefer-h3` and `fake-ip-filter-mode` now flow through typed
+schema-one settings, candidate generation, management/API validation and Web
+editing. False DNS switches retain the established source-inheritance rule.
+**Next implementation task (P1):** continue resource-management settings and
+lifecycle, starting with the remaining Geo resource update policy/readback.
+Verify actual TUN interface, routes and traffic when a Linux host with
 `/dev/net/tun` and the required privileges is available. Finish P1 before P2.
 
 ## Complete target architecture
@@ -114,6 +113,7 @@ mihomo-server/
 │       ├── Transactional global editing / pointer recovery [Implemented]
 │       ├── Explicit runtime settings authority       [Implemented; Linux verified]
 │       ├── Typed DNS/TUN, resolver policies/fallback filter, host-use booleans / authority [Implemented; Linux verified]
+│       ├── DNS page H3/rule-respecting/fake-IP filter-mode controls [Implemented; Linux verified]
 │       ├── settings/dns_policy.rs / strict policy values / per-leaf fallback ownership [Implemented; Linux verified]
 │       ├── Typed Geo fields incl. geosite matcher / per-URL authority / bounds / schema-one recovery [Implemented; Linux verified]
 │       ├── TCP concurrency / process mode authority / schema-one recovery [Implemented; Linux verified]
@@ -150,6 +150,7 @@ mihomo-server/
 │   ├── Startup settings snapshot / candidate authority [Implemented; Linux verified]
 │   ├── Actor settings read/replace / coordinated apply and rollback [Implemented; Linux verified]
 │   ├── DNS/TUN/hosts, resolver policy/fallback generation and settings transactions [Implemented; Linux verified]
+│   ├── DNS page H3/rule-respecting/filter-mode API validation/apply [Implemented; Linux verified]
 │   ├── native_tun.rs / device admission and live TUN config readback [Partially implemented; P1; privileged routing verification pending]
 │   ├── Raw/enhanced candidate phases / single TUN derivation [Implemented; Linux validation]
 │   ├── DNS/hosts conflict commands / scoped confirmation / coordinated auto-disable [Implemented; Linux verified]
@@ -285,6 +286,7 @@ mihomo-server/
 │   ├── outbound-settings.tsx / interface ownership / Linux mark editor / readback [Implemented; Linux verified]
 │   ├── download-settings.tsx / User-Agent ownership / ETag editor / readback [Implemented; Linux verified]
 │   ├── DNS/TUN editor / resolver policy and fallback JSON / nested inheritance / readback [Implemented; Linux verified]
+│   ├── DNS H3/rule-respecting/filter-mode editor [Implemented; Linux verified]
 │   ├── hosts-settings.tsx / typed JSON editor / explicit empty / canonical save comparison / snapshot [Implemented; Linux verified]
 │   ├── Provider DNS confirmation / cancellation / reconnect reconciliation [Implemented; Linux verified]
 │   ├── Stable/Alpha channel selection / core upgrade / broken-core repair / force confirmation / installation readback / retry [Implemented; Linux x86_64]
@@ -4394,7 +4396,35 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: DNS resolver policy and fallback-filter authority
+## Current increment: remaining DNS page controls
+
+Delivery step 7 now includes `fake-ip-filter-mode` (`blacklist`/`whitelist`),
+`prefer-h3` and `respect-rules` in the existing DNS settings object. The two
+switches retain the DNS page's established semantics: saved `true` overrides,
+saved `false` inherits a subscription or enhancement value. Either nonempty
+filter-mode enum value is authoritative. Invalid enum values and wrong boolean
+types fail before settings publication. The fields use the existing staged
+generation, Mihomo validation, live application, rollback and schema-one
+settings recovery; no new on-disk version or command is introduced.
+
+The Web DNS editor exposes all three fields and preserves whole-runtime
+replacement, inherited values and failed drafts. A real Mihomo candidate
+accepts the three controls together with the previously delivered resolver
+policies and fallback filter. Upstream field values come from
+`src/components/setting/mods/dns-viewer.tsx` and
+`src-tauri/src/utils/init.rs` at the pinned revision; the service authority
+and browser controls are headless adaptations.
+
+Verification: `cargo check --workspace` passes; the serial workspace suite
+reports **385 passed, 87 opt-in ignored and zero failures**. Targeted model,
+management API, real-Mihomo application/rollback and browser editor tests pass.
+The actual-node resource/proxy workflow still returns HTTPS 204 using private
+copies of `data`. The Linux MVP remains runnable. Privileged native TUN routing
+still cannot be verified on this host without `/dev/net/tun` and network
+administration capability. Next: remaining P1 Geo resource update policy and
+readback, followed by other resource settings and the host-dependent TUN test.
+
+## Previous increment: DNS resolver policy and fallback-filter authority
 
 Delivery step 7 extends the version-one service settings without changing its
 on-disk schema. DNS now accepts direct/proxy resolver lists, the direct resolver

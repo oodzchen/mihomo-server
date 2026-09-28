@@ -16,13 +16,16 @@ async fn resolver_policy_and_fallback_filter_apply_and_reject_invalid_core_candi
     let manager = CoreManager::spawn(dir.options()?)?;
     let result = async {
         manager.start().await?;
-        let runtime = serde_yaml_ng::from_str("dns: {enable: true, enhanced-mode: redir-host, listen: '127.0.0.1:0', nameserver: [1.1.1.1], nameserver-policy: {example.test: [1.1.1.1]}, proxy-server-nameserver: [8.8.8.8], direct-nameserver: [9.9.9.9], fallback-filter: {geoip: false, geoip-code: CN, domain: ['+.example.test']}}")?;
+        let runtime = serde_yaml_ng::from_str("dns: {enable: true, enhanced-mode: redir-host, fake-ip-filter-mode: whitelist, prefer-h3: true, respect-rules: true, listen: '127.0.0.1:0', nameserver: [1.1.1.1], nameserver-policy: {example.test: [1.1.1.1]}, proxy-server-nameserver: [8.8.8.8], direct-nameserver: [9.9.9.9], fallback-filter: {geoip: false, geoip-code: CN, domain: ['+.example.test']}}")?;
         manager.set_settings(runtime).await?;
         let applied = manager.runtime_config().await?;
         assert_eq!(applied["dns"]["nameserver-policy"]["example.test"][0].as_str(), Some("1.1.1.1"));
         assert_eq!(applied["dns"]["fallback-filter"]["geoip"].as_bool(), Some(false));
         assert_eq!(applied["dns"]["fallback-filter"]["geoip-code"].as_str(), Some("CN"));
         assert_eq!(applied["dns"]["proxy-server-nameserver"][0].as_str(), Some("8.8.8.8"));
+        assert_eq!(applied["dns"]["fake-ip-filter-mode"].as_str(), Some("whitelist"));
+        assert_eq!(applied["dns"]["prefer-h3"].as_bool(), Some(true));
+        assert_eq!(applied["dns"]["respect-rules"].as_bool(), Some(true));
         let before = manager.status();
         let settings = manager.settings().await?;
         let invalid = serde_yaml_ng::from_str("dns: {enable: true, nameserver: [1.1.1.1], nameserver-policy: {example.test: 'https://['}}")?;

@@ -20,7 +20,7 @@ pub use dns_policy::{FallbackFilter, ResolverPolicy, ResolverPolicyValue};
 mod hosts;
 pub use hosts::{HostValue, Hosts};
 mod network;
-pub use network::{DnsMode, DnsSettings, TunSettings, TunStack};
+pub use network::{DnsMode, DnsSettings, FakeIpFilterMode, TunSettings, TunStack};
 
 pub const MAX_SETTINGS_BYTES: usize = 64 * 1024;
 

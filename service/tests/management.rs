@@ -594,6 +594,9 @@ async fn settings_commands_authenticate_validate_full_replacement_and_work_befor
             json!({"command":"set_settings","runtime":{"mixed-port":65536}}),
             json!({"command":"set_settings","runtime":{"external-controller":"127.0.0.1:9099"}}),
             json!({"command":"set_settings","runtime":{"dns":{"nameserver-policy":{"example.test":123}}}}),
+            json!({"command":"set_settings","runtime":{"dns":{"fake-ip-filter-mode":"allowlist"}}}),
+            json!({"command":"set_settings","runtime":{"dns":{"prefer-h3":"true"}}}),
+            json!({"command":"set_settings","runtime":{"dns":{"respect-rules":1}}}),
             json!({"command":"set_settings","runtime":{"dns":{"enable":"true"}}}),
             json!({"command":"set_settings","runtime":{"tun":{"unknown":true}}}),
             json!({"command":"set_settings","runtime":{"tun":{"mtu":0}}}),
@@ -634,7 +637,7 @@ async fn settings_commands_authenticate_validate_full_replacement_and_work_befor
         .await?;
         assert_eq!(saved, settings);
         let runtime =
-            json!({"hosts":{"a.test":["192.0.2.1","2001:db8::1"],"alias.test":"a.test"},"dns":{"enable":false,"use-hosts":false,"use-system-hosts":false,"nameserver":["1.1.1.1"],"nameserver-policy":{"example.test":["1.1.1.1"]},"fallback-filter":{"geoip":false,"domain":["+.example.test"]}},"tun":{"enable":false,"dns-hijack":[],"mtu":1500}});
+            json!({"hosts":{"a.test":["192.0.2.1","2001:db8::1"],"alias.test":"a.test"},"dns":{"enable":false,"use-hosts":false,"use-system-hosts":false,"fake-ip-filter-mode":"whitelist","prefer-h3":true,"respect-rules":true,"nameserver":["1.1.1.1"],"nameserver-policy":{"example.test":["1.1.1.1"]},"fallback-filter":{"geoip":false,"domain":["+.example.test"]}},"tun":{"enable":false,"dns-hijack":[],"mtu":1500}});
         let (status, nested) = response(
             &app,
             request(
