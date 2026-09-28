@@ -429,6 +429,7 @@ function Manager({
         ) : route === "/core" ? (
           <CoreUpgradePage
             token={token}
+            language={language}
             status={status}
             connection={connection}
             busy={busy}

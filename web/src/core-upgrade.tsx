@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, command, type Perform } from "./api";
+import { t, type Language } from "./i18n";
 import type { CoreStatus } from "./types";
 
 type Release = { version: string; bytes: number; target: string };
@@ -8,6 +9,7 @@ type Report = { upgraded: boolean; from: string; to: string };
 
 export function CoreUpgradePage({
   token,
+  language,
   status,
   connection,
   busy,
@@ -15,6 +17,7 @@ export function CoreUpgradePage({
   logout,
 }: {
   token: string;
+  language: Language;
   status: CoreStatus;
   connection: string;
   busy: boolean;
@@ -22,7 +25,7 @@ export function CoreUpgradePage({
   logout: (reason?: string) => void;
 }) {
   const [channel, setChannel] = useState<"stable" | "alpha">("stable");
-  const label = channel === "alpha" ? "Alpha" : "稳定版";
+  const label = channel === "alpha" ? "Alpha" : t(language, "channelStable");
   const [version, setVersion] = useState<string>();
   const [installation, setInstallation] = useState<Installation | null>();
   const [latest, setLatest] = useState<Release>();
@@ -63,15 +66,15 @@ export function CoreUpgradePage({
         );
         if (failed.length === 0) return;
         if (failed.some((result) => result.reason instanceof ApiError && result.reason.status === 401))
-          logout("认证失效，请重新输入令牌。");
+          logout(t(language, "expiredToken"));
         else {
           const error: unknown = failed[0].reason;
           const message =
             error instanceof Error ? error.message : String(error);
           setError(
             message.includes("bundle-managed resources")
-              ? "当前启动模式不支持在线升级，请使用带托管内核的 Linux bundle。"
-              : `读取已安装内核失败：${message}`,
+              ? t(language, "coreUpgradeNotSupported")
+              : t(language, "coreUpgradeReadFailed", { message }),
           );
         }
       });
@@ -79,13 +82,13 @@ export function CoreUpgradePage({
       active = false;
       controller.abort();
     };
-  }, [token, connection, status.generation, refresh, logout]);
+  }, [token, connection, status.generation, refresh, logout, language]);
 
   async function run(force?: boolean) {
     if (locked.current || busy) return;
     if (
       force === true &&
-      !window.confirm(`重新安装最新${label}内核？运行中的代理连接会短暂中断。`)
+      !window.confirm(t(language, "coreUpgradeConfirmReinstall", { label }))
     )
       return;
     locked.current = true;
@@ -108,19 +111,19 @@ export function CoreUpgradePage({
   }
   const disabled = busy || working || connection !== "已连接" || !version;
   return (
-    <section className="panel" aria-label={`${label}内核升级`}>
+    <section className="panel" aria-label={t(language, "coreUpgradeTitle", { label })}>
       <div className="panel-title">
-        <h2>{label}内核升级</h2>
+        <h2>{t(language, "coreUpgradeTitle", { label })}</h2>
         <button
           type="button"
           disabled={busy || working || connection !== "已连接"}
           onClick={() => setRefresh((value) => value + 1)}
         >
-          刷新安装信息
+          {t(language, "coreUpgradeRefresh")}
         </button>
       </div>
       <label>
-        升级通道
+        {t(language, "coreUpgradeChannel")}
         <select
           value={channel}
           disabled={busy || working || connection !== "已连接"}
@@ -131,55 +134,55 @@ export function CoreUpgradePage({
             setReport(undefined);
           }}
         >
-          <option value="stable">稳定版</option>
-          <option value="alpha">Alpha</option>
+          <option value="stable">{t(language, "coreUpgradeChannelStable")}</option>
+          <option value="alpha">{t(language, "coreUpgradeChannelAlpha")}</option>
         </select>
       </label>
       <p className="muted">
-        检查并安装 Mihomo 最新{label}。升级时会短暂中断代理连接；失败时恢复上一份内核，停止的内核仍保持停止。
+        {t(language, "coreUpgradeDesc", { label })}
       </p>
       {channel === "alpha" && (
-        <p className="info">Alpha 是预发布版本。可选择稳定版通道切回最新稳定版。</p>
+        <p className="info">{t(language, "coreUpgradeAlphaNotice")}</p>
       )}
       {connection !== "已连接" ? (
-        <p className="info">服务连接中断，重新连接后核对安装信息。</p>
+        <p className="info">{t(language, "coreUpgradeDisconnected")}</p>
       ) : error ? (
         <p className="alert" role="alert">
           {error}
         </p>
       ) : !version ? (
-        <p className="info">正在读取已安装内核…</p>
+        <p className="info">{t(language, "coreUpgradeReadingInstalled")}</p>
       ) : null}
       {version && connection === "已连接" && (
         <dl className="proxy-details">
           <div>
-            <dt>已安装版本</dt>
-            <dd>{version === "unknown" ? "未知（需要修复）" : version}</dd>
+            <dt>{t(language, "coreUpgradeInstalledVersion")}</dt>
+            <dd>{version === "unknown" ? t(language, "coreUpgradeUnknownRepair") : version}</dd>
           </div>
           <div>
-            <dt>最新{label}</dt>
-            <dd>{latest?.version || "尚未检查"}</dd>
+            <dt>{t(language, "coreUpgradeLatestChannel", { label })}</dt>
+            <dd>{latest?.version || t(language, "coreUpgradeNotChecked")}</dd>
           </div>
           <div>
-            <dt>安装记录</dt>
+            <dt>{t(language, "coreUpgradeInstallRecord")}</dt>
             <dd>
               {installation === undefined
-                ? "记录未验证"
+                ? t(language, "coreUpgradeRecordUnverified")
                 : installation
-                ? `已验证安装 ${installation.version}`
-                : "随 bundle 初始化"}
+                ? t(language, "coreUpgradeRecordVerified", { version: installation.version })
+                : t(language, "coreUpgradeRecordBundle")}
             </dd>
           </div>
         </dl>
       )}
       {version === "unknown" && (
         <p className="info">
-          当前内核无法报告版本，可以升级至最新{label}进行修复。失败时保留原文件，可重试；修复后请启动内核。
+          {t(language, "coreUpgradeUnknownHint", { label })}
         </p>
       )}
       <div className="actions">
         <button type="button" disabled={disabled} onClick={() => void run()}>
-          检查{label}更新
+          {t(language, "coreUpgradeCheck", { label })}
         </button>
         <button
           type="button"
@@ -187,37 +190,37 @@ export function CoreUpgradePage({
           disabled={disabled}
           onClick={() => void run(false)}
         >
-          升级至最新{label}
+          {t(language, "coreUpgradeUpgrade", { label })}
         </button>
         <button
           type="button"
           disabled={disabled}
           onClick={() => void run(true)}
         >
-          强制重新安装{label}
+          {t(language, "coreUpgradeReinstall", { label })}
         </button>
       </div>
       {working && (
         <p className="info" role="status">
-          正在检查或升级内核，请稍候…
+          {t(language, "coreUpgradeWorking")}
         </p>
       )}
       {report && (
         <p className="success" role="status">
           {report.upgraded
             ? report.from === "unknown"
-              ? `修复完成：${report.to}`
-              : `升级完成：${report.from} → ${report.to}`
-            : `已是最新${label} ${report.to}，无需重新安装。`}
+              ? t(language, "coreUpgradeReportRepaired", { version: report.to })
+              : t(language, "coreUpgradeReportUpgraded", { from: report.from, to: report.to })
+            : t(language, "coreUpgradeReportAlreadyLatest", { label, version: report.to })}
         </p>
       )}
       {report && version && version !== report.to && (
         <p className="alert" role="alert">
-          当前安装版本与操作结果不同，请刷新安装信息并检查服务日志。
+          {t(language, "coreUpgradeMismatchWarning")}
         </p>
       )}
       <p className="hint">
-        默认跳过相同版本；强制重新安装会重新验证并替换内核。升级失败后可查看上方错误、刷新安装信息并重试。页面关闭后，已开始的内核切换由服务完成。
+        {t(language, "coreUpgradeHint")}
       </p>
     </section>
   );

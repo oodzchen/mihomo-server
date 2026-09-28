@@ -53,13 +53,16 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** the logs view heading, subtitle, search/filter controls,
-clear action, and empty/unmatched state messages now follow the browser's
-Chinese/English language choice. Switching languages preserves active filter text
-and matched log lines without losing real-time event updates; core log stream tags
-and message text remain unchanged.
-**Next implementation task (P3):** translate resource and upgrade views,
-followed by service-message localization and additional browser languages.
+**Latest completed task (P3):** the core upgrade view (`CoreUpgradePage`) now
+follows the browser's Chinese/English language selection: channel switcher
+(Stable/Alpha), release and install status summaries, version details, action
+buttons (check updates, upgrade, force reinstall with confirmation dialog),
+in-progress notices, report banners, mismatch warnings, and operational hints.
+Switching channels and languages dynamically updates titles, notices, and button
+labels without unmounting or triggering duplicate network requests.
+**Next implementation task (P3):** translate resource views (Geo and provider
+management panels and offline/online update actions), followed by
+service-message localization and additional browser languages.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -342,7 +345,8 @@ mihomo-server/
 │   ├── Rule list zh/en search, counts, table and empty/loading states [Implemented; P3; browser verified]
 │   ├── Rule-provider inventory/update controls and status feedback zh/en [Implemented; P3; browser verified]
 │   ├── Log view zh/en heading, filter input, clear action and empty/unmatched states [Implemented; P3; browser verified]
-│   ├── Resource, upgrade views, additional languages and service-message localization [Pending; P3]
+│   ├── Core upgrade view zh/en channels, release info, install records and action dialogs [Implemented; P3; browser verified]
+│   ├── Resource views, additional languages and service-message localization [Pending; P3]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4466,7 +4470,33 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: logs view and filter localization
+## Current increment: core upgrade view localization
+
+Delivery step 9 (P3) now localizes the core upgrade panel (`CoreUpgradePage`):
+channel selector (Stable / Alpha), panel titles, install info refresh action,
+description copy, pre-release channel notice, disconnected notice, installed
+version labels (installed version, latest release version, install record,
+unverified record, bundle initialization, and repair-needed guidance), action
+buttons (check updates, upgrade, force reinstall with confirmation dialog),
+working/progress indicators, upgrade and repair report banners, mismatch
+warnings, and operational footer hints. Dynamic placeholders for channel label
+(`{label}`), versions (`{version}`, `{from}`, `{to}`), and error messages
+(`{message}`) interpolate cleanly across language changes via parameter support
+in `t()`. Switching between Chinese and English preserves selected channels,
+active installation reads, and in-flight states without unmounting or duplicate
+requests.
+
+Verification: `cargo check --workspace` and the Web production build pass. A
+Playwright workflow navigates to the core upgrade page, mocks core version and
+release endpoints, verifies Chinese labels and controls in the default Stable
+channel, switches to English and confirms all translated labels and action buttons,
+switches channel to Alpha and verifies the pre-release notice and channel-specific
+actions, switches back to Chinese to verify localized Alpha labels, and returns
+to Stable channel. The full browser regression test suite reports **48 passed and
+4 optional upgrade workflows skipped**. The complete architecture tree above is
+synchronized. Next: translate resource views (Geo and provider management panels).
+
+## Previous increment: logs view and filter localization
 
 Delivery step 9 (P3) now localizes the core logs panel (`LogPage`) and log line
 container (`LogLines`): section heading, update/reconnect subtitle, filter input

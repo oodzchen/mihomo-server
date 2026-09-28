@@ -188,6 +188,37 @@ const zh = {
   logsClear: "清除", logsAria: "内核日志",
   logsEmpty: "暂无日志。内核启动后，输出会显示在这里。",
   logsNoMatches: "没有找到匹配的日志。",
+  channelStable: "稳定版",
+  coreUpgradeTitle: "{label}内核升级",
+  coreUpgradeRefresh: "刷新安装信息",
+  coreUpgradeChannel: "升级通道",
+  coreUpgradeChannelStable: "稳定版",
+  coreUpgradeChannelAlpha: "Alpha",
+  coreUpgradeDesc: "检查并安装 Mihomo 最新{label}。升级时会短暂中断代理连接；失败时恢复上一份内核，停止的内核仍保持停止。",
+  coreUpgradeAlphaNotice: "Alpha 是预发布版本。可选择稳定版通道切回最新稳定版。",
+  coreUpgradeDisconnected: "服务连接中断，重新连接后核对安装信息。",
+  coreUpgradeReadingInstalled: "正在读取已安装内核…",
+  coreUpgradeNotSupported: "当前启动模式不支持在线升级，请使用带托管内核的 Linux bundle。",
+  coreUpgradeReadFailed: "读取已安装内核失败：{message}",
+  coreUpgradeInstalledVersion: "已安装版本",
+  coreUpgradeUnknownRepair: "未知（需要修复）",
+  coreUpgradeLatestChannel: "最新{label}",
+  coreUpgradeNotChecked: "尚未检查",
+  coreUpgradeInstallRecord: "安装记录",
+  coreUpgradeRecordUnverified: "记录未验证",
+  coreUpgradeRecordVerified: "已验证安装 {version}",
+  coreUpgradeRecordBundle: "随 bundle 初始化",
+  coreUpgradeUnknownHint: "当前内核无法报告版本，可以升级至最新{label}进行修复。失败时保留原文件，可重试；修复后请启动内核。",
+  coreUpgradeCheck: "检查{label}更新",
+  coreUpgradeUpgrade: "升级至最新{label}",
+  coreUpgradeReinstall: "强制重新安装{label}",
+  coreUpgradeConfirmReinstall: "重新安装最新{label}内核？运行中的代理连接会短暂中断。",
+  coreUpgradeWorking: "正在检查或升级内核，请稍候…",
+  coreUpgradeReportRepaired: "修复完成：{version}",
+  coreUpgradeReportUpgraded: "升级完成：{from} → {to}",
+  coreUpgradeReportAlreadyLatest: "已是最新{label} {version}，无需重新安装。",
+  coreUpgradeMismatchWarning: "当前安装版本与操作结果不同，请刷新安装信息并检查服务日志。",
+  coreUpgradeHint: "默认跳过相同版本；强制重新安装会重新验证并替换内核。升级失败后可查看上方错误、刷新安装信息并重试。页面关闭后，已开始的内核切换由服务完成。",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -359,11 +390,52 @@ const en: Record<keyof typeof zh, string> = {
   logsClear: "Clear", logsAria: "Core logs",
   logsEmpty: "No logs yet. Output will appear here once the core starts.",
   logsNoMatches: "No matching log entries found.",
+  channelStable: "Stable",
+  coreUpgradeTitle: "{label} core upgrade",
+  coreUpgradeRefresh: "Refresh install info",
+  coreUpgradeChannel: "Upgrade channel",
+  coreUpgradeChannelStable: "Stable",
+  coreUpgradeChannelAlpha: "Alpha",
+  coreUpgradeDesc: "Check and install the latest {label} Mihomo core. Proxy connections will briefly pause during upgrades; previous core is restored on failure, stopped cores remain stopped.",
+  coreUpgradeAlphaNotice: "Alpha is a pre-release channel. Switch back to Stable channel anytime.",
+  coreUpgradeDisconnected: "Service connection interrupted; check installation info after reconnecting.",
+  coreUpgradeReadingInstalled: "Reading installed core…",
+  coreUpgradeNotSupported: "Online upgrade is not supported in current launch mode. Use a Linux bundle with managed core.",
+  coreUpgradeReadFailed: "Failed to read installed core: {message}",
+  coreUpgradeInstalledVersion: "Installed version",
+  coreUpgradeUnknownRepair: "Unknown (repair needed)",
+  coreUpgradeLatestChannel: "Latest {label}",
+  coreUpgradeNotChecked: "Not checked yet",
+  coreUpgradeInstallRecord: "Install record",
+  coreUpgradeRecordUnverified: "Unverified record",
+  coreUpgradeRecordVerified: "Verified install {version}",
+  coreUpgradeRecordBundle: "Initialized with bundle",
+  coreUpgradeUnknownHint: "Current core cannot report its version. Upgrade to latest {label} to repair. Failed updates keep original files and can be retried; start core after repair.",
+  coreUpgradeCheck: "Check {label} update",
+  coreUpgradeUpgrade: "Upgrade to latest {label}",
+  coreUpgradeReinstall: "Force reinstall {label}",
+  coreUpgradeConfirmReinstall: "Reinstall latest {label} core? Active proxy connections will briefly interrupt.",
+  coreUpgradeWorking: "Checking or upgrading core, please wait…",
+  coreUpgradeReportRepaired: "Repair complete: {version}",
+  coreUpgradeReportUpgraded: "Upgrade complete: {from} → {to}",
+  coreUpgradeReportAlreadyLatest: "Already latest {label} {version}, no reinstallation needed.",
+  coreUpgradeMismatchWarning: "Currently installed version differs from the result; refresh install info and check service logs.",
+  coreUpgradeHint: "Identical versions are skipped by default; force reinstall re-verifies and replaces the core. Check error messages above on failure, refresh install info and retry. Started core switches finish even if the browser closes.",
 };
 
 export type MessageKey = keyof typeof zh;
-export function t(language: Language, key: MessageKey): string {
-  return language === "en" ? en[key] : zh[key];
+export function t(
+  language: Language,
+  key: MessageKey,
+  params?: Record<string, string | number>,
+): string {
+  let text: string = language === "en" ? en[key] : zh[key];
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      text = text.replaceAll(`{${k}}`, String(v));
+    }
+  }
+  return text;
 }
 
 const phaseKeys: Record<string, MessageKey> = {

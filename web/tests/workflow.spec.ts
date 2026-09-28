@@ -1549,6 +1549,69 @@ test("logs page controls and empty/filter states translate across language chang
   await expect(page.getByRole("log")).toContainText("time=");
 });
 
+test("core upgrade page controls and channels translate across language changes", async ({ page }) => {
+  await page.route("**/api/commands", async (route) => {
+    const body = route.request().postDataJSON();
+    if (body?.command === "installed_core_version") {
+      await route.fulfill({ json: "v1.18.0" });
+      return;
+    }
+    if (body?.command === "core_installation") {
+      await route.fulfill({ json: { version: "v1.18.0", stage_id: "init-stage" } });
+      return;
+    }
+    if (body?.command === "core_release") {
+      await route.fulfill({ json: { version: "v1.19.0", bytes: 1234567, target: "x86_64" } });
+      return;
+    }
+    if (body?.command === "alpha_core_release") {
+      await route.fulfill({ json: { version: "v1.19.0-alpha", bytes: 1234567, target: "x86_64" } });
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto(`${base}/core`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "稳定版内核升级" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "刷新安装信息" })).toBeVisible();
+  await expect(page.getByLabel("升级通道")).toBeVisible();
+  await expect(page.getByText("检查并安装 Mihomo 最新稳定版。升级时会短暂中断代理连接；失败时恢复上一份内核，停止的内核仍保持停止。")).toBeVisible();
+  await expect(page.getByText("已验证安装 v1.18.0")).toBeVisible();
+  await expect(page.getByRole("button", { name: "检查稳定版更新" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "升级至最新稳定版" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "强制重新安装稳定版" })).toBeVisible();
+
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("heading", { name: "Stable core upgrade" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh install info" })).toBeVisible();
+  await expect(page.getByLabel("Upgrade channel")).toBeVisible();
+  await expect(page.getByText("Check and install the latest Stable Mihomo core. Proxy connections will briefly pause during upgrades; previous core is restored on failure, stopped cores remain stopped.")).toBeVisible();
+  await expect(page.getByText("Verified install v1.18.0")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Check Stable update" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Upgrade to latest Stable" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Force reinstall Stable" })).toBeVisible();
+
+  await page.getByLabel("Upgrade channel").selectOption("alpha");
+  await expect(page.getByRole("heading", { name: "Alpha core upgrade" })).toBeVisible();
+  await expect(page.getByText("Alpha is a pre-release channel. Switch back to Stable channel anytime.")).toBeVisible();
+  await expect(page.getByText("Check and install the latest Alpha Mihomo core. Proxy connections will briefly pause during upgrades; previous core is restored on failure, stopped cores remain stopped.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Check Alpha update" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Upgrade to latest Alpha" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Force reinstall Alpha" })).toBeVisible();
+
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(page.getByRole("heading", { name: "Alpha内核升级" })).toBeVisible();
+  await expect(page.getByText("Alpha 是预发布版本。可选择稳定版通道切回最新稳定版。")).toBeVisible();
+  await expect(page.getByText("检查并安装 Mihomo 最新Alpha。升级时会短暂中断代理连接；失败时恢复上一份内核，停止的内核仍保持停止。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "检查Alpha更新" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "升级至最新Alpha" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "强制重新安装Alpha" })).toBeVisible();
+
+  await page.getByLabel("升级通道").selectOption("stable");
+  await expect(page.getByRole("heading", { name: "稳定版内核升级" })).toBeVisible();
+});
+
 test("manual remote refresh keeps identity, applies active config and preserves failures across restart", async ({
   page,
 }) => {
