@@ -17,6 +17,13 @@ import { DOWNLOAD_KEYS, DownloadFields, downloadDraft, downloadRuntime, validate
 import { HostsFields, hostsDraft, hostsRuntime, validateHosts } from "./hosts-settings";
 import { SettingsReadback } from "./settings-readback";
 import { ResourcesPanel } from "./resources";
+import {
+  AUTHORITY_KEYS,
+  AuthorityFields,
+  authorityDraft,
+  authorityRuntime,
+  validateAuthority,
+} from "./authority-settings";
 import type { Language } from "./i18n";
 
 type Settings = { schema_version: number; runtime: Runtime };
@@ -77,6 +84,7 @@ function toDraft(settings: Settings): Draft {
     ...Object.entries(outboundDraft(settings.runtime)),
     ...Object.entries(downloadDraft(settings.runtime)),
     ...Object.entries(hostsDraft(settings.runtime)),
+    ...Object.entries(authorityDraft(settings.runtime)),
     ...fields.map((field) => [
       field.key,
       settings.runtime[field.key] == null
@@ -86,7 +94,14 @@ function toDraft(settings: Settings): Draft {
   ]);
 }
 function runtime(draft: Draft): Runtime {
-  const result: Runtime = { ...networkRuntime(draft), ...geoRuntime(draft), ...outboundRuntime(draft), ...downloadRuntime(draft), ...hostsRuntime(draft) };
+  const result: Runtime = {
+    ...networkRuntime(draft),
+    ...geoRuntime(draft),
+    ...outboundRuntime(draft),
+    ...downloadRuntime(draft),
+    ...hostsRuntime(draft),
+    ...authorityRuntime(draft),
+  };
   for (const field of fields) {
     const value = draft[field.key];
     if (value === "") continue;
@@ -122,6 +137,7 @@ function decode(value: unknown): Settings {
     if (GEO_KEYS.has(key)) continue;
     if (DOWNLOAD_KEYS.has(key)) { validateDownload(key, value); continue; }
     if (OUTBOUND_KEYS.has(key)) { validateOutbound(key, value); continue; }
+    if (AUTHORITY_KEYS.has(key)) { validateAuthority(key, value); continue; }
     if (key === "dns" || key === "tun") {
       validateNetwork(key, value);
       continue;
@@ -439,6 +455,10 @@ export function SettingsPage({
               setDraft(previous => ({ ...previous, [key]: value }));
               setError(""); setNotice(""); setConfirmation(undefined);
             }} />
+            <AuthorityFields draft={draft} disabled={disabled} onChange={(key, value) => {
+              setDraft(previous => ({ ...previous, [key]: value }));
+              setError(""); setNotice(""); setConfirmation(undefined);
+            }} />
             <NetworkFields
               draft={draft}
               disabled={disabled}
@@ -568,6 +588,7 @@ export function SettingsPage({
           {saved && <pre className="network-snapshot" aria-label="已保存 hosts 映射">{saved.runtime.hosts == null ? "继承" : JSON.stringify(saved.runtime.hosts, null, 2)}</pre>}
           {saved && <pre className="network-snapshot" aria-label="已保存核心下载设置">{JSON.stringify(Object.fromEntries([...DOWNLOAD_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
           {saved && <pre className="network-snapshot" aria-label="已保存出口设置">{JSON.stringify(Object.fromEntries([...OUTBOUND_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
+          {saved && <pre className="network-snapshot" aria-label="已保存监听与访问控制设置">{JSON.stringify(Object.fromEntries([...AUTHORITY_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
           {saved && <pre className="network-snapshot" aria-label="已保存 Geo 设置">{JSON.stringify(Object.fromEntries([...GEO_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
           {saved && (
             <pre className="network-snapshot" aria-label="已保存网络设置">

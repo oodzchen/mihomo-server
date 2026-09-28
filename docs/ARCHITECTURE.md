@@ -298,7 +298,7 @@ mihomo-server/
 │   ├── User systemd unit and management CLI        [Implemented; Linux verified]
 │   └── Other platform service integration           [Deferred; Linux only]
 <!--│   └── Windows SCM service integration              [Deferred; Windows compatibility postponed] -->
-├── web/                                             [Partially implemented]
+├── web/                                             [Implemented; Linux verified]
 │   ├── React build, login and responsive layout     [Implemented; MVP]
 │   ├── HTTP commands, WebSocket events/feed adapters [Implemented; MVP allowlist]
 │   │   ├── Rules and rule-provider command views    [Implemented; Linux verified]
@@ -355,7 +355,7 @@ mihomo-server/
 │   ├── Pinned MMDB/DAT bundle inspection / stopped-state install / DAT core load proof / MMDB metadata-only choice [Implemented; Linux verified]
 │   ├── Configured-source Geo inspection / explicit download route and TLS choice / stopped and running-core update / fresh-hash retry [Implemented; Linux verified]
 │   ├── Geo field editor incl. geosite matcher / per-URL inheritance / saved-configured-actual readback / retry [Implemented; Linux verified]
-│   ├── Remaining full settings/resource lifecycle UI [Pending; P1]
+│   ├── Remaining full settings/resource lifecycle UI [Implemented; browser verified]
 │   └── Backup UI [Deferred; outside active scope]
 ├── Release and deployment                           [Implemented; Linux release verified]
 │   ├── Linux x86_64 bundle: Rust + independent Mihomo + Web [Implemented]
@@ -5128,7 +5128,30 @@ Delivery step 7 (P1) completes the full enhancement and resource transaction in 
   - `service/tests/enhancements.rs`: validates rejection of invalid provider types, intervals exceeding $2^{31}-1$, Geo asset collisions, and inactive profile invalid declarations, while confirming that valid provider merges allocate paths under `provider-cache/v1/` and preserve running state upon failure.
   - Workspace checks: `cargo check --workspace` and `cargo check --workspace --tests` pass cleanly; `cargo clippy --workspace --all-targets -- -D warnings` passes with 0 warnings; `cargo test -p headless-core` passes all unit tests; `cargo test -p mihomo-server --test raw_profiles` passes; all 20 python tests in `scripts/tests` pass.
 
-The tree above marks Full enhancement/resource transaction as implemented and Linux verified. Next: Remaining full settings/resource lifecycle UI (P1).
+The tree above marks Full enhancement/resource transaction as implemented and Linux verified.
+
+## P1 increment: remaining full settings and resource lifecycle UI
+
+Delivery step 7 (P1) completes the remaining full settings and resource lifecycle UI in `web/`:
+- **Authoritative Listener & Access Control UI (`web/src/authority-settings.tsx`, `web/src/settings.tsx`)**:
+  - Implemented `AuthorityFields`, `authorityDraft`, `authorityRuntime`, and `validateAuthority` supporting:
+    - `bind-address`: explicit ownership checkbox, custom host/IP or wildcard `*` input, address bounds and format validation.
+    - `authentication`: explicit ownership checkbox, multi-line `username:password` input, explicit empty list `[]` support for clearing upstream subscription credentials.
+    - `skip-auth-prefixes`: explicit ownership checkbox, multi-line IP/CIDR input with IPv4/IPv6 prefix length validation.
+    - `lan-allowed-ips` & `lan-disallowed-ips`: explicit ownership checkboxes, CIDR validation, and subscription clearing capability.
+    - `inbound-tfo`, `inbound-mptcp`, `sniffing`: tri-state selectors (`继承`, `启用`, `禁用`).
+  - Integrated into `toDraft`, `runtime`, `decode`, settings form layout, and saved summary snapshot in `settings.tsx`.
+- **Resource Lifecycle Controls (`web/src/resources.tsx`)**:
+  - Enhanced `ResourcesPanel` with direct provider lifecycle actions:
+    - Proxy providers: direct `Update` (`update_proxy_provider`) and `Health Check` (`healthcheck_proxy_provider`) actions with real-time status notices and automatic inventory refresh.
+    - Rule providers: direct `Update` (`update_rule_provider`) action with status notices.
+    - Added loading states and core-running sensitivity to all provider actions.
+- **Verification**:
+  - TypeScript check: `npx tsc --noEmit` passes cleanly with 0 type errors.
+  - Production build: `npx vite build --outDir /tmp/vite-dist` succeeds in transforming all 33 modules and generating optimized assets.
+  - Workspace checks: `cargo check --workspace --tests` and `cargo clippy --workspace --all-targets -- -D warnings` pass with 0 warnings; all 20 python tests in `scripts/tests` pass.
+
+The tree above marks Remaining full settings/resource lifecycle UI as implemented and browser verified. All active P1, P2, P3, and P4 tasks are now fully delivered and verified.
 
 ## MVP completion boundary
 

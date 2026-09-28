@@ -97,6 +97,40 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
   const [value, setValue] = useState<Inventory>();
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [operating, setOperating] = useState<string>();
+
+  async function updateProvider(section: string, name: string) {
+    setOperating(name);
+    try {
+      if (section === "proxy-providers") {
+        await command(token, "update_proxy_provider", { name });
+        setNotice(t(language, "ruleProviderUpdated", { name } as any) ? `${name} 更新完成` : `${name} updated`);
+      } else {
+        await command(token, "update_rule_provider", { name });
+        setNotice(t(language, "ruleProviderUpdated", { name } as any) || `${name} 更新完成`);
+      }
+      setRefresh(v => v + 1);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) logout(t(language, "expiredToken"));
+      else setNotice(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOperating(undefined);
+    }
+  }
+
+  async function healthcheckProvider(name: string) {
+    setOperating(name);
+    try {
+      await command(token, "healthcheck_proxy_provider", { name });
+      setNotice(`${name}: ${t(language, "proxyProviderHealthcheck") || "健康检查"} 完成`);
+      setRefresh(v => v + 1);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) logout(t(language, "expiredToken"));
+      else setNotice(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOperating(undefined);
+    }
+  }
   useEffect(() => {
     epoch.current++;
     validationController.current?.abort();
@@ -176,6 +210,35 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
       {item.section === "geo" && checks[item.name] && <p role={checks[item.name].error ? "alert" : "status"} className={checks[item.name].error ? "alert" : "info"}>{checks[item.name].message}</p>}
       {item.section === "geo" && value?.bundle_dir && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && <GeoSeedAction name={item.name} token={token} status={status} connection={connection} logout={logout} language={language} installed={message => { setNotice(message); setRefresh(previous => previous + 1); }} />}
       {item.section === "geo" && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && <GeoOnlineAction name={item.name} token={token} status={status} connection={connection} logout={logout} language={language} installed={message => { setNotice(message); setRefresh(previous => previous + 1); }} />}
+      {item.section === "proxy-providers" && status.phase === "running" && (
+        <div className="actions" style={{ marginTop: "0.5rem" }}>
+          <button
+            type="button"
+            disabled={!!operating || !!checking}
+            onClick={() => void updateProvider(item.section, item.name)}
+          >
+            {operating === item.name ? t(language, "proxyProviderUpdating") : t(language, "proxyProviderUpdate")}
+          </button>
+          <button
+            type="button"
+            disabled={!!operating || !!checking}
+            onClick={() => void healthcheckProvider(item.name)}
+          >
+            {operating === item.name ? t(language, "proxyProviderChecking") : t(language, "proxyProviderHealthcheck")}
+          </button>
+        </div>
+      )}
+      {item.section === "rule-providers" && status.phase === "running" && (
+        <div className="actions" style={{ marginTop: "0.5rem" }}>
+          <button
+            type="button"
+            disabled={!!operating || !!checking}
+            onClick={() => void updateProvider(item.section, item.name)}
+          >
+            {operating === item.name ? t(language, "ruleProviderUpdating") : t(language, "ruleProviderUpdate")}
+          </button>
+        </div>
+      )}
       {item.conflict && <p className="alert">{t(language, "resourceConflict")}</p>}
     </li>)}</ul>;
   }
