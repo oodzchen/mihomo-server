@@ -95,6 +95,11 @@ and **Google Antigravity CLI (`agy`)** as interchangeable autonomous agent backe
    with explicit next-task directives, and recent Git commits into a structured handover briefing.
    This ensures the successor agent (`agy`) picks up in-progress code immediately, verifies build
    and tests, and maintains identical development cadence without discarding work.
+8. **Development rhythm & turn cadence injection**: Prompts enforce a strict incremental
+   rhythm based on prior turn history: single subtask focus per turn, implement & verify,
+   synchronize `docs/ARCHITECTURE.md`, output a mandatory 4-part summary (Commit block ->
+   Feature summary -> Verification results -> Next task directive), and hand off to the host
+   for atomic Git commit before automatically launching the next turn until all tasks complete.
 
 ## Complete target architecture
 

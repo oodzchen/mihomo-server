@@ -121,6 +121,26 @@ export AGENT_TOOL=agy
    - **架构文档与约束继承**：自动挂载 `ARCHITECTURE.md` 优先级（P1 -> P2 -> P3 -> P4）与 `AGENTS.md` 规则。
 3. **外部统一的节奏管控**：进度总结节奏、看门狗超时监控、Conventional Commit 规范提取均由外部调度器硬性保障，与底层具体使用哪家 Agent 无关。
 
+## 无人值守开发节奏与行事风格规范 (Development Rhythm & Turn Cadence)
+
+工作台在启动任何 Agent 时均严格注入前序轮次沉淀的成熟研发规律，保证不同底层代理工具遵守完全相同的行事风格：
+
+1. **单轮聚焦单一功能点 (One Subtask Per Turn)**：
+   - 每一轮仅从 `docs/ARCHITECTURE.md` 的交付顺序（P1 -> P2 -> P3 -> P4）中挑选一个自包含的原子子任务进行攻坚。
+   - 严禁单轮过度发散或一口气做多个功能点，做完即刻进入验证，收敛交付物。
+2. **开发与验证闭环 (Implement & Verify)**：
+   - 结合上游源码与本地 `./data` 现有可用真实节点进行业务实现，确保代码通过 `cargo check --workspace` 和单元测试，服务直接可用。
+3. **架构文档强制同步 (Sync ARCHITECTURE.md)**：
+   - 完成功能点后必须同步更新 `docs/ARCHITECTURE.md` 架构树状态、最新完成任务与下一步计划，外部调度器自动进行 MD5 校验防遗漏。
+4. **固定四段式总结输出 (Mandatory 4-Part Summary)**：
+   - 最终答复必须严格遵循四段式结构：
+     1. 标准英文提交块 (`COMMIT_START ... COMMIT_END`)；
+     2. 本轮完成的功能点实质总结；
+     3. 测试与验证结果（编译、测试通过数、真实节点状态）；
+     4. 下一步任务指引与未完成状态声明（“项目尚未全部完成。下一项任务是：...”）。
+5. **轮次自然收敛与宿主提交 (Turn Hand-off)**：
+   - Agent 输出总结后结束当前轮次，外部调度器自动完成宿主 Git 原子提交并归档日志，随后自动拉起下一轮继续推进，直至最终达成所有目标输出 `$COMPLETION_FLAG`。
+
 ---
 
 ## 规范化英文 Conventional Commits 与测试噪音过滤

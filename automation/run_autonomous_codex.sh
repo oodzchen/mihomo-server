@@ -761,9 +761,9 @@ build_handover_context() {
         [ "$target_agent" = "codex" ] && prev_agent="Google Antigravity CLI (agy)"
     fi
 
-    # 1. 查找最近一轮的交付总结文件
+    # 1. 查找最近一轮的交付总结文件 (按轮次序号数值降序取最大轮次)
     local last_msg_file
-    last_msg_file=$(find "$LOG_DIR" -maxdepth 1 -name "turn_*_last_msg.txt" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -n 1 | awk '{print $2}')
+    last_msg_file=$(find "$LOG_DIR" -maxdepth 1 -name "turn_*_last_msg.txt" 2>/dev/null | sed -E 's/.*turn_([0-9]+)_last_msg\.txt/\1 &/' | sort -n | tail -n 1 | awk '{print $2}')
     local last_msg_content=""
     local last_turn_num="未知"
     if [ -n "$last_msg_file" ] && [ -f "$last_msg_file" ]; then
@@ -805,6 +805,10 @@ build_handover_context() {
         handover_block+="▶ 3. 【近期 5 个切片的 Git 提交历史】：\n"
         handover_block+="\`\`\`text\n${recent_commits}\n\`\`\`\n"
     fi
+
+    handover_block+="▶ 4. 【核心开发规律与行事风格继承（遵循前序轮次成熟节奏）】：\n"
+    handover_block+="本项目采用“小步快跑、单轮单点、步步留痕、宿主提交、自动流转”的成熟规律。\n"
+    handover_block+="每轮仅攻坚一个自包含的原子功能点/小任务，验证通过并更新 ARCHITECTURE.md 后，必须按照固定四段式（COMMIT块 -> 本轮实质总结 -> 验证结果 -> 下一任务指引）输出进度总结，随后结束本轮答复，由外部宿主自动提交 Git 并开启下一轮。切勿在单轮内过度发散或连续做多个功能点！\n"
     handover_block+="================================================================================\n"
 
     echo -e "$handover_block"
@@ -823,31 +827,51 @@ $handover_info
 【项目背景与目标】
 1. 本项目目标是将 Clash Verge Rev 中的核心组件拆离并改造成无需桌面环境（无 Tauri/无外部服务依赖）的单个 headless service (mihomo-server)。
 2. 该 service 是唯一系统服务入口，负责 Mihomo 内核生命周期管理、Axum HTTP 管理 API、WebSocket 事件转发、配置生成校验以及 Web UI 静态托管。
-3. 遵循 ./docs/ARCHITECTURE.md 中记录的架构分层、状态标记（[Migrated]、[Implemented]、[Partially migrated]、[Pending] 等）和交付顺序 (Delivery order)。
+3. 遵循 ./docs/ARCHITECTURE.md 中记录的架构分层、状态标记（[Migrated]、[Implemented]、[Partially migrated]、[Pending] 等）和交付顺序 (Delivery order)，当前最高执行优先级为 P1（配置与资源管理）-> P2（规则与延迟）-> P3（i18n）-> P4（打包与 systemd）。
 4. 【上游代码参考】：上游 clash-verge-rev 源码位于 ../clash-verge-rev（已在工作区中开放读取权限）。在拆离或移植算法（例如 enhance/配置增强、mihomo 交互通信、前端组件等）时，请直接阅读参考 ../clash-verge-rev 中的对应实现，保留原有业务行为。
+5. 【真实节点验证环境】：当前 ./data 目录中存在实际可用的真实节点数据，可基于这些数据进行代理功能测试与回归验证，保证最终服务真实可用。
 
-【本轮执行准则】
-1. 先查看 ./docs/ARCHITECTURE.md 中记录的当前完成进度与未完成模块（如 headless-core 剩余功能、Axum API、WebSocket、Web UI 适配等）。
-2. 从交付顺序中选取下一个具体的、自包含的小任务进行开发或迁移。
-3. 编写/调整代码并运行 \`cargo check --workspace\` 以及相关测试进行行为验证，保证代码能正确构建和通过测试。
-4. 【强制要求 - 同步进度】：在完成该小任务并验证后，必须立即编辑 ./docs/ARCHITECTURE.md 文档：
-   - 更新 ## Complete target architecture 中的状态标签（例如将 [Pending] 变更为 [Partially implemented] 或 [Implemented]）。
-   - 更新文档底部的迁移状态与进度记录，说明本次变更、验证结果和下一步计划。
-5. 【重要 - 关于 Git 自动提交与英文格式规范】：
-   - 为避免执行上下文与 Git 产生竞态或在只读沙箱内报错，在会话中请【不要】在内部执行 git 提交命令。
-   - 外部自动化宿主运行脚本会在每轮子任务完成并验证通过后，自动代你在宿主机上将代码改动原子提交到 Git。
-   - 【规范化英文提交要求】：为保证 Git 提交历史的一致性与专业性，请务必在你的最终答复最开头提供一段标准的英文 Conventional Commit 块，格式如下：
-     COMMIT_START
-     <type>(<scope>): <concise English summary of the change>
+【核心开发节奏与行事风格规范（严格遵循前序轮次成熟规律）】
+本项目采用“小步快跑、单轮单点、步步留痕、宿主提交、自动流转”的原子化研发规律，请严格恪守以下行为准则：
 
-     - <key implementation detail 1 in English>
-     - <key implementation detail 2 in English>
-     COMMIT_END
-     （注意：严禁在 COMMIT 信息块中包含“验证通过/Tests passed/cargo check/browser tests”等测试流水表述，只陈述实际代码与功能改动本身！）
-6. 【重要 - 完成判定与标志输出】：
-   当且仅当 ./headless.md 和 ./docs/ARCHITECTURE.md 中所要求的所有架构组件（核心库、Axum API、WebSocket、Web UI 适配、生命周期管理、配置增强与事务、单服务打包部署与测试验证）全部完整实现并通过验证时，在本次最终回答的最末尾单独输出一行特定标记字符串：
-   $COMPLETION_FLAG
-   如果整个项目的最终计划尚未全部达成，请绝对不要输出该标记字符串！只需总结本小任务的完成成果并指出下一步任务即可。
+1. 【单轮聚焦单一功能点 (One Subtask Per Turn)】：
+   - 每一轮仅从 ./docs/ARCHITECTURE.md 的交付顺序中挑选【一个自包含的、具体的原子功能点/小任务】进行开发。
+   - 严禁单轮过度发散、大包大揽或一口气推进多个独立模块。做完一个功能点立即进入验证和总结，结束本轮答复交由外部调度器自动流转。
+
+2. 【开发与验证闭环 (Implement & Verify)】：
+   - 参考 ../clash-verge-rev 实现，修改相关 Rust/Web 代码。
+   - 必须运行 \`cargo check --workspace\` 和相关测试验证，必要时结合 ./data 现有可用节点数据进行实际代理请求验证，保证代码可构建且直接可用。
+
+3. 【同步更新架构文档 (Sync ARCHITECTURE.md)】：
+   - 完成该小任务后，必须立即编辑 ./docs/ARCHITECTURE.md：
+     - 更新 ## Complete target architecture 架构树中的组件状态标签（例如将 [Pending] 变更为 [Partially implemented] 或 [Implemented]）。
+     - 更新文档顶部的 Latest completed task 与 Next implementation task，并在底部追加详细进展记录。
+
+4. 【每轮结束时的固定四段式总结结构 (Mandatory 4-Part Summary)】：
+   每完成一个功能点/小任务，必须在最终答复中严格按照以下四段式格式输出进度总结，随后结束本轮答复：
+
+   [第 1 段 - 标准英文提交块]：
+   COMMIT_START
+   <type>(<scope>): <concise English summary of the change>
+
+   - <key implementation detail 1 in English>
+   - <key implementation detail 2 in English>
+   COMMIT_END
+   （注意：严禁在 COMMIT 块中包含“验证通过/Tests passed/cargo check/browser tests”等测试流水表述，只陈述实际代码与功能改动本身！）
+
+   [第 2 段 - 本轮完成的功能点总结]：
+   已完成本轮 [P1/P2/...] 子任务：<清晰陈述本轮实质完成的功能点或修复>。完整架构树与进度已同步更新至 [ARCHITECTURE.md](/home/kholin/github/mihomo-server/docs/ARCHITECTURE.md)。
+
+   [第 3 段 - 验证与测试结果]：
+   \`cargo check --workspace\` 通过；<具体测试项/浏览器回归/真实内核或节点验证情况>。
+
+   [第 4 段 - 下一步任务指引与未完成状态声明]：
+   项目尚未全部完成。**下一项 [P1/P2/...] 任务**是：<明确写出下一个具体待办功能点>。
+   （重要完成判定：仅当整个项目的所有规划目标全部彻底完成并通过全盘验证时，才在最后一行输出特定完成标志：$COMPLETION_FLAG；若未完成，严禁输出该标志！）
+
+5. 【轮次自然收敛与自动流转 (Turn Hand-off)】：
+   - 输出上述四段式总结后，当前轮次即告结束（请勿继续调用工具或开始下一个功能点）。
+   - 外部宿主调度器会自动从答复中提取 COMMIT 块在宿主机执行原子 Git commit，记录日志并保存本轮总结，然后自动拉起下一个 turn 继续推进，直到整个计划全部完成。
 EOF
 }
 
@@ -868,24 +892,43 @@ generate_continuation_prompt() {
 ${handover_block:+$handover_block\n}继续推进无人值守自动化重构与编程任务。
 $extra_warning
 
-【执行步骤】
-1. 查看 ./docs/ARCHITECTURE.md 与当前代码库状态，确认上一个子任务的完成情况。
-2. 依据 ./docs/ARCHITECTURE.md 中的交付顺序 (Delivery order)，选取下一个待实现的子任务继续编写代码。
-3. 【上游参考】：若需要参考上游原始实现，可直接查阅 ../clash-verge-rev 目录中的源码。
-4. 运行 \`cargo check --workspace\` 及相关测试，验证修改的正确性。
-5. 【强制要求 - 同步进度】：完成该小任务后，必须同步更新 ./docs/ARCHITECTURE.md 文件中的架构树状态与进度总结。
-6. 【重要 - 关于 Git 提交与英文格式规范】：
-   - 请勿在会话内执行 git commit；每轮完成后外部宿主脚本会自动代你提交。
-   - 请务必在最终答复最开头声明标准的英文 Conventional Commit 块（严禁包含“验证通过/Tests passed/cargo test”等测试流水表述）：
-     COMMIT_START
-     <type>(<scope>): <concise English summary of code change>
+【核心开发节奏与行事风格规范（严格遵循前序轮次成熟规律）】
+本项目采用“小步快跑、单轮单点、步步留痕、宿主提交、自动流转”的成熟研发规律，请严格恪守以下行为准则：
 
-     - <key technical change in English>
-     COMMIT_END
-7. 【重要 - 完成判定】：
-   如果且仅如果整个项目的目标与功能已全部完成并验证通过，请在最后输出特定完成标志：
-   $COMPLETION_FLAG
-   若尚未全部完成，严禁输出该标志，请总结当前进度并明确下一个待办子任务。
+1. 【单轮聚焦单一功能点 (One Subtask Per Turn)】：
+   - 查看 ./docs/ARCHITECTURE.md 确认上一小任务状态，从交付顺序中选取【下一个自包含的、具体的原子功能点/子任务】继续编写代码。
+   - 严禁单轮过度发散或做多个功能点，完成一个功能点立即验证并输出总结，结束本轮答复交由调度器自动流转。
+
+2. 【开发与验证闭环 (Implement & Verify)】：
+   - 参考 ../clash-verge-rev 源码实现业务逻辑。
+   - 运行 \`cargo check --workspace\` 及相关测试，必要时结合 ./data 真实节点数据验证代理可用性。
+
+3. 【同步更新架构文档 (Sync ARCHITECTURE.md)】：
+   - 完成该小任务后，必须同步更新 ./docs/ARCHITECTURE.md 文件中的架构树状态与进度总结。
+
+4. 【每轮结束时的固定四段式总结结构 (Mandatory 4-Part Summary)】：
+   本轮小任务完成后，最终答复必须严格按照以下四段式格式输出：
+
+   [第 1 段 - 标准英文提交块]：
+   COMMIT_START
+   <type>(<scope>): <concise English summary of code change>
+
+   - <key technical change in English>
+   COMMIT_END
+   （严禁包含“验证通过/Tests passed/cargo test”等流水表述，只陈述实际代码与功能改动本身）
+
+   [第 2 段 - 本轮完成的功能点总结]：
+   已完成本轮 [P1/P2/...] 子任务：<清晰陈述本轮实质完成的功能点或修复>。完整架构树与进度已同步更新至 [ARCHITECTURE.md](/home/kholin/github/mihomo-server/docs/ARCHITECTURE.md)。
+
+   [第 3 段 - 验证与测试结果]：
+   \`cargo check --workspace\` 通过；<具体测试项/浏览器回归/真实内核或节点验证情况>。
+
+   [第 4 段 - 下一步任务指引与未完成状态声明]：
+   项目尚未全部完成。**下一项 [P1/P2/...] 任务**是：<明确写出下一个具体待办功能点>。
+   （若全部计划已彻底完成并通过验证，才在最后一行输出：$COMPLETION_FLAG；若未完成，严禁输出该标志！）
+
+5. 【轮次自然收敛与下一轮接力 (Turn Hand-off)】：
+   - 输出上述总结后本轮结束，切勿在当前答复中继续开发下一个功能点。外部调度器将自动代为执行 Git 提交，并开启下一轮。
 EOF
 }
 
