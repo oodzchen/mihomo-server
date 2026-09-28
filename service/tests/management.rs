@@ -1264,6 +1264,13 @@ async fn http_errors_localize_via_accept_language_and_preserve_default_fallback(
         assert_eq!(body["error"]["code"], "not_found");
         assert_eq!(body["error"]["message"], "Resource not found");
 
+        let mut req_zhtw = request(&token, "/api/absent", None)?;
+        req_zhtw.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh-TW,zh;q=0.9".parse()?);
+        let (status, body) = response(&app, req_zhtw).await?;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["error"]["code"], "not_found");
+        assert_eq!(body["error"]["message"], "找不到請求的資源");
+
         let req_default = request(&token, "/api/absent", None)?;
         let (status, body) = response(&app, req_default).await?;
         assert_eq!(status, StatusCode::NOT_FOUND);
@@ -1285,6 +1292,13 @@ async fn http_errors_localize_via_accept_language_and_preserve_default_fallback(
         assert_eq!(body["error"]["code"], "unauthorized");
         assert_eq!(body["error"]["message"], "Authentication required");
 
+        let mut req_unauth_zhtw = request("wrong-token", "/api/commands", None)?;
+        req_unauth_zhtw.headers_mut().insert(header::ACCEPT_LANGUAGE, "zhtw".parse()?);
+        let (status, body) = response(&app, req_unauth_zhtw).await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"]["code"], "unauthorized");
+        assert_eq!(body["error"]["message"], "需要身分認證");
+
         let req_unauth_default = request("wrong-token", "/api/commands", None)?;
         let (status, body) = response(&app, req_unauth_default).await?;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -1305,6 +1319,13 @@ async fn http_errors_localize_via_accept_language_and_preserve_default_fallback(
         assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
         assert_eq!(body["error"]["code"], "method_not_allowed");
         assert_eq!(body["error"]["message"], "Method is not allowed");
+
+        let mut req_method_zhtw = request(&token, "/api/commands", None)?;
+        req_method_zhtw.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh-HK,zh;q=0.8".parse()?);
+        let (status, body) = response(&app, req_method_zhtw).await?;
+        assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(body["error"]["code"], "method_not_allowed");
+        assert_eq!(body["error"]["message"], "不支援的請求方法");
 
         // 4. Invalid query
         let mut req_query_zh = request(&token, "/api/status?bad=1", None)?;
@@ -1329,6 +1350,13 @@ async fn http_errors_localize_via_accept_language_and_preserve_default_fallback(
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["error"]["code"], "shutting_down");
         assert_eq!(body["error"]["message"], "Service is shutting down");
+
+        let mut req_shut_zhtw = request(&token, "/api/status", None)?;
+        req_shut_zhtw.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh-Hant".parse()?);
+        let (status, body) = response(&app, req_shut_zhtw).await?;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"]["code"], "shutting_down");
+        assert_eq!(body["error"]["message"], "服務正在關閉");
 
         let req_shut_default = request(&token, "/api/status", None)?;
         let (status, body) = response(&app, req_shut_default).await?;

@@ -164,9 +164,14 @@ async fn run() -> Result<()> {
             listen,
             arguments.get_one::<String>("public-origin").map(String::as_str),
         )?;
-        let listener = tokio::net::TcpListener::bind(listen)
-            .await
-            .context("bind management listener")?;
+        let socket = if listen.is_ipv6() {
+            tokio::net::TcpSocket::new_v6()?
+        } else {
+            tokio::net::TcpSocket::new_v4()?
+        };
+        socket.set_reuseaddr(true)?;
+        socket.bind(listen).context("bind management listener")?;
+        let listener = socket.listen(1024).context("listen management listener")?;
         let mut state = HttpState::new(Management::new(manager.clone(), authentication));
         if let Some(directory) = &web_dir {
             state = state.with_web_assets(directory)?;

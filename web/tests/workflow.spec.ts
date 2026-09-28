@@ -47,7 +47,7 @@ async function start() {
   service = spawn(
     bundle
       ? join(resolve(bundle), "launch")
-      : resolve("../target/debug/mihomo-server"),
+      : process.env.MIHOMO_SERVER_BINARY || resolve("../target/debug/mihomo-server"),
     bundle
       ? [
           "--listen",
@@ -63,7 +63,7 @@ async function start() {
           "--listen",
           new URL(base).host,
           "--web-dir",
-          resolve("dist"),
+          process.env.MIHOMO_TEST_WEB_DIR || resolve("dist"),
         ],
     {
       stdio: ["ignore", "ignore", "pipe"],
@@ -173,15 +173,8 @@ test.beforeAll(async () => {
   if (!tlsProvider || typeof tlsProvider === "string")
     throw new Error("No TLS provider address");
   tlsSubscriptionUrl = `https://127.0.0.1:${tlsProvider.port}/subscription?token=private-browser-token`;
-  const listener = createServer();
-  await new Promise<void>((resolve) =>
-    listener.listen(0, "127.0.0.1", resolve),
-  );
-  const address = listener.address();
-  if (!address || typeof address === "string")
-    throw new Error("No test address");
-  base = `http://127.0.0.1:${address.port}`;
-  await new Promise<void>((resolve) => listener.close(() => resolve()));
+  const port = Math.floor(Math.random() * 20000 + 30000);
+  base = `http://127.0.0.1:${port}`;
   await start();
 });
 test.afterAll(async () => {
@@ -228,6 +221,33 @@ test("browser language selection persists locally without changing service state
   } finally {
     await separate.close();
   }
+});
+
+test("browser language selection supports traditional chinese zhtw and persists locally", async ({ page, browser }) => {
+  await page.goto(base);
+  await expect(page.getByRole("heading", { name: "连接你的服务" })).toBeVisible();
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("zhtw");
+  await expect(page.getByRole("heading", { name: "連線你的服務" })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-TW");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "連線你的服務" })).toBeVisible();
+  await page.getByLabel("管理權杖").fill(token);
+  await page.getByRole("button", { name: "連線服務" }).click();
+  const navigation = page.getByRole("navigation", { name: "主導航" });
+  await expect(navigation.getByRole("link", { name: "01 概覽" })).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "05 規則" })).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "06 記錄" })).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "08 核心升級" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "啟動核心", exact: true })).toBeVisible();
+
+  const storage = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
+  expect(storage["mihomo-server-language"]).toBe("zhtw");
+  expect(JSON.stringify(storage)).not.toContain(token);
+
+  await page.getByRole("combobox", { name: "介面語言" }).selectOption("en");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
 });
 
 test("configuration editor translates without losing an unapplied YAML draft", async ({ page }) => {

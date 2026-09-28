@@ -53,20 +53,8 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** localized service messages and error responses
-connect `Accept-Language` request headers to the embedded `clash-verge-i18n` catalog.
-Standard HTTP and WebSocket error responses (`not_found`, `method_not_allowed`,
-`unauthorized`, `shutting_down`, `invalid_query`, `invalid_request`, `session_limit`,
-`invalid_upgrade`, `backup_busy`, `backup_storage_full`, `backup_not_found`,
-`backup_interrupted`, `backup_storage_failed`, `invalid_restore_policy`,
-`invalid_backup_media`, `invalid_backup_length`, `backup_too_large`,
-`backup_upload_timeout`, `restore_requires_settled_core`, `invalid_backup_archive`,
-`asset_error`, etc.) resolve into Chinese (`zh`), Traditional Chinese (`zhtw`),
-or English (`en`) according to caller preference with quality-factor weighting,
-while preserving verbatim default messages when no language is requested or when
-untranslated. The Web client (`web/src/api.ts`) transmits `Accept-Language: savedLanguage()`
-and provides localized network fallback messages.
-**Next implementation task (P3):** additional browser languages and service signals verification.
+**Latest completed task (P3):** browser Traditional Chinese language support (`zhtw` / 繁體中文) and service signal/rebind verification. Extended frontend `Language` union to `"zh" | "en" | "zhtw"`, added full Traditional Chinese dictionary in `web/src/i18n.ts`, updated `LanguagePicker` with Traditional Chinese option, set HTML lang dynamically to `zh-TW`, and enabled `SO_REUSEADDR` on the management listener for reliable rebinds across service lifecycle. Verified backend `Accept-Language` error response localization for `zh-TW`/`zhtw`/`zh-HK`/`zh-Hant`, and validated local browser persistence in `localStorage` without leaking server tokens.
+**Next implementation task (P4):** Linux packaging and actual systemd installation (Priority P4 — deliver reproducible Linux bundle, systemd unit, install lifecycle, child process reaping and real proxy verification).
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -120,8 +108,8 @@ mihomo-server/
 │   │   └── Snapshots, drafts, transactions, tests, benchmarks
 │   ├── clash-verge-limiter/                          [Migrated]
 │   │   └── Period checks, concurrent admission, existing tests
-│   ├── Shared upstream components                   [Partially migrated; P3]
-│   │   ├── Thirteen i18n locale assets / aliases / explicit lookup [Migrated + headless adaptation; browser integration pending]
+│   ├── Shared upstream components                   [Implemented; Linux verified]
+│   │   ├── Thirteen i18n locale assets / aliases / explicit lookup, browser language switcher (zh/zhtw/en), and Accept-Language negotiation [Implemented; Linux verified]
 │   │   ├── Unix SIGTERM/SIGINT/SIGHUP listener and shutdown latch [Migrated + headless adaptation; Linux verified]
 │   │   └── Additional logging / media unlock         [Deferred; outside active scope]
 │   ├── mihomo-client/                               [Migrated; Linux verified]
@@ -332,7 +320,7 @@ mihomo-server/
 │   ├── Traffic, memory and connection-count overview [Implemented; MVP]
 │   ├── Rules and rule-provider management page      [Implemented; Linux verified]
 │   ├── Proxy providers and node delay views         [Implemented; Linux verified]
-│   ├── Browser-owned zh/en language selection, login/navigation/core shell/overview copy [Implemented; P3; browser verified]
+│   ├── Browser-owned zh/zhtw/en language selection, login/navigation/core shell/overview copy [Implemented; P3; browser verified]
 │   ├── Config editor zh/en copy and draft-safe switching [Implemented; P3; browser verified]
 │   ├── Profile list zh/en labels/actions/deletion confirmation [Implemented; P3; browser verified]
 │   ├── Local YAML and remote URL import forms / file-size feedback [Implemented; P3; browser verified]
@@ -351,7 +339,7 @@ mihomo-server/
 │   ├── Log view zh/en heading, filter input, clear action and empty/unmatched states [Implemented; P3; browser verified]
 │   ├── Core upgrade view zh/en channels, release info, install records and action dialogs [Implemented; P3; browser verified]
 │   ├── Resource views zh/en inventory, auto-update policy, validation and seed/online actions [Implemented; P3; browser verified]
-│   ├── Additional languages and service-message localization [Partially implemented; P3; zh/en/zhtw service messages verified]
+│   ├── Additional languages and service-message localization [Implemented; P3; zh/zhtw/en frontend and service messages verified]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
