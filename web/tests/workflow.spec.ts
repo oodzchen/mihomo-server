@@ -1472,6 +1472,58 @@ test("rule list and search translate without losing the filter or reloading rule
   expect(ruleReads).toBe(1);
 });
 
+test("rule provider inventory and update controls translate while an update is pending", async ({ page }) => {
+  const calls: string[] = [];
+  let releaseUpdate: () => void = () => {};
+  const firstUpdate = new Promise<void>((resolve) => { releaseUpdate = resolve; });
+  let holdFirstUpdate = true;
+  await page.route("**/api/commands", async (route) => {
+    const body = route.request().postDataJSON();
+    if (body?.command === "rules") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: '{"rules":[]}' });
+    } else if (body?.command === "rule_providers") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        providers: {
+          DirectRules: { name: "DirectRules", behavior: "domain", format: "text", ruleCount: 42, vehicleType: "HTTP", updatedAt: "2026-09-28 12:00" },
+        },
+      }) });
+    } else if (body?.command === "update_rule_provider") {
+      calls.push(body.command);
+      expect(body.name).toBe("DirectRules");
+      if (holdFirstUpdate) {
+        holdFirstUpdate = false;
+        await firstUpdate;
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    } else {
+      await route.continue();
+    }
+  });
+  await page.goto(base);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /规则/ }).click();
+  const card = page.locator(".provider-card").filter({ hasText: "DirectRules" });
+  await expect(page.getByRole("heading", { name: "外部规则集 (Rule Providers)" })).toBeVisible();
+  await expect(card).toContainText("包含 42 条");
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("heading", { name: "Rule Providers" })).toBeVisible();
+  await expect(card).toContainText("42 rules");
+  await card.getByRole("button", { name: "Update", exact: true }).click();
+  await expect(card.getByRole("button", { name: "Updating…" })).toBeVisible();
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(card.getByRole("button", { name: "更新中…" })).toBeVisible();
+  releaseUpdate();
+  await expect(card.getByRole("button", { name: "更新", exact: true })).toBeEnabled();
+  await expect(page.getByText("规则集 DirectRules 更新完成")).toBeVisible();
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByText("Rule provider DirectRules updated")).toBeVisible();
+  await page.getByRole("button", { name: "Update all" }).click();
+  await expect.poll(() => calls.length).toBe(2);
+  await expect(card.getByRole("button", { name: "Update", exact: true })).toBeEnabled();
+  expect(calls).toEqual(["update_rule_provider", "update_rule_provider"]);
+});
+
 test("manual remote refresh keeps identity, applies active config and preserves failures across restart", async ({
   page,
 }) => {

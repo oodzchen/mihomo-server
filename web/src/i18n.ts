@@ -172,6 +172,16 @@ const zh = {
   rulesNoMatches: "没有找到匹配的规则。",
   rulesTypeColumn: "类型", rulesPayloadColumn: "匹配模式 / Payload",
   rulesTargetColumn: "目标策略",
+  ruleProviderTitle: "外部规则集 (Rule Providers)",
+  ruleProviderSubtitle: "可在线按需更新外部规则集资源",
+  ruleProviderUpdateAll: "全部更新",
+  ruleProviderFormat: "格式: ", ruleProviderType: "类型: ",
+  ruleProviderRulesCount: "包含 {count} 条",
+  ruleProviderUpdatedAt: "更新时间: ",
+  ruleProviderUpdate: "更新", ruleProviderUpdating: "更新中…",
+  ruleProviderUpdated: "规则集 {name} 更新完成",
+  ruleProviderUpdateFailed: "更新 {name} 失败: {error}",
+  ruleProvidersUpdatedAll: "所有规则集更新完毕",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -327,6 +337,16 @@ const en: Record<keyof typeof zh, string> = {
   rulesNoMatches: "No matching rules found.",
   rulesTypeColumn: "Type", rulesPayloadColumn: "Match / Payload",
   rulesTargetColumn: "Target policy",
+  ruleProviderTitle: "Rule Providers",
+  ruleProviderSubtitle: "Update external rule sets on demand online",
+  ruleProviderUpdateAll: "Update all",
+  ruleProviderFormat: "Format: ", ruleProviderType: "Type: ",
+  ruleProviderRulesCount: "{count} rules",
+  ruleProviderUpdatedAt: "Updated: ",
+  ruleProviderUpdate: "Update", ruleProviderUpdating: "Updating…",
+  ruleProviderUpdated: "Rule provider {name} updated",
+  ruleProviderUpdateFailed: "Failed to update {name}: {error}",
+  ruleProvidersUpdatedAll: "All rule providers updated",
 };
 
 export type MessageKey = keyof typeof zh;

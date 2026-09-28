@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { command, type Perform } from "./api";
-import { t, type Language } from "./i18n";
+import { t, type Language, type MessageKey } from "./i18n";
 import type { CoreStatus, Rule, RuleProvider, RuleProviders, Rules } from "./types";
 
 export function RulesPage({
@@ -21,8 +21,8 @@ export function RulesPage({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [updating, setUpdating] = useState<Record<string, boolean>>({});
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [error, setError] = useState<{ key?: MessageKey; name?: string; message?: string } | string>("");
+  const [notice, setNotice] = useState<{ key: MessageKey; name?: string } | null>(null);
   const [revision, setRevision] = useState(0);
 
   useEffect(() => {
@@ -72,10 +72,10 @@ export function RulesPage({
   async function updateProvider(name: string) {
     setUpdating((prev) => ({ ...prev, [name]: true }));
     setError("");
-    setNotice("");
+    setNotice(null);
     try {
       await perform("update_rule_provider", { name });
-      setNotice(`规则集 ${name} 更新完成`);
+      setNotice({ key: "ruleProviderUpdated", name });
       setRevision((v) => v + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -88,18 +88,22 @@ export function RulesPage({
     const names = Object.keys(providers);
     if (!names.length) return;
     setError("");
-    setNotice("");
+    setNotice(null);
     for (const name of names) {
       setUpdating((prev) => ({ ...prev, [name]: true }));
       try {
         await perform("update_rule_provider", { name });
       } catch (err) {
-        setError(`更新 ${name} 失败: ${err instanceof Error ? err.message : String(err)}`);
+        setError({
+          key: "ruleProviderUpdateFailed",
+          name,
+          message: err instanceof Error ? err.message : String(err),
+        });
       } finally {
         setUpdating((prev) => ({ ...prev, [name]: false }));
       }
     }
-    setNotice("所有规则集更新完毕");
+    setNotice({ key: "ruleProvidersUpdatedAll" });
     setRevision((v) => v + 1);
   }
 
@@ -132,27 +136,33 @@ export function RulesPage({
 
       {error && (
         <p className="alert" role="alert">
-          {error}
+          {typeof error === "string"
+            ? error
+            : error.key
+              ? t(language, error.key)
+                  .replace("{name}", error.name || "")
+                  .replace("{error}", error.message || "")
+              : error.message}
         </p>
       )}
       {notice && (
         <p className="success" role="status">
-          {notice}
+          {t(language, notice.key).replace("{name}", notice.name || "")}
         </p>
       )}
 
       {providerList.length > 0 && (
-        <section className="panel" aria-label="规则集">
+        <section className="panel" aria-label={t(language, "ruleProviderTitle")}>
           <div className="panel-title">
             <div>
-              <h3>外部规则集 (Rule Providers)</h3>
-              <p className="muted">可在线按需更新外部规则集资源</p>
+              <h3>{t(language, "ruleProviderTitle")}</h3>
+              <p className="muted">{t(language, "ruleProviderSubtitle")}</p>
             </div>
             <button
               disabled={busy || loading || status.phase !== "running" || Object.values(updating).some(Boolean)}
               onClick={() => void updateAllProviders()}
             >
-              全部更新
+              {t(language, "ruleProviderUpdateAll")}
             </button>
           </div>
           <div className="provider-grid">
@@ -163,15 +173,19 @@ export function RulesPage({
                   <span className="badge">{p.behavior}</span>
                 </div>
                 <p className="muted">
-                  格式: {p.format} · 类型: {p.vehicleType || p.type} · 包含 {p.ruleCount} 条
+                  {t(language, "ruleProviderFormat")}{p.format} · {t(language, "ruleProviderType")}{p.vehicleType || p.type} · {t(language, "ruleProviderRulesCount").replace("{count}", String(p.ruleCount))}
                 </p>
-                {p.updatedAt && <p className="hint">更新时间: {p.updatedAt}</p>}
+                {p.updatedAt && (
+                  <p className="hint">
+                    {t(language, "ruleProviderUpdatedAt")}{p.updatedAt}
+                  </p>
+                )}
                 <div className="card-actions">
                   <button
                     disabled={busy || loading || status.phase !== "running" || updating[p.name]}
                     onClick={() => void updateProvider(p.name)}
                   >
-                    {updating[p.name] ? "更新中…" : "更新"}
+                    {t(language, updating[p.name] ? "ruleProviderUpdating" : "ruleProviderUpdate")}
                   </button>
                 </div>
               </div>
