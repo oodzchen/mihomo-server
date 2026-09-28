@@ -1862,13 +1862,13 @@ function ProxyPage({
 
   function renderDelayBadge(delay: number | undefined, isTesting: boolean) {
     if (isTesting) {
-      return <span className="delay-badge delay-testing">测速中</span>;
+      return <span className="delay-badge delay-testing">{t(language, "proxyDelayTesting")}</span>;
     }
     if (delay === undefined || delay < 0) {
-      return <span className="delay-badge delay-untested">未测</span>;
+      return <span className="delay-badge delay-untested">{t(language, "proxyDelayUntested")}</span>;
     }
     if (delay === 0 || delay >= 10000) {
-      return <span className="delay-badge delay-timeout">超时</span>;
+      return <span className="delay-badge delay-timeout">{t(language, "proxyDelayTimeout")}</span>;
     }
     if (delay < 300) {
       return <span className="delay-badge delay-fast">{delay}ms</span>;
@@ -1890,14 +1890,14 @@ function ProxyPage({
           </p>
           <div className="delay-url-bar">
             <label htmlFor="delay-test-url" className="muted" style={{ fontSize: "12px", marginRight: "6px" }}>
-              测速链接:
+              {t(language, "proxyDelayUrl")}
             </label>
             <input
               id="delay-test-url"
               type="text"
               value={testUrl}
               onChange={(e) => setTestUrl(e.target.value)}
-              placeholder="测速 URL"
+              placeholder={t(language, "proxyDelayUrlPlaceholder")}
               style={{ width: "320px", display: "inline-block", padding: "4px 8px", fontSize: "12px" }}
             />
           </div>
@@ -1983,7 +1983,7 @@ function ProxyPage({
                 disabled={busy || loading || testingGroup === name}
                 onClick={() => void testGroupDelay(name)}
               >
-                {testingGroup === name ? "测速中…" : "测速"}
+                {t(language, testingGroup === name ? "proxyDelayWorking" : "proxyDelayAction")}
               </button>
               {group.type !== "Selector" && (
                 <button
@@ -2016,7 +2016,7 @@ function ProxyPage({
                     {renderDelayBadge(delay, isTesting)}
                     <span
                       className="node-test-btn"
-                      title={`测试 ${node} 延迟`}
+                      title={t(language, "proxyDelayNodeTitle").replace("{node}", node)}
                       onClick={(e) => {
                         e.stopPropagation();
                         void testNodeDelay(node);

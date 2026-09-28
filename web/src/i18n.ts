@@ -151,6 +151,10 @@ const zh = {
   proxyGroupWaiting: "等待分组加载", proxyUnfix: "取消固定",
   proxySelected: "已选择", proxySelect: "选择",
   proxyGroupEmpty: "分组尚未加载节点，请稍后刷新。",
+  proxyDelayUrl: "测速链接:", proxyDelayUrlPlaceholder: "测速 URL",
+  proxyDelayTesting: "测速中", proxyDelayUntested: "未测", proxyDelayTimeout: "超时",
+  proxyDelayAction: "测速", proxyDelayWorking: "测速中…",
+  proxyDelayNodeTitle: "测试 {node} 延迟",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -285,6 +289,10 @@ const en: Record<keyof typeof zh, string> = {
   proxyGroupWaiting: "Waiting for group to load", proxyUnfix: "Unfix",
   proxySelected: "Selected", proxySelect: "Select",
   proxyGroupEmpty: "The group has no loaded nodes yet. Refresh later.",
+  proxyDelayUrl: "Delay test URL:", proxyDelayUrlPlaceholder: "Delay test URL",
+  proxyDelayTesting: "Testing", proxyDelayUntested: "Not tested", proxyDelayTimeout: "Timed out",
+  proxyDelayAction: "Test delay", proxyDelayWorking: "Testing…",
+  proxyDelayNodeTitle: "Test {node} latency",
 };
 
 export type MessageKey = keyof typeof zh;
