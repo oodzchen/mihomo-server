@@ -1,5 +1,5 @@
 //! Browser events and owned, bounded forwarding through the extracted client.
-use super::http::{HttpState, error};
+use super::http::{HttpState, error_with_headers};
 use crate::core_manager::CorePhase;
 use anyhow::{Result, bail, ensure};
 use axum::{
@@ -62,38 +62,42 @@ pub(super) fn is_route(path: &str) -> bool {
 
 pub(super) async fn events(
     State(state): State<HttpState>,
+    headers: axum::http::HeaderMap,
     upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
     match upgrade {
-        Ok(upgrade) => upgrade_session(state, upgrade, None),
-        Err(rejection) => error(rejection.status(), "invalid_upgrade", &rejection.body_text()),
+        Ok(upgrade) => upgrade_session(state, &headers, upgrade, None),
+        Err(rejection) => error_with_headers(&headers, rejection.status(), "invalid_upgrade", &rejection.body_text()),
     }
 }
 
 pub(super) async fn stream(
     State(state): State<HttpState>,
     Path(feed): Path<String>,
+    headers: axum::http::HeaderMap,
     upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
     let Some(feed) = Feed::parse(&feed) else {
-        return error(StatusCode::NOT_FOUND, "not_found", "stream does not exist");
+        return error_with_headers(&headers, StatusCode::NOT_FOUND, "not_found", "stream does not exist");
     };
     match upgrade {
-        Ok(upgrade) => upgrade_session(state, upgrade, Some(feed)),
-        Err(rejection) => error(rejection.status(), "invalid_upgrade", &rejection.body_text()),
+        Ok(upgrade) => upgrade_session(state, &headers, upgrade, Some(feed)),
+        Err(rejection) => error_with_headers(&headers, rejection.status(), "invalid_upgrade", &rejection.body_text()),
     }
 }
 
-fn upgrade_session(state: HttpState, upgrade: WebSocketUpgrade, feed: Option<Feed>) -> Response {
+fn upgrade_session(state: HttpState, headers: &axum::http::HeaderMap, upgrade: WebSocketUpgrade, feed: Option<Feed>) -> Response {
     let Ok(permit) = Arc::clone(&state.sessions).try_acquire_owned() else {
-        return error(
+        return error_with_headers(
+            headers,
             StatusCode::SERVICE_UNAVAILABLE,
             "session_limit",
             "WebSocket session limit reached",
         );
     };
     if *state.closing.borrow() {
-        return error(
+        return error_with_headers(
+            headers,
             StatusCode::SERVICE_UNAVAILABLE,
             "shutting_down",
             "service is shutting down",

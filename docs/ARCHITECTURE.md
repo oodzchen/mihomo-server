@@ -53,17 +53,20 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** the resource inventory panel (`ResourcesPanel`),
-offline bundle actions (`GeoSeedAction`), and online Geo update actions (`GeoOnlineAction`)
-now follow the browser's Chinese/English language selection: runtime data and bundle
-directory labels, auto-update policy status, core effective readback, freshness and
-file state tags, structure validation summaries (MMDB and DAT records, groups, regex,
-attributes, and CN group status), candidate and current fingerprint displays,
-download route choices, certificate error bypass advisories, busy indicators, and
-installation receipts. Switching languages dynamically translates all active
-cards, readouts, and status notices without losing loaded resources or in-flight operations.
-**Next implementation task (P3):** translate service-message errors and notifications,
-followed by additional browser languages and signals verification.
+**Latest completed task (P3):** localized service messages and error responses
+connect `Accept-Language` request headers to the embedded `clash-verge-i18n` catalog.
+Standard HTTP and WebSocket error responses (`not_found`, `method_not_allowed`,
+`unauthorized`, `shutting_down`, `invalid_query`, `invalid_request`, `session_limit`,
+`invalid_upgrade`, `backup_busy`, `backup_storage_full`, `backup_not_found`,
+`backup_interrupted`, `backup_storage_failed`, `invalid_restore_policy`,
+`invalid_backup_media`, `invalid_backup_length`, `backup_too_large`,
+`backup_upload_timeout`, `restore_requires_settled_core`, `invalid_backup_archive`,
+`asset_error`, etc.) resolve into Chinese (`zh`), Traditional Chinese (`zhtw`),
+or English (`en`) according to caller preference with quality-factor weighting,
+while preserving verbatim default messages when no language is requested or when
+untranslated. The Web client (`web/src/api.ts`) transmits `Accept-Language: savedLanguage()`
+and provides localized network fallback messages.
+**Next implementation task (P3):** additional browser languages and service signals verification.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -303,7 +306,7 @@ mihomo-server/
 │   │   └── Per-session cancellation, bounded queues/retry/drain [Implemented]
 │   ├── Web static assets and scoped SPA fallback    [Implemented; Linux verified]
 │   ├── Unix SIGINT/SIGTERM/SIGHUP and unified shutdown [Implemented; Linux verified]
-│   ├── Localized service messages                   [Pending; P3]
+│   ├── Localized service messages                   [Implemented; Linux verified]
 │   ├── User systemd unit template                  [Scaffold; static check only]
 │   └── Other platform service integration           [Deferred; Linux only]
 <!--│   └── Windows SCM service integration              [Deferred; Windows compatibility postponed] -->
@@ -348,7 +351,7 @@ mihomo-server/
 │   ├── Log view zh/en heading, filter input, clear action and empty/unmatched states [Implemented; P3; browser verified]
 │   ├── Core upgrade view zh/en channels, release info, install records and action dialogs [Implemented; P3; browser verified]
 │   ├── Resource views zh/en inventory, auto-update policy, validation and seed/online actions [Implemented; P3; browser verified]
-│   ├── Additional languages and service-message localization [Pending; P3]
+│   ├── Additional languages and service-message localization [Partially implemented; P3; zh/en/zhtw service messages verified]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4472,7 +4475,37 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: resource views and Geo action localization
+## Current increment: localized service messages and error responses
+
+Delivery step 10 (P3) connects HTTP and WebSocket management error responses to
+the embedded `clash-verge-i18n` localization engine using `Accept-Language` headers:
+- **`clash-verge-i18n` catalog and resolution**:
+  - `resolve_accept_language(header_value)` parses weighted quality factors (RFC 9110)
+    and resolves the client's highest-preference language tag to an embedded locale.
+  - `translate_service_error(code, default_message, language)` looks up error codes
+    in `service.errors.<code_snake_case>` and `service.errors.<code_camel_case>`,
+    returning localized strings for `zh`, `zhtw`, and `en` while preserving verbatim
+    `default_message` when no language is requested or when untranslated.
+- **Service HTTP error handling (`service/src/management/http.rs`)**:
+  - `language_from_headers`, `error_with_headers`, and `error_with_language` resolve
+    the caller's preferred language tag from `Accept-Language`.
+  - Authentication, command parsing, method-not-allowed fallback, backup import/export,
+    restore validation, and web asset/streaming endpoints return localized error bodies
+    (`{"error": {"code": code, "message": localized}}`).
+- **Web client integration (`web/src/api.ts`)**:
+  - `command()` passes `Accept-Language: savedLanguage()` in JSON POST headers so
+    the server's error responses reflect the browser's currently chosen UI language (`zh` or `en`).
+  - Fallback error messages in `ApiError` adapt to the active client language.
+
+Verification: `cargo test -p clash-verge-i18n` passes all 7 unit tests (including
+weighted `Accept-Language` resolution and error translation fallbacks). `cargo test
+--test management http_errors_localize_via_accept_language_and_preserve_default_fallback`
+verifies Chinese, English, and unlocalized fallback behaviors across 404, 401, 405, 400,
+and 503 error states. Full management test suite (23 passed, 1 ignored) and Web
+production build pass cleanly. All 49 Playwright UI workflow tests pass (4 skipped).
+Next: additional browser languages and service signals verification.
+
+## Previous increment: resource views and Geo action localization
 
 Delivery step 9 (P3) now localizes the runtime resource inventory panel
 (`ResourcesPanel`), offline seed installation controls (`GeoSeedAction`), and

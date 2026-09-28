@@ -37,6 +37,40 @@ notifications:
 service:
   adminInstallPrompt: 安裝 Clash Verge 服務需要管理員權限
   adminUninstallPrompt: 解除安裝 Clash Verge 服務需要管理員權限
+  errors:
+    method_not_allowed: 不支援的請求方法
+    shutting_down: 服務正在關閉
+    invalid_headers: 請求標頭無效
+    duplicate_credential: 憑證標頭重複
+    invalid_credential: 憑證標頭無效
+    unauthorized: 需要身分認證
+    invalid_query: 不支援查詢參數
+    invalid_request: 無效的請求
+    invalid_path: 無效的資源路徑
+    not_found: 找不到請求的資源
+    session_limit: WebSocket 連線階段已達上限
+    invalid_upgrade: WebSocket 升級請求無效
+    stream_not_found: 資料流不存在
+    backup_busy: 備份操作忙碌中，請稍後重試
+    invalid_backup_request: 本地備份請求必須為空
+    invalid_backup_id: 無效的本地備份 ID
+    backup_export_failed: 備份匯出失敗，請檢查來源檔案後重試
+    backup_storage_full: 本地備份容量已滿，請清理後重試
+    backup_not_found: 找不到本地備份
+    backup_interrupted: 本地備份操作中斷，請檢查後重試
+    backup_storage_failed: 本地備份操作失敗，請檢查後重試
+    invalid_restore_policy: 還原策略無效，請提供 X-Backup-Runtime 標頭
+    invalid_backup_media: 備份檔案格式無效，請上傳 zip 檔案
+    invalid_backup_length: 上傳長度無效
+    backup_too_large: 備份檔案超過 65 MiB 限制
+    invalid_backup_body: 上傳內容過大或讀取失敗
+    backup_upload_timeout: 備份上傳超過 15 秒逾時
+    restore_requires_settled_core: 需要核心處於穩定執行或停止狀態後方可還原備份
+    restore_interrupted: 服務正在關閉，重試前請檢查狀態
+    backup_restore_failed: 備份還原失敗，重試前請檢查服務狀態
+    backup_restore_validation_failed: 備份還原驗證失敗，未套用任何設定
+    invalid_backup_archive: 備份檔案未通過格式、完整性或設定檢查
+    asset_error: 靜態資源載入失敗
 launchGuard:
   currentExeError: 無法判斷應用程式位置：{error}
   homeDirError: 無法判斷目前使用者的個人目錄，應用程式將結束：{error}

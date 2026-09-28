@@ -113,6 +113,45 @@ pub fn resolve_supported_language(language: &str) -> Option<Cow<'static, str>> {
     None
 }
 
+/// Parse an HTTP `Accept-Language` header (e.g. "zh-CN,zh;q=0.9,en;q=0.8")
+/// and resolve the highest-preference supported language.
+pub fn resolve_accept_language(header_value: &str) -> Option<Cow<'static, str>> {
+    if header_value.is_empty() {
+        return None;
+    }
+    let mut candidates: Vec<(&str, f32)> = Vec::new();
+    for part in header_value.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let mut subparts = part.split(';');
+        let lang = subparts.next().unwrap_or("").trim();
+        if lang.is_empty() || lang == "*" {
+            continue;
+        }
+        let mut quality = 1.0f32;
+        for param in subparts {
+            let param = param.trim();
+            if let Some(rest) = param.strip_prefix("q=") {
+                if let Ok(q) = rest.trim().parse::<f32>() {
+                    quality = q;
+                }
+            }
+        }
+        if quality > 0.0 {
+            candidates.push((lang, quality));
+        }
+    }
+    candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    for (lang, _) in candidates {
+        if let Some(resolved) = resolve_supported_language(lang) {
+            return Some(resolved);
+        }
+    }
+    None
+}
+
 #[inline]
 pub fn current_language(language: Option<&str>) -> Cow<'static, str> {
     language
@@ -179,6 +218,54 @@ pub fn translate_for<'a>(key: &'a str, language: Option<&str>) -> Cow<'a, str> {
     }
 
     Cow::Borrowed(key)
+}
+
+fn snake_to_camel(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut capitalize = false;
+    for c in s.chars() {
+        if c == '_' || c == '-' {
+            capitalize = true;
+        } else if capitalize {
+            result.extend(c.to_uppercase());
+            capitalize = false;
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Translate a service API error code into a localized message.
+///
+/// Looks up `service.errors.<code_snake_case>` and `service.errors.<code_camel_case>`.
+/// If neither key exists or language is None, returns `Cow::Borrowed(default_message)`.
+pub fn translate_service_error<'a>(
+    code: &str,
+    default_message: &'a str,
+    language: Option<&str>,
+) -> Cow<'a, str> {
+    let Some(lang) = language else {
+        return Cow::Borrowed(default_message);
+    };
+    if lang.is_empty() {
+        return Cow::Borrowed(default_message);
+    }
+
+    let snake_key = format!("service.errors.{code}");
+    let translated = translate_for(&snake_key, Some(lang));
+    if translated != snake_key {
+        return Cow::Owned(translated.into_owned());
+    }
+
+    let camel = snake_to_camel(code);
+    let camel_key = format!("service.errors.{camel}");
+    let translated = translate_for(&camel_key, Some(lang));
+    if translated != camel_key {
+        return Cow::Owned(translated.into_owned());
+    }
+
+    Cow::Borrowed(default_message)
 }
 
 #[macro_export]
@@ -269,5 +356,48 @@ mod tests {
             "仪表板"
         );
         assert_eq!(current_language(None), before);
+    }
+
+    #[test]
+    fn resolve_accept_language_parses_quality_and_variants() {
+        assert_eq!(resolve_accept_language("zh-CN,zh;q=0.9,en;q=0.8").as_deref(), Some("zh"));
+        assert_eq!(resolve_accept_language("en-US,en;q=0.9,zh;q=0.8").as_deref(), Some("en"));
+        assert_eq!(resolve_accept_language("fr-FR,fr;q=0.9,en;q=0.8").as_deref(), Some("en"));
+        assert_eq!(resolve_accept_language("zh-TW,zh;q=0.8").as_deref(), Some("zhtw"));
+        assert_eq!(resolve_accept_language("ja, en;q=0.5").as_deref(), Some("jp"));
+        assert_eq!(resolve_accept_language("unknown-lang;q=1.0"), None);
+        assert_eq!(resolve_accept_language(""), None);
+    }
+
+    #[test]
+    fn translate_service_error_localizes_known_codes_and_preserves_fallback() {
+        assert_eq!(
+            translate_service_error("unauthorized", "authentication required", Some("zh")),
+            "需要身份认证"
+        );
+        assert_eq!(
+            translate_service_error("unauthorized", "authentication required", Some("en")),
+            "Authentication required"
+        );
+        assert_eq!(
+            translate_service_error("unauthorized", "authentication required", Some("zhtw")),
+            "需要身分認證"
+        );
+        assert_eq!(
+            translate_service_error("shutting_down", "service is shutting down", Some("zh")),
+            "服务正在关闭"
+        );
+        assert_eq!(
+            translate_service_error("shutting_down", "service is shutting down", Some("en")),
+            "Service is shutting down"
+        );
+        assert_eq!(
+            translate_service_error("shutting_down", "service is shutting down", None),
+            "service is shutting down"
+        );
+        assert_eq!(
+            translate_service_error("custom_unknown", "custom error detail", Some("zh")),
+            "custom error detail"
+        );
     }
 }

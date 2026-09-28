@@ -1241,6 +1241,109 @@ async fn http_errors_limits_and_shutdown_are_structured() -> Result<()> {
 }
 
 #[tokio::test]
+async fn http_errors_localize_via_accept_language_and_preserve_default_fallback() -> Result<()> {
+    let directory = Directory::new()?;
+    let manager = directory.manager()?;
+    let state = HttpState::new(Management::new(manager.clone(), directory.authentication()?));
+    let app = router(state.clone());
+    let result = async {
+        let token = directory.token()?;
+
+        // 1. Missing route (not_found)
+        let mut req_zh = request(&token, "/api/absent", None)?;
+        req_zh.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9".parse()?);
+        let (status, body) = response(&app, req_zh).await?;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["error"]["code"], "not_found");
+        assert_eq!(body["error"]["message"], "未找到请求的资源");
+
+        let mut req_en = request(&token, "/api/absent", None)?;
+        req_en.headers_mut().insert(header::ACCEPT_LANGUAGE, "en-US,en;q=0.9".parse()?);
+        let (status, body) = response(&app, req_en).await?;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["error"]["code"], "not_found");
+        assert_eq!(body["error"]["message"], "Resource not found");
+
+        let req_default = request(&token, "/api/absent", None)?;
+        let (status, body) = response(&app, req_default).await?;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["error"]["code"], "not_found");
+        assert_eq!(body["error"]["message"], "API route does not exist");
+
+        // 2. Unauthorized
+        let mut req_unauth_zh = request("wrong-token", "/api/commands", None)?;
+        req_unauth_zh.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9".parse()?);
+        let (status, body) = response(&app, req_unauth_zh).await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"]["code"], "unauthorized");
+        assert_eq!(body["error"]["message"], "需要身份认证");
+
+        let mut req_unauth_en = request("wrong-token", "/api/commands", None)?;
+        req_unauth_en.headers_mut().insert(header::ACCEPT_LANGUAGE, "en".parse()?);
+        let (status, body) = response(&app, req_unauth_en).await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"]["code"], "unauthorized");
+        assert_eq!(body["error"]["message"], "Authentication required");
+
+        let req_unauth_default = request("wrong-token", "/api/commands", None)?;
+        let (status, body) = response(&app, req_unauth_default).await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"]["code"], "unauthorized");
+        assert_eq!(body["error"]["message"], "authentication required");
+
+        // 3. Method not allowed
+        let mut req_method_zh = request(&token, "/api/commands", None)?;
+        req_method_zh.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh".parse()?);
+        let (status, body) = response(&app, req_method_zh).await?;
+        assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(body["error"]["code"], "method_not_allowed");
+        assert_eq!(body["error"]["message"], "不支持的请求方法");
+
+        let mut req_method_en = request(&token, "/api/commands", None)?;
+        req_method_en.headers_mut().insert(header::ACCEPT_LANGUAGE, "en".parse()?);
+        let (status, body) = response(&app, req_method_en).await?;
+        assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(body["error"]["code"], "method_not_allowed");
+        assert_eq!(body["error"]["message"], "Method is not allowed");
+
+        // 4. Invalid query
+        let mut req_query_zh = request(&token, "/api/status?bad=1", None)?;
+        req_query_zh.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh".parse()?);
+        let (status, body) = response(&app, req_query_zh).await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "invalid_query");
+        assert_eq!(body["error"]["message"], "不支持查询参数");
+
+        // 5. Shutting down
+        state.close();
+        let mut req_shut_zh = request(&token, "/api/status", None)?;
+        req_shut_zh.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh".parse()?);
+        let (status, body) = response(&app, req_shut_zh).await?;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"]["code"], "shutting_down");
+        assert_eq!(body["error"]["message"], "服务正在关闭");
+
+        let mut req_shut_en = request(&token, "/api/status", None)?;
+        req_shut_en.headers_mut().insert(header::ACCEPT_LANGUAGE, "en".parse()?);
+        let (status, body) = response(&app, req_shut_en).await?;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"]["code"], "shutting_down");
+        assert_eq!(body["error"]["message"], "Service is shutting down");
+
+        let req_shut_default = request(&token, "/api/status", None)?;
+        let (status, body) = response(&app, req_shut_default).await?;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"]["code"], "shutting_down");
+        assert_eq!(body["error"]["message"], "service is shutting down");
+
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
 async fn http_import_select_config_and_failed_start_share_the_manager() -> Result<()> {
     let directory = Directory::new()?;
     let manager = directory.manager()?;

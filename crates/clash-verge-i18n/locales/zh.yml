@@ -37,6 +37,40 @@ notifications:
 service:
   adminInstallPrompt: 安装 Clash Verge 服务需要管理员权限
   adminUninstallPrompt: 卸载 Clash Verge 服务需要管理员权限
+  errors:
+    method_not_allowed: 不支持的请求方法
+    shutting_down: 服务正在关闭
+    invalid_headers: 请求头无效
+    duplicate_credential: 凭据头重复
+    invalid_credential: 凭据头无效
+    unauthorized: 需要身份认证
+    invalid_query: 不支持查询参数
+    invalid_request: 无效的请求
+    invalid_path: 无效的资源路径
+    not_found: 未找到请求的资源
+    session_limit: WebSocket 会话已达上限
+    invalid_upgrade: WebSocket 升级请求无效
+    stream_not_found: 数据流不存在
+    backup_busy: 备份操作正忙，请稍后重试
+    invalid_backup_request: 本地备份请求必须为空
+    invalid_backup_id: 无效的本地备份 ID
+    backup_export_failed: 备份导出失败，请检查源文件后重试
+    backup_storage_full: 本地备份空间已满，请清理后重试
+    backup_not_found: 未找到本地备份
+    backup_interrupted: 本地备份操作被中断，请检查后重试
+    backup_storage_failed: 本地备份操作失败，请检查后重试
+    invalid_restore_policy: 恢复策略无效，请提供 X-Backup-Runtime 请求头
+    invalid_backup_media: 备份文件格式无效，请上传 zip 文件
+    invalid_backup_length: 备份上传长度无效
+    backup_too_large: 备份文件超过 65 MiB 限制
+    invalid_backup_body: 上传内容过大或读取失败
+    backup_upload_timeout: 备份上传超时
+    restore_requires_settled_core: 需要内核处于稳定运行或停止状态后方可恢复备份
+    restore_interrupted: 服务正在关闭，重试前请检查状态
+    backup_restore_failed: 备份恢复失败，重试前请检查服务状态
+    backup_restore_validation_failed: 备份恢复验证失败，未应用任何配置
+    invalid_backup_archive: 备份文件未通过格式、完整性或配置检查
+    asset_error: 静态资源加载失败
 launchGuard:
   currentExeError: 无法确定应用位置：{error}
   homeDirError: 无法确定当前用户主目录，应用将退出：{error}

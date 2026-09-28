@@ -37,6 +37,40 @@ notifications:
 service:
   adminInstallPrompt: Installing the Clash Verge service requires administrator privileges.
   adminUninstallPrompt: Uninstalling the Clash Verge service requires administrator privileges.
+  errors:
+    method_not_allowed: Method is not allowed
+    shutting_down: Service is shutting down
+    invalid_headers: Invalid request headers
+    duplicate_credential: Duplicate credential header
+    invalid_credential: Invalid credential header
+    unauthorized: Authentication required
+    invalid_query: Query parameters are not supported
+    invalid_request: Invalid request
+    invalid_path: Invalid asset path
+    not_found: Resource not found
+    session_limit: WebSocket session limit reached
+    invalid_upgrade: Invalid WebSocket upgrade request
+    stream_not_found: Stream does not exist
+    backup_busy: Backup operation unavailable; finish current operation and retry
+    invalid_backup_request: Local backup requests must be empty
+    invalid_backup_id: Invalid local backup ID
+    backup_export_failed: Backup export unavailable; check source files and retry
+    backup_storage_full: Local backup capacity reached; delete a retained backup and retry
+    backup_not_found: Local backup not found
+    backup_interrupted: Local backup operation interrupted; inspect retained backups before retrying
+    backup_storage_failed: Local backup operation failed; inspect retained backups before retrying
+    invalid_restore_policy: "Send one X-Backup-Runtime header: archived or regenerated"
+    invalid_backup_media: Send an unencoded application/zip body
+    invalid_backup_length: Invalid upload length
+    backup_too_large: Backup archive exceeds 65 MiB
+    invalid_backup_body: Upload is oversized or could not be read
+    backup_upload_timeout: Backup upload exceeded 15 seconds
+    restore_requires_settled_core: Wait for a settled running or stopped core before restoring a backup
+    restore_interrupted: Service is closing; inspect status before retrying restoration
+    backup_restore_failed: Backup restoration failed; inspect service status before retrying
+    backup_restore_validation_failed: Backup restore candidate failed validation; no configuration was applied
+    invalid_backup_archive: Backup archive failed format, integrity or configuration checks
+    asset_error: Cannot serve asset
 launchGuard:
   currentExeError: 'Unable to determine the application location: {error}'
   homeDirError: 'Unable to determine the current user''s home directory. The application will exit: {error}'

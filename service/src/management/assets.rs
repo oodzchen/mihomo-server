@@ -1,5 +1,5 @@
 //! Public login assets and a navigation-only SPA fallback, separate from APIs.
-use super::http::{HttpState, error};
+use super::http::{HttpState, error_with_headers};
 use anyhow::{Context as _, Result, ensure};
 use axum::{
     extract::{Request, State},
@@ -34,32 +34,33 @@ pub(super) fn is_api(path: &str) -> bool {
 }
 
 pub(super) async fn serve(State(state): State<HttpState>, request: Request) -> Response {
+    let headers = request.headers().clone();
     let path = request.uri().path();
     if is_api(path) {
-        return error(StatusCode::NOT_FOUND, "not_found", "API route does not exist");
+        return error_with_headers(&headers, StatusCode::NOT_FOUND, "not_found", "API route does not exist");
     }
     if request.method() != Method::GET && request.method() != Method::HEAD {
-        return error(
+        return error_with_headers(
+            &headers,
             StatusCode::METHOD_NOT_ALLOWED,
             "method_not_allowed",
             "method is not allowed",
         );
     }
     let Some(assets) = state.assets else {
-        return error(StatusCode::NOT_FOUND, "not_found", "Web assets are not configured");
+        return error_with_headers(&headers, StatusCode::NOT_FOUND, "not_found", "Web assets are not configured");
     };
     let Ok(decoded) = percent_encoding::percent_decode_str(path).decode_utf8() else {
-        return error(StatusCode::BAD_REQUEST, "invalid_path", "invalid asset path");
+        return error_with_headers(&headers, StatusCode::BAD_REQUEST, "invalid_path", "invalid asset path");
     };
     if is_api(&decoded) {
-        return error(StatusCode::NOT_FOUND, "not_found", "API route does not exist");
+        return error_with_headers(&headers, StatusCode::NOT_FOUND, "not_found", "API route does not exist");
     }
     let navigation = matches!(
         decoded.as_ref(),
         "/" | "/profiles" | "/config" | "/proxies" | "/logs" | "/settings" | "/core"
     );
-    let accepts_html = request
-        .headers()
+    let accepts_html = headers
         .get(header::ACCEPT)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.split(',').any(|part| part.trim().starts_with("text/html")));
@@ -72,11 +73,11 @@ pub(super) async fn serve(State(state): State<HttpState>, request: Request) -> R
         .components()
         .all(|part| matches!(part, Component::Normal(_)))
     {
-        return error(StatusCode::NOT_FOUND, "not_found", "asset does not exist");
+        return error_with_headers(&headers, StatusCode::NOT_FOUND, "not_found", "asset does not exist");
     }
     let file = match tokio::fs::canonicalize(assets.root.join(relative)).await {
         Ok(file) if file.starts_with(assets.root.as_ref()) && file.is_file() => file,
-        _ => return error(StatusCode::NOT_FOUND, "not_found", "asset does not exist"),
+        _ => return error_with_headers(&headers, StatusCode::NOT_FOUND, "not_found", "asset does not exist"),
     };
     match ServeFile::new(file).oneshot(request).await {
         Ok(response) => {
@@ -88,6 +89,6 @@ pub(super) async fn serve(State(state): State<HttpState>, request: Request) -> R
                 .insert(header::REFERRER_POLICY, "no-referrer".parse().unwrap());
             response
         }
-        Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "asset_error", "cannot serve asset"),
+        Err(_) => error_with_headers(&headers, StatusCode::INTERNAL_SERVER_ERROR, "asset_error", "cannot serve asset"),
     }
 }

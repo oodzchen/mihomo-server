@@ -1,3 +1,4 @@
+import { savedLanguage } from "./i18n";
 import type { EventMessage } from "./types";
 
 export type Perform = <T>(
@@ -19,11 +20,13 @@ export async function command<T>(
   fields: Record<string, unknown> = {},
   signal?: AbortSignal,
 ): Promise<T> {
+  const lang = savedLanguage();
   const response = await fetch("/api/commands", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
+      "Accept-Language": lang,
     },
     body: JSON.stringify({ command, ...fields }),
     signal,
@@ -32,7 +35,8 @@ export async function command<T>(
   const body = await response.json();
   if (!response.ok)
     throw new ApiError(
-      body.error?.message || `请求失败 (${response.status})`,
+      body.error?.message ||
+        (lang === "en" ? `Request failed (${response.status})` : `请求失败 (${response.status})`),
       response.status,
     );
   return body as T;
