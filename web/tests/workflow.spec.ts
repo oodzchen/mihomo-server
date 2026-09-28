@@ -1322,6 +1322,26 @@ test("browser repairs failed startup, saves selection/config, restores after ser
   expect(errors).toEqual([]);
 });
 
+test("proxy node selection translates without changing the selected node", async ({ page }) => {
+  await page.goto(`${base}/proxies`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await expect(page.getByRole("button", { name: "选择 Main / REJECT" })).toHaveAttribute("aria-pressed", "true");
+  const mainGroup = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Main", exact: true }) });
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByText("Node selections are saved per profile and restored after core and service restarts.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh nodes" })).toBeVisible();
+  await expect(mainGroup.getByText(/Selector · Current:/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Select Main / REJECT" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Select Main / DIRECT" }).click();
+  await expect(page.getByRole("button", { name: "Select Main / DIRECT" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(mainGroup.getByText(/Selector · 当前：/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "选择 Main / DIRECT" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "选择 Main / REJECT" }).click();
+  await expect(page.getByRole("button", { name: "选择 Main / REJECT" })).toHaveAttribute("aria-pressed", "true");
+});
+
 test("manual remote refresh keeps identity, applies active config and preserves failures across restart", async ({
   page,
 }) => {

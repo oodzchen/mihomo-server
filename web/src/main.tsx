@@ -411,6 +411,7 @@ function Manager({
         ) : route === "/proxies" ? (
           <ProxyPage
             token={token}
+            language={language}
             status={status}
             busy={busy}
             perform={perform}
@@ -1707,11 +1708,13 @@ function ConfigPage({
 
 function ProxyPage({
   token,
+  language,
   status,
   busy,
   perform,
 }: {
   token: string;
+  language: Language;
   status: CoreStatus;
   busy: boolean;
   perform: Perform;
@@ -1883,7 +1886,7 @@ function ProxyPage({
       <div className="section-title">
         <div>
           <p className="muted">
-            节点选择按订阅保存，内核与服务重启后会尝试恢复。
+            {t(language, "proxyHelp")}
           </p>
           <div className="delay-url-bar">
             <label htmlFor="delay-test-url" className="muted" style={{ fontSize: "12px", marginRight: "6px" }}>
@@ -1903,21 +1906,21 @@ function ProxyPage({
           disabled={busy || loading || status.phase !== "running"}
           onClick={() => refresh((value) => value + 1)}
         >
-          刷新节点
+          {t(language, "proxyRefresh")}
         </button>
       </div>
       {status.phase !== "running" && (
-        <p className="info">启动内核后可查看节点。</p>
+        <p className="info">{t(language, "proxyNeedsCore")}</p>
       )}
       {!status.active_profile && (
-        <p className="info">先使用一个订阅，才能保存节点选择。</p>
+        <p className="info">{t(language, "proxyNeedsProfile")}</p>
       )}
       {error && (
         <p className="alert" role="alert">
           {error}
         </p>
       )}
-      {loading && <p className="info">加载节点与代理集…</p>}
+      {loading && <p className="info">{t(language, "proxyLoading")}</p>}
 
       {providerList.length > 0 && (
         <section className="panel" style={{ marginBottom: "20px" }}>
@@ -1970,8 +1973,8 @@ function ProxyPage({
             <div>
               <h2>{name}</h2>
               <p className="muted">
-                {group.type} · 当前：
-                {group.fixed || group.now || "等待分组加载"}
+                {group.type} · {t(language, "proxyCurrent")}
+                {group.fixed || group.now || t(language, "proxyGroupWaiting")}
               </p>
             </div>
             <div className="panel-actions">
@@ -1987,7 +1990,7 @@ function ProxyPage({
                   disabled={busy || !status.active_profile}
                   onClick={() => void select("unfix_node", { group: name })}
                 >
-                  取消固定
+                  {t(language, "proxyUnfix")}
                 </button>
               )}
             </div>
@@ -2000,7 +2003,7 @@ function ProxyPage({
               return (
                 <button
                   key={node}
-                  aria-label={`选择 ${name} / ${node}`}
+                  aria-label={`${t(language, "proxySelect")} ${name} / ${node}`}
                   aria-pressed={isSelected}
                   className={isSelected ? "selected" : ""}
                   disabled={busy || !status.active_profile}
@@ -2022,7 +2025,7 @@ function ProxyPage({
                       ⚡
                     </span>
                     <span>
-                      {isSelected ? "已选择" : "选择"}
+                      {t(language, isSelected ? "proxySelected" : "proxySelect")}
                     </span>
                   </div>
                 </button>
@@ -2030,7 +2033,7 @@ function ProxyPage({
             })}
           </div>
           {!group.all?.length && (
-            <p className="empty">分组尚未加载节点，请稍后刷新。</p>
+            <p className="empty">{t(language, "proxyGroupEmpty")}</p>
           )}
         </section>
       ))}

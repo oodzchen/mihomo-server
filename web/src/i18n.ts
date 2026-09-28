@@ -144,6 +144,13 @@ const zh = {
   globalScriptSource: "全局脚本 JavaScript", globalScriptTooLarge: "脚本不能超过 1 MiB。",
   globalScriptSave: "保存全局脚本", globalScriptReset: "恢复默认全局脚本",
   globalScriptResetWarning: "将恢复返回原配置的默认脚本，替换已保存的脚本和当前输入。",
+  proxyHelp: "节点选择按订阅保存，内核与服务重启后会尝试恢复。",
+  proxyRefresh: "刷新节点", proxyNeedsCore: "启动内核后可查看节点。",
+  proxyNeedsProfile: "先使用一个订阅，才能保存节点选择。",
+  proxyLoading: "加载节点与代理集…", proxyCurrent: "当前：",
+  proxyGroupWaiting: "等待分组加载", proxyUnfix: "取消固定",
+  proxySelected: "已选择", proxySelect: "选择",
+  proxyGroupEmpty: "分组尚未加载节点，请稍后刷新。",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -271,6 +278,13 @@ const en: Record<keyof typeof zh, string> = {
   globalScriptSource: "Global script JavaScript", globalScriptTooLarge: "Script must not exceed 1 MiB.",
   globalScriptSave: "Save global script", globalScriptReset: "Restore default global script",
   globalScriptResetWarning: "Restore the default script that returns the original configuration, replacing the saved script and current input.",
+  proxyHelp: "Node selections are saved per profile and restored after core and service restarts.",
+  proxyRefresh: "Refresh nodes", proxyNeedsCore: "Start the core to view nodes.",
+  proxyNeedsProfile: "Use a profile before saving node selections.",
+  proxyLoading: "Loading nodes and proxy groups…", proxyCurrent: "Current:",
+  proxyGroupWaiting: "Waiting for group to load", proxyUnfix: "Unfix",
+  proxySelected: "Selected", proxySelect: "Select",
+  proxyGroupEmpty: "The group has no loaded nodes yet. Refresh later.",
 };
 
 export type MessageKey = keyof typeof zh;
