@@ -67,7 +67,13 @@ pub fn validate_profile_file(file: &str) -> Result<()> {
 
 impl ProfileStore {
     pub fn open(data_dir: &Path) -> Result<Self> {
-        fs::create_dir_all(data_dir.join("profiles"))?;
+        let profiles_dir = data_dir.join("profiles");
+        fs::create_dir_all(&profiles_dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let _ = fs::set_permissions(&profiles_dir, fs::Permissions::from_mode(0o700));
+        }
         let path = data_dir.join("profiles.yaml");
         let profiles: IProfiles = if path.try_exists()? {
             ensure!(

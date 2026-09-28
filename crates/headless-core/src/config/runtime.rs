@@ -16,6 +16,7 @@ use serde_yaml_ng::Mapping;
 use crate::enhance::merge::use_merge;
 
 pub const MAX_CONFIG_BYTES: usize = 8 * 1024 * 1024;
+pub const DEFAULT_RETAINED_REVISIONS: usize = 10;
 const CONTROLLER_FIELDS: [&str; 4] = [
     "external-controller",
     "external-controller-tls",
@@ -92,6 +93,12 @@ impl RuntimeStore {
     pub fn open(data_dir: &Path) -> Result<Self> {
         let root = data_dir.join("config");
         fs::create_dir_all(root.join("revisions"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let _ = fs::set_permissions(&root, fs::Permissions::from_mode(0o700));
+            let _ = fs::set_permissions(root.join("revisions"), fs::Permissions::from_mode(0o700));
+        }
         let manifest = root.join("state.yaml");
         let state = if manifest.try_exists()? {
             ensure!(manifest.metadata()?.len() <= 64 * 1024, "runtime manifest is too large");
@@ -107,6 +114,7 @@ impl RuntimeStore {
         };
         ensure!(state.schema_version == 1, "unsupported runtime manifest version");
         let mut store = Self { root, state };
+        let _ = store.clean_state_temporaries();
         if let Some(current) = &store.state.current {
             store.path(current)?;
         }
@@ -115,6 +123,7 @@ impl RuntimeStore {
         if store.state.pending.is_some() {
             store.abort()?;
         }
+        let _ = store.gc_revisions(DEFAULT_RETAINED_REVISIONS);
         Ok(store)
     }
 
@@ -191,7 +200,9 @@ impl RuntimeStore {
         let mut state = self.state.clone();
         state.current = Some(state.pending.take().context("no pending configuration")?);
         state.active_profile = state.pending_profile.take();
-        self.save(state)
+        self.save(state)?;
+        let _ = self.gc_revisions(DEFAULT_RETAINED_REVISIONS);
+        Ok(())
     }
 
     pub fn abort(&mut self) -> Result<()> {
@@ -203,7 +214,85 @@ impl RuntimeStore {
 
     pub fn restore(&mut self, previous: RuntimeState) -> Result<()> {
         ensure!(previous.pending.is_none(), "cannot restore a pending state");
-        self.save(previous)
+        self.save(previous)?;
+        let _ = self.gc_revisions(DEFAULT_RETAINED_REVISIONS);
+        Ok(())
+    }
+
+    /// Garbage-collect unreferenced runtime revisions, retaining at least `keep_count`
+    /// latest revisions in addition to active `current` and `pending` revisions.
+    /// Also cleans up abandoned `state-*.tmp` temporary files.
+    pub fn gc_revisions(&mut self, keep_count: usize) -> Result<usize> {
+        let keep_count = keep_count.max(1);
+        let mut pruned = self.clean_state_temporaries()?;
+
+        let revisions_dir = self.root.join("revisions");
+        if !revisions_dir.is_dir() {
+            return Ok(pruned);
+        }
+
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(&revisions_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with("rev-") && name_str.ends_with(".yaml") {
+                let mtime = entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(UNIX_EPOCH);
+                entries.push((name_str.into_owned(), path, mtime));
+            }
+        }
+
+        // Sort descending by mtime (newest first), tie-break by name
+        entries.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| b.0.cmp(&a.0)));
+
+        let current_file = self.state.current.as_ref().map(|r| r.file.as_str());
+        let pending_file = self.state.pending.as_ref().map(|r| r.file.as_str());
+
+        let mut kept = 0;
+        for (name, path, _mtime) in entries {
+            let is_active = Some(name.as_str()) == current_file || Some(name.as_str()) == pending_file;
+            if is_active {
+                continue;
+            }
+            if kept < keep_count {
+                kept += 1;
+                continue;
+            }
+            if fs::remove_file(&path).is_ok() {
+                pruned += 1;
+            }
+        }
+
+        sync_directory(&revisions_dir)?;
+        Ok(pruned)
+    }
+
+    /// Clean up orphan temporary state files (state-*.tmp) left over from interrupted saves.
+    pub fn clean_state_temporaries(&self) -> Result<usize> {
+        let mut cleaned = 0;
+        if !self.root.is_dir() {
+            return Ok(cleaned);
+        }
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with("state-") && name_str.ends_with(".tmp") {
+                let path = entry.path();
+                if path.is_file() && fs::remove_file(path).is_ok() {
+                    cleaned += 1;
+                }
+            }
+        }
+        sync_directory(&self.root)?;
+        Ok(cleaned)
     }
 
     fn save(&mut self, state: RuntimeState) -> Result<()> {

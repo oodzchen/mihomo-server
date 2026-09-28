@@ -53,8 +53,8 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P4):** Actual Linux systemd installation and daemon lifecycle verification. Created `scripts/install_service.py` supporting user systemd unit installation, path customization, private permissions (`0700` data, `0644` unit, `0755` binaries), and service management commands (`install`, `uninstall`, `start`, `stop`, `restart`, `enable`, `disable`, `status`, `is-active`, `logs`, `unit`). Implemented comprehensive unit tests in `scripts/tests/test_install_service.py` and live systemd lifecycle integration test in `scripts/tests/test_systemd_lifecycle.py` verifying real systemd unit start/stop/restart, child Mihomo process reaping (`ESRCH`), journal logs capturing, and real proxy node selection against `./data` profile `amy` (87 nodes, `AI` group, node `🇯🇵 日本 03`). Updated `docs/DEPLOYMENT.md` and architecture documentation.
-**All planned milestone priorities (P1–P4) completed and Linux-verified.** Deliverable Linux release packaging, license inventory, systemd user service management, and daemon lifecycle verification are fully delivered. Remaining non-core items remain deferred until future scope expansion.
+**Latest completed task (P1):** Runtime revision and orphan file garbage collection. Implemented `gc_revisions(&mut self, keep_count: usize)` and `clean_state_temporaries(&self)` in `RuntimeStore` (`crates/headless-core/src/config/runtime.rs`), ensuring active `current` and `pending` revisions are strictly preserved while stale/unreferenced revisions are bounded and orphan temporary state files (`state-*.tmp`) are safely cleaned up. Enforced private `0700` directory permissions on `config/revisions` and `profiles` directories upon creation. Added unit tests in `crates/headless-core/tests/runtime_store.rs` verifying active revision preservation, orphan cleanup, and bounded revision retention across commit loops.
+**Next implementation task (P1):** Remaining authoritative resource and settings lifecycle integration.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -169,7 +169,7 @@ mihomo-server/
 │       ├── Remaining Geo lifecycle / resource settings [Pending; P1; typed runtime fields delivered]
 │       ├── Rule and provider operation models        [Implemented; Linux verified]
 │       ├── Proxy provider and delay operation models [Implemented; Linux verified]
-│       ├── Immutable revision / orphan file garbage collection [Pending]
+│       ├── Immutable revision / orphan file garbage collection [Implemented; Linux verified]
 │       ├── Timed update metadata / saved refresh source [Migrated + service scheduler]
 │       ├── Backup manifest / bounded entries / inspection, validation, runtime policy and restore receipt models [Implemented; upstream ZIP adaptation]
 │       ├── Opaque restore plan / durable catalog-settings journal / runtime commit recovery [Implemented; Linux verified]

@@ -131,3 +131,64 @@ fn staging_archived_yaml_retains_exact_bytes_and_controller_boundary() -> Result
     assert!(store.stage_yaml("- not-a-mapping\n").is_err());
     Ok(())
 }
+
+#[test]
+fn revision_gc_cleans_orphans_and_bounds_retained_revisions() -> Result<()> {
+    let directory = Directory::new()?;
+    let mut store = RuntimeStore::open(&directory.0)?;
+
+    // Stage 6 revisions, commit revision 1
+    let rev1 = store.stage(parse("mode: direct\n")?)?;
+    store.begin(rev1.clone())?;
+    store.commit()?;
+
+    // Stage a few uncommitted revisions
+    let rev2 = store.stage(parse("mode: rule\n")?)?;
+    let _rev3 = store.stage(parse("mode: global\n")?)?;
+    let _rev4 = store.stage(parse("mode: direct\n")?)?;
+
+    // Create a dummy abandoned state-*.tmp
+    std::fs::write(directory.0.join("config/state-abandoned.tmp"), "stale")?;
+
+    // Begin rev2 as pending
+    store.begin(rev2.clone())?;
+
+    // Current is rev1, Pending is rev2. Both must be preserved!
+    // Call gc_revisions with keep_count = 1
+    let pruned = store.gc_revisions(1)?;
+    ensure!(pruned >= 2, "expected at least 2 pruned files");
+
+    // Both rev1 (current) and rev2 (pending) must still exist
+    assert!(store.path(&rev1)?.is_file(), "current revision was pruned");
+    assert!(store.path(&rev2)?.is_file(), "pending revision was pruned");
+
+    // Abandoned tmp must be cleaned
+    assert!(!directory.0.join("config/state-abandoned.tmp").exists(), "state-*.tmp was not cleaned");
+
+    Ok(())
+}
+
+#[test]
+fn commit_loop_keeps_revisions_bounded() -> Result<()> {
+    let directory = Directory::new()?;
+    let mut store = RuntimeStore::open(&directory.0)?;
+
+    for i in 0..25 {
+        let rev = store.stage(parse(&format!("mode: direct\n# run {i}\n"))?)?;
+        store.begin(rev)?;
+        store.commit()?;
+    }
+
+    let revisions_dir = directory.0.join("config/revisions");
+    let count = std::fs::read_dir(&revisions_dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .count();
+
+    // Must be bounded around DEFAULT_RETAINED_REVISIONS
+    assert!(count <= headless_core::config::runtime::DEFAULT_RETAINED_REVISIONS + 2);
+    assert_eq!(store.read_current()?["mode"].as_str(), Some("direct"));
+
+    Ok(())
+}
+
