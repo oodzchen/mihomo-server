@@ -53,13 +53,14 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** explicit direct/system/managed routes for online
-Geo downloads, using the subscription downloader's proxy discovery and TLS root
-fallback policy. Managed routing reads live Mihomo listeners and committed
-authentication; route failure never silently falls back. The bounded download,
-Geo validation and stopped/running publication paths remain in place.
-**Next implementation task (P1):** remaining authoritative service/resource
-settings, starting with native Linux TUN integration. Finish P1 before P2.
+**Latest completed task (P1):** native Linux TUN admission and live configuration
+readback. Enabling TUN requires an accessible `/dev/net/tun` before starting or
+replacing a running core; the service compares enabled state, explicit device and
+auto-route settings with Mihomo `/configs` before declaring readiness. The
+existing rollback path preserves a running proxy when admission fails.
+**Next implementation task (P1):** verify actual TUN interface and route
+activation on a capability-bearing Linux host, then finish remaining
+authoritative service/resource settings. Finish P1 before P2.
 
 ## Complete target architecture
 
@@ -119,7 +120,7 @@ mihomo-server/
 │       ├── Provider DNS digest / profile preference / session confirmation / hosts-only protection [Migrated + adaptation; Linux verified]
 │       ├── Deleted-profile DNS preference / confirmation cleanup [Implemented; recoverable]
 │       ├── settings/hosts.rs / strict typed maps / whole-map authority / empty clear / alias-cycle checks [Implemented; Linux verified]
-│       ├── Remaining native TUN integration           [Pending; P1]
+│       ├── Native Linux TUN admission / live config readback [Partially implemented; P1; interface/route validation pending]
 │       ├── Final LAN bind / group cleanup / field order [Migrated + staged adaptation; Linux verified]
 │       ├── Outbound interface / Linux routing mark authority / bounds / recovery [Implemented; Linux verified]
 │       ├── Global download User-Agent / ETag authority / strict headers / recovery [Implemented; Linux verified]
@@ -147,6 +148,7 @@ mihomo-server/
 │   ├── Startup settings snapshot / candidate authority [Implemented; Linux verified]
 │   ├── Actor settings read/replace / coordinated apply and rollback [Implemented; Linux verified]
 │   ├── DNS/TUN/hosts subset in generation / settings transactions [Implemented; Linux verified]
+│   ├── native_tun.rs / device admission and live TUN config readback [Partially implemented; P1; privileged routing verification pending]
 │   ├── Raw/enhanced candidate phases / single TUN derivation [Implemented; Linux validation]
 │   ├── DNS/hosts conflict commands / scoped confirmation / coordinated auto-disable [Implemented; Linux verified]
 │   ├── Final candidate LAN/group normalization after authority [Implemented; Linux verified]
@@ -168,7 +170,7 @@ mihomo-server/
 │   │   ├── geo_live.rs / durable rollback journal / startup recovery / guarded cleanup [Implemented; Linux verified]
 │   │   ├── Running-core online Geo replacement / verified restart / rollback and crash recovery [Implemented; Linux verified]
 │   │   ├── Online Geo managed/system proxy route choice and TLS retry parity [Implemented; Linux verified]
-│   │   └── Remaining full settings and native TUN [Pending; P1]
+│   │   └── Remaining full settings and native TUN interface/route verification [Pending; P1]
 │   ├── Core state watches and bounded log stream    [Implemented]
 │   ├── Built-in proxy port readback / restart fallback and rollback [Implemented; Linux verified]
 │   ├── Profile snapshots/watches and active UID     [Implemented]
@@ -4389,6 +4391,39 @@ runnable. Next: P1 remaining authoritative settings and native Linux TUN
 integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
+
+## Current increment: Linux TUN admission and live core readback
+
+Delivery step 7 now checks an enabled TUN candidate against the local Linux
+character device before a start or live configuration replacement. An absent,
+incorrect or inaccessible `/dev/net/tun` yields a specific error. Stopped
+configuration edits remain possible, so an administrator can prepare settings
+before installing TUN privileges. Disabled and inherited TUN candidates do not
+require that device. The service does not assume that its own process needs
+`CAP_NET_ADMIN`: a capability-bearing Mihomo binary may hold that permission
+independently. Mihomo remains responsible for creating the interface and routes.
+
+After Mihomo starts or reloads, the existing `/configs` readiness query also
+checks that TUN is enabled and that explicit device and auto-route choices match
+the live core. A readback mismatch enters the established activation/rollback
+path, rather than treating a successful validator or open API socket as proof of
+TUN operation. A live settings update that fails the device preflight returns
+before attempting a reload or stopping the healthy proxy. This does not prove
+that the kernel interface or policy routes carry traffic; that needs a host with
+`/dev/net/tun` and the permissions required by Mihomo.
+
+Verification: `cargo check --workspace` passes; the final serial workspace
+suite reports **382 passed, 86 opt-in ignored, zero failures**. Focused tests
+cover disabled and inherited candidates, missing and non-device paths, both
+directions of live enable mismatch, explicit device/auto-route mismatch and a
+real Mihomo settings rollback on a host without `/dev/net/tun`. That rollback
+preserves the original PID, config revision and settings. The isolated
+actual-node resource/proxy workflow again returns HTTPS 204
+through Mihomo using private copies of `data`. This host has neither
+`/dev/net/tun` nor effective network-admin capability, so no privileged TUN
+traffic or kernel route claim is made. The tree above marks native TUN as
+partial; the Linux MVP remains runnable. Next: privileged interface/route and
+traffic verification, followed by remaining P1 service/resource settings.
 
 ## MVP completion boundary
 

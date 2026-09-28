@@ -10,6 +10,36 @@ use std::{fs, path::PathBuf};
 struct Directory(PathBuf);
 
 #[tokio::test]
+#[ignore = "requires real Mihomo and a Linux host without /dev/net/tun"]
+async fn unavailable_native_tun_rejects_live_settings_without_stopping_proxy() -> Result<()> {
+    if std::path::Path::new("/dev/net/tun").exists() {
+        return Ok(());
+    }
+    let dir = Directory::new()?;
+    let manager = CoreManager::spawn(dir.options()?)?;
+    let result = async {
+        manager.start().await?;
+        let before = manager.status();
+        let config = manager.runtime_config().await?;
+        let settings = manager.settings().await?;
+        let error = manager
+            .set_settings(serde_yaml_ng::from_str("tun: {enable: true, auto-route: false}")?)
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("/dev/net/tun"), "{error:#}");
+        assert_eq!(manager.status().phase, CorePhase::Running);
+        assert_eq!(manager.status().pid, before.pid);
+        assert_eq!(manager.status().config_revision, before.config_revision);
+        assert_eq!(manager.runtime_config().await?, config);
+        assert_eq!(manager.settings().await?, settings);
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
 #[ignore = "requires real Mihomo and bounded script worker"]
 async fn provider_dns_confirmation_is_scoped_rolls_back_and_expires_after_restart() -> Result<()> {
     use headless_core::config::dns::DnsOverrideOutcome;

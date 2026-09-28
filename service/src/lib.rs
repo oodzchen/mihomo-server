@@ -15,6 +15,7 @@ pub mod geo_settings;
 pub mod geo_update;
 pub mod geo_validation;
 pub mod management;
+mod native_tun;
 mod proxy_access;
 pub mod remote;
 pub mod resource_inventory;

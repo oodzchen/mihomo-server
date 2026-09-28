@@ -1373,8 +1373,14 @@ private and bounded to 64 KiB including nested values; with a runtime, candidate
 generation and Mihomo validation precede publication. Without a runtime, semantic
 core validation is deferred until bootstrap, as for the existing scalar fields.
 
-This is the typed/authority and pure derivation subset. TUN does not change host
-DNS or acquire TUN permissions. Hosts mapping and host-use switches are supported below; policy settings and
+This is the typed/authority and pure derivation subset. On Linux, starting or
+updating a running core with TUN enabled requires an accessible `/dev/net/tun`;
+the service also checks Mihomo's live `/configs` TUN enable, explicit device and
+auto-route readback before reporting readiness. Stopped settings can still be
+prepared without the device. Mihomo itself creates the interface and routes;
+the service does not change host DNS or grant TUN permissions. A working kernel
+interface, routes and traffic still require verification on a privileged host.
+Hosts mapping and host-use switches are supported below; policy settings and
 fallback-filter remain pending. The browser now edits
 all of the typed fields above and preserves other supported runtime settings.
 Unknown nested fields prevent saving until a compatible snapshot is read.

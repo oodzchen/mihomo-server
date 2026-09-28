@@ -2950,7 +2950,12 @@ impl Actor {
         // A valid manual apply cancels automatic recovery; it remains stopped if stopped.
         self.retry_at = None;
         self.cancel_restoration();
+        let mut live_attempted = false;
         let result = async {
+            if was_running {
+                let config = read_config(&candidate).await?;
+                crate::native_tun::preflight(&config)?;
+            }
             if setting {
                 self.settings_store.begin(settings_candidate, self.store.state().pending.context("settings candidate revision missing")?)?;
             }
@@ -2970,6 +2975,7 @@ impl Actor {
                 None => {}
             }
             if was_running {
+                live_attempted = true;
                 if let Err(error) = self.reload(&candidate).await {
                     ensure!(
                         !*self.shutdown.borrow(),
@@ -3040,7 +3046,7 @@ impl Actor {
                 .profile_store
                 .set_current(self.store.state().active_profile.as_deref());
             self.profile_state.send_replace(self.profile_store.snapshot());
-            let recovery = if was_running && !*self.shutdown.borrow() {
+            let recovery = if was_running && live_attempted && !*self.shutdown.borrow() {
                 self.publish(CorePhase::Stopping, None);
                 match self.stop_process().await {
                     Ok(()) => self.start_core().await,
@@ -3085,6 +3091,7 @@ impl Actor {
         let path = tokio::fs::canonicalize(path).await?;
         check_config(&path).await?;
         crate::validation::resource_paths(&self.options.data_dir, &path, &self.options.binary).await?;
+        crate::native_tun::preflight(&read_config(&path).await?)?;
         tokio::select! {
             biased;
             _ = closing(&mut self.shutdown) => bail!("reload cancelled during shutdown"),
@@ -3105,7 +3112,8 @@ impl Actor {
                 result.context("listener verification timed out")??
             }
         };
-        crate::proxy_access::verify_ports(&config, &core)
+        crate::proxy_access::verify_ports(&config, &core)?;
+        crate::native_tun::verify(&config, &core)
     }
 
     async fn recover_core_upgrade(&mut self) -> Result<()> {
@@ -3761,6 +3769,7 @@ impl Actor {
         );
         check_config(&self.options.config).await?;
         crate::validation::resource_paths(&self.options.data_dir, &self.options.config, &self.options.binary).await?;
+        crate::native_tun::preflight(&read_config(&self.options.config).await?)?;
         if self.store.state().pending.is_none() {
             crate::validation::validate(
                 &self.options.binary,
