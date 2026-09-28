@@ -1050,12 +1050,14 @@ function GlobalEditor({
 
 function ScriptEditor({
   item,
+  language,
   content,
   busy,
   perform,
   onClose,
 }: {
   item: Profile;
+  language: Language;
   content: { uid?: string; source?: string };
   busy: boolean;
   perform: Perform;
@@ -1075,14 +1077,11 @@ function ScriptEditor({
   }
   return (
     <section className="panel">
-      <h2>脚本增强</h2>
-      <p className="muted">
-        为 {item.name || item.uid} 编写 main(config,
-        name)，返回配置对象。脚本在序列与合并增强之后执行。保存前会运行脚本；当前订阅会校验并应用配置。执行失败会保留旧配置，输出显示在日志中。
-      </p>
+      <h2>{t(language, "scriptEditorTitle")}</h2>
+      <p className="muted">{t(language, "scriptEditorHelp").replace("{name}", item.name || item.uid)}</p>
       <form onSubmit={save}>
         <label>
-          脚本增强 JavaScript
+          {t(language, "scriptEditorSource")}
           <textarea
             className="code"
             rows={12}
@@ -1095,17 +1094,17 @@ function ScriptEditor({
         </label>
         <div className="form-actions">
           <button className="primary" disabled={busy}>
-            保存脚本增强
+            {t(language, "scriptEditorSave")}
           </button>
           <button
             type="button"
             disabled={busy || !content.uid}
             onClick={() => void clear()}
           >
-            移除脚本增强
+            {t(language, "scriptEditorRemove")}
           </button>
           <button type="button" disabled={busy} onClick={onClose}>
-            取消脚本编辑
+            {t(language, "scriptEditorCancel")}
           </button>
         </div>
       </form>
@@ -1492,6 +1491,7 @@ function ProfilePage({
           <ScriptEditor
             key={scriptEditing.item.uid}
             item={scriptEditing.item}
+            language={language}
             content={scriptEditing.content}
             busy={busy}
             perform={perform}

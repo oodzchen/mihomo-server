@@ -123,6 +123,10 @@ const zh = {
   sequenceProxies: "代理", sequenceGroups: "代理组",
   sequenceEditorYaml: "序列增强 YAML", sequenceEditorSave: "保存序列增强",
   sequenceEditorRemove: "移除序列增强", sequenceEditorCancel: "取消序列编辑",
+  scriptEditorTitle: "脚本增强",
+  scriptEditorHelp: "为 {name} 编写 main(config, name)，返回配置对象。脚本在序列与合并增强之后执行。保存前会运行脚本；当前订阅会校验并应用配置。执行失败会保留旧配置，输出显示在日志中。",
+  scriptEditorSource: "脚本增强 JavaScript", scriptEditorSave: "保存脚本增强",
+  scriptEditorRemove: "移除脚本增强", scriptEditorCancel: "取消脚本编辑",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -229,6 +233,10 @@ const en: Record<keyof typeof zh, string> = {
   sequenceProxies: "Proxies", sequenceGroups: "Proxy groups",
   sequenceEditorYaml: "Sequence YAML", sequenceEditorSave: "Save sequence",
   sequenceEditorRemove: "Remove sequence", sequenceEditorCancel: "Cancel sequence editing",
+  scriptEditorTitle: "Script enhancement",
+  scriptEditorHelp: "Write main(config, name) for {name} and return a configuration object. The script runs after sequence and merge enhancements. It runs before saving; the active profile is then validated and applied. Failures keep the previous configuration, with output shown in Logs.",
+  scriptEditorSource: "Script enhancement JavaScript", scriptEditorSave: "Save script enhancement",
+  scriptEditorRemove: "Remove script enhancement", scriptEditorCancel: "Cancel script editing",
 };
 
 export type MessageKey = keyof typeof zh;

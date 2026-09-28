@@ -499,6 +499,44 @@ test("profile sequence editor localizes kinds and keeps YAML across language cha
   await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
 });
 
+test("profile script editor preserves JavaScript draft across language changes", async ({ page }) => {
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByLabel("订阅名称", { exact: true }).fill("ScriptLanguage");
+  await page.getByLabel("订阅 YAML", { exact: true }).fill("proxies: []\nmode: direct\n");
+  await page.getByRole("button", { name: "导入订阅", exact: true }).click();
+  const profile = page.locator("article.profile").filter({ has: page.getByRole("heading", { name: "ScriptLanguage" }) });
+  await expect(profile).toBeVisible();
+  const uid = await profile.locator(".mono").textContent();
+  const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  await profile.getByRole("button", { name: "脚本增强 ScriptLanguage" }).click();
+  const source = "function main(config, name) {\n  // localized draft\n  return config;\n}\n";
+  await page.getByLabel("脚本增强 JavaScript").fill(source);
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("heading", { name: "Script enhancement" })).toBeVisible();
+  await expect(page.getByText("Write main(config, name) for ScriptLanguage", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("Script enhancement JavaScript")).toHaveValue(source);
+  await page.getByRole("button", { name: "Save script enhancement" }).click();
+  await expect(profile).toContainText("Script linked");
+  const response = await fetch(`${base}/api/commands`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ command: "profile_script", uid }),
+  });
+  expect(response.ok).toBe(true);
+  expect((await response.json()).source).toBe(source);
+  await profile.getByRole("button", { name: "Script enhancement ScriptLanguage" }).click();
+  await expect(page.getByLabel("Script enhancement JavaScript")).toHaveValue(source);
+  await page.getByRole("button", { name: "Remove script enhancement" }).click();
+  await expect(profile.getByText("Script linked")).toHaveCount(0);
+  const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  expect(after.generation).toBe(before.generation);
+  await profile.getByRole("button", { name: "Delete profile ScriptLanguage" }).click();
+  await profile.getByRole("button", { name: "Confirm deletion ScriptLanguage" }).click();
+  await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
+});
+
 test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
   await page.goto(`${base}/settings`);
   await page.getByLabel("管理令牌").fill(token);
