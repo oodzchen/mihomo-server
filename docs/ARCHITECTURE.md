@@ -53,14 +53,13 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** the local YAML and remote URL subscription import
-forms now follow the browser's Chinese/English language choice. Switching
-languages retains both drafts and download options, and file-size feedback
-updates in place without changing service generation.
-**Next implementation task (P3):** translate the profile metadata editor,
-then the raw and extension editors and proxy, rules, log, resource and upgrade
-views; service-message localization and additional browser languages remain
-pending.
+**Latest completed task (P3):** the profile metadata editor now follows the
+browser's Chinese/English language choice for its fields, remote download
+options, help and actions. Switching languages retains the edit draft, and
+saving the English form preserves the same service behavior.
+**Next implementation task (P3):** translate the raw subscription YAML editor,
+then the extension editors and proxy, rules, log, resource and upgrade views;
+service-message localization and additional browser languages remain pending.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -330,7 +329,8 @@ mihomo-server/
 │   ├── Config editor zh/en copy and draft-safe switching [Implemented; P3; browser verified]
 │   ├── Profile list zh/en labels/actions/deletion confirmation [Implemented; P3; browser verified]
 │   ├── Local YAML and remote URL import forms / file-size feedback [Implemented; P3; browser verified]
-│   ├── Profile metadata/raw/extension editors, proxy/rules/log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
+│   ├── Profile metadata editor zh/en fields/options/draft-safe switching [Implemented; P3; browser verified]
+│   ├── Profile raw/extension editors, proxy/rules/log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4454,7 +4454,25 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: subscription import form localization
+## Current increment: profile metadata editor localization
+
+Delivery step 9 (P3) now localizes the profile metadata editor's title,
+instructions, name and description, remote URL, User-Agent, timeout and update
+interval, automatic update and proxy/TLS choices, and save/cancel actions. It
+uses the browser-owned Chinese/English catalog while retaining the existing
+patch-only authenticated save. Changing language keeps field values and checkbox
+states without remounting the editor or changing service generation. Raw YAML
+and profile extension editors remain Chinese-only P3 work.
+
+Verification: `cargo check --workspace` and the Web production build pass. A
+Playwright workflow imports a remote fixture, edits its metadata and download
+options, switches to English, saves the draft, verifies the service profile
+readback and unchanged core generation, then deletes the fixture. The full
+browser regression reports **35 passed and 4 optional upgrade/repair workflows
+skipped**. The complete architecture tree above is synchronized. Next:
+translate the raw subscription YAML editor.
+
+## Previous increment: subscription import form localization
 
 Delivery step 9 (P3) now localizes both profile import forms: titles, help,
 field labels, download-route and TLS choices, and submit actions use the

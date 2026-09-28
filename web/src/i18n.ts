@@ -77,6 +77,17 @@ const zh = {
   localImportUpload: "上传订阅 YAML", localImportName: "订阅名称",
   localImportYaml: "订阅 YAML", localImportSubmit: "导入订阅",
   localImportFileTooLarge: "文件不能超过 8 MiB",
+  profileEditorTitle: "编辑订阅",
+  profileEditorHelp: "保存名称、描述和下载设置。修改链接后，点击刷新订阅以获取新内容。",
+  profileEditorName: "修改订阅名称", profileEditorDescription: "订阅描述",
+  profileEditorUrl: "远程订阅链接", profileEditorAgent: "订阅 User-Agent",
+  profileEditorTimeout: "下载超时（秒）", profileEditorInterval: "更新间隔（分钟）",
+  profileEditorAuto: "允许自动更新", profileEditorManaged: "订阅刷新通过托管内核代理",
+  profileEditorSystem: "订阅刷新使用服务系统代理",
+  profileEditorInvalidCerts: "订阅刷新允许无效 TLS 证书",
+  profileEditorTlsHelp: "开启后不校验 HTTPS 服务器身份，仅对该订阅的下载生效。",
+  profileEditorRouteHelp: "托管内核模式优先，需要运行中的 HTTP 或 Mixed 入口。系统代理读取服务环境，未配置时直连。允许自动更新且间隔大于 0 时，服务按分钟定时刷新；失败后等待完整间隔重试。",
+  profileEditorSave: "保存订阅信息", profileEditorCancel: "取消编辑",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -137,6 +148,17 @@ const en: Record<keyof typeof zh, string> = {
   localImportUpload: "Upload profile YAML", localImportName: "Profile name",
   localImportYaml: "Profile YAML", localImportSubmit: "Import profile",
   localImportFileTooLarge: "File must not exceed 8 MiB",
+  profileEditorTitle: "Edit profile",
+  profileEditorHelp: "Save the name, description and download settings. After changing the URL, refresh the profile to fetch the new content.",
+  profileEditorName: "Change profile name", profileEditorDescription: "Profile description",
+  profileEditorUrl: "Remote profile URL", profileEditorAgent: "Profile User-Agent",
+  profileEditorTimeout: "Download timeout (seconds)", profileEditorInterval: "Update interval (minutes)",
+  profileEditorAuto: "Allow automatic updates", profileEditorManaged: "Refresh through the managed core proxy",
+  profileEditorSystem: "Use the service system proxy for refreshes",
+  profileEditorInvalidCerts: "Allow invalid TLS certificates for refreshes",
+  profileEditorTlsHelp: "When enabled, the HTTPS server's identity is not verified. This applies only to downloads for this profile.",
+  profileEditorRouteHelp: "The managed core proxy takes priority and needs a running HTTP or Mixed listener. The system proxy comes from the service environment; without one, refreshes connect directly. With automatic updates enabled and an interval above zero, the service refreshes on that schedule in minutes and waits a full interval after failures.",
+  profileEditorSave: "Save profile details", profileEditorCancel: "Cancel editing",
 };
 
 export type MessageKey = keyof typeof zh;

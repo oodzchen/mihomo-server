@@ -324,6 +324,52 @@ test("subscription import forms translate without losing drafts or changing impo
   await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
 });
 
+test("profile metadata editor keeps remote draft across language changes and saves it", async ({ page }) => {
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByLabel("订阅链接").fill(`${subscriptionUrl}/ok`);
+  await page.getByLabel("远程订阅名称（可选）").fill("MetadataDraft");
+  await page.getByRole("button", { name: "下载并导入" }).click();
+  const draft = page.locator("article.profile").filter({ has: page.getByRole("heading", { name: "MetadataDraft" }) });
+  await expect(draft).toBeVisible();
+  const uid = await draft.locator(".mono").textContent();
+  const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  await draft.getByRole("button", { name: "编辑订阅 MetadataDraft" }).click();
+  await page.getByLabel("修改订阅名称").fill("MetadataSaved");
+  await page.getByLabel("订阅描述").fill("localized editor draft");
+  await page.getByLabel("订阅 User-Agent").fill("metadata-i18n-agent");
+  await page.getByLabel("下载超时（秒）").fill("7");
+  await page.getByLabel("更新间隔（分钟）").fill("60");
+  await page.getByLabel("允许自动更新").uncheck();
+  await page.getByLabel("订阅刷新允许无效 TLS 证书").check();
+
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("heading", { name: "Edit profile" })).toBeVisible();
+  await expect(page.getByLabel("Change profile name")).toHaveValue("MetadataSaved");
+  await expect(page.getByLabel("Profile description")).toHaveValue("localized editor draft");
+  await expect(page.getByLabel("Profile User-Agent")).toHaveValue("metadata-i18n-agent");
+  await expect(page.getByLabel("Download timeout (seconds)")).toHaveValue("7");
+  await expect(page.getByLabel("Update interval (minutes)")).toHaveValue("60");
+  await expect(page.getByLabel("Allow automatic updates")).not.toBeChecked();
+  await expect(page.getByLabel("Allow invalid TLS certificates for refreshes")).toBeChecked();
+  await page.getByRole("button", { name: "Save profile details" }).click();
+  const saved = page.locator("article.profile").filter({ has: page.getByRole("heading", { name: "MetadataSaved" }) });
+  await expect(saved).toContainText("localized editor draft");
+  const catalog = await fetch(`${base}/api/profiles`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  const item = catalog.items.find((entry: { uid: string }) => entry.uid === uid);
+  expect(item.option.user_agent).toBe("metadata-i18n-agent");
+  expect(item.option.timeout_seconds).toBe(7);
+  expect(item.option.update_interval).toBe(60);
+  expect(item.option.allow_auto_update).toBe(false);
+  expect(item.option.danger_accept_invalid_certs).toBe(true);
+  const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  expect(after.generation).toBe(before.generation);
+  await saved.getByRole("button", { name: "Delete profile MetadataSaved" }).click();
+  await saved.getByRole("button", { name: "Confirm deletion MetadataSaved" }).click();
+  await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
+});
+
 test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
   await page.goto(`${base}/settings`);
   await page.getByLabel("管理令牌").fill(token);

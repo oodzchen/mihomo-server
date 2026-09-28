@@ -603,11 +603,13 @@ function Overview({
 
 function ProfileEditor({
   item,
+  language,
   busy,
   perform,
   onClose,
 }: {
   item: Profile;
+  language: Language;
   busy: boolean;
   perform: Perform;
   onClose: () => void;
@@ -660,13 +662,11 @@ function ProfileEditor({
   }
   return (
     <section className="panel">
-      <h2>编辑订阅</h2>
-      <p className="muted">
-        保存名称、描述和下载设置。修改链接后，点击刷新订阅以获取新内容。
-      </p>
+      <h2>{t(language, "profileEditorTitle")}</h2>
+      <p className="muted">{t(language, "profileEditorHelp")}</p>
       <form onSubmit={save}>
         <label>
-          修改订阅名称
+          {t(language, "profileEditorName")}
           <input
             required
             maxLength={256}
@@ -676,7 +676,7 @@ function ProfileEditor({
           />
         </label>
         <label>
-          订阅描述
+          {t(language, "profileEditorDescription")}
           <textarea
             maxLength={4096}
             disabled={busy}
@@ -687,7 +687,7 @@ function ProfileEditor({
         {item.type === "remote" && (
           <>
             <label>
-              远程订阅链接
+              {t(language, "profileEditorUrl")}
               <input
                 type="url"
                 required
@@ -698,7 +698,7 @@ function ProfileEditor({
               />
             </label>
             <label>
-              订阅 User-Agent
+              {t(language, "profileEditorAgent")}
               <input
                 maxLength={1024}
                 disabled={busy}
@@ -707,7 +707,7 @@ function ProfileEditor({
               />
             </label>
             <label>
-              下载超时（秒）
+              {t(language, "profileEditorTimeout")}
               <input
                 type="number"
                 required
@@ -720,7 +720,7 @@ function ProfileEditor({
               />
             </label>
             <label>
-              更新间隔（分钟）
+              {t(language, "profileEditorInterval")}
               <input
                 type="number"
                 required
@@ -739,7 +739,7 @@ function ProfileEditor({
                 checked={auto}
                 onChange={(event) => setAuto(event.target.checked)}
               />
-              允许自动更新
+              {t(language, "profileEditorAuto")}
             </label>
             <label className="check-label">
               <input
@@ -748,7 +748,7 @@ function ProfileEditor({
                 checked={selfProxy}
                 onChange={(event) => setSelfProxy(event.target.checked)}
               />
-              订阅刷新通过托管内核代理
+              {t(language, "profileEditorManaged")}
             </label>
             <label className="check-label">
               <input
@@ -757,7 +757,7 @@ function ProfileEditor({
                 checked={withProxy}
                 onChange={(event) => setWithProxy(event.target.checked)}
               />
-              订阅刷新使用服务系统代理
+              {t(language, "profileEditorSystem")}
             </label>
             <label className="check-label">
               <input
@@ -766,24 +766,18 @@ function ProfileEditor({
                 checked={invalidCerts}
                 onChange={(event) => setInvalidCerts(event.target.checked)}
               />
-              订阅刷新允许无效 TLS 证书
+              {t(language, "profileEditorInvalidCerts")}
             </label>
-            <p className="muted">
-              开启后不校验 HTTPS 服务器身份，仅对该订阅的下载生效。
-            </p>
-            <p className="muted">
-              托管内核模式优先，需要运行中的 HTTP 或 Mixed 入口。
-              系统代理读取服务环境，未配置时直连。允许自动更新且间隔大于 0
-              时，服务按分钟定时刷新；失败后等待完整间隔重试。
-            </p>
+            <p className="muted">{t(language, "profileEditorTlsHelp")}</p>
+            <p className="muted">{t(language, "profileEditorRouteHelp")}</p>
           </>
         )}
         <div className="form-actions">
           <button className="primary" disabled={busy}>
-            保存订阅信息
+            {t(language, "profileEditorSave")}
           </button>
           <button type="button" disabled={busy} onClick={onClose}>
-            取消编辑
+            {t(language, "profileEditorCancel")}
           </button>
         </div>
       </form>
@@ -1507,6 +1501,7 @@ function ProfilePage({
         <ProfileEditor
           key={editing.uid}
           item={editing}
+          language={language}
           busy={busy}
           perform={perform}
           onClose={() => setEditing(null)}
