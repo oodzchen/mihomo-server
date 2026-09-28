@@ -196,6 +196,40 @@ test.afterAll(async () => {
   }
 });
 
+test("browser language selection persists locally without changing service state", async ({ page, browser }) => {
+  await page.goto(base);
+  await expect(page.getByRole("heading", { name: "连接你的服务" })).toBeVisible();
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("heading", { name: "Connect to your service" })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Connect to your service" })).toBeVisible();
+  await page.getByLabel("Management token").fill(token);
+  await page.getByRole("button", { name: "Connect to service" }).click();
+  const navigation = page.getByRole("navigation", { name: "Main navigation" });
+  await expect(navigation.getByRole("link", { name: "01 Overview" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start core", exact: true })).toBeVisible();
+  const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "01 概览" })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+  const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  expect(after.generation).toBe(before.generation);
+  const storage = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
+  expect(storage["mihomo-server-language"]).toBe("zh");
+  expect(JSON.stringify(storage)).not.toContain(token);
+
+  const separate = await browser.newContext();
+  try {
+    const otherPage = await separate.newPage();
+    await otherPage.goto(base);
+    await expect(otherPage.getByRole("heading", { name: "连接你的服务" })).toBeVisible();
+    await expect(otherPage.getByRole("combobox", { name: "界面语言" })).toHaveValue("zh");
+  } finally {
+    await separate.close();
+  }
+});
+
 test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
   await page.goto(`${base}/settings`);
   await page.getByLabel("管理令牌").fill(token);

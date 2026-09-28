@@ -153,6 +153,15 @@ h3 {
   font-size: 30px;
   margin-bottom: 16px;
 }
+.language-picker {
+  display: block;
+  font-size: 12px;
+  margin: 8px 0 16px;
+}
+.language-picker select {
+  padding: 7px 9px;
+  margin-top: 4px;
+}
 .login-form form {
   margin-top: 30px;
 }
@@ -622,6 +631,10 @@ footer {
     margin: 0;
     padding: 0;
   }
+  .sidebar-bottom .language-picker {
+    width: 120px;
+    margin: 0;
+  }
   .workspace {
     padding: 22px 18px;
   }
@@ -965,4 +978,3 @@ footer {
   align-items: center;
   margin-top: 6px;
 }
-

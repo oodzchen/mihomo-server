@@ -53,13 +53,12 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** the shared locale catalog and Unix signal/latch
-components have been extracted from the pinned upstream tree. Explicit locale
-lookup does not mutate service-global state; SIGTERM, SIGINT and SIGHUP use the
-existing foreground shutdown and reap the managed core. Browser language and
-service message integration are still pending.
-**Next implementation task (P3):** add browser-owned language selection and
-translate the management UI without changing service-global locale.
+**Latest completed task (P3):** the browser now owns a persisted Chinese/English
+language choice. Login, navigation, the core action bar and the overview's main
+labels switch without changing service settings or restarting the event socket.
+**Next implementation task (P3):** translate the remaining configuration,
+profile, proxy, rules, log, resource and upgrade management views; service
+message localization and additional browser languages remain pending.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -325,7 +324,8 @@ mihomo-server/
 │   ├── Traffic, memory and connection-count overview [Implemented; MVP]
 │   ├── Rules and rule-provider management page      [Implemented; Linux verified]
 │   ├── Proxy providers and node delay views         [Implemented; Linux verified]
-│   ├── Browser-owned language selection and translated management UI [Pending; P3]
+│   ├── Browser-owned zh/en language selection, login/navigation/core shell/overview copy [Implemented; P3; browser verified]
+│   ├── Remaining management views, additional languages and service-message localization [Pending; P3]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4449,7 +4449,30 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: shared locale catalog and Linux service signals
+## Current increment: browser-owned language selection and management shell
+
+Delivery step 9 (P3) now has a browser-local Chinese/English language setting.
+The selector appears before login and in the management sidebar. It follows the
+upstream Chinese fallback and regional language normalization, persists only in
+the browser origin's local storage, and updates the document language/title.
+Login, navigation, connection and core status, global start/stop/restart
+controls, feedback, and the overview's main labels use a typed message catalog.
+Changing language does not write service settings or recreate the WebSocket.
+An isolated browser context starts with its own default language. The existing
+Chinese UI and management behavior remain the default; detailed settings,
+profile, proxy, rules, log, resource and upgrade pages still need translation.
+The initial browser catalog covers Chinese and English; other upstream browser
+locales remain pending, as do localized service messages.
+
+Verification: `cargo check --workspace` and the Web production build pass. A
+Playwright test covers login and navigation switching, persistence after reload,
+isolated browser storage, unchanged service generation and token absence from
+local storage. The full browser regression reports **31 passed and 4 optional
+upgrade/repair workflows skipped**. The complete architecture tree above is
+synchronized. Next: translate the remaining
+P3 management views, starting with configuration and profile workflows.
+
+## Previous increment: shared locale catalog and Linux service signals
 
 Delivery step 9 (P3) begins with the in-flight upstream shared-component
 extraction. `clash-verge-i18n` embeds the thirteen pinned YAML locale files,

@@ -57,6 +57,16 @@ extracted Unix signal listener, not a copied upstream file. It preserves the
 existing service supervisor, HTTP/WebSocket drain and managed child reaping.
 Browser language integration and localized service messages remain pending.
 
+The P3 browser language foundation in `web/src/i18n.ts` adapts the Chinese
+fallback, regional normalization and browser-local persistence behavior from
+`src/services/i18n.ts` at pinned commit
+`b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b`. Login/navigation/overview
+message entries are original headless-service copy in `web/src/main.tsx`, with
+upstream `src/locales/{zh,en}/{layout,home,shared}.json` as terminology references.
+This initial browser catalog covers Chinese and English without loading the
+desktop app's unrelated UI text or changing service-global locale. Feature-page
+copy and the remaining upstream browser languages are later P3 work.
+
 ## DNS resolver policy settings reference
 
 The P1 DNS policy and remaining DNS page controls (`fake-ip-filter-mode`,

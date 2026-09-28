@@ -13,6 +13,7 @@ import { ProxyAccessPanel } from "./proxy-access";
 import { RawEditor } from "./raw-editor";
 import { CoreUpgradePage } from "./core-upgrade";
 import { RulesPage } from "./rules";
+import { connectionLabel, phaseLabel, resolveLanguage, savedLanguage, saveLanguage, t, type Language, type MessageKey } from "./i18n";
 import type {
   CoreLog,
   CoreStatus,
@@ -26,29 +27,17 @@ import type {
 } from "./types";
 import "./style.css";
 
-const phases: Record<string, string> = {
-  stopped: "已停止",
-  starting: "启动中",
-  running: "运行中",
-  stopping: "停止中",
-  recovering: "恢复中",
-  failed: "启动失败",
-  shutdown: "服务关闭",
-};
-const pages = [
-  ["/", "概览", "01"],
-  ["/profiles", "订阅", "02"],
-  ["/config", "配置", "03"],
-  ["/proxies", "节点", "04"],
-  ["/rules", "规则", "05"],
-  ["/logs", "日志", "06"],
-  ["/settings", "设置", "07"],
-  ["/core", "内核升级", "08"],
+const pages: [string, MessageKey, string][] = [
+  ["/", "overview", "01"], ["/profiles", "profiles", "02"],
+  ["/config", "config", "03"], ["/proxies", "proxies", "04"],
+  ["/rules", "rules", "05"], ["/logs", "logs", "06"],
+  ["/settings", "settings", "07"], ["/core", "core", "08"],
 ];
 const describe = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
 function App() {
+  const [language, setLanguage] = useState<Language>(savedLanguage);
   const [session, setSession] = useState<{
     token: string;
     status: CoreStatus;
@@ -58,23 +47,46 @@ function App() {
     setSession(undefined);
     setLoginError(reason);
   }, []);
+  const changeLanguage = useCallback((value: string) => {
+    const next = resolveLanguage(value);
+    saveLanguage(next);
+    setLanguage(next);
+    setLoginError("");
+  }, []);
+  useEffect(() => {
+    document.documentElement.lang = language === "en" ? "en" : "zh-CN";
+    document.title = `Mihomo · ${t(language, "serviceManagement")}`;
+  }, [language]);
   return session ? (
-    <Manager token={session.token} initial={session.status} logout={logout} />
+    <Manager token={session.token} initial={session.status} logout={logout} language={language} changeLanguage={changeLanguage} />
   ) : (
-    <Login error={loginError} login={setSession} />
+    <Login error={loginError} login={setSession} language={language} changeLanguage={changeLanguage} />
   );
+}
+
+function LanguagePicker({ language, changeLanguage }: { language: Language; changeLanguage: (value: string) => void }) {
+  return <label className="language-picker">{t(language, "language")}
+    <select aria-label={t(language, "language")} value={language} onChange={event => changeLanguage(event.target.value)}>
+      <option value="zh">简体中文</option><option value="en">English</option>
+    </select>
+  </label>;
 }
 
 function Login({
   error,
   login,
+  language,
+  changeLanguage,
 }: {
   error: string;
   login: (session: { token: string; status: CoreStatus }) => void;
+  language: Language;
+  changeLanguage: (value: string) => void;
 }) {
   const [token, setToken] = useState(""),
     [busy, setBusy] = useState(false),
     [failure, setFailure] = useState("");
+  useEffect(() => setFailure(""), [language]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -87,7 +99,7 @@ function Login({
     } catch (error) {
       setFailure(
         error instanceof ApiError && error.status === 401
-          ? "令牌无效，请检查后重试。"
+          ? t(language, "invalidToken")
           : describe(error),
       );
     } finally {
@@ -101,29 +113,30 @@ function Login({
           MH<span>MIHOMO SERVER</span>
         </div>
         <div>
-          <p className="eyebrow">独立服务 · 浏览器管理</p>
+          <p className="eyebrow">{t(language, "loginEyebrow")}</p>
           <h1>
-            让连接
+            {t(language, "loginTitleFirst")}
             <br />
-            尽在掌握。
+            {t(language, "loginTitleSecond")}
           </h1>
           <p>
-            订阅、配置与内核状态，
+            {t(language, "loginIntroFirst")}
             <br />
-            在同一个地方管理。
+            {t(language, "loginIntroSecond")}
           </p>
         </div>
         <span className="login-foot">Mihomo / Headless</span>
       </div>
       <section className="login-form">
-        <p className="eyebrow">服务管理入口</p>
-        <h2>连接你的服务</h2>
+        <LanguagePicker language={language} changeLanguage={changeLanguage} />
+        <p className="eyebrow">{t(language, "loginEntry")}</p>
+        <h2>{t(language, "loginTitle")}</h2>
         <p className="muted">
-          输入服务管理令牌以继续。令牌仅保存在当前页面内存，刷新后需重新登录。
+          {t(language, "loginHelp")}
         </p>
         <form onSubmit={submit}>
           <label>
-            管理令牌
+            {t(language, "token")}
             <input
               type="password"
               value={token}
@@ -139,10 +152,10 @@ function Login({
             </p>
           )}
           <button className="primary" disabled={busy}>
-            {busy ? "验证中…" : "连接服务"}
+            {busy ? t(language, "verifying") : t(language, "connect")}
           </button>
         </form>
-        <p className="hint">令牌位于服务数据目录的 management-token 文件中。</p>
+        <p className="hint">{t(language, "tokenHint")}</p>
       </section>
     </main>
   );
@@ -152,10 +165,14 @@ function Manager({
   token,
   initial,
   logout,
+  language,
+  changeLanguage,
 }: {
   token: string;
   initial: CoreStatus;
   logout: (reason?: string) => void;
+  language: Language;
+  changeLanguage: (value: string) => void;
 }) {
   const [status, setStatus] = useState(initial),
     [profiles, setProfiles] = useState<Profiles>({}),
@@ -168,6 +185,8 @@ function Manager({
   const alive = useRef(true),
     pending = useRef(new Set<AbortController>()),
     locked = useRef(false);
+  const languageRef = useRef(language);
+  languageRef.current = language;
   const request = useCallback(
     async <T,>(name: string, fields: Record<string, unknown> = {}) => {
       const controller = new AbortController();
@@ -201,7 +220,7 @@ function Manager({
       },
       (value) => {
         setConnection(value);
-        if (value === "认证失败") logout("认证失效，请重新输入令牌。");
+        if (value === "认证失败") logout(t(languageRef.current, "expiredToken"));
       },
     );
     const popstate = () => setRoute(location.pathname);
@@ -231,13 +250,13 @@ function Manager({
       if (alive.current) {
         setStatus(current);
         setProfiles(catalog);
-        setNotice("操作已完成");
+        setNotice(t(language, "completed"));
       }
       return result;
     } catch (error) {
       if (alive.current) {
         if (error instanceof ApiError && error.status === 401)
-          logout("认证失效，请重新输入令牌。");
+          logout(t(language, "expiredToken"));
         else setFailure(describe(error));
       }
       return undefined;
@@ -264,7 +283,7 @@ function Manager({
   const active = profiles.items?.find(
     (item) => item.uid === status.active_profile,
   );
-  const title = pages.find(([path]) => route === path)?.[1] || "概览";
+  const title = t(language, pages.find(([path]) => route === path)?.[1] || "overview");
   const transitional = [
     "starting",
     "stopping",
@@ -282,9 +301,9 @@ function Manager({
             SERVER
           </span>
         </div>
-        <p className="nav-label">工作空间</p>
-        <nav aria-label="主导航">
-          {pages.map(([path, label, number]) => (
+        <p className="nav-label">{t(language, "navLabel")}</p>
+        <nav aria-label={t(language, "navAria")}>
+          {pages.map(([path, key, number]) => (
             <a
               key={path}
               href={path}
@@ -292,38 +311,39 @@ function Manager({
               onClick={(event) => navigate(event, path)}
             >
               <span>{number}</span>
-              {label}
+              {t(language, key)}
             </a>
           ))}
         </nav>
         <div className="sidebar-bottom">
           <span className={`dot ${connection === "已连接" ? "good" : ""}`} />
-          <span role="status" aria-label="事件连接状态">
-            {connection}
+          <span role="status" aria-label={t(language, "eventConnection")}>
+            {connectionLabel(language, connection)}
           </span>
+          <LanguagePicker language={language} changeLanguage={changeLanguage} />
           <button className="quiet" onClick={() => logout()}>
-            退出登录
+            {t(language, "logout")}
           </button>
         </div>
       </aside>
       <div className="workspace">
         <header>
           <div>
-            <p className="eyebrow">MIHOMO / 服务管理</p>
+            <p className="eyebrow">MIHOMO / {t(language, "serviceManagement")}</p>
             <h1>{title}</h1>
           </div>
           <span className={`badge ${status.phase === "running" ? "good" : ""}`}>
-            {phases[status.phase] || status.phase}
+            {phaseLabel(language, status.phase)}
           </span>
         </header>
-        <section className="core-strip" aria-label="内核状态">
+        <section className="core-strip" aria-label={t(language, "coreStatus")}>
           <div>
-            <strong>{status.version || "Mihomo 内核"}</strong>
+            <strong>{status.version || t(language, "coreName")}</strong>
             <p>
               {active?.name ||
-                (status.active_profile ? status.active_profile : "未选择订阅")}
+                (status.active_profile ? status.active_profile : t(language, "noProfile"))}
               <span className="separator">/</span>
-              {status.pid ? `PID ${status.pid}` : "内核未运行"}
+              {status.pid ? `PID ${status.pid}` : t(language, "coreStopped")}
             </p>
           </div>
           <div className="actions">
@@ -331,7 +351,7 @@ function Manager({
               disabled={busy || transitional || status.phase === "running"}
               onClick={() => void perform("start")}
             >
-              启动内核
+              {t(language, "startCore")}
             </button>
             <button
               disabled={
@@ -339,18 +359,18 @@ function Manager({
               }
               onClick={() => void perform("stop")}
             >
-              停止内核
+              {t(language, "stopCore")}
             </button>
             <button
               disabled={busy || transitional}
               onClick={() => void perform("restart")}
             >
-              重启内核
+              {t(language, "restartCore")}
             </button>
           </div>
         </section>
         <div className="feedback" aria-live="polite">
-          {busy && <p className="info">正在处理，请稍候…</p>}
+          {busy && <p className="info">{t(language, "working")}</p>}
           {failure && (
             <p className="alert" role="alert">
               {failure}
@@ -363,16 +383,16 @@ function Manager({
           )}
           {status.error && (
             <p className="alert">
-              {status.phase === "failed" ? "内核错误" : "上次操作错误"}：
+              {status.phase === "failed" ? t(language, "coreError") : t(language, "operationError")}：
               {status.error}
             </p>
           )}
           {status.selection_error && (
-            <p className="alert">节点恢复：{status.selection_error}</p>
+            <p className="alert">{t(language, "selectionRestore")}：{status.selection_error}</p>
           )}
           {status.selection_pending?.length > 0 && (
             <p className="info">
-              正在恢复节点：{status.selection_pending.join("、")}
+              {t(language, "restoringNodes")}：{status.selection_pending.join("、")}
             </p>
           )}
         </div>
@@ -423,6 +443,7 @@ function Manager({
           />
         ) : (
           <Overview
+            language={language}
             token={token}
             connection={connection}
             logout={logout}
@@ -432,7 +453,7 @@ function Manager({
             logs={logs}
           />
         )}
-        <footer>独立运行 · 配置与节点选择由服务保存</footer>
+        <footer>{t(language, "footer")}</footer>
       </div>
     </div>
   );
@@ -470,6 +491,7 @@ const bytes = (value?: number) =>
       ? `${(value / 1024 ** 2).toFixed(1)} MB`
       : `${(value / 1024).toFixed(1)} KB`;
 function Overview({
+  language,
   token,
   connection,
   logout,
@@ -478,6 +500,7 @@ function Overview({
   navigate,
   logs,
 }: {
+  language: Language;
   token: string;
   connection: string;
   logout: (reason?: string) => void;
@@ -493,25 +516,25 @@ function Overview({
     <>
       <div className="metrics">
         <div>
-          <p>上传速率</p>
+          <p>{t(language, "uploadRate")}</p>
           <strong>
             {bytes(traffic?.up)}
             <small>/s</small>
           </strong>
         </div>
         <div>
-          <p>下载速率</p>
+          <p>{t(language, "downloadRate")}</p>
           <strong>
             {bytes(traffic?.down)}
             <small>/s</small>
           </strong>
         </div>
         <div>
-          <p>活跃连接</p>
+          <p>{t(language, "activeConnections")}</p>
           <strong>{connections?.count ?? "—"}</strong>
         </div>
         <div>
-          <p>内存占用</p>
+          <p>{t(language, "memory")}</p>
           <strong>{bytes(memory?.inuse)}</strong>
         </div>
       </div>
@@ -524,51 +547,51 @@ function Overview({
       <div className="two-column">
         <section className="panel">
           <div className="panel-title">
-            <h2>当前配置</h2>
+            <h2>{t(language, "currentConfig")}</h2>
             <a href="/config" onClick={(event) => navigate(event, "/config")}>
-              编辑配置 ↗
+              {t(language, "editConfig")}
             </a>
           </div>
           <dl>
             <div>
-              <dt>活动订阅</dt>
-              <dd>{active?.name || "未选择"}</dd>
+              <dt>{t(language, "activeProfile")}</dt>
+              <dd>{active?.name || t(language, "notSelected")}</dd>
             </div>
             <div>
-              <dt>配置版本</dt>
-              <dd className="mono">{status.config_revision || "尚未提交"}</dd>
+              <dt>{t(language, "configVersion")}</dt>
+              <dd className="mono">{status.config_revision || t(language, "notCommitted")}</dd>
             </div>
             <div>
-              <dt>内核状态</dt>
-              <dd>{phases[status.phase]}</dd>
+              <dt>{t(language, "coreStatus")}</dt>
+              <dd>{phaseLabel(language, status.phase)}</dd>
             </div>
           </dl>
           <p className="hint">
-            修改会先经过 YAML 和内核校验。失败时保留上一个已提交配置。
+            {t(language, "configHint")}
           </p>
         </section>
         <section className="panel">
           <div className="panel-title">
-            <h2>开始使用</h2>
+            <h2>{t(language, "getStarted")}</h2>
             <a
               href="/profiles"
               onClick={(event) => navigate(event, "/profiles")}
             >
-              管理订阅 ↗
+              {t(language, "manageProfiles")}
             </a>
           </div>
           <ol className="steps">
-            <li>导入本地 YAML 订阅</li>
-            <li>使用订阅并启动内核</li>
-            <li>选择节点，设置会自动保存</li>
+            <li>{t(language, "stepImport")}</li>
+            <li>{t(language, "stepUse")}</li>
+            <li>{t(language, "stepSelect")}</li>
           </ol>
         </section>
       </div>
       <section className="panel">
         <div className="panel-title">
-          <h2>最近日志</h2>
+          <h2>{t(language, "recentLogs")}</h2>
           <a href="/logs" onClick={(event) => navigate(event, "/logs")}>
-            查看全部 ↗
+            {t(language, "viewAll")}
           </a>
         </div>
         <LogLines logs={logs.slice(-8)} />
