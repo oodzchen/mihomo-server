@@ -888,8 +888,13 @@ generate_continuation_prompt() {
         fi
     fi
 
+    local prefix=""
+    [ -n "$handover_block" ] && prefix="${handover_block}
+
+"
+
     cat <<EOF
-${handover_block:+$handover_block\n}继续推进无人值守自动化重构与编程任务。
+${prefix}继续推进无人值守自动化重构与编程任务。
 $extra_warning
 
 【核心开发节奏与行事风格规范（严格遵循前序轮次成熟规律）】
