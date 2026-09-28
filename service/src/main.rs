@@ -170,6 +170,8 @@ async fn run() -> Result<()> {
             tokio::net::TcpSocket::new_v4()?
         };
         socket.set_reuseaddr(true)?;
+        #[cfg(unix)]
+        socket.set_reuseport(true)?;
         socket.bind(listen).context("bind management listener")?;
         let listener = socket.listen(1024).context("listen management listener")?;
         let mut state = HttpState::new(Management::new(manager.clone(), authentication));

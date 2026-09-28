@@ -287,3 +287,22 @@ fn unsafe_managed_directories_and_links_are_rejected_but_broken_regular_cores_re
     assert!(resources.initialize_core(&directory.0.join("core-link")).is_err());
     Ok(())
 }
+
+#[test]
+fn manifest_with_license_inventory_is_exposed() -> Result<()> {
+    let dir = Directory::new()?;
+    fs::write(
+        dir.0.join("resources/manifest.json"),
+        serde_json::to_vec(&json!({
+            "schema_version": 1,
+            "target": TARGET,
+            "core": {"version": "v1.19.31", "sha256": hash(b"owned test core")},
+            "licenses": {"primary": "LICENSE", "inventory": "LICENSES.txt"}
+        }))?,
+    )?;
+    let resources = dir.resources()?;
+    let licenses = resources.licenses().expect("license info present");
+    assert_eq!(licenses.primary.as_deref(), Some("LICENSE"));
+    assert_eq!(licenses.inventory.as_deref(), Some("LICENSES.txt"));
+    Ok(())
+}

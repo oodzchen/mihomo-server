@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
+import unittest.mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / "package_bundle.py"
 spec = importlib.util.spec_from_file_location("packager", SCRIPT)
@@ -98,6 +99,49 @@ class PackageBoundaries(unittest.TestCase):
                 packager.package(self.args)
             self.assertFalse((self.root / "bundle").exists())
 
+    @unittest.mock.patch("subprocess.run")
+    def test_bundle_packaging_includes_license_inventory_and_valid_checksums(self, mock_run):
+        mock_run.return_value = SimpleNamespace(stdout="Mihomo Meta v1.19.31 linux amd64\n", stderr="", returncode=0)
+        service = self.root / "mihomo-server"
+        service.write_bytes(b"\x7fELF\x02\x01" + bytes(12) + (62).to_bytes(2, "little"))
+        service.chmod(0o755)
+        web = self.root / "web"
+        web.mkdir()
+        (web / "index.html").write_text("<!doctype html><html></html>")
+        self.args.service = str(service)
+        self.args.web_dir = str(web)
+        output = self.root / "bundle"
+        packager.package(self.args)
+        self.assertTrue((output / "LICENSE").is_file())
+        self.assertTrue((output / "LICENSES.txt").is_file())
+        self.assertIn("GPL-3.0", (output / "LICENSES.txt").read_text())
+        manifest = json.loads((output / "resources" / "manifest.json").read_text())
+        self.assertEqual(manifest["licenses"], {"primary": "LICENSE", "inventory": "LICENSES.txt"})
+        checksums = (output / "checksums.sha256").read_text()
+        self.assertIn("  LICENSES.txt\n", checksums)
+        self.assertIn("  LICENSE\n", checksums)
+        for line in checksums.strip().splitlines():
+            digest, rel_path = line.split("  ", 1)
+            self.assertEqual(packager.sha256(output / rel_path), digest)
+
+    @unittest.mock.patch("subprocess.run")
+    def test_missing_or_symlinked_license_inventory_is_rejected(self, mock_run):
+        mock_run.return_value = SimpleNamespace(stdout="Mihomo Meta v1.19.31 linux amd64\n", stderr="", returncode=0)
+        service = self.root / "mihomo-server"
+        service.write_bytes(b"\x7fELF\x02\x01" + bytes(12) + (62).to_bytes(2, "little"))
+        service.chmod(0o755)
+        web = self.root / "web"
+        web.mkdir()
+        (web / "index.html").write_text("<!doctype html><html></html>")
+        self.args.service = str(service)
+        self.args.web_dir = str(web)
+        fake_root = self.root / "fake_repo"
+        fake_root.mkdir()
+        with unittest.mock.patch.object(packager, "ROOT", fake_root):
+            with self.assertRaisesRegex(ValueError, "LICENSE"):
+                packager.package(self.args)
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -42,12 +42,13 @@ impl Service {
             .args(["--listen", listen])
             .current_dir(cwd)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
         if let Some(config) = config {
             command.arg("--config").arg(config);
         }
-        let child = command.spawn()?;
+        let mut child = command.spawn()?;
+        let mut stderr = child.stderr.take().unwrap();
         let mut service = Self {
             child,
             url: format!("http://{listen}"),
@@ -56,10 +57,11 @@ impl Service {
         };
         timeout(Duration::from_secs(10), async {
             loop {
-                ensure!(
-                    service.child.try_wait()?.is_none(),
-                    "bundle launcher exited before readiness"
-                );
+                if let Some(status) = service.child.try_wait()? {
+                    let mut err = Vec::new();
+                    tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut err).await?;
+                    anyhow::bail!("bundle launcher exited before readiness ({status}): {}", String::from_utf8_lossy(&err));
+                }
                 if let Ok(token) = fs::read_to_string(data.join("management-token")) {
                     service.token = token.trim().to_owned();
                     if service.get("/api/status").await.is_ok() {
@@ -183,6 +185,8 @@ async fn bundle_launch_repairs_failed_bootstrap_and_retains_state_and_managed_co
         .output()
         .await?;
     ensure!(checks.status.success(), "bundle integrity check failed");
+    ensure!(bundle.join("LICENSE").is_file(), "bundle LICENSE missing");
+    ensure!(bundle.join("LICENSES.txt").is_file(), "bundle LICENSES.txt missing");
     let data = directory.0.join("data");
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     let listen = listener.local_addr()?.to_string();
@@ -220,6 +224,7 @@ async fn bundle_launch_repairs_failed_bootstrap_and_retains_state_and_managed_co
         let child = status["pid"].as_i64().context("owned core PID missing")?;
         let token = service.token.clone();
         service.stop().await?;
+        tokio::time::sleep(Duration::from_millis(50)).await;
         ensure!(unsafe { libc::kill(child as i32, 0) } == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH), "core was not reaped");
         let managed = data.join("core/verge-mihomo");
         // Simulate an independently replaced core with a different, still executable ELF.
@@ -228,7 +233,10 @@ async fn bundle_launch_repairs_failed_bootstrap_and_retains_state_and_managed_co
         // A service update replaces the bundle, not its persistent core/data.
         let bundle_updated = directory.0.join("bundle-updated");
         fs::rename(&bundle, &bundle_updated)?;
-        service = Service::start(&bundle_updated, &data, &directory.0.join("unrelated-cwd"), &listen, None).await?;
+        let listener_restart = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let listen_restart = listener_restart.local_addr()?.to_string();
+        drop(listener_restart);
+        service = Service::start(&bundle_updated, &data, &directory.0.join("unrelated-cwd"), &listen_restart, None).await?;
         ensure!(service.token == token, "service restart replaced credential");
         let status = service.phase("running").await?;
         ensure!(status["active_profile"] == item["uid"], "profile was not restored");

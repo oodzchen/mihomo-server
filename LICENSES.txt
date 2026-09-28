@@ -1,0 +1,227 @@
+================================================================================
+mihomo-server - Third-Party Software and License Inventory
+================================================================================
+
+This document contains licensing notices and provenance records for the
+mihomo-server software bundle, including its runtime service, web frontend,
+managed core executable, bundled resources, and third-party dependencies.
+
+--------------------------------------------------------------------------------
+1. Main Project and Upstream Provenance
+--------------------------------------------------------------------------------
+
+Project: mihomo-server
+License: GNU General Public License v3.0 only (GPL-3.0-only)
+See the accompanying `LICENSE` file for the complete license text.
+
+Upstream Provenance:
+- Clash Verge Rev
+  Repository: https://github.com/clash-verge-rev/clash-verge-rev
+  Pinned Revision: b057bd964ccd156f68bc43a3a8ed66cf3cb1cd7b
+  License: GNU General Public License v3.0 only (GPL-3.0-only)
+  Copyright (C) 2024-2026 Clash Verge Rev Contributors
+
+- Mihomo API Client (crates/mihomo-client)
+  Source: https://github.com/clash-verge-rev/tauri-plugin-mihomo
+  Pinned Revision: ba8434c08c869916b8041d707ad66599bb5230b2
+  Author: oomeow
+  Notice: No explicit license declaration was found in the pinned upstream
+  source repository. The code is retained with full upstream author attribution
+  and documented in docs/UPSTREAM.md.
+
+--------------------------------------------------------------------------------
+2. Managed Runtime Core and Bundled Geo Assets
+--------------------------------------------------------------------------------
+
+- Mihomo / Clash.Meta (resources/core/verge-mihomo)
+  Repository: https://github.com/MetaCubeX/mihomo
+  License: GNU General Public License v3.0 (GPL-3.0)
+  Copyright (C) MetaCubeX team
+
+- GeoIP and GeoSite Databases (resources/geo/)
+  - MetaCubeX GeoIP / GeoSite (geoip.metadb, geosite.dat):
+    License: CC-BY-SA 4.0 / GPL-3.0
+    Copyright (C) MetaCubeX team and contributors
+  - MaxMind GeoLite2 databases (Country.mmdb, ASN.mmdb, if bundled):
+    License: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+    This product includes GeoLite2 data created by MaxMind, available from
+    https://www.maxmind.com.
+
+--------------------------------------------------------------------------------
+3. Web Management Frontend (resources/web/)
+--------------------------------------------------------------------------------
+
+The built React application bundles and links the following libraries:
+
+- React & React DOM
+  License: MIT
+  Copyright (c) Meta Platforms, Inc. and affiliates.
+
+- Lucide Icons (lucide-react)
+  License: ISC
+  Copyright (c) Lucide Contributors
+
+- Tailwind CSS
+  License: MIT
+  Copyright (c) Tailwind Labs, Inc.
+
+- Vite
+  License: MIT
+  Copyright (c) 2019-present Evan You & Vite Contributors
+
+- TypeScript
+  License: Apache-2.0
+  Copyright (c) Microsoft Corporation
+
+--------------------------------------------------------------------------------
+4. Rust Service Dependencies
+--------------------------------------------------------------------------------
+
+The compiled Linux service executable (bin/mihomo-server) incorporates the
+following third-party crates:
+
+- MIT License:
+  - axum, axum-core (Copyright (c) 2024 Axum Contributors)
+  - tokio, tokio-util, tokio-stream, tokio-macros (Copyright (c) 2024 Tokio Contributors)
+  - tower, tower-http, tower-service, tower-layer (Copyright (c) 2024 Tower Contributors)
+  - smartstring (Copyright (c) 2019-2024 Bodil Stokke)
+  - clashmap (Copyright (c) 2024)
+  - tracing, tracing-core (Copyright (c) 2024 Tokio Contributors)
+  - bytes (Copyright (c) 2024 Tokio Contributors)
+  - mio (Copyright (c) 2024 Carl Lerche, Tokio Contributors)
+  - http, http-body, http-body-util, httparse (Copyright (c) 2024 Alex Crichton, Sean McArthur)
+  - percent-encoding (Copyright (c) 2013-2024 The rust-url developers)
+  - pin-project, pin-project-lite (Copyright (c) 2018-2024 Taiki Endo)
+
+- Dual Licensed (MIT OR Apache-2.0):
+  - anyhow, thiserror, thiserror-impl (Copyright (c) 2019-2024 David Tolnay)
+  - reqwest (Copyright (c) 2024 Sean McArthur)
+  - serde, serde_derive, serde_json, serde_yaml_ng (Copyright (c) 2017-2024 Serde Contributors)
+  - parking_lot, parking_lot_core, lock_api (Copyright (c) 2016-2024 Amanieu d'Antras)
+  - libc (Copyright (c) 2014-2024 The Rust Project Developers)
+  - uuid (Copyright (c) 2013-2024 Uuid Developers)
+  - log (Copyright (c) 2014-2024 The Rust Project Developers)
+  - futures, futures-util, futures-core, futures-channel, futures-sink, futures-task
+    (Copyright (c) 2016-2024 The Rust Project Developers)
+  - flate2, miniz_oxide (Copyright (c) 2014-2024 Alex Crichton, Frommi)
+  - url, idna, form_urlencoded (Copyright (c) 2013-2024 The rust-url developers)
+  - zip (Copyright (c) 2024 Zip contributors)
+  - maxminddb (Copyright (c) 2015-2024 MaxMind, Inc. and contributors)
+  - clap, clap_builder, clap_lex (Copyright (c) 2015-2024 Clap Contributors)
+  - tokio-tungstenite, tungstenite (Copyright (c) 2017-2024 Alexey Galakhov)
+  - rustls, rustls-pki-types, rustls-webpki, tokio-rustls (Copyright (c) 2016-2024 Rustls Contributors)
+
+- ISC License:
+  - ring (Copyright (c) 2015-2024 Brian Smith)
+
+- Dual Licensed (Unlicense OR MIT):
+  - boa_engine, boa_gc, boa_parser, boa_ast, boa_interner (Copyright (c) 2019-2024 Boa Contributors)
+
+- BSD-3-Clause License:
+  - webpki-root-certs (Copyright (c) 2024 Rustls Contributors)
+
+--------------------------------------------------------------------------------
+5. Common License Texts
+--------------------------------------------------------------------------------
+
+================================================================================
+The MIT License (MIT)
+================================================================================
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+Apache License, Version 2.0
+================================================================================
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+================================================================================
+ISC License
+================================================================================
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+================================================================================
+The Unlicense
+================================================================================
+
+This is free and unencumbered software released into the public domain.
+
+Anyone is free to copy, modify, publish, use, compile, sell, or
+distribute this software, either in source code form or as a compiled
+binary, for any purpose, commercial or non-commercial, and by any
+means.
+
+In jurisdictions that recognize copyright laws, the author or authors
+of this software dedicate any and all copyright interest in the
+software to the public domain. We make this dedication for the benefit
+of the public at large and to the detriment of our heirs and
+successors. We intend this dedication to be an overt act of
+relinquishment in perpetuity of all present and future rights to this
+software under copyright law.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+For more information, please refer to <http://unlicense.org/>
+
+================================================================================
+Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+================================================================================
+
+You are free to:
+- Share — copy and redistribute the material in any medium or format
+- Adapt — remix, transform, and build upon the material for any purpose,
+  even commercially.
+
+Under the following terms:
+- Attribution — You must give appropriate credit, provide a link to the
+  license, and indicate if changes were made.
+- ShareAlike — If you remix, transform, or build upon the material, you must
+  distribute your contributions under the same license as the original.
+- No additional restrictions — You may not apply legal terms or technological
+  measures that legally restrict others from doing anything the license permits.
+
+Full license text: https://creativecommons.org/licenses/by-sa/4.0/legalcode

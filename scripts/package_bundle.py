@@ -113,10 +113,18 @@ def package(args):
         # Verify the published copy as well as the input before copying.
         if sha256(stage / "resources" / "core" / "verge-mihomo") != args.core_sha256.lower():
             raise ValueError("Core changed while preparing bundle")
+        if (ROOT / "LICENSE").is_symlink() or not (ROOT / "LICENSE").is_file():
+            raise ValueError("Expected regular project LICENSE file")
+        if (ROOT / "LICENSES.txt").is_symlink() or not (ROOT / "LICENSES.txt").is_file():
+            raise ValueError("Expected regular license inventory LICENSES.txt file")
         shutil.copytree(web, stage / "resources" / "web")
         shutil.copyfile(ROOT / "examples" / "minimal.yaml", stage / "resources" / "minimal.yaml")
-        manifest = {"schema_version": 1, "target": args.target,
-                    "core": {"version": args.core_version, "sha256": args.core_sha256.lower()}}
+        manifest = {
+            "schema_version": 1,
+            "target": args.target,
+            "core": {"version": args.core_version, "sha256": args.core_sha256.lower()},
+            "licenses": {"primary": "LICENSE", "inventory": "LICENSES.txt"},
+        }
         if geo:
             (stage / "resources" / "geo").mkdir()
             for name, pin in geo.items():
@@ -131,6 +139,7 @@ def package(args):
         (stage / "launch").chmod(0o755)
         shutil.copyfile(ROOT / "deploy" / "mihomo-server.service", stage / "mihomo-server.service")
         shutil.copyfile(ROOT / "LICENSE", stage / "LICENSE")
+        shutil.copyfile(ROOT / "LICENSES.txt", stage / "LICENSES.txt")
         (stage / "docs").mkdir()
         for name in ["DEPLOYMENT.md", "UPSTREAM.md"]:
             shutil.copyfile(ROOT / "docs" / name, stage / "docs" / name)

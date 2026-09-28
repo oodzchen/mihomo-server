@@ -11,6 +11,15 @@ use std::{
 
 pub const TARGET: &str = env!("MIHOMO_SERVER_TARGET");
 
+#[derive(Debug, Deserialize, Clone, Default, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LicenseInfo {
+    #[serde(default)]
+    pub primary: Option<String>,
+    #[serde(default)]
+    pub inventory: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Manifest {
@@ -20,6 +29,8 @@ struct Manifest {
     #[cfg(unix)]
     #[serde(default)]
     geo: BTreeMap<String, crate::geo_resources::Seed>,
+    #[serde(default)]
+    licenses: Option<LicenseInfo>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -34,10 +45,15 @@ pub struct Resources {
     hash: String,
     #[cfg(unix)]
     geo: BTreeMap<String, crate::geo_resources::Seed>,
+    licenses: Option<LicenseInfo>,
 }
 impl Resources {
     pub fn directory(&self) -> &Path {
         &self.root
+    }
+
+    pub fn licenses(&self) -> Option<&LicenseInfo> {
+        self.licenses.as_ref()
     }
 
     pub fn open(directory: &Path) -> Result<Self> {
@@ -74,6 +90,7 @@ impl Resources {
             hash: manifest.core.sha256.to_ascii_lowercase(),
             #[cfg(unix)]
             geo: manifest.geo,
+            licenses: manifest.licenses,
         })
     }
 

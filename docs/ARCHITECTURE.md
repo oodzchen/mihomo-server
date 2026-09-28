@@ -53,8 +53,8 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** browser Traditional Chinese language support (`zhtw` / 繁體中文) and service signal/rebind verification. Extended frontend `Language` union to `"zh" | "en" | "zhtw"`, added full Traditional Chinese dictionary in `web/src/i18n.ts`, updated `LanguagePicker` with Traditional Chinese option, set HTML lang dynamically to `zh-TW`, and enabled `SO_REUSEADDR` on the management listener for reliable rebinds across service lifecycle. Verified backend `Accept-Language` error response localization for `zh-TW`/`zhtw`/`zh-HK`/`zh-Hant`, and validated local browser persistence in `localStorage` without leaking server tokens.
-**Next implementation task (P4):** Linux packaging and actual systemd installation (Priority P4 — deliver reproducible Linux bundle, systemd unit, install lifecycle, child process reaping and real proxy verification).
+**Latest completed task (P4):** Linux release bundle license inventory (`LICENSES.txt`) and packager verification. Added comprehensive `LICENSES.txt` capturing project GPL-3.0-only terms, upstream Clash Verge Rev and `mihomo-client` provenance, bundled Mihomo core, Geo databases, Web dependencies, and compiled Rust crate licenses. Updated `scripts/package_bundle.py` to bundle `LICENSE` and `LICENSES.txt`, embed `licenses` mapping into `resources/manifest.json`, and record checksums in `checksums.sha256`. Extended `service/src/resources.rs` with `LicenseInfo` to expose manifest licenses, enabled `SO_REUSEPORT` on unix management listener for clean restarts, and validated packaging and lifecycle with `test_package_bundle.py`, `resources.rs`, and `deployment.rs`.
+**Next implementation task (P4):** Linux systemd service unit installation and daemon lifecycle verification (Priority P4 — install user/system systemd service unit, verify start/stop/restart, process reaping, journal logs, and real proxy traffic verification).
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
@@ -366,9 +366,9 @@ mihomo-server/
 │   ├── Managed core installation receipt / interrupted-switch recovery [Implemented; Linux x86_64]
 │   ├── Actual Linux systemd installation / lifecycle verification [Pending; P4; template exists]
 │   ├── Optional integrity-pinned Geo resources / packager handoff [Implemented; P1 dependency; Linux verified]
-│   ├── Full Linux release resource/license inventory [Pending; P4]
+│   ├── Full Linux release resource/license inventory [Implemented; Linux verified]
 │   ├── Other platforms / containers / Alpha bundle seeds [Deferred]
-│   ├── Linux package license inventory              [Pending; P4]
+│   ├── Linux package license inventory              [Implemented; Linux verified]
 │   └── External publication                      [Deferred]
 ├── automation/                                       [Implemented; multi-engine verified]
 │   ├── Host autonomous runner / multi-agent engine support (Codex & Antigravity agy) [Implemented; verified]

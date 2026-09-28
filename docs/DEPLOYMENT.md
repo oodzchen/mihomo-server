@@ -73,20 +73,22 @@ bundle/
 ├── launch                         # execs the sole foreground service
 ├── bin/mihomo-server
 ├── resources/
-│   ├── manifest.json              # schema, exact target, core version/SHA-256
+│   ├── manifest.json              # schema, exact target, core version/SHA-256, licenses
 │   ├── core/verge-mihomo           # immutable initial independent core
 │   ├── minimal.yaml               # bootstrap only; committed config wins
 │   └── web/                       # built React assets
 ├── mihomo-server.service           # optional user systemd unit template
 ├── checksums.sha256
 ├── LICENSE
+├── LICENSES.txt                   # third-party license and dependency inventory
 └── docs/{DEPLOYMENT,UPSTREAM}.md
 ```
 
 Check the prepared bundle from its root with `sha256sum -c checksums.sha256`.
 The manifest is a local build record, not a cryptographic publisher signature.
-See UPSTREAM.md for source revisions and the client's unresolved upstream license
-declaration before external redistribution; this path prepares local artifacts.
+See LICENSES.txt and UPSTREAM.md for source revisions, third-party dependency
+licenses, and the client's unresolved upstream license declaration before external
+redistribution; this path prepares local artifacts.
 
 ## Foreground launch and stop
 
