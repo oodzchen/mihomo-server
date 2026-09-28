@@ -281,6 +281,49 @@ test("profile list switches language while keeping deletion confirmation", async
   expect(after.generation).toBe(before.generation);
 });
 
+test("subscription import forms translate without losing drafts or changing imports", async ({ page }) => {
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("heading", { name: "Import local profile" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Download remote profile" })).toBeVisible();
+  await page.getByLabel("Upload profile YAML").setInputFiles({
+    name: "large.yaml", mimeType: "text/yaml", buffer: Buffer.alloc(8 * 1024 ** 2 + 1),
+  });
+  await expect(page.getByText("File must not exceed 8 MiB")).toBeVisible();
+  await page.getByLabel("Subscription URL").fill(`${subscriptionUrl}/ok`);
+  await page.getByLabel("Remote profile name (optional)").fill("RemoteDraft");
+  await page.getByLabel("Allow invalid TLS certificates for downloads").check();
+  const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(page.getByText("文件不能超过 8 MiB")).toBeVisible();
+  await expect(page.getByLabel("订阅链接")).toHaveValue(`${subscriptionUrl}/ok`);
+  await expect(page.getByLabel("远程订阅名称（可选）")).toHaveValue("RemoteDraft");
+  await expect(page.getByLabel("下载允许无效 TLS 证书")).toBeChecked();
+  await page.getByLabel("上传订阅 YAML").setInputFiles({
+    name: "LocalDraft.yaml", mimeType: "text/yaml", buffer: Buffer.from("proxies: []\nmode: direct\n"),
+  });
+  await expect(page.getByLabel("订阅名称", { exact: true })).toHaveValue("LocalDraft");
+  await expect(page.getByText("文件不能超过 8 MiB")).toHaveCount(0);
+  const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  expect(after.generation).toBe(before.generation);
+
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await page.getByRole("button", { name: "Import profile", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "LocalDraft" })).toBeVisible();
+  await page.getByLabel("Allow invalid TLS certificates for downloads").uncheck();
+  await page.getByRole("button", { name: "Download and import" }).click();
+  await expect(page.getByRole("heading", { name: "RemoteDraft" })).toBeVisible();
+  for (const profile of ["LocalDraft", "RemoteDraft"]) {
+    const item = page.locator("article.profile").filter({ has: page.getByRole("heading", { name: profile }) });
+    await item.getByRole("button", { name: `Delete profile ${profile}` }).click();
+    await item.getByRole("button", { name: `Confirm deletion ${profile}` }).click();
+  }
+  await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
+});
+
 test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
   await page.goto(`${base}/settings`);
   await page.getByLabel("管理令牌").fill(token);

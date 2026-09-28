@@ -1233,7 +1233,7 @@ function ProfilePage({
     [remoteSelfProxy, setRemoteSelfProxy] = useState(false),
     [remoteWithProxy, setRemoteWithProxy] = useState(false),
     [remoteInvalidCerts, setRemoteInvalidCerts] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState<"too-large" | Error | null>(null);
   const [rawEditing, setRawEditing] = useState<string>();
   const [editing, setEditing] = useState<Profile | null>(null);
   const [mergeEditing, setMergeEditing] = useState<{
@@ -1291,12 +1291,15 @@ function ProfilePage({
   async function upload(file?: File) {
     if (!file) return;
     try {
-      if (file.size > 8 * 1024 ** 2) throw new Error("文件不能超过 8 MiB");
+      if (file.size > 8 * 1024 ** 2) {
+        setError("too-large");
+        return;
+      }
       setYaml(await file.text());
       setName(file.name.replace(/\.ya?ml$/i, ""));
-      setError("");
+      setError(null);
     } catch (error) {
-      setError(describe(error));
+      setError(error instanceof Error ? error : new Error(String(error)));
     }
   }
   async function submit(event: FormEvent) {
@@ -1510,14 +1513,11 @@ function ProfilePage({
         />
       )}
       <section className="panel">
-        <h2>下载远程订阅</h2>
-        <p className="muted">
-          由服务下载并保存
-          YAML。刷新当前订阅时会校验并应用新配置，失败时保留原配置。
-        </p>
+        <h2>{t(language, "remoteImportTitle")}</h2>
+        <p className="muted">{t(language, "remoteImportHelp")}</p>
         <form onSubmit={importRemote}>
           <label>
-            订阅链接
+            {t(language, "remoteImportUrl")}
             <input
               type="url"
               value={remoteUrl}
@@ -1529,7 +1529,7 @@ function ProfilePage({
             />
           </label>
           <label>
-            远程订阅名称（可选）
+            {t(language, "remoteImportName")}
             <input
               value={remoteName}
               maxLength={256}
@@ -1544,7 +1544,7 @@ function ProfilePage({
               checked={remoteSelfProxy}
               onChange={(event) => setRemoteSelfProxy(event.target.checked)}
             />
-            通过托管内核代理下载
+            {t(language, "remoteImportManaged")}
           </label>
           <label className="check-label">
             <input
@@ -1553,7 +1553,7 @@ function ProfilePage({
               checked={remoteWithProxy}
               onChange={(event) => setRemoteWithProxy(event.target.checked)}
             />
-            使用服务系统代理下载
+            {t(language, "remoteImportSystem")}
           </label>
           <label className="check-label">
             <input
@@ -1562,28 +1562,21 @@ function ProfilePage({
               checked={remoteInvalidCerts}
               onChange={(event) => setRemoteInvalidCerts(event.target.checked)}
             />
-            下载允许无效 TLS 证书
+            {t(language, "remoteImportInvalidCerts")}
           </label>
-          <p className="muted">
-            默认校验证书。开启后不校验 HTTPS 服务器身份，仅对该订阅生效。
-          </p>
-          <p className="muted">
-            托管内核模式优先，需要运行中的 HTTP 或 Mixed 入口。
-            系统代理读取服务环境，未配置时直连；代理连接失败会报错。
-          </p>
+          <p className="muted">{t(language, "remoteImportTlsHelp")}</p>
+          <p className="muted">{t(language, "remoteImportRouteHelp")}</p>
           <button className="primary" disabled={busy || !remoteUrl.trim()}>
-            下载并导入
+            {t(language, "remoteImportSubmit")}
           </button>
         </form>
       </section>
       <section className="panel">
-        <h2>导入订阅</h2>
-        <p className="muted">
-          导入只保存内容。点击“使用订阅”后，会校验并应用配置。
-        </p>
+        <h2>{t(language, "localImportTitle")}</h2>
+        <p className="muted">{t(language, "localImportHelp")}</p>
         <form onSubmit={submit}>
           <label>
-            上传订阅 YAML
+            {t(language, "localImportUpload")}
             <input
               type="file"
               accept=".yaml,.yml,text/yaml,text/plain"
@@ -1592,7 +1585,7 @@ function ProfilePage({
             />
           </label>
           <label>
-            订阅名称
+            {t(language, "localImportName")}
             <input
               value={name}
               required
@@ -1602,7 +1595,7 @@ function ProfilePage({
             />
           </label>
           <label>
-            订阅 YAML
+            {t(language, "localImportYaml")}
             <textarea
               className="code small"
               value={yaml}
@@ -1614,14 +1607,14 @@ function ProfilePage({
           </label>
           {error && (
             <p className="alert" role="alert">
-              {error}
+              {error === "too-large" ? t(language, "localImportFileTooLarge") : describe(error)}
             </p>
           )}
           <button
             className="primary"
             disabled={busy || !yaml.trim() || !name.trim()}
           >
-            导入订阅
+            {t(language, "localImportSubmit")}
           </button>
         </form>
       </section>

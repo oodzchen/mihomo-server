@@ -65,6 +65,18 @@ const zh = {
   profileReapply: "重新应用", profileUse: "使用订阅", profileDelete: "删除",
   profileEditRawNamed: "编辑原始订阅", profileEditNamed: "编辑订阅",
   profileDeleteNamed: "删除订阅", profileSwitchFirst: "请先使用其他订阅",
+  remoteImportTitle: "下载远程订阅",
+  remoteImportHelp: "由服务下载并保存 YAML。刷新当前订阅时会校验并应用新配置，失败时保留原配置。",
+  remoteImportUrl: "订阅链接", remoteImportName: "远程订阅名称（可选）",
+  remoteImportManaged: "通过托管内核代理下载", remoteImportSystem: "使用服务系统代理下载",
+  remoteImportInvalidCerts: "下载允许无效 TLS 证书",
+  remoteImportTlsHelp: "默认校验证书。开启后不校验 HTTPS 服务器身份，仅对该订阅生效。",
+  remoteImportRouteHelp: "托管内核模式优先，需要运行中的 HTTP 或 Mixed 入口。系统代理读取服务环境，未配置时直连；代理连接失败会报错。",
+  remoteImportSubmit: "下载并导入", localImportTitle: "导入订阅",
+  localImportHelp: "导入只保存内容。点击“使用订阅”后，会校验并应用配置。",
+  localImportUpload: "上传订阅 YAML", localImportName: "订阅名称",
+  localImportYaml: "订阅 YAML", localImportSubmit: "导入订阅",
+  localImportFileTooLarge: "文件不能超过 8 MiB",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -113,6 +125,18 @@ const en: Record<keyof typeof zh, string> = {
   profileReapply: "Reapply", profileUse: "Use profile", profileDelete: "Delete",
   profileEditRawNamed: "Edit raw profile", profileEditNamed: "Edit profile",
   profileDeleteNamed: "Delete profile", profileSwitchFirst: "Use another profile first",
+  remoteImportTitle: "Download remote profile",
+  remoteImportHelp: "The service downloads and saves the YAML. Refreshing an active profile validates and applies the new configuration; failures keep the previous one.",
+  remoteImportUrl: "Subscription URL", remoteImportName: "Remote profile name (optional)",
+  remoteImportManaged: "Download through the managed core proxy", remoteImportSystem: "Use the service system proxy for downloads",
+  remoteImportInvalidCerts: "Allow invalid TLS certificates for downloads",
+  remoteImportTlsHelp: "Certificates are verified by default. Disabling verification affects only this profile and does not verify the HTTPS server's identity.",
+  remoteImportRouteHelp: "The managed core proxy takes priority and needs a running HTTP or Mixed listener. The system proxy comes from the service environment; without one, downloads connect directly. Proxy connection failures are reported.",
+  remoteImportSubmit: "Download and import", localImportTitle: "Import local profile",
+  localImportHelp: "Import saves the content only. Use the profile to validate and apply its configuration.",
+  localImportUpload: "Upload profile YAML", localImportName: "Profile name",
+  localImportYaml: "Profile YAML", localImportSubmit: "Import profile",
+  localImportFileTooLarge: "File must not exceed 8 MiB",
 };
 
 export type MessageKey = keyof typeof zh;
