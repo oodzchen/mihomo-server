@@ -896,7 +896,7 @@ function GlobalEnhancements({
             disabled={busy || editing !== null}
             onClick={() => void open("script")}
           >
-            编辑全局脚本
+            {t(language, "globalScriptOpen")}
           </button>
         </div>
       </div>
@@ -946,7 +946,7 @@ function GlobalEditor({
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<"script-large" | "merge-large" | null>(null);
   const script = kind === "script";
-  const title = script ? "全局脚本增强" : t(language, "globalMergeTitle");
+  const title = t(language, script ? "globalScriptTitle" : "globalMergeTitle");
   async function save(event: FormEvent) {
     event.preventDefault();
     setError(null);
@@ -972,16 +972,16 @@ function GlobalEditor({
       <h3>{title}</h3>
       <p className="muted">
         {script
-          ? "编写 main(config, name)，返回配置对象。脚本错误会显示在页面上，console 输出可在「日志」中查看。"
+          ? t(language, "globalScriptHelp")
           : t(language, "globalMergeHelp")}
       </p>
       {!loaded && (
         <p className="info">
-          {script ? "未读取到已保存内容。可重试读取、粘贴完整内容替换，或恢复默认。" : t(language, "globalReadMissing")}
+          {t(language, "globalReadMissing")}
         </p>
       )}
       <label>
-        {script ? "全局脚本 JavaScript" : t(language, "globalMergeYaml")}
+        {t(language, script ? "globalScriptSource" : "globalMergeYaml")}
         <textarea
           className="code"
           rows={12}
@@ -998,50 +998,50 @@ function GlobalEditor({
       </label>
       {error && (
         <p className="alert" role="alert">
-          {error === "script-large" ? "脚本不能超过 1 MiB。" : t(language, "globalMergeTooLarge")}
+          {t(language, error === "script-large" ? "globalScriptTooLarge" : "globalMergeTooLarge")}
         </p>
       )}
       <div className="actions">
         <button className="primary" disabled={busy || !content.trim()}>
-          {script ? "保存全局脚本" : t(language, "globalMergeSave")}
+          {t(language, script ? "globalScriptSave" : "globalMergeSave")}
         </button>
         <button
           type="button"
           disabled={busy}
           onClick={() => setResetting(true)}
         >
-          {script ? "恢复默认全局脚本" : t(language, "globalMergeReset")}
+          {t(language, script ? "globalScriptReset" : "globalMergeReset")}
         </button>
         {!loaded && !content && (
           <button type="button" disabled={busy} onClick={onRetry}>
-            {script ? "重试读取全局增强" : t(language, "globalRetry")}
+            {t(language, "globalRetry")}
           </button>
         )}
         <button type="button" disabled={busy} onClick={onClose}>
-          {script ? "取消全局编辑" : t(language, "globalCancel")}
+          {t(language, "globalCancel")}
         </button>
       </div>
       {resetting && (
         <div
           className="reset-confirmation"
           role="group"
-          aria-label={script ? "恢复默认确认" : t(language, "globalResetConfirmRegion")}
+          aria-label={t(language, "globalResetConfirmRegion")}
         >
           <p className="muted">
             {script
-              ? "将恢复返回原配置的默认脚本，替换已保存的脚本和当前输入。"
+              ? t(language, "globalScriptResetWarning")
               : t(language, "globalMergeResetWarning")}
           </p>
           <div className="actions">
             <button type="button" disabled={busy} onClick={() => void reset()}>
-              {script ? "确认恢复默认" : t(language, "globalResetConfirm")}
+              {t(language, "globalResetConfirm")}
             </button>
             <button
               type="button"
               disabled={busy}
               onClick={() => setResetting(false)}
             >
-              {script ? "继续编辑" : t(language, "globalKeepEditing")}
+              {t(language, "globalKeepEditing")}
             </button>
           </div>
         </div>

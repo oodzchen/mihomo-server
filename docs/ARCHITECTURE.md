@@ -53,13 +53,13 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** the global merge extension editor now follows
-the browser's Chinese/English language choice for its panel guidance, YAML
-field, save/reset controls, size feedback and reset confirmation. Switching
-languages preserves the unsaved YAML and pending confirmation; authenticated
-save and reset retain the existing service behavior.
-**Next implementation task (P3):** translate the global script extension editor,
-then the proxy, rules, log, resource and upgrade views;
+**Latest completed task (P3):** the global script extension editor now follows
+the browser's Chinese/English language choice for its JavaScript field,
+instructions, size feedback, save/reset controls and reset confirmation.
+Switching languages preserves the unsaved source, size feedback and pending
+confirmation; authenticated save and reset retain the existing behavior.
+**Next implementation task (P3):** translate the proxy page's node list and
+selection controls, then the rules, log, resource and upgrade views;
 service-message localization and additional browser languages remain pending.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
@@ -336,7 +336,8 @@ mihomo-server/
 │   ├── Profile-linked sequence editor zh/en types/YAML controls [Implemented; P3; browser verified]
 │   ├── Profile-linked script editor zh/en JavaScript controls [Implemented; P3; browser verified]
 │   ├── Global merge editor zh/en YAML controls and reset confirmation [Implemented; P3; browser verified]
-│   ├── Global script editor, proxy/rules/log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
+│   ├── Global script editor zh/en JavaScript controls and reset confirmation [Implemented; P3; browser verified]
+│   ├── Proxy/rules/log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4460,7 +4461,25 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: global merge editor localization
+## Current increment: global script editor localization
+
+Delivery step 9 (P3) now localizes the global script extension editor's
+instructions, JavaScript field, byte-limit feedback, save/cancel controls and
+default-reset confirmation. Browser language changes preserve the mounted
+editor, unsaved source, size feedback and pending confirmation. The existing
+authenticated read/save/reset commands and script validation are unchanged.
+Proxy, rules, log, resource and upgrade views still need P3 translation.
+
+Verification: `cargo check --workspace` and the Web production build pass. A
+Playwright workflow switches languages with an unsaved source and open reset
+confirmation, checks translated oversized-source feedback, then saves, reads
+back and restores the original default script through authenticated commands
+without changing core generation. The full browser regression reports **41
+passed and 4 optional upgrade/repair workflows skipped**. The complete
+architecture tree above is synchronized. Next: translate the proxy page's
+node list and selection controls.
+
+## Previous increment: global merge editor localization
 
 Delivery step 9 (P3) now localizes the global merge extension panel guidance,
 YAML field, size feedback, save/cancel controls and default-reset confirmation.

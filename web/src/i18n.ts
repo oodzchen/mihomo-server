@@ -139,6 +139,11 @@ const zh = {
   globalRetry: "重试读取全局增强", globalCancel: "取消全局编辑",
   globalResetConfirmRegion: "恢复默认确认", globalResetConfirm: "确认恢复默认",
   globalKeepEditing: "继续编辑",
+  globalScriptOpen: "编辑全局脚本", globalScriptTitle: "全局脚本增强",
+  globalScriptHelp: "编写 main(config, name)，返回配置对象。脚本错误会显示在页面上，console 输出可在「日志」中查看。",
+  globalScriptSource: "全局脚本 JavaScript", globalScriptTooLarge: "脚本不能超过 1 MiB。",
+  globalScriptSave: "保存全局脚本", globalScriptReset: "恢复默认全局脚本",
+  globalScriptResetWarning: "将恢复返回原配置的默认脚本，替换已保存的脚本和当前输入。",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -261,6 +266,11 @@ const en: Record<keyof typeof zh, string> = {
   globalRetry: "Retry reading global enhancement", globalCancel: "Cancel global editing",
   globalResetConfirmRegion: "Confirm restoring default", globalResetConfirm: "Confirm restore default",
   globalKeepEditing: "Keep editing",
+  globalScriptOpen: "Edit global script", globalScriptTitle: "Global script enhancement",
+  globalScriptHelp: "Write main(config, name) and return a configuration object. Script errors appear on this page; console output is available in Logs.",
+  globalScriptSource: "Global script JavaScript", globalScriptTooLarge: "Script must not exceed 1 MiB.",
+  globalScriptSave: "Save global script", globalScriptReset: "Restore default global script",
+  globalScriptResetWarning: "Restore the default script that returns the original configuration, replacing the saved script and current input.",
 };
 
 export type MessageKey = keyof typeof zh;

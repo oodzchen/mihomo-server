@@ -579,6 +579,52 @@ test("global merge editor translates without replacing its draft or reset confir
   expect(after.generation).toBe(before.generation);
 });
 
+test("global script editor translates draft, size feedback and reset confirmation", async ({ page }) => {
+  const headers = { Authorization: `Bearer ${token}` };
+  const readScript = async () => {
+    const response = await fetch(`${base}/api/commands`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "global_script" }),
+    });
+    expect(response.ok).toBe(true);
+    return (await response.json()).source as string;
+  };
+  const original = await readScript();
+  const before = await fetch(`${base}/api/status`, { headers }).then(response => response.json());
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByRole("button", { name: "编辑全局脚本" }).click();
+  const source = "// bilingual global script\nfunction main(config, name) { return config; }\n";
+  await page.getByLabel("全局脚本 JavaScript").fill(source);
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("form", { name: "Global script enhancement" })).toBeVisible();
+  await expect(page.getByLabel("Global script JavaScript")).toHaveValue(source);
+  await page.getByRole("button", { name: "Restore default global script" }).click();
+  await expect(page.getByRole("group", { name: "Confirm restoring default" })).toContainText("replacing the saved script and current input");
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(page.getByRole("group", { name: "恢复默认确认" })).toContainText("替换已保存的脚本和当前输入");
+  await expect(page.getByLabel("全局脚本 JavaScript")).toHaveValue(source);
+  await page.getByRole("button", { name: "继续编辑" }).click();
+  await page.getByLabel("全局脚本 JavaScript").fill("x".repeat(1024 * 1024 + 1));
+  await page.getByRole("button", { name: "保存全局脚本" }).click();
+  await expect(page.getByRole("alert")).toContainText("脚本不能超过 1 MiB");
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("alert")).toContainText("Script must not exceed 1 MiB");
+  await page.getByLabel("Global script JavaScript").fill(source);
+  await page.getByRole("button", { name: "Save global script" }).click();
+  await expect(page.getByLabel("Global script JavaScript")).toHaveCount(0);
+  expect(await readScript()).toBe(source);
+  await page.getByRole("button", { name: "Edit global script" }).click();
+  await expect(page.getByLabel("Global script JavaScript")).toHaveValue(source);
+  await page.getByRole("button", { name: "Restore default global script" }).click();
+  await page.getByRole("button", { name: "Confirm restore default" }).click();
+  expect(await readScript()).toBe(original);
+  const after = await fetch(`${base}/api/status`, { headers }).then(response => response.json());
+  expect(after.generation).toBe(before.generation);
+});
+
 test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
   await page.goto(`${base}/settings`);
   await page.getByLabel("管理令牌").fill(token);
