@@ -160,6 +160,18 @@ const zh = {
   proxyProviderNodes: "节点数：", proxyProviderUpdateAll: "全部更新",
   proxyProviderUpdate: "更新", proxyProviderUpdating: "更新中…",
   proxyProviderHealthcheck: "健康检查", proxyProviderChecking: "检查中…",
+  rulesTitle: "规则与分流策略",
+  rulesSummary: "内核实时生效的路由分流规则与规则集（Rule Providers）。共 {count} 条规则",
+  rulesSummaryProviders: "，{count} 个规则集", rulesSummaryEnd: "。",
+  rulesRefresh: "刷新规则", rulesNeedsCore: "内核未运行，启动内核后可查看生效规则与规则集。",
+  rulesListRegion: "规则列表", rulesSearch: "搜索规则",
+  rulesSearchPlaceholder: "搜索规则类型、域名、IP或目标策略…",
+  rulesClear: "清除", rulesTotal: "共 {count} 条",
+  rulesMatches: "匹配 {matched} / {total} 条",
+  rulesLoading: "正在加载规则列表…", rulesEmpty: "当前没有配置规则。",
+  rulesNoMatches: "没有找到匹配的规则。",
+  rulesTypeColumn: "类型", rulesPayloadColumn: "匹配模式 / Payload",
+  rulesTargetColumn: "目标策略",
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -303,6 +315,18 @@ const en: Record<keyof typeof zh, string> = {
   proxyProviderNodes: "Nodes: ", proxyProviderUpdateAll: "Update all",
   proxyProviderUpdate: "Update", proxyProviderUpdating: "Updating…",
   proxyProviderHealthcheck: "Health check", proxyProviderChecking: "Checking…",
+  rulesTitle: "Rules and routing policy",
+  rulesSummary: "Live routing rules and rule providers from the core. {count} rules",
+  rulesSummaryProviders: ", {count} providers", rulesSummaryEnd: ".",
+  rulesRefresh: "Refresh rules", rulesNeedsCore: "Start the core to view active rules and rule providers.",
+  rulesListRegion: "Rule list", rulesSearch: "Search rules",
+  rulesSearchPlaceholder: "Search rule type, domain, IP or target policy…",
+  rulesClear: "Clear", rulesTotal: "{count} rules",
+  rulesMatches: "{matched} of {total} matched",
+  rulesLoading: "Loading rules…", rulesEmpty: "No rules are configured.",
+  rulesNoMatches: "No matching rules found.",
+  rulesTypeColumn: "Type", rulesPayloadColumn: "Match / Payload",
+  rulesTargetColumn: "Target policy",
 };
 
 export type MessageKey = keyof typeof zh;

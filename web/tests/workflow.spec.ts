@@ -1429,6 +1429,49 @@ test("proxy provider controls translate while an update is pending", async ({ pa
   expect(calls).toEqual(["update_proxy_provider", "healthcheck_proxy_provider", "update_proxy_provider"]);
 });
 
+test("rule list and search translate without losing the filter or reloading rules", async ({ page }) => {
+  let ruleReads = 0;
+  await page.route("**/api/commands", async (route) => {
+    const body = route.request().postDataJSON();
+    if (body?.command === "rules") {
+      ruleReads += 1;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rules: [
+        { type: "DOMAIN", payload: "example.test", proxy: "DIRECT" },
+        { type: "IP-CIDR", payload: "10.0.0.0/8", proxy: "REJECT" },
+      ] }) });
+    } else if (body?.command === "rule_providers") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: '{"providers":{}}' });
+    } else {
+      await route.continue();
+    }
+  });
+  await page.goto(base);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /规则/ }).click();
+  const search = page.getByRole("searchbox", { name: "搜索规则" });
+  await expect(page.getByRole("region", { name: "规则列表" })).toBeVisible();
+  await expect(page.getByText("共 2 条", { exact: true })).toBeVisible();
+  await search.fill("example");
+  await expect(page.getByText("匹配 1 / 2 条")).toBeVisible();
+  await expect(page.getByRole("row", { name: /example.test/ })).toBeVisible();
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await expect(page.getByRole("heading", { name: "Rules and routing policy" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Rule list" })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "Search rules" })).toHaveValue("example");
+  await expect(page.getByText("1 of 2 matched")).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Target policy" })).toBeVisible();
+  await page.getByRole("searchbox", { name: "Search rules" }).fill("absent.example");
+  await expect(page.getByText("No matching rules found.")).toBeVisible();
+  await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await expect(page.getByRole("searchbox", { name: "搜索规则" })).toHaveValue("absent.example");
+  await expect(page.getByText("没有找到匹配的规则。")).toBeVisible();
+  await page.getByRole("button", { name: "清除" }).click();
+  await expect(page.getByRole("row", { name: /example.test/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /10.0.0.0\/8/ })).toBeVisible();
+  expect(ruleReads).toBe(1);
+});
+
 test("manual remote refresh keeps identity, applies active config and preserves failures across restart", async ({
   page,
 }) => {

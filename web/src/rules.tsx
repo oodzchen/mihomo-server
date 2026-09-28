@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { command, type Perform } from "./api";
+import { t, type Language } from "./i18n";
 import type { CoreStatus, Rule, RuleProvider, RuleProviders, Rules } from "./types";
 
 export function RulesPage({
   token,
+  language,
   status,
   busy,
   perform,
 }: {
   token: string;
+  language: Language;
   status: CoreStatus;
   busy: boolean;
   perform: Perform;
@@ -106,10 +109,11 @@ export function RulesPage({
     <>
       <div className="section-title">
         <div>
-          <h2>规则与分流策略</h2>
+          <h2>{t(language, "rulesTitle")}</h2>
           <p className="muted">
-            内核实时生效的路由分流规则与规则集（Rule Providers）。共 {rules.length} 条规则
-            {providerList.length > 0 && `，${providerList.length} 个规则集`}。
+            {t(language, "rulesSummary").replace("{count}", String(rules.length))}
+            {providerList.length > 0 && t(language, "rulesSummaryProviders").replace("{count}", String(providerList.length))}
+            {t(language, "rulesSummaryEnd")}
           </p>
         </div>
         <div className="actions">
@@ -117,13 +121,13 @@ export function RulesPage({
             disabled={busy || loading || status.phase !== "running"}
             onClick={() => setRevision((v) => v + 1)}
           >
-            刷新规则
+            {t(language, "rulesRefresh")}
           </button>
         </div>
       </div>
 
       {status.phase !== "running" && (
-        <p className="info">内核未运行，启动内核后可查看生效规则与规则集。</p>
+        <p className="info">{t(language, "rulesNeedsCore")}</p>
       )}
 
       {error && (
@@ -177,32 +181,34 @@ export function RulesPage({
       )}
 
       {status.phase === "running" && (
-        <section className="panel" aria-label="规则列表">
+        <section className="panel" aria-label={t(language, "rulesListRegion")}>
           <div className="rules-search">
             <input
               type="search"
-              placeholder="搜索规则类型、域名、IP或目标策略…"
+              placeholder={t(language, "rulesSearchPlaceholder")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              aria-label="搜索规则"
+              aria-label={t(language, "rulesSearch")}
             />
             {query && (
               <button className="quiet" onClick={() => setQuery("")}>
-                清除
+                {t(language, "rulesClear")}
               </button>
             )}
             <span className="muted">
               {filteredRules.length === rules.length
-                ? `共 ${rules.length} 条`
-                : `匹配 ${filteredRules.length} / ${rules.length} 条`}
+                ? t(language, "rulesTotal").replace("{count}", String(rules.length))
+                : t(language, "rulesMatches")
+                    .replace("{matched}", String(filteredRules.length))
+                    .replace("{total}", String(rules.length))}
             </span>
           </div>
 
           {loading ? (
-            <p className="info">正在加载规则列表…</p>
+            <p className="info">{t(language, "rulesLoading")}</p>
           ) : filteredRules.length === 0 ? (
             <p className="empty">
-              {rules.length === 0 ? "当前没有配置规则。" : "没有找到匹配的规则。"}
+              {t(language, rules.length === 0 ? "rulesEmpty" : "rulesNoMatches")}
             </p>
           ) : (
             <div className="rules-table-scroll">
@@ -210,9 +216,9 @@ export function RulesPage({
                 <thead>
                   <tr>
                     <th style={{ width: "60px" }}>#</th>
-                    <th style={{ width: "160px" }}>类型</th>
-                    <th>匹配模式 / Payload</th>
-                    <th style={{ width: "180px" }}>目标策略</th>
+                    <th style={{ width: "160px" }}>{t(language, "rulesTypeColumn")}</th>
+                    <th>{t(language, "rulesPayloadColumn")}</th>
+                    <th style={{ width: "180px" }}>{t(language, "rulesTargetColumn")}</th>
                   </tr>
                 </thead>
                 <tbody>

@@ -53,13 +53,12 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P3):** the proxy-provider inventory and action
-controls now follow the browser's Chinese/English language choice. Provider
-names, transport types, node counts and update timestamps remain stable while
-pending update labels translate; authenticated update and healthcheck commands
-are unchanged.
-**Next implementation task (P3):** translate the rules page's rule list,
-search and table controls, then rule-provider, log, resource and upgrade views;
+**Latest completed task (P3):** the rules page's list, search and table controls
+now follow the browser's Chinese/English language choice. Switching languages
+preserves the current filter and matched rows without reloading rules; rule
+types, payloads and target names remain unchanged.
+**Next implementation task (P3):** translate rule-provider inventory and
+update feedback, then log, resource and upgrade views;
 service-message localization and additional browser languages remain pending.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
@@ -340,7 +339,8 @@ mihomo-server/
 │   ├── Proxy node list zh/en selection controls and group status [Implemented; P3; browser verified]
 │   ├── Proxy delay-test URL/actions/result badges zh/en [Implemented; P3; browser verified]
 │   ├── Proxy-provider inventory/update/healthcheck controls zh/en [Implemented; P3; browser verified]
-│   ├── Rules/log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
+│   ├── Rule list zh/en search, counts, table and empty/loading states [Implemented; P3; browser verified]
+│   ├── Rule-provider, log/resource/upgrade views, additional languages and service-message localization [Pending; P3]
 │   ├── Full connection dashboards                   [Deferred; outside active scope]
 │   ├── Runtime settings editor / inheritance / readback [Implemented; Linux verified]
 │   ├── TCP concurrency / process mode / keep-alive editor / shared comparison / retry [Implemented; Linux verified]
@@ -4464,7 +4464,22 @@ integration. P2 rules/provider/delay, P3 i18n/signals and P4 actual systemd
 installation remain incomplete. Deferred work stays deferred. Git submission is
 left to the external host script.
 
-## Current increment: proxy-provider inventory and actions localization
+## Current increment: rule list and search localization
+
+Delivery step 9 (P3) now localizes the rules page heading and count summary,
+refresh/stopped guidance, rule-list region, search and clear controls, match
+count, empty/loading notices and table headers. Rule types, payloads and target
+names remain core-supplied values. Changing browser language keeps the current
+search input and filtered rows without fetching a new rules snapshot. The
+rule-provider panel on this page remains untranslated P3 work.
+
+Verification: `cargo check --workspace` and the Web production build pass. A
+Playwright workflow supplies two deterministic rules, filters them, switches
+languages, checks table and empty-result translations, then clears the filter
+without refetching rules. The complete architecture tree above is synchronized.
+Next: translate rule-provider inventory and update feedback.
+
+## Previous increment: proxy-provider inventory and actions localization
 
 Delivery step 9 (P3) now localizes the proxy-provider panel's title, collection
 and node counts, update-all and per-provider update/healthcheck actions, and

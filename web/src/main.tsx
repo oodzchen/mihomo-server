@@ -419,6 +419,7 @@ function Manager({
         ) : route === "/rules" ? (
           <RulesPage
             token={token}
+            language={language}
             status={status}
             busy={busy}
             perform={perform}
