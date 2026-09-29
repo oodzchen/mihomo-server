@@ -127,8 +127,8 @@ fn interrupted_backup_and_rename_recovery_are_idempotent_and_preserve_file_mode(
     fs::set_permissions(&live, fs::Permissions::from_mode(0o755))?;
     let root = dir.0.join(TRANSACTION);
     create_directory(&root)?;
-    file(&root.join("previous"))?.write_all(b"partial")?;
-    file(&root.join("journal.next"))?.write_all(b"{")?;
+    create_private(&root.join("previous"))?.write_all(b"partial")?;
+    create_private(&root.join("journal.next"))?.write_all(b"{")?;
     recover(&dir.0)?;
     assert_eq!(fs::read(&live)?, b"previous working core");
     assert!(!root.exists());
@@ -184,7 +184,7 @@ fn links_unknown_files_and_forged_records_are_not_followed_or_deleted() -> Resul
     assert!(recover(&dir.0).is_err());
     assert_eq!(fs::read(&outside)?, b"private unrelated data");
     fs::remove_file(root.join("previous"))?;
-    file(&root.join("unknown"))?.write_all(b"preserve me")?;
+    create_private(&root.join("unknown"))?.write_all(b"preserve me")?;
     assert!(recover(&dir.0).is_err());
     assert!(root.join("unknown").exists());
     fs::remove_file(root.join("unknown"))?;

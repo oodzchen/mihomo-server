@@ -5,7 +5,7 @@ use crate::geo_validation;
 use anyhow::{Context as _, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::Write as _,
     path::{Path, PathBuf},
 };
@@ -24,10 +24,7 @@ fn hash(data: &Path, name: &str) -> Result<Option<String>> {
     Ok(geo_validation::snapshot(data, name)?.map(|bytes| geo_validation::sha256(&bytes)))
 }
 
-fn sync_dir(path: &Path) -> Result<()> {
-    File::open(path)?.sync_all()?;
-    Ok(())
-}
+use crate::secure_fs::sync_directory;
 
 fn directory(data: &Path) -> Result<PathBuf> {
     use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
@@ -35,7 +32,7 @@ fn directory(data: &Path) -> Result<PathBuf> {
     let mut builder = fs::DirBuilder::new();
     builder.mode(0o700);
     match builder.create(&path) {
-        Ok(()) => sync_dir(data)?,
+        Ok(()) => sync_directory(data)?,
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error.into()),
     }
@@ -97,7 +94,7 @@ pub(crate) fn begin(data: &Path, name: &str, previous: Option<&str>, candidate: 
             hash(&path, name)?.as_deref() == Some(previous),
             "Geo rollback copy changed"
         );
-        sync_dir(&path)?;
+        sync_directory(&path)?;
     }
     let pending = Pending {
         name: name.into(),
@@ -112,7 +109,7 @@ pub(crate) fn begin(data: &Path, name: &str, previous: Option<&str>, candidate: 
         .open(path.join("pending"))?;
     marker.write_all(&serde_json::to_vec(&pending)?)?;
     marker.sync_all()?;
-    sync_dir(&path)?;
+    sync_directory(&path)?;
     Ok(())
 }
 
@@ -125,7 +122,7 @@ fn clean(path: &Path, data: &Path) -> Result<()> {
         fs::remove_file(entry.path())?;
     }
     fs::remove_dir(path)?;
-    sync_dir(data)
+    sync_directory(data)
 }
 
 /// Returns (journal directory durable, post-commit cleanup pending).
@@ -134,7 +131,7 @@ pub(crate) fn commit(data: &Path) -> Result<(bool, bool)> {
     let path = directory(data)?;
     ensure!(path.join("pending").try_exists()?, "Geo live journal is missing");
     fs::remove_file(path.join("pending"))?;
-    let durable = sync_dir(&path).is_ok();
+    let durable = sync_directory(&path).is_ok();
     Ok((durable, clean(&path, data).is_err()))
 }
 
@@ -178,14 +175,14 @@ pub(crate) fn recover(data: &Path) -> Result<bool> {
         );
         if actual.as_deref() != Some(old) {
             fs::rename(path.join(&pending.name), data.join(&pending.name))?;
-            sync_dir(data)?;
+            sync_directory(data)?;
         }
     } else if actual.is_some() {
         fs::remove_file(data.join(&pending.name))?;
-        sync_dir(data)?;
+        sync_directory(data)?;
     }
     fs::remove_file(path.join("pending"))?;
-    sync_dir(&path)?;
+    sync_directory(&path)?;
     clean(&path, data)?;
     Ok(true)
 }

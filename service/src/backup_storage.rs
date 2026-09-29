@@ -8,7 +8,6 @@ use std::{
     fs::{self, File, Metadata, OpenOptions},
     io::{Read as _, Write as _},
     os::{
-        fd::{AsRawFd as _, FromRawFd as _},
         unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _},
     },
     path::Path,
@@ -61,7 +60,7 @@ fn filename(row: &RetainedBackup) -> String {
 }
 fn safe_file(meta: &Metadata) -> bool {
     meta.is_file()
-        && meta.uid() == unsafe { libc::geteuid() }
+        && meta.uid() == crate::secure_fs::euid()
         && meta.nlink() == 1
         && meta.mode() & 0o7177 == 0
         && meta.len() <= MAX_ARCHIVE_BYTES as u64
@@ -88,7 +87,7 @@ fn root(data: &Path, create: bool) -> Result<Option<File>> {
     let current = fs::symlink_metadata(path)?;
     ensure!(
         meta.is_dir()
-            && meta.uid() == unsafe { libc::geteuid() }
+            && meta.uid() == crate::secure_fs::euid()
             && meta.mode() & 0o7077 == 0
             && meta.dev() == current.dev()
             && meta.ino() == current.ino(),
@@ -155,7 +154,7 @@ fn scan(root: &File, budget: &Budget) -> Result<RetainedBackupList> {
 fn unlink(root: &File, name: &str) -> Result<()> {
     let name = CString::new(name)?;
     ensure!(
-        unsafe { libc::unlinkat(root.as_raw_fd(), name.as_ptr(), 0) } == 0,
+        crate::secure_fs::unlink_at(root, &name, 0).is_ok(),
         "local backup removal failed"
     );
     Ok(())
@@ -249,16 +248,13 @@ pub(crate) fn run(
             };
             let part_text = format!(".{}.part", row.id);
             let part_name = CString::new(part_text.as_str())?;
-            let fd = unsafe {
-                libc::openat(
-                    root.as_raw_fd(),
-                    part_name.as_ptr(),
-                    libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                    0o600,
-                )
-            };
-            ensure!(fd >= 0, "local backup partial creation failed");
-            let mut file = unsafe { File::from_raw_fd(fd) };
+            let mut file = crate::secure_fs::open_at(
+                &root,
+                &part_name,
+                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                0o600,
+            )
+            .map_err(|_| anyhow::anyhow!("local backup partial creation failed"))?;
             let _part = Part {
                 root: &root,
                 name: part_text,
@@ -271,15 +267,7 @@ pub(crate) fn run(
             budget.check()?;
             let final_name = CString::new(filename(&row))?;
             ensure!(
-                unsafe {
-                    libc::renameat2(
-                        root.as_raw_fd(),
-                        part_name.as_ptr(),
-                        root.as_raw_fd(),
-                        final_name.as_ptr(),
-                        libc::RENAME_NOREPLACE,
-                    )
-                } == 0,
+                crate::secure_fs::rename_noreplace_at(&root, &part_name, &final_name).is_ok(),
                 "local backup commit failed"
             );
             // Rename is the logical commit; a subsequent directory fsync cannot undo it.

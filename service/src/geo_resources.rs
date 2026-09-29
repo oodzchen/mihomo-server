@@ -140,28 +140,20 @@ pub(crate) fn cleanup(stage: &Path) -> Result<()> {
 }
 
 pub(crate) fn copy(source: &Path, stage: &Path, name: &str, seed: &Seed) -> Result<()> {
-    use std::{
-        ffi::CString,
-        os::{
-            fd::{AsRawFd, FromRawFd},
-            unix::fs::OpenOptionsExt as _,
-        },
-    };
+    use std::{ffi::CString, os::unix::fs::OpenOptionsExt as _};
     let directory = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
         .open(source)
         .context("open bundled Geo directory")?;
     let name_c = CString::new(name)?;
-    let fd = unsafe {
-        libc::openat(
-            directory.as_raw_fd(),
-            name_c.as_ptr(),
-            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
-        )
-    };
-    ensure!(fd >= 0, "cannot open bundled Geo file without following links");
-    let mut input = unsafe { File::from_raw_fd(fd) };
+    let mut input = crate::secure_fs::open_at(
+        &directory,
+        &name_c,
+        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+        0,
+    )
+    .map_err(|_| anyhow::anyhow!("cannot open bundled Geo file without following links"))?;
     let metadata = input.metadata()?;
     ensure!(
         metadata.is_file() && metadata.len() == seed.bytes,

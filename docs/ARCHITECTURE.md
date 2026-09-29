@@ -53,8 +53,24 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
-**Next implementation task:** Maintain deployed Linux service, support user feature queries, and expand deferred capabilities upon request.
+**Latest completed task:** Code-quality refactor step 1 — shared `secure_fs` filesystem primitives (see below).
+**Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
+**Next implementation task:** Code-quality refactor step 2 — split `core_manager.rs` into domain modules.
+
+## Code-quality refactor (behavior-preserving)
+
+Structural cleanup with no business-logic change. Each step keeps the Rust
+suite, the real-core `--ignored` suite and the real-node data checks at the
+pre-refactor baseline.
+
+1. **Shared filesystem primitives — done.** `service/src/secure_fs.rs` now owns
+   the raw `libc` descriptor calls (`openat`, `unlinkat`, `mkdirat`,
+   `renameat2(RENAME_NOREPLACE)`, `fchmod`, `flock`, `fdopendir/readdir`,
+   `geteuid`) with `SAFETY` notes, plus the previously duplicated SHA-256/hex,
+   directory fsync and owner-only `create_new` helpers. Backup, Geo, core
+   release/upgrade and TUN modules call these; each keeps its own ownership and
+   permission policy and its original error messages. `headless-core`
+   `profile_store` shares one SHA-256 helper between import and restore journals.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 

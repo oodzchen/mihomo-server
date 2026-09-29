@@ -21,6 +21,7 @@ pub mod remote;
 pub mod resource_inventory;
 pub mod resources;
 pub mod script;
+mod secure_fs;
 mod selections;
 mod settings_readback;
 pub mod shutdown;

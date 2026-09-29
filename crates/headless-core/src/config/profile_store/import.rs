@@ -1,7 +1,6 @@
 //! New service imports create missing upstream auxiliaries in one catalog commit.
 use super::super::PrfOption;
 use super::*;
-use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 
 const JOURNAL: &str = "profile-import.yaml";
@@ -23,11 +22,7 @@ fn template(kind: &str) -> Result<&'static str> {
     })
 }
 fn hash(source: &str) -> String {
-    digest(&SHA256, source.as_bytes())
-        .as_ref()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    super::sha256_hex(source.as_bytes())
 }
 fn filename(transaction: &str, kind: &str) -> String {
     format!(

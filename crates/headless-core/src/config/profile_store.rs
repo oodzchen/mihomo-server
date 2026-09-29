@@ -37,6 +37,15 @@ pub use import::ImportPlan;
 #[cfg(unix)]
 pub use restore::RestorePlan;
 
+/// Lowercase hexadecimal SHA-256 digest shared by journals and restore receipts.
+fn sha256_hex(bytes: &[u8]) -> String {
+    ring::digest::digest(&ring::digest::SHA256, bytes)
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RawContent {
     pub uid: String,

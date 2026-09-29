@@ -46,8 +46,8 @@ fn seed(downloads: &CoreDownloads, bytes: &[u8], version: &str) -> Result<Prepar
     let id = format!("{version}-{}", release.sha256);
     let path = downloads.root.join(&id);
     private_directory(&path)?;
-    private_file(&path.join("package.gz"))?.write_all(&package)?;
-    private_file(&path.join("release.json"))?.write_all(&serde_json::to_vec(&Manifest {
+    create_private(&path.join("package.gz"))?.write_all(&package)?;
+    create_private(&path.join("release.json"))?.write_all(&serde_json::to_vec(&Manifest {
         schema_version: 1,
         release: release.clone(),
     })?)?;
@@ -59,7 +59,7 @@ fn extraction_checks_crc_eof_single_member_size_elf_and_cancellation() -> Result
     let (stop, rx) = watch::channel(false);
     let bytes = elf();
     let package = gzip(&bytes)?;
-    let mut output = private_file(&dir.0.join("valid"))?;
+    let mut output = create_private(&dir.0.join("valid"))?;
     assert_eq!(unpack(&package, &mut output, &rx, 64)?, (64, hash(&bytes)));
     let mut crc = package.clone();
     let n = crc.len();
@@ -76,13 +76,13 @@ fn extraction_checks_crc_eof_single_member_size_elf_and_cancellation() -> Result
         gzip(&architecture)?,
     ];
     for (i, package) in cases.into_iter().enumerate() {
-        let mut output = private_file(&dir.0.join(format!("bad-{i}")))?;
+        let mut output = create_private(&dir.0.join(format!("bad-{i}")))?;
         assert!(unpack(&package, &mut output, &rx, 64).is_err());
     }
-    let mut output = private_file(&dir.0.join("limit"))?;
+    let mut output = create_private(&dir.0.join("limit"))?;
     assert!(unpack(&package, &mut output, &rx, 63).is_err());
     stop.send_replace(true);
-    let mut output = private_file(&dir.0.join("cancel"))?;
+    let mut output = create_private(&dir.0.join("cancel"))?;
     assert!(unpack(&package, &mut output, &rx, 64).is_err());
     Ok(())
 }
@@ -130,10 +130,10 @@ fn staged_readback_requires_matching_private_manifest_executable_config_and_sour
         };
         let path = downloads.root.join(format!(".validated-{stage_id}"));
         private_directory(&path)?;
-        private_file(&path.join("verge-mihomo"))?.write_all(&bytes)?;
+        create_private(&path.join("verge-mihomo"))?.write_all(&bytes)?;
         fs::set_permissions(path.join("verge-mihomo"), fs::Permissions::from_mode(0o700))?;
-        private_file(&path.join("candidate.yaml"))?.write_all(yaml)?;
-        private_file(&path.join("stage.json"))?.write_all(&serde_json::to_vec(&StageManifest {
+        create_private(&path.join("candidate.yaml"))?.write_all(yaml)?;
+        create_private(&path.join("stage.json"))?.write_all(&serde_json::to_vec(&StageManifest {
             schema_version: 1,
             core: core.clone(),
         })?)?;

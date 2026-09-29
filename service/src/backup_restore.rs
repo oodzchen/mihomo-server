@@ -11,7 +11,7 @@ use headless_core::{
     },
 };
 use std::{
-    fs::{self, File, Metadata, OpenOptions},
+    fs::{self, Metadata, OpenOptions},
     io::{Read as _, Write as _},
     os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _},
     path::{Component, Path},
@@ -40,16 +40,8 @@ impl Budget {
         Ok(())
     }
 }
-fn private_file(path: &Path) -> Result<File> {
-    Ok(OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?)
-}
 fn write(path: &Path, bytes: &[u8], budget: &Budget) -> Result<()> {
-    let mut output = private_file(path)?;
+    let mut output = crate::secure_fs::create_private(path)?;
     for chunk in bytes.chunks(64 * 1024) {
         budget.check()?;
         output.write_all(chunk)?;
@@ -84,7 +76,7 @@ fn copy_geo(source: &Path, destination: &Path, budget: &Budget) -> Result<()> {
         ensure!(
             before.is_file()
                 && before.nlink() == 1
-                && before.uid() == unsafe { libc::geteuid() }
+                && before.uid() == crate::secure_fs::euid()
                 && before.mode() & 0o7022 == 0,
             "unsafe validation Geo resource"
         );
@@ -93,7 +85,7 @@ fn copy_geo(source: &Path, destination: &Path, budget: &Budget) -> Result<()> {
             .checked_add(total)
             .context("validation Geo size overflow")?;
         ensure!(total <= MAX_GEO_BYTES, "validation Geo resources exceed 256 MiB");
-        let mut output = private_file(&destination.join(name))?;
+        let mut output = crate::secure_fs::create_private(&destination.join(name))?;
         let mut chunk = [0; 64 * 1024];
         let mut copied = 0;
         loop {
@@ -124,7 +116,7 @@ fn check_config(path: &Path, expected: &[u8], budget: &Budget) -> Result<Metadat
         before.is_file()
             && before.nlink() == 1
             && before.len() == expected.len() as u64
-            && before.uid() == unsafe { libc::geteuid() }
+            && before.uid() == crate::secure_fs::euid()
             && before.mode() & 0o7022 == 0,
         "unsafe or changed restore candidate"
     );
@@ -224,7 +216,7 @@ fn verify_sources(candidate: &Candidate, stop: watch::Receiver<bool>) -> Result<
         ensure!(
             before.is_file()
                 && before.nlink() == 1
-                && before.uid() == unsafe { libc::geteuid() }
+                && before.uid() == crate::secure_fs::euid()
                 && before.mode() & 0o7077 == 0
                 && before.len() == entry.bytes,
             "restore source changed during probes"

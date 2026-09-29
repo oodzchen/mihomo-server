@@ -29,13 +29,7 @@ pub(crate) enum RetainedOutcome {
     Deleted(headless_core::backup::BackupDeletionReceipt),
 }
 
-pub(crate) fn hash(bytes: &[u8]) -> String {
-    ring::digest::digest(&ring::digest::SHA256, bytes)
-        .as_ref()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
+pub(crate) use crate::secure_fs::sha256_hex as hash;
 
 pub struct BackupDownload {
     pub metadata: BackupMetadata,
@@ -68,10 +62,7 @@ pub(crate) mod export {
         ffi::CString,
         fs::{File, Metadata, OpenOptions},
         io::{Cursor, Read as _, Seek, SeekFrom, Write},
-        os::{
-            fd::{AsRawFd as _, FromRawFd as _},
-            unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
-        },
+        os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
         path::{Path, PathBuf},
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
@@ -100,7 +91,7 @@ pub(crate) mod export {
     fn safe_metadata(file: &File, directory: bool) -> Result<Metadata> {
         let meta = file.metadata()?;
         ensure!(
-            meta.uid() == unsafe { libc::geteuid() }
+            meta.uid() == crate::secure_fs::euid()
                 && meta.permissions().mode() & 0o7022 == 0
                 && if directory {
                     meta.is_dir()
@@ -123,19 +114,17 @@ pub(crate) mod export {
     }
     fn open_at(parent: &File, name: &str, directory: bool) -> Result<File> {
         let name = CString::new(name)?;
-        let fd = unsafe {
-            libc::openat(
-                parent.as_raw_fd(),
-                name.as_ptr(),
-                libc::O_RDONLY
-                    | libc::O_NOFOLLOW
-                    | libc::O_NONBLOCK
-                    | libc::O_CLOEXEC
-                    | if directory { libc::O_DIRECTORY } else { 0 },
-            )
-        };
-        ensure!(fd >= 0, "cannot open backup source");
-        let file = unsafe { File::from_raw_fd(fd) };
+        let file = crate::secure_fs::open_at(
+            parent,
+            &name,
+            libc::O_RDONLY
+                | libc::O_NOFOLLOW
+                | libc::O_NONBLOCK
+                | libc::O_CLOEXEC
+                | if directory { libc::O_DIRECTORY } else { 0 },
+            0,
+        )
+        .map_err(|_| anyhow::anyhow!("cannot open backup source"))?;
         safe_metadata(&file, directory)?;
         Ok(file)
     }

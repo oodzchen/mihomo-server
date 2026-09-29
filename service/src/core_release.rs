@@ -11,7 +11,7 @@ use ring::digest::{Context, SHA256};
 use serde::{Deserialize, Serialize};
 pub use stage::StagedCore;
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{Read as _, Write as _},
     path::{Path, PathBuf},
     time::Duration,
@@ -475,7 +475,7 @@ impl CoreDownloads {
             schema_version: 1,
             release: release.clone(),
         };
-        let mut file = private_file(&pending.0.join("release.json"))?;
+        let mut file = create_private(&pending.0.join("release.json"))?;
         file.write_all(&serde_json::to_vec(&manifest)?)?;
         file.sync_all()?;
         sync_directory(&pending.0)?;
@@ -510,7 +510,7 @@ impl CoreDownloads {
             response.content_length().is_none_or(|n| n == release.bytes),
             "core package length differs from release metadata"
         );
-        let output = private_file(&directory.join("package.gz"))?;
+        let output = create_private(&directory.join("package.gz"))?;
         let mut output = tokio::fs::File::from_std(output);
         let mut digest = Context::new(&SHA256);
         let mut size = 0;
@@ -586,9 +586,7 @@ impl CoreDownloads {
         })
     }
 }
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
+use crate::secure_fs::{create_private, hex, sync_directory};
 fn pending_name(name: &str) -> bool {
     name.strip_prefix(".pending-")
         .is_some_and(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit()))
@@ -642,16 +640,6 @@ fn check_directory(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-fn private_file(path: &Path) -> Result<File> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    Ok(options.open(path)?)
-}
 fn check_file(path: &Path, limit: u64) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     ensure!(
@@ -666,11 +654,6 @@ fn check_file(path: &Path, limit: u64) -> Result<()> {
             "core staging file must be private"
         );
     }
-    Ok(())
-}
-fn sync_directory(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    File::open(path)?.sync_all()?;
     Ok(())
 }
 

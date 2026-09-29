@@ -128,7 +128,7 @@ pub(crate) fn verify_linux_interface_and_routes(device: &str, auto_route: bool) 
 
 #[cfg(target_os = "linux")]
 pub(crate) fn has_net_admin_capability() -> bool {
-    if unsafe { libc::geteuid() } == 0 {
+    if crate::secure_fs::euid() == 0 {
         return true;
     }
     if let Ok(status) = std::fs::read_to_string("/proc/self/status") {

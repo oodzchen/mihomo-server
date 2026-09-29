@@ -5,7 +5,7 @@ use super::super::{
     settings::{MAX_SETTINGS_BYTES, ServiceSettings, SettingsStore},
 };
 use super::*;
-use ring::digest::{SHA256, digest};
+use super::sha256_hex as hash;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -57,13 +57,6 @@ impl RestorePlan {
     pub fn active_profile(&self) -> Option<&str> {
         self.journal.candidate.current.as_deref()
     }
-}
-fn hash(bytes: &[u8]) -> String {
-    digest(&SHA256, bytes)
-        .as_ref()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
 }
 fn equal(a: &IProfiles, b: &IProfiles) -> Result<bool> {
     Ok(serde_json::to_value(a)? == serde_json::to_value(b)?)

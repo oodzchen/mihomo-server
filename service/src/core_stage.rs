@@ -24,9 +24,7 @@ struct StageManifest {
     schema_version: u32,
     core: StagedCore,
 }
-fn hash(bytes: &[u8]) -> String {
-    hex(ring::digest::digest(&SHA256, bytes).as_ref())
-}
+use crate::secure_fs::sha256_hex as hash;
 fn stage_name(id: &str) -> Result<(&str, &str)> {
     let (package_id, config_hash) = id.rsplit_once('-').context("invalid staged core ID")?;
     let (version, package_hash) = package_id.rsplit_once('-').context("invalid staged core ID")?;
@@ -116,7 +114,7 @@ impl CoreDownloads {
         let extraction = tokio::task::spawn_blocking(move || {
             let package = bounded_read(&package, MAX_PACKAGE)?;
             ensure!(hash(&package) == expected, "core package changed before unpack");
-            let mut output = private_file(&path)?;
+            let mut output = create_private(&path)?;
             let result = unpack(&package, &mut output, &stop, MAX_EXECUTABLE)?;
             #[cfg(unix)]
             {
@@ -129,7 +127,7 @@ impl CoreDownloads {
         // Await the cooperative worker to completion before removing its files.
         let (executable_bytes, executable_sha256) = extraction.await.context("core unpack worker failed")??;
         ensure!(!*shutdown.borrow(), "core staging cancelled during shutdown");
-        let mut file = private_file(&candidate)?;
+        let mut file = create_private(&candidate)?;
         file.write_all(yaml.as_bytes())?;
         file.sync_all()?;
         drop(file);
@@ -151,7 +149,7 @@ impl CoreDownloads {
                     total += metadata.len();
                     ensure!(total <= MAX_RESOURCES, "validation Geo resources exceed size bounds");
                     let mut input = File::open(&source)?.take(metadata.len() + 1);
-                    let mut output = private_file(&resource_data.join(name))?;
+                    let mut output = create_private(&resource_data.join(name))?;
                     ensure!(
                         std::io::copy(&mut input, &mut output)? == metadata.len(),
                         "validation Geo resource changed"
@@ -189,7 +187,7 @@ impl CoreDownloads {
             "candidate configuration changed during validation"
         );
         fs::remove_dir_all(&resource_data)?;
-        let mut manifest = private_file(&pending.0.join("stage.json"))?;
+        let mut manifest = create_private(&pending.0.join("stage.json"))?;
         manifest.write_all(&serde_json::to_vec(&StageManifest {
             schema_version: 1,
             core: core.clone(),

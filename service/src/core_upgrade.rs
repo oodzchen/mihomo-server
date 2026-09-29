@@ -4,7 +4,7 @@ use anyhow::{Context as _, Result, ensure};
 use ring::digest::{Context, SHA256};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{Read as _, Write as _},
     path::Path,
 };
@@ -60,7 +60,7 @@ impl PreviousFile {
         {
             use std::os::unix::fs::MetadataExt as _;
             ensure!(
-                m.uid() == unsafe { libc::geteuid() } && m.mode() & 0o7777 & !0o755 == 0,
+                m.uid() == crate::secure_fs::euid() && m.mode() & 0o7777 & !0o755 == 0,
                 "unsafe managed core ownership or permissions"
             );
             Ok(Self {
@@ -94,12 +94,8 @@ pub(crate) fn repairable(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-pub(crate) fn config_hash(bytes: &[u8]) -> String {
-    hex(ring::digest::digest(&SHA256, bytes).as_ref())
-}
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
+pub(crate) use crate::secure_fs::sha256_hex as config_hash;
+use crate::secure_fs::{create_private, hex, sync_directory};
 fn hash_valid(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
@@ -141,21 +137,6 @@ fn create_directory(path: &Path) -> Result<()> {
     fs::create_dir(path)?;
     directory(path)
 }
-fn sync(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    File::open(path)?.sync_all()?;
-    Ok(())
-}
-fn file(path: &Path) -> Result<File> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    Ok(options.open(path)?)
-}
 fn remove_owned(path: &Path, limit: u64) -> Result<()> {
     match fs::symlink_metadata(path) {
         Ok(_) => {
@@ -189,7 +170,7 @@ fn digest(path: &Path, private: bool) -> Result<(u64, String)> {
 fn copy(source: &Path, destination: &Path, expected: &str, mode: u32, private: bool) -> Result<()> {
     metadata(source, MAX_CORE, private)?;
     let mut input = File::open(source)?.take(MAX_CORE + 1);
-    let mut output = file(destination)?;
+    let mut output = create_private(destination)?;
     let mut count = 0;
     let mut hash = Context::new(&SHA256);
     let mut buffer = [0; 65536];
@@ -274,14 +255,14 @@ fn journal(root: &Path) -> Result<Journal> {
 fn write_journal(root: &Path, j: &Journal) -> Result<()> {
     let next = root.join("journal.next");
     remove_owned(&next, MAX_RECORD)?;
-    let mut output = file(&next)?;
+    let mut output = create_private(&next)?;
     output.write_all(&serde_json::to_vec(j)?)?;
     output.sync_all()?;
     if fs::symlink_metadata(root.join("journal.json")).is_ok() {
         metadata(&root.join("journal.json"), MAX_RECORD, true)?;
     }
     fs::rename(next, root.join("journal.json"))?;
-    sync(root)
+    sync_directory(root)
 }
 fn write_receipt(core: &Path, root: &Path, receipt: Option<&CoreInstallation>) -> Result<()> {
     let destination = core.join(RECEIPT);
@@ -292,15 +273,15 @@ fn write_receipt(core: &Path, root: &Path, receipt: Option<&CoreInstallation>) -
         Some(receipt) => {
             let next = root.join("receipt.next");
             remove_owned(&next, MAX_RECORD)?;
-            let mut output = file(&next)?;
+            let mut output = create_private(&next)?;
             output.write_all(&serde_json::to_vec(receipt)?)?;
             output.sync_all()?;
             fs::rename(next, destination)?;
-            sync(core)?;
+            sync_directory(core)?;
         }
         None => {
             remove_owned(&destination, MAX_RECORD)?;
-            sync(core)?;
+            sync_directory(core)?;
         }
     }
     Ok(())
@@ -329,7 +310,7 @@ fn clean(core: &Path, root: &Path) -> Result<()> {
         fs::remove_file(path)?;
     }
     fs::remove_dir(root)?;
-    sync(core)
+    sync_directory(core)
 }
 /// None means clean or committed; Some(was_running) means an uncommitted switch was rolled back.
 pub(crate) fn recover(core: &Path) -> Result<Option<bool>> {
@@ -377,7 +358,7 @@ pub(crate) fn recover(core: &Path) -> Result<Option<bool>> {
                 );
             }
             fs::rename(backup, &live)?;
-            sync(core)?;
+            sync_directory(core)?;
         }
         write_receipt(core, &root, j.previous_installation.as_ref())?;
         clean(core, &root)?;
@@ -409,7 +390,7 @@ pub(crate) fn recover(core: &Path) -> Result<Option<bool>> {
         remove_owned(&restore, MAX_CORE)?;
         copy(&root.join("previous"), &restore, &j.previous_sha256, 0o700, true)?;
         fs::rename(restore, &live)?;
-        sync(core)?;
+        sync_directory(core)?;
     }
     #[cfg(unix)]
     {
@@ -546,7 +527,7 @@ pub(crate) fn prepare_with_repair(
             installation: r.clone(),
         },
     )?;
-    sync(core)?;
+    sync_directory(core)?;
     Ok(r)
 }
 pub(crate) fn publish(core: &Path) -> Result<()> {
@@ -577,7 +558,7 @@ pub(crate) fn publish(core: &Path) -> Result<()> {
         "core upgrade backup/candidate integrity failure"
     );
     fs::rename(root.join("candidate"), core.join("verge-mihomo"))?;
-    sync(core)
+    sync_directory(core)
 }
 pub(crate) fn commit(core: &Path) -> Result<()> {
     let root = core.join(TRANSACTION);

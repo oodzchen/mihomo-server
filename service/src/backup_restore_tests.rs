@@ -1,6 +1,7 @@
 use super::*;
 use headless_core::backup::{BackupEntry, BackupManifest};
 use std::{
+    fs::File,
     io::Cursor,
     os::unix::fs::{PermissionsExt as _, symlink},
 };

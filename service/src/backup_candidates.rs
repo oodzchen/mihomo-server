@@ -1,13 +1,13 @@
 //! Data-directory scoped restore scratch space; callers hold the service data lock.
+use crate::secure_fs;
 use anyhow::{Context as _, Result, ensure};
 use std::{
     ffi::{CString, OsStr, OsString},
     fs::{self, File, Metadata, OpenOptions},
     io,
     os::{
-        fd::{AsRawFd as _, FromRawFd as _},
         unix::{
-            ffi::{OsStrExt as _, OsStringExt as _},
+            ffi::OsStrExt as _,
             fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _},
         },
     },
@@ -19,14 +19,14 @@ const LEASE: &str = ".lease";
 const MAX_ENTRIES: usize = 4096;
 
 fn private_dir(meta: &Metadata) -> bool {
-    meta.is_dir() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o7077 == 0
+    meta.is_dir() && meta.uid() == secure_fs::euid() && meta.mode() & 0o7077 == 0
 }
 fn owned_file(meta: &Metadata) -> bool {
-    meta.is_file() && meta.uid() == unsafe { libc::geteuid() } && meta.nlink() == 1 && meta.mode() & 0o7177 == 0
+    meta.is_file() && meta.uid() == secure_fs::euid() && meta.nlink() == 1 && meta.mode() & 0o7177 == 0
 }
 fn writable(dir: &File) -> Result<()> {
     ensure!(
-        unsafe { libc::fchmod(dir.as_raw_fd(), 0o700) } == 0,
+        secure_fs::fchmod(dir, 0o700).is_ok(),
         "restore scratch permissions could not be recovered"
     );
     Ok(())
@@ -44,70 +44,17 @@ pub(super) fn open_at(parent: &File, child: &OsStr, directory: bool) -> io::Resu
         | libc::O_NONBLOCK
         | libc::O_CLOEXEC
         | if directory { libc::O_DIRECTORY } else { 0 };
-    let fd = unsafe { libc::openat(parent.as_raw_fd(), child.as_ptr(), flags) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(unsafe { File::from_raw_fd(fd) })
+    secure_fs::open_at(parent, &child, flags, 0)
 }
 fn unlink_at(parent: &File, child: &OsStr, directory: bool) -> Result<()> {
     let child = name(child)?;
-    ensure!(
-        unsafe {
-            libc::unlinkat(
-                parent.as_raw_fd(),
-                child.as_ptr(),
-                if directory { libc::AT_REMOVEDIR } else { 0 },
-            )
-        } == 0,
-        "restore scratch removal failed: {}",
-        io::Error::last_os_error()
-    );
-    Ok(())
+    secure_fs::unlink_at(parent, &child, if directory { libc::AT_REMOVEDIR } else { 0 })
+        .map_err(|error| anyhow::anyhow!("restore scratch removal failed: {error}"))
 }
 pub(super) fn names(dir: &File) -> Result<Vec<OsString>> {
-    // fdopendir owns its descriptor. Reopen '.' so directory offsets are independent.
-    let stream = open_at(dir, OsStr::new("."), true)?;
-    let fd = std::os::fd::IntoRawFd::into_raw_fd(stream);
-    let raw = unsafe { libc::fdopendir(fd) };
-    if raw.is_null() {
-        let error = io::Error::last_os_error();
-        unsafe {
-            libc::close(fd);
-        }
-        return Err(error).context("restore scratch enumeration failed");
-    }
-    struct Stream(*mut libc::DIR);
-    impl Drop for Stream {
-        fn drop(&mut self) {
-            unsafe {
-                libc::closedir(self.0);
-            }
-        }
-    }
-    let stream = Stream(raw);
-    let mut result = Vec::new();
-    loop {
-        #[cfg(target_os = "linux")]
-        unsafe {
-            *libc::__errno_location() = 0;
-        }
-        let entry = unsafe { libc::readdir(stream.0) };
-        if entry.is_null() {
-            #[cfg(target_os = "linux")]
-            if io::Error::last_os_error().raw_os_error() != Some(0) {
-                return Err(io::Error::last_os_error()).context("restore scratch enumeration failed");
-            }
-            break;
-        }
-        let bytes = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
-        if bytes == b"." || bytes == b".." {
-            continue;
-        }
-        ensure!(result.len() < MAX_ENTRIES, "restore scratch entry limit exceeded");
-        result.push(OsString::from_vec(bytes.to_vec()));
-    }
-    Ok(result)
+    secure_fs::dir_names(dir, MAX_ENTRIES)
+        .context("restore scratch enumeration failed")?
+        .context("restore scratch entry limit exceeded")
 }
 fn root(data: &Path, create: bool) -> Result<Option<File>> {
     let path = data.join(ROOT);
@@ -142,14 +89,7 @@ fn candidate_name(child: &OsStr) -> bool {
         .is_some_and(|id| id.len() == 24 && id.iter().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(c)))
 }
 fn lock(file: &File) -> Result<bool> {
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-        return Ok(true);
-    }
-    let e = io::Error::last_os_error();
-    if e.raw_os_error() == Some(libc::EWOULDBLOCK) {
-        return Ok(false);
-    }
-    Err(e.into())
+    Ok(secure_fs::try_lock_exclusive(file)?)
 }
 struct Budget {
     remaining: usize,
@@ -180,7 +120,7 @@ fn remove_contents(dir: &File, depth: usize, keep_lease: bool, budget: &mut Budg
         match open_at(dir, &child, true) {
             Ok(nested) => {
                 ensure!(
-                    nested.metadata()?.uid() == unsafe { libc::geteuid() }
+                    nested.metadata()?.uid() == secure_fs::euid()
                         && nested.metadata()?.dev() == dir.metadata()?.dev(),
                     "unsafe restore scratch child directory"
                 );
@@ -260,21 +200,18 @@ impl PrivateDirectory {
         let child = format!("ms-restore-{}", &super::hash(&random)[..24]);
         let child_c = name(OsStr::new(&child))?;
         ensure!(
-            unsafe { libc::mkdirat(root.as_raw_fd(), child_c.as_ptr(), 0o700) } == 0,
+            secure_fs::mkdir_at(&root, &child_c, 0o700).is_ok(),
             "restore candidate creation failed"
         );
         let dir = open_at(&root, OsStr::new(&child), true)?;
         let lease_c = name(OsStr::new(LEASE))?;
-        let fd = unsafe {
-            libc::openat(
-                dir.as_raw_fd(),
-                lease_c.as_ptr(),
-                libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                0o600,
-            )
-        };
-        ensure!(fd >= 0, "restore candidate lease creation failed");
-        let lease = unsafe { File::from_raw_fd(fd) };
+        let lease = secure_fs::open_at(
+            &dir,
+            &lease_c,
+            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            0o600,
+        )
+        .map_err(|_| anyhow::anyhow!("restore candidate lease creation failed"))?;
         ensure!(lock(&lease)?, "restore candidate lease busy");
         lease.sync_all()?;
         dir.sync_all()?;

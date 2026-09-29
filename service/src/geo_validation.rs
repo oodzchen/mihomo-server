@@ -33,12 +33,9 @@ pub struct Validation {
 pub(crate) fn snapshot(root: &Path, name: &str) -> Result<Option<Vec<u8>>> {
     use std::{
         ffi::CString,
-        fs::{File, OpenOptions},
+        fs::OpenOptions,
         io::Read as _,
-        os::{
-            fd::{AsRawFd, FromRawFd},
-            unix::fs::{MetadataExt as _, OpenOptionsExt as _},
-        },
+        os::unix::fs::{MetadataExt as _, OpenOptionsExt as _},
     };
     ensure!(
         MMDB_FILES.contains(&name) || crate::dat_validation::DAT_FILES.contains(&name),
@@ -49,21 +46,16 @@ pub(crate) fn snapshot(root: &Path, name: &str) -> Result<Option<Vec<u8>>> {
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(root)?;
     let leaf = CString::new(name)?;
-    let fd = unsafe {
-        libc::openat(
-            directory.as_raw_fd(),
-            leaf.as_ptr(),
-            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
-        )
+    let mut file = match crate::secure_fs::open_at(
+        &directory,
+        &leaf,
+        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+        0,
+    ) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => anyhow::bail!("Geo file unreadable or linked"),
     };
-    if fd < 0 {
-        let error = std::io::Error::last_os_error();
-        if error.kind() == std::io::ErrorKind::NotFound {
-            return Ok(None);
-        }
-        anyhow::bail!("Geo file unreadable or linked");
-    }
-    let mut file = unsafe { File::from_raw_fd(fd) };
     let before = file.metadata()?;
     ensure!(
         before.is_file() && before.len() <= MAX_BYTES,
@@ -84,13 +76,7 @@ pub(crate) fn snapshot(root: &Path, name: &str) -> Result<Option<Vec<u8>>> {
     Ok(Some(bytes))
 }
 
-pub(crate) fn sha256(bytes: &[u8]) -> String {
-    ring::digest::digest(&ring::digest::SHA256, bytes)
-        .as_ref()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
+pub(crate) use crate::secure_fs::sha256_hex as sha256;
 
 #[cfg(unix)]
 pub(crate) fn validate(root: &Path, name: &str) -> Result<Validation> {
