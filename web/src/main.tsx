@@ -329,10 +329,7 @@ function Manager({
       </aside>
       <div className="workspace">
         <header>
-          <div>
-            <p className="eyebrow">MIHOMO / {t(language, "serviceManagement")}</p>
-            <h1>{title}</h1>
-          </div>
+          <h1>{title}</h1>
           <span className={`badge ${status.phase === "running" ? "good" : ""}`}>
             {phaseLabel(language, status.phase)}
           </span>
