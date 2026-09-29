@@ -53,8 +53,8 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task (P1):** Runtime revision and orphan file garbage collection. Implemented `gc_revisions(&mut self, keep_count: usize)` and `clean_state_temporaries(&self)` in `RuntimeStore` (`crates/headless-core/src/config/runtime.rs`), ensuring active `current` and `pending` revisions are strictly preserved while stale/unreferenced revisions are bounded and orphan temporary state files (`state-*.tmp`) are safely cleaned up. Enforced private `0700` directory permissions on `config/revisions` and `profiles` directories upon creation. Added unit tests in `crates/headless-core/tests/runtime_store.rs` verifying active revision preservation, orphan cleanup, and bounded revision retention across commit loops.
-**Next implementation task (P1):** Remaining authoritative resource and settings lifecycle integration.
+**Latest completed task:** Full test suite execution and live dev service verification. Resolved Geo online canonical naming validation, non-failing provider declaration inventory inspection, and test upgrade race conditions. Verified zero compilation errors and warnings across all crates (`cargo check`, `cargo clippy`), all 20 Python deployment tests (`scripts/tests`), TypeScript & Vite web builds, full workspace unit tests (`cargo test --workspace`), and verified live end-to-end proxy traffic against real `./data` subscriptions.
+**Next implementation task:** Maintain deployed Linux service, support user feature queries, and expand deferred capabilities upon request.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 
