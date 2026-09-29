@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, command, type Perform } from "./api";
-import { t, type Language } from "./i18n";
+import { phaseLabel, t, type Language } from "./i18n";
 import type { CoreStatus } from "./types";
 
 type Release = { version: string; bytes: number; target: string };
@@ -15,6 +15,7 @@ export function CoreUpgradePage({
   busy,
   perform,
   logout,
+  activeProfileName,
 }: {
   token: string;
   language: Language;
@@ -23,6 +24,7 @@ export function CoreUpgradePage({
   busy: boolean;
   perform: Perform;
   logout: (reason?: string) => void;
+  activeProfileName?: string;
 }) {
   const [channel, setChannel] = useState<"stable" | "alpha">("stable");
   const label = channel === "alpha" ? "Alpha" : t(language, "channelStable");
@@ -109,9 +111,67 @@ export function CoreUpgradePage({
       if (alive.current) setWorking(false);
     }
   }
+  const transitional = [
+    "starting",
+    "stopping",
+    "recovering",
+    "shutdown",
+  ].includes(status.phase);
   const disabled = busy || working || connection !== "已连接" || !version;
   return (
-    <section className="panel" aria-label={t(language, "coreUpgradeTitle", { label })}>
+    <>
+      <section className="panel" aria-label={t(language, "coreStatus")}>
+        <div className="panel-title">
+          <h2>{t(language, "coreManagement")}</h2>
+        </div>
+        <dl className="proxy-details">
+          <div>
+            <dt>{t(language, "coreRunningPhase")}</dt>
+            <dd>
+              <span className={`badge ${status.phase === "running" ? "good" : ""}`}>
+                {phaseLabel(language, status.phase)}
+              </span>
+            </dd>
+          </div>
+          <div>
+            <dt>{t(language, "corePid")}</dt>
+            <dd className="mono">{status.pid ? status.pid : t(language, "coreStopped")}</dd>
+          </div>
+          <div>
+            <dt>{t(language, "activeProfile")}</dt>
+            <dd>{activeProfileName || (status.active_profile ? status.active_profile : t(language, "noProfile"))}</dd>
+          </div>
+          <div>
+            <dt>{t(language, "coreName")}</dt>
+            <dd className="mono">{status.version || t(language, "coreStopped")}</dd>
+          </div>
+        </dl>
+        <div className="actions">
+          <button
+            type="button"
+            disabled={busy || transitional || status.phase === "running"}
+            onClick={() => void perform("start")}
+          >
+            {t(language, "startCore")}
+          </button>
+          <button
+            type="button"
+            disabled={busy || !["running", "recovering"].includes(status.phase)}
+            onClick={() => void perform("stop")}
+          >
+            {t(language, "stopCore")}
+          </button>
+          <button
+            type="button"
+            disabled={busy || transitional}
+            onClick={() => void perform("restart")}
+          >
+            {t(language, "restartCore")}
+          </button>
+        </div>
+      </section>
+
+      <section className="panel" aria-label={t(language, "coreUpgradeTitle", { label })}>
       <div className="panel-title">
         <h2>{t(language, "coreUpgradeTitle", { label })}</h2>
         <button
@@ -223,5 +283,6 @@ export function CoreUpgradePage({
         {t(language, "coreUpgradeHint")}
       </p>
     </section>
+    </>
   );
 }

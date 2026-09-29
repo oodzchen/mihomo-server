@@ -286,12 +286,6 @@ function Manager({
     (item) => item.uid === status.active_profile,
   );
   const title = t(language, pages.find(([path]) => route === path)?.[1] || "overview");
-  const transitional = [
-    "starting",
-    "stopping",
-    "recovering",
-    "shutdown",
-  ].includes(status.phase);
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -325,6 +319,9 @@ function Manager({
           <button className="quiet" onClick={() => logout()}>
             {t(language, "logout")}
           </button>
+          <div className="sidebar-version mono" title={status.version || t(language, "coreName")}>
+            {status.version || t(language, "coreName")}
+          </div>
         </div>
       </aside>
       <div className="workspace">
@@ -334,39 +331,6 @@ function Manager({
             {phaseLabel(language, status.phase)}
           </span>
         </header>
-        <section className="core-strip" aria-label={t(language, "coreStatus")}>
-          <div>
-            <strong>{status.version || t(language, "coreName")}</strong>
-            <p>
-              {active?.name ||
-                (status.active_profile ? status.active_profile : t(language, "noProfile"))}
-              <span className="separator">/</span>
-              {status.pid ? `PID ${status.pid}` : t(language, "coreStopped")}
-            </p>
-          </div>
-          <div className="actions">
-            <button
-              disabled={busy || transitional || status.phase === "running"}
-              onClick={() => void perform("start")}
-            >
-              {t(language, "startCore")}
-            </button>
-            <button
-              disabled={
-                busy || !["running", "recovering"].includes(status.phase)
-              }
-              onClick={() => void perform("stop")}
-            >
-              {t(language, "stopCore")}
-            </button>
-            <button
-              disabled={busy || transitional}
-              onClick={() => void perform("restart")}
-            >
-              {t(language, "restartCore")}
-            </button>
-          </div>
-        </section>
         <div className="feedback" aria-live="polite">
           {busy && <p className="info">{t(language, "working")}</p>}
           {failure && (
@@ -433,6 +397,7 @@ function Manager({
             busy={busy}
             perform={perform}
             logout={logout}
+            activeProfileName={active?.name}
           />
         ) : route === "/settings" ? (
           <SettingsPage

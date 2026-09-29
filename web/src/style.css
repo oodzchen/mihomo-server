@@ -279,6 +279,13 @@ nav a:hover {
   color: #18181b;
   background: transparent;
 }
+.sidebar-version {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #71717a;
+  word-break: break-all;
+  line-height: 1.4;
+}
 .dot {
   display: inline-block;
   width: 6px;
@@ -881,6 +888,9 @@ footer {
   .sidebar-bottom .language-picker {
     width: 110px;
     margin: 0;
+  }
+  .sidebar-bottom .sidebar-version {
+    display: none;
   }
   .workspace {
     padding: 16px 14px;
