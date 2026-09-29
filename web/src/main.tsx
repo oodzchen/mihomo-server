@@ -1737,9 +1737,10 @@ function ProxyPage({
     }
   });
 
-  const toggleGroup = (name: string) => {
+  const toggleGroup = (name: string, defaultCollapsed: boolean) => {
     setCollapsed((prev) => {
-      const next = { ...prev, [name]: !prev[name] };
+      const current = name in prev ? !!prev[name] : defaultCollapsed;
+      const next = { ...prev, [name]: !current };
       try {
         localStorage.setItem("mhs-collapsed-groups", JSON.stringify(next));
       } catch {}
@@ -1940,16 +1941,24 @@ function ProxyPage({
       )}
       {loading && <p className="info">{t(language, "proxyLoading")}</p>}
 
-      {groups.map(([name, group]) => {
-        const isCollapsed = !!collapsed[name];
+      {groups.map(([name, group], index) => {
+        const hasDefaultProxies = groups.some(([gName]) => isDefaultProxies(gName));
+        const defaultCollapsed = hasDefaultProxies ? !isDefaultProxies(name) : index !== 0;
+        const isCollapsed = name in collapsed ? !!collapsed[name] : defaultCollapsed;
         const currentSelection = group.fixed || group.now || t(language, "proxyGroupWaiting");
         return (
           <section className="panel" key={name}>
-            <div className={`panel-title group-header ${isCollapsed ? "collapsed" : ""}`}>
+            <div
+              className={`panel-title group-header ${isCollapsed ? "collapsed" : ""}`}
+              onClick={() => toggleGroup(name, defaultCollapsed)}
+            >
               <button
                 type="button"
                 className="group-title-btn"
-                onClick={() => toggleGroup(name)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleGroup(name, defaultCollapsed);
+                }}
                 aria-expanded={!isCollapsed}
                 aria-label={`${name} ${isCollapsed ? "展开" : "折叠"}`}
               >
@@ -1964,7 +1973,7 @@ function ProxyPage({
                   </p>
                 </div>
               </button>
-              <div className="panel-actions">
+              <div className="panel-actions" onClick={(e) => e.stopPropagation()}>
                 <button
                   type="button"
                   disabled={busy || loading || testingGroup === name}
