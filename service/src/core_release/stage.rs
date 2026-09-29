@@ -256,5 +256,5 @@ impl CoreDownloads {
 }
 
 #[cfg(test)]
-#[path = "core_stage_tests.rs"]
+#[path = "stage_tests.rs"]
 mod tests;

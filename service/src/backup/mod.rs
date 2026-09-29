@@ -1,19 +1,15 @@
 //! Bounded ZIP export, inspection and disposable restore rehearsal. Explicit retained storage is separate from export.
 use headless_core::backup::BackupMetadata;
 
-#[path = "backup_inspect.rs"]
 pub(crate) mod inspect;
 
 #[cfg(unix)]
-#[path = "backup_candidates.rs"]
 pub(crate) mod candidates;
 
 #[cfg(unix)]
-#[path = "backup_restore.rs"]
 pub(crate) mod restore;
 
 #[cfg(target_os = "linux")]
-#[path = "backup_storage.rs"]
 pub(crate) mod storage;
 
 pub(crate) enum RetainedOperation {
@@ -293,5 +289,4 @@ pub(crate) mod export {
 }
 
 #[cfg(all(test, unix))]
-#[path = "backup_tests.rs"]
 mod tests;

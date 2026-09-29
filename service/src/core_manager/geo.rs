@@ -2,7 +2,7 @@
 use super::*;
 
 impl CoreManager {
-    pub async fn geo_settings(&self) -> Result<crate::geo_settings::Snapshot> {
+    pub async fn geo_settings(&self) -> Result<crate::geo::settings::Snapshot> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         self.call(
             CommandMessage::ReadGeoSettings,
@@ -12,7 +12,7 @@ impl CoreManager {
     }
 
     #[cfg(unix)]
-    pub async fn geo_seed_info(&self, name: String) -> Result<crate::geo_update::SeedInfo> {
+    pub async fn geo_seed_info(&self, name: String) -> Result<crate::geo::update::SeedInfo> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         self.call(
             |reply| CommandMessage::GeoSeedInfo { name, reply },
@@ -24,8 +24,8 @@ impl CoreManager {
     #[cfg(unix)]
     pub async fn install_geo_seed(
         &self,
-        request: crate::geo_update::InstallRequest,
-    ) -> Result<crate::geo_update::Receipt> {
+        request: crate::geo::update::InstallRequest,
+    ) -> Result<crate::geo::update::Receipt> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         self.call(
             |reply| CommandMessage::InstallGeoSeed { request, reply },
@@ -35,7 +35,7 @@ impl CoreManager {
     }
 
     #[cfg(unix)]
-    pub async fn geo_online_info(&self, name: String) -> Result<crate::geo_online::Info> {
+    pub async fn geo_online_info(&self, name: String) -> Result<crate::geo::online::Info> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         self.call(
             |reply| CommandMessage::GeoOnlineInfo { name, reply },
@@ -45,7 +45,7 @@ impl CoreManager {
     }
 
     #[cfg(unix)]
-    pub async fn update_geo_online(&self, request: crate::geo_online::Request) -> Result<crate::geo_update::Receipt> {
+    pub async fn update_geo_online(&self, request: crate::geo::online::Request) -> Result<crate::geo::update::Receipt> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         self.call(
             |reply| CommandMessage::UpdateGeoOnline { request, reply },
@@ -54,7 +54,7 @@ impl CoreManager {
         .await
     }
 
-    pub async fn validate_geo(&self, name: String) -> Result<crate::geo_validation::Validation> {
+    pub async fn validate_geo(&self, name: String) -> Result<crate::geo::validation::Validation> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
         self.call(
             |reply| CommandMessage::ValidateGeo { name, reply },
@@ -74,10 +74,10 @@ impl Actor {
     #[cfg(unix)]
     pub(super) async fn geo_download_route(
         &mut self,
-        choice: crate::geo_online::RouteChoice,
+        choice: crate::geo::online::RouteChoice,
         config: &Mapping,
     ) -> Result<crate::core_release::Route> {
-        use crate::geo_online::RouteChoice;
+        use crate::geo::online::RouteChoice;
         match choice {
             RouteChoice::Direct => Ok(crate::core_release::Route::Direct),
             RouteChoice::System => Ok(crate::core_release::Route::System),
@@ -109,10 +109,10 @@ impl Actor {
     #[cfg(unix)]
     pub(super) async fn verify_prepared_geo(
         &mut self,
-        mut prepared: crate::geo_update::Prepared,
+        mut prepared: crate::geo::update::Prepared,
         name: &str,
-    ) -> Result<crate::geo_update::Prepared> {
-        if crate::dat_validation::DAT_FILES.contains(&name) {
+    ) -> Result<crate::geo::update::Prepared> {
+        if crate::geo::dat::DAT_FILES.contains(&name) {
             let (next, probe) = tokio::task::spawn_blocking(move || {
                 let probe = prepared.probe()?;
                 Ok::<_, anyhow::Error>((prepared, probe))
@@ -145,9 +145,9 @@ impl Actor {
     #[cfg(unix)]
     pub(super) async fn publish_prepared_geo(
         &mut self,
-        prepared: crate::geo_update::Prepared,
+        prepared: crate::geo::update::Prepared,
         name: &str,
-    ) -> Result<crate::geo_update::Receipt> {
+    ) -> Result<crate::geo::update::Receipt> {
         let prepared = self.verify_prepared_geo(prepared, name).await?;
         tokio::task::spawn_blocking(move || prepared.publish())
             .await
@@ -157,9 +157,9 @@ impl Actor {
     #[cfg(unix)]
     pub(super) async fn publish_live_geo(
         &mut self,
-        prepared: crate::geo_update::Prepared,
+        prepared: crate::geo::update::Prepared,
         name: &str,
-    ) -> Result<crate::geo_update::Receipt> {
+    ) -> Result<crate::geo::update::Receipt> {
         let prepared = self.verify_prepared_geo(prepared, name).await?;
         if prepared.previous_sha256() == Some(prepared.candidate_sha256()) {
             return tokio::task::spawn_blocking(move || prepared.publish())
@@ -167,7 +167,7 @@ impl Actor {
                 .context("Geo no-change publication worker failed")?;
         }
         let data = self.options.data_dir.clone();
-        crate::geo_live::begin(&data, name, prepared.previous_sha256(), prepared.candidate_sha256())?;
+        crate::geo::live::begin(&data, name, prepared.previous_sha256(), prepared.candidate_sha256())?;
         self.retry_at = None;
         self.publish(CorePhase::Stopping, None);
         let result = async {
@@ -191,12 +191,12 @@ impl Actor {
                 .await
                 .context("Geo activation health check timed out")??;
             let on_disk =
-                crate::geo_validation::snapshot(&data, name)?.map(|bytes| crate::geo_validation::sha256(&bytes));
+                crate::geo::validation::snapshot(&data, name)?.map(|bytes| crate::geo::validation::sha256(&bytes));
             ensure!(
                 on_disk.as_deref() == Some(receipt.validation.sha256.as_str()),
                 "Geo file changed during activation"
             );
-            let commit = crate::geo_live::commit(&data)?;
+            let commit = crate::geo::live::commit(&data)?;
             Ok::<_, anyhow::Error>((receipt, commit))
         }
         .await;
@@ -213,7 +213,7 @@ impl Actor {
                     self.publish(CorePhase::Failed, Some("Geo rollback requires core cleanup".into()));
                     return Err(error.context(format!("Geo candidate cleanup failed: {stop:#}")));
                 }
-                if let Err(recovery) = crate::geo_live::recover(&data) {
+                if let Err(recovery) = crate::geo::live::recover(&data) {
                     self.publish(CorePhase::Failed, Some("Geo rollback recovery required".into()));
                     return Err(error.context(format!("Geo rollback failed: {recovery:#}")));
                 }
@@ -236,7 +236,7 @@ impl Actor {
         }
     }
 
-    pub(super) async fn read_geo_settings(&self) -> Result<crate::geo_settings::Snapshot> {
+    pub(super) async fn read_geo_settings(&self) -> Result<crate::geo::settings::Snapshot> {
         let (revision, config) = self.committed_config()?;
         let running = self.status.borrow().phase == CorePhase::Running;
         let actual = if running {
@@ -247,7 +247,7 @@ impl Actor {
         } else {
             None
         };
-        crate::geo_settings::snapshot(
+        crate::geo::settings::snapshot(
             &self.settings.runtime,
             config.as_ref(),
             revision,
@@ -286,15 +286,15 @@ impl Actor {
         .context("resource inventory worker failed")?
     }
 
-    pub(super) async fn validate_geo(&self, name: String) -> Result<crate::geo_validation::Validation> {
+    pub(super) async fn validate_geo(&self, name: String) -> Result<crate::geo::validation::Validation> {
         let data = self.options.data_dir.clone();
-        tokio::task::spawn_blocking(move || crate::geo_validation::validate(&data, &name))
+        tokio::task::spawn_blocking(move || crate::geo::validation::validate(&data, &name))
             .await
             .context("Geo validation worker failed")?
     }
 
     #[cfg(unix)]
-    pub(super) async fn geo_seed_info(&self, name: String) -> Result<crate::geo_update::SeedInfo> {
+    pub(super) async fn geo_seed_info(&self, name: String) -> Result<crate::geo::update::SeedInfo> {
         let resources = self
             .options
             .resources
@@ -309,8 +309,8 @@ impl Actor {
     #[cfg(unix)]
     pub(super) async fn install_geo_seed(
         &mut self,
-        request: crate::geo_update::InstallRequest,
-    ) -> Result<crate::geo_update::Receipt> {
+        request: crate::geo::update::InstallRequest,
+    ) -> Result<crate::geo::update::Receipt> {
         ensure!(
             self.status.borrow().phase == CorePhase::Stopped && self.process.is_none(),
             "stop the core before installing a Geo seed"
@@ -321,7 +321,7 @@ impl Actor {
             .clone()
             .context("Geo updates require bundle resources")?;
         let data = self.options.data_dir.clone();
-        if crate::dat_validation::DAT_FILES.contains(&request.name.as_str()) {
+        if crate::geo::dat::DAT_FILES.contains(&request.name.as_str()) {
             let name = request.name.clone();
             let prepared = tokio::task::spawn_blocking(move || resources.prepare_dat_seed(&data, &request))
                 .await
@@ -335,29 +335,29 @@ impl Actor {
     }
 
     #[cfg(unix)]
-    pub(super) fn geo_online_info(&self, name: &str) -> Result<crate::geo_online::Info> {
+    pub(super) fn geo_online_info(&self, name: &str) -> Result<crate::geo::online::Info> {
         let config = self.store.read_current()?;
-        crate::geo_online::info(&config, &self.options.data_dir, name)
+        crate::geo::online::info(&config, &self.options.data_dir, name)
     }
 
     /// Download from the committed source, then publish live (running) or in place (stopped).
     #[cfg(unix)]
     pub(super) async fn update_geo_online(
         &mut self,
-        request: crate::geo_online::Request,
-    ) -> Result<crate::geo_update::Receipt> {
+        request: crate::geo::online::Request,
+    ) -> Result<crate::geo::update::Receipt> {
         let running = self.status.borrow().phase == CorePhase::Running && self.process.is_some();
         ensure!(
             running || (self.status.borrow().phase == CorePhase::Stopped && self.process.is_none()),
             "Geo online update requires a running or stopped core"
         );
         let config = self.store.read_current()?;
-        let (url, source_sha256) = crate::geo_online::source(&config, &request.name)?;
+        let (url, source_sha256) = crate::geo::online::source(&config, &request.name)?;
         ensure!(
             request.expected_source_sha256.eq_ignore_ascii_case(&source_sha256),
             "Geo source changed since inspection; inspect again"
         );
-        let inspected = crate::geo_online::info(&config, &self.options.data_dir, &request.name)?;
+        let inspected = crate::geo::online::info(&config, &self.options.data_dir, &request.name)?;
         ensure!(
             match (&request.expected_current_sha256, &inspected.current_sha256) {
                 (None, None) => true,
@@ -370,7 +370,7 @@ impl Actor {
         let downloaded = tokio::select! {
             biased;
             _ = closing(&mut self.shutdown) => bail!("Geo download cancelled during shutdown"),
-            result = crate::geo_online::fetch(
+            result = crate::geo::online::fetch(
                 &url,
                 &request.name,
                 request.expected_download_sha256.as_deref(),
@@ -388,13 +388,13 @@ impl Actor {
         let data = self.options.data_dir.clone();
         let name = request.name.clone();
         let prepared = tokio::task::spawn_blocking(move || {
-            let install = crate::geo_update::InstallRequest {
+            let install = crate::geo::update::InstallRequest {
                 name: request.name,
                 expected_current_sha256: request.expected_current_sha256,
                 expected_seed_sha256: downloaded.seed.sha256.clone(),
                 accept_metadata_only: request.accept_metadata_only,
             };
-            crate::geo_update::prepare(&downloaded.directory, &data, &downloaded.seed, &install)
+            crate::geo::update::prepare(&downloaded.directory, &data, &downloaded.seed, &install)
         })
         .await
         .context("online Geo staging worker failed")??;

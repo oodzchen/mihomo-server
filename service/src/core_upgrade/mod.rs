@@ -576,5 +576,4 @@ pub(crate) fn commit(core: &Path) -> Result<()> {
 }
 
 #[cfg(test)]
-#[path = "core_upgrade_tests.rs"]
 mod tests;

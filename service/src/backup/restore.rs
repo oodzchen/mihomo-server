@@ -494,5 +494,5 @@ pub(crate) async fn publication(
 }
 
 #[cfg(test)]
-#[path = "backup_restore_tests.rs"]
+#[path = "restore_tests.rs"]
 mod tests;

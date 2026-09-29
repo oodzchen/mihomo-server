@@ -53,9 +53,9 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task:** Code-quality refactor step 3 — typed Web connection state and per-page modules (see below).
+**Latest completed task:** Code-quality refactor step 4 — real module directories for backup, core release/upgrade and Geo (see below).
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
-**Next implementation task:** Code-quality refactor step 4 — real module directories for backup, core release/upgrade and Geo.
+**Next implementation task:** Maintain deployed Linux service, support user feature queries, and expand deferred capabilities upon request.
 
 ## Code-quality refactor (behavior-preserving)
 
@@ -107,6 +107,15 @@ pre-refactor baseline.
    app shell (App, Login, Manager, routing); pages moved verbatim to
    `overview.tsx`, `profiles.tsx`, `enhancement-editors.tsx`, `config.tsx`,
    `proxies.tsx` and `logs.tsx`, with shared `describe`/`bytes` in `format.ts`.
+4. **Real module directories — done.** Modules that were nested through
+   `#[path]` now live in matching directories: `service/src/backup/`
+   (`mod`, `inspect`, `candidates`, `restore`, `storage` and tests),
+   `service/src/core_release/` (`mod`, `stage`, `transport` and tests) and
+   `service/src/core_upgrade/`. Geo modules are grouped as `service/src/geo/`
+   (`dat`, `live`, `online`, `resources`, `settings`, `update`, `validation`);
+   their crate paths changed from `crate::geo_*`/`crate::dat_validation` to
+   `crate::geo::*` with unchanged visibility and platform gating.
+
 Not changed on purpose: the remaining hard-coded Chinese text in the settings
 pages (translation content, not a refactor), and this document's long
 increment history (the autonomous workbench appends to it).

@@ -242,7 +242,7 @@ impl CoreOptions {
         let lock = open.open(self.data_dir.join(".mihomo-server.lock"))?;
         lock.try_lock().context("another service owns this data directory")?;
         #[cfg(unix)]
-        crate::geo_live::recover(&self.data_dir).context("live Geo rollback recovery failed")?;
+        crate::geo::live::recover(&self.data_dir).context("live Geo rollback recovery failed")?;
         if let Some(resources) = &self.resources {
             let core_directory = self.core_dir.clone().unwrap_or_else(|| self.data_dir.join("core"));
             crate::core_upgrade::recover(&core_directory).context("managed core upgrade recovery failed")?;

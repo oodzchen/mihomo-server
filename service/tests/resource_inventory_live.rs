@@ -230,7 +230,7 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
         assert_eq!(manager.status().pid, before_check.pid);
         assert_eq!(manager.status().config_revision, before_check.config_revision);
         let seed_info = manager.geo_seed_info("geoip.metadb".into()).await?;
-        let mut update = mihomo_server::geo_update::InstallRequest {
+        let mut update = mihomo_server::geo::update::InstallRequest {
             name: "geoip.metadb".into(),
             expected_current_sha256: seed_info.current_sha256,
             expected_seed_sha256: seed_info.seed_sha256,

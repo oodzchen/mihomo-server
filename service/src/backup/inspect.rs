@@ -408,5 +408,5 @@ pub(crate) fn run(
 }
 
 #[cfg(test)]
-#[path = "backup_inspect_tests.rs"]
+#[path = "inspect_tests.rs"]
 mod tests;

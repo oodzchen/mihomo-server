@@ -402,7 +402,7 @@ async fn real_mihomo_package_is_staged_and_read_back_without_changing_the_existi
     Ok(())
 }
 
-#[path = "../tests/support/tls.rs"]
+#[path = "../../tests/support/tls.rs"]
 #[allow(dead_code)] // Shared HTTPS fixture also supplies helpers for other integration suites.
 mod https_fixture;
 

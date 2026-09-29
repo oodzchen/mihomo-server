@@ -106,7 +106,7 @@ pub enum ManagementCommand {
         #[serde(default)]
         accept_metadata_only: bool,
         #[serde(default)]
-        route: crate::geo_online::RouteChoice,
+        route: crate::geo::online::RouteChoice,
         #[serde(default)]
         danger_accept_invalid_certs: bool,
     },
@@ -313,7 +313,7 @@ impl Management {
                 accept_metadata_only,
             } => serde_json::to_value(
                 self.manager
-                    .install_geo_seed(crate::geo_update::InstallRequest {
+                    .install_geo_seed(crate::geo::update::InstallRequest {
                         name,
                         expected_current_sha256,
                         expected_seed_sha256,
@@ -336,7 +336,7 @@ impl Management {
                 danger_accept_invalid_certs,
             } => serde_json::to_value(
                 self.manager
-                    .update_geo_online(crate::geo_online::Request {
+                    .update_geo_online(crate::geo::online::Request {
                         name,
                         expected_current_sha256,
                         expected_source_sha256,

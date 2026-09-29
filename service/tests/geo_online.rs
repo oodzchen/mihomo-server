@@ -4,7 +4,7 @@ mod dat;
 use anyhow::Result;
 use mihomo_server::{
     core_manager::{CoreManager, CoreOptions, CorePhase},
-    geo_online::{Request, RouteChoice},
+    geo::online::{Request, RouteChoice},
 };
 use std::{
     fs,

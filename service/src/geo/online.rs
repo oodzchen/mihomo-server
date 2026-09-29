@@ -1,5 +1,5 @@
 //! Bounded direct downloads from a committed Geo URL; no caller-supplied destination or URL.
-use crate::{geo_resources::Seed, geo_validation};
+use super::{resources::Seed, validation};
 use anyhow::{Context as _, Result, ensure};
 use ring::digest::{Context, SHA256};
 use serde::{Deserialize, Serialize};
@@ -74,13 +74,13 @@ pub(crate) fn source(config: &Mapping, name: &str) -> Result<(url::Url, String)>
             && url.fragment().is_none(),
         "Geo source requires HTTP(S) without credentials or fragment"
     );
-    let fingerprint = geo_validation::sha256(text.as_bytes());
+    let fingerprint = validation::sha256(text.as_bytes());
     Ok((url, fingerprint))
 }
 
 pub(crate) fn info(config: &Mapping, data: &Path, name: &str) -> Result<Info> {
     let (_, source_sha256) = source(config, name)?;
-    let current_sha256 = geo_validation::snapshot(data, name)?.map(|bytes| geo_validation::sha256(&bytes));
+    let current_sha256 = validation::snapshot(data, name)?.map(|bytes| validation::sha256(&bytes));
     Ok(Info {
         name: name.into(),
         current_sha256,
@@ -125,7 +125,7 @@ pub(crate) async fn fetch(
     danger_accept_invalid_certs: bool,
 ) -> Result<Download> {
     ensure!(
-        geo_validation::MMDB_FILES.contains(&name) || crate::dat_validation::DAT_FILES.contains(&name),
+        validation::MMDB_FILES.contains(&name) || crate::geo::dat::DAT_FILES.contains(&name),
         "unsupported online Geo filename"
     );
     if let Some(hash) = expected_download_sha256 {
@@ -299,7 +299,7 @@ mod tests {
         let origin = format!("http://{}", listener.local_addr()?);
         let server = tokio::spawn(axum::serve(listener, app).into_future());
         let good = url::Url::parse(&format!("{origin}/ok"))?;
-        let hash = geo_validation::sha256(b"private geo fixture");
+        let hash = validation::sha256(b"private geo fixture");
         let downloaded = fetch(&good, "geosite.dat", Some(&hash), &route, false).await?;
         assert_eq!(downloaded.seed.bytes, 19);
         assert_eq!(downloaded.seed.sha256, hash);
@@ -343,7 +343,7 @@ mod tests {
 
     #[tokio::test]
     async fn downloaded_mmdb_uses_existing_stopped_core_staging_and_preserves_old_on_stale_hash() -> Result<()> {
-        let bytes = crate::geo_validation::tests::fixture_with_description(true);
+        let bytes = crate::geo::validation::tests::fixture_with_description(true);
         let app = Router::new().route(
             "/country",
             get({
@@ -362,7 +362,7 @@ mod tests {
         let downloaded = fetch(
             &url,
             "Country.mmdb",
-            Some(&geo_validation::sha256(&bytes)),
+            Some(&validation::sha256(&bytes)),
             &crate::core_release::Route::Direct,
             false,
         )
@@ -370,17 +370,17 @@ mod tests {
         let data = tempfile_data()?;
         let path = data.join("Country.mmdb");
         fs::write(&path, b"old database")?;
-        let mut request = crate::geo_update::InstallRequest {
+        let mut request = crate::geo::update::InstallRequest {
             name: "Country.mmdb".into(),
             expected_current_sha256: Some("0".repeat(64)),
             expected_seed_sha256: downloaded.seed.sha256.clone(),
             accept_metadata_only: false,
         };
-        assert!(crate::geo_update::prepare(&downloaded.directory, &data, &downloaded.seed, &request).is_err());
+        assert!(crate::geo::update::prepare(&downloaded.directory, &data, &downloaded.seed, &request).is_err());
         assert_eq!(fs::read(&path)?, b"old database");
-        request.expected_current_sha256 = Some(geo_validation::sha256(b"old database"));
+        request.expected_current_sha256 = Some(validation::sha256(b"old database"));
         let receipt =
-            crate::geo_update::prepare(&downloaded.directory, &data, &downloaded.seed, &request)?.publish()?;
+            crate::geo::update::prepare(&downloaded.directory, &data, &downloaded.seed, &request)?.publish()?;
         assert!(receipt.changed && receipt.validation.verified);
         assert!(receipt.core_load_verified.is_none());
         assert_eq!(fs::read(&path)?, bytes);

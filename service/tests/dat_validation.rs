@@ -149,7 +149,7 @@ async fn dat_validation_preserves_running_core_and_fixtures_match_both_loaders_a
 #[ignore = "requires real Mihomo; pinned DAT bundle and isolated compatibility probe"]
 async fn stopped_pinned_dat_install_checks_core_and_keeps_runtime_recoverable() -> Result<()> {
     use mihomo_server::{
-        geo_update::InstallRequest,
+        geo::update::InstallRequest,
         resources::{Resources, TARGET},
     };
     use ring::digest::{SHA256, digest};
@@ -250,7 +250,7 @@ async fn stopped_pinned_dat_install_checks_core_and_keeps_runtime_recoverable() 
 #[ignore = "requires real Mihomo; invalid regexp must fail isolated DAT installation"]
 async fn dat_install_rejects_core_invalid_regex_without_replacing_old_resource() -> Result<()> {
     use mihomo_server::{
-        geo_update::InstallRequest,
+        geo::update::InstallRequest,
         resources::{Resources, TARGET},
     };
     use ring::digest::{SHA256, digest};

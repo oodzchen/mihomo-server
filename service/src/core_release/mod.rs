@@ -1,8 +1,6 @@
 //! Stable/Alpha upstream release discovery and verified compressed-package preparation.
 //! Actor-owned staging validates executables; activation remains a separate workflow.
-#[path = "core_stage.rs"]
 mod stage;
-#[path = "core_release_transport.rs"]
 mod transport;
 use crate::remote::tls::{self, RootMode};
 use crate::resources::TARGET;
@@ -658,5 +656,4 @@ fn check_file(path: &Path, limit: u64) -> Result<()> {
 }
 
 #[cfg(test)]
-#[path = "core_release_tests.rs"]
 mod tests;

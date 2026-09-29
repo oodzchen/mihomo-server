@@ -28,7 +28,7 @@ struct Manifest {
     core: Core,
     #[cfg(unix)]
     #[serde(default)]
-    geo: BTreeMap<String, crate::geo_resources::Seed>,
+    geo: BTreeMap<String, crate::geo::resources::Seed>,
     #[serde(default)]
     licenses: Option<LicenseInfo>,
 }
@@ -44,7 +44,7 @@ pub struct Resources {
     root: PathBuf,
     hash: String,
     #[cfg(unix)]
-    geo: BTreeMap<String, crate::geo_resources::Seed>,
+    geo: BTreeMap<String, crate::geo::resources::Seed>,
     licenses: Option<LicenseInfo>,
 }
 impl Resources {
@@ -84,7 +84,7 @@ impl Resources {
             "invalid pinned core SHA-256"
         );
         #[cfg(unix)]
-        crate::geo_resources::validate_manifest(&manifest.geo)?;
+        crate::geo::resources::validate_manifest(&manifest.geo)?;
         Ok(Self {
             root,
             hash: manifest.core.sha256.to_ascii_lowercase(),
@@ -106,7 +106,7 @@ impl Resources {
     pub fn initialize_geo(&self, data: &Path) -> Result<Vec<String>> {
         #[cfg(unix)]
         {
-            crate::geo_resources::initialize(&self.root.join("geo"), data, &self.geo)
+            crate::geo::resources::initialize(&self.root.join("geo"), data, &self.geo)
         }
         #[cfg(not(unix))]
         {
@@ -116,50 +116,50 @@ impl Resources {
     }
 
     #[cfg(unix)]
-    pub(crate) fn geo_seed_info(&self, data: &Path, name: &str) -> Result<crate::geo_update::SeedInfo> {
+    pub(crate) fn geo_seed_info(&self, data: &Path, name: &str) -> Result<crate::geo::update::SeedInfo> {
         ensure!(
-            crate::geo_validation::MMDB_FILES.contains(&name) || crate::dat_validation::DAT_FILES.contains(&name),
+            crate::geo::validation::MMDB_FILES.contains(&name) || crate::geo::dat::DAT_FILES.contains(&name),
             "unsupported bundled Geo update name"
         );
         let seed = self
             .geo
             .get(name)
             .ok_or_else(|| anyhow::anyhow!("no pinned bundle seed for this Geo file"))?;
-        crate::geo_update::info(data, name, seed)
+        crate::geo::update::info(data, name, seed)
     }
 
     #[cfg(unix)]
     pub(crate) fn install_geo_seed(
         &self,
         data: &Path,
-        request: &crate::geo_update::InstallRequest,
-    ) -> Result<crate::geo_update::Receipt> {
+        request: &crate::geo::update::InstallRequest,
+    ) -> Result<crate::geo::update::Receipt> {
         ensure!(
-            crate::geo_validation::MMDB_FILES.contains(&request.name.as_str()),
+            crate::geo::validation::MMDB_FILES.contains(&request.name.as_str()),
             "only MMDB bundle updates are supported"
         );
         let seed = self
             .geo
             .get(&request.name)
             .ok_or_else(|| anyhow::anyhow!("no pinned bundle seed for this Geo file"))?;
-        crate::geo_update::install(&self.root.join("geo"), data, seed, request)
+        crate::geo::update::install(&self.root.join("geo"), data, seed, request)
     }
 
     #[cfg(unix)]
     pub(crate) fn prepare_dat_seed(
         &self,
         data: &Path,
-        request: &crate::geo_update::InstallRequest,
-    ) -> Result<crate::geo_update::Prepared> {
+        request: &crate::geo::update::InstallRequest,
+    ) -> Result<crate::geo::update::Prepared> {
         ensure!(
-            crate::dat_validation::DAT_FILES.contains(&request.name.as_str()),
+            crate::geo::dat::DAT_FILES.contains(&request.name.as_str()),
             "only DAT bundle updates require a core probe"
         );
         let seed = self
             .geo
             .get(&request.name)
             .ok_or_else(|| anyhow::anyhow!("no pinned bundle seed for this Geo file"))?;
-        crate::geo_update::prepare(&self.root.join("geo"), data, seed, request)
+        crate::geo::update::prepare(&self.root.join("geo"), data, seed, request)
     }
 
     /// Called only while the manager owns its data-directory lock.

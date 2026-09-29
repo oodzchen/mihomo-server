@@ -3,7 +3,7 @@ use anyhow::{Result, ensure};
 use serde::Serialize;
 use std::path::Path;
 
-pub use crate::dat_validation::Statistics as DatStatistics;
+pub use crate::geo::dat::Statistics as DatStatistics;
 
 pub const MMDB_FILES: [&str; 3] = ["Country.mmdb", "ASN.mmdb", "geoip.metadb"];
 const MAX_BYTES: u64 = 128 * 1024 * 1024;
@@ -38,7 +38,7 @@ pub(crate) fn snapshot(root: &Path, name: &str) -> Result<Option<Vec<u8>>> {
         os::unix::fs::{MetadataExt as _, OpenOptionsExt as _},
     };
     ensure!(
-        MMDB_FILES.contains(&name) || crate::dat_validation::DAT_FILES.contains(&name),
+        MMDB_FILES.contains(&name) || crate::geo::dat::DAT_FILES.contains(&name),
         "unsupported Geo validation filename"
     );
     let directory = OpenOptions::new()
@@ -84,8 +84,8 @@ pub(crate) fn validate(root: &Path, name: &str) -> Result<Validation> {
     ensure!(!bytes.is_empty(), "Geo validation requires a nonempty file");
     let size = bytes.len() as u64;
     let hash = sha256(&bytes);
-    if crate::dat_validation::DAT_FILES.contains(&name) {
-        let dat = crate::dat_validation::validate(&bytes, name)?;
+    if crate::geo::dat::DAT_FILES.contains(&name) {
+        let dat = crate::geo::dat::validate(&bytes, name)?;
         let verified = dat.unknown_field_count == 0;
         return Ok(Validation {
             name: name.into(),
@@ -242,8 +242,8 @@ pub(crate) mod tests {
     fn dat_snapshot_reports_hash_counts_and_limits_without_mmdb_metadata() -> Result<()> {
         let directory = Directory::new()?;
         for (name, fixture) in [
-            ("geoip.dat", crate::dat_validation::fixtures::geoip()),
-            ("geosite.dat", crate::dat_validation::fixtures::geosite()),
+            ("geoip.dat", crate::geo::dat::fixtures::geoip()),
+            ("geosite.dat", crate::geo::dat::fixtures::geosite()),
         ] {
             let path = directory.0.join(name);
             fs::write(&path, &fixture)?;
@@ -260,11 +260,11 @@ pub(crate) mod tests {
             assert!(!json.to_string().contains("exact.dat.test"));
             assert_eq!(fs::read(&path)?, fixture);
             let record = if name == "geoip.dat" {
-                crate::dat_validation::fixtures::cidr(&[192, 0, 2, 0], 24)
+                crate::geo::dat::fixtures::cidr(&[192, 0, 2, 0], 24)
             } else {
-                crate::dat_validation::fixtures::domain(3, b"example.test")
+                crate::geo::dat::fixtures::domain(3, b"example.test")
             };
-            let missing_cn = crate::dat_validation::fixtures::group(b"custom", &[record]);
+            let missing_cn = crate::geo::dat::fixtures::group(b"custom", &[record]);
             fs::write(&path, missing_cn)?;
             let missing = validate(&directory.0, name)?;
             assert!(missing.verified);

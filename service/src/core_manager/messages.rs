@@ -124,28 +124,28 @@ pub(super) enum CommandMessage {
     #[cfg(unix)]
     GeoSeedInfo {
         name: String,
-        reply: oneshot::Sender<Result<crate::geo_update::SeedInfo>>,
+        reply: oneshot::Sender<Result<crate::geo::update::SeedInfo>>,
     },
     #[cfg(unix)]
     InstallGeoSeed {
-        request: crate::geo_update::InstallRequest,
-        reply: oneshot::Sender<Result<crate::geo_update::Receipt>>,
+        request: crate::geo::update::InstallRequest,
+        reply: oneshot::Sender<Result<crate::geo::update::Receipt>>,
     },
     #[cfg(unix)]
     GeoOnlineInfo {
         name: String,
-        reply: oneshot::Sender<Result<crate::geo_online::Info>>,
+        reply: oneshot::Sender<Result<crate::geo::online::Info>>,
     },
     #[cfg(unix)]
     UpdateGeoOnline {
-        request: crate::geo_online::Request,
-        reply: oneshot::Sender<Result<crate::geo_update::Receipt>>,
+        request: crate::geo::online::Request,
+        reply: oneshot::Sender<Result<crate::geo::update::Receipt>>,
     },
     ValidateGeo {
         name: String,
-        reply: oneshot::Sender<Result<crate::geo_validation::Validation>>,
+        reply: oneshot::Sender<Result<crate::geo::validation::Validation>>,
     },
-    ReadGeoSettings(oneshot::Sender<Result<crate::geo_settings::Snapshot>>),
+    ReadGeoSettings(oneshot::Sender<Result<crate::geo::settings::Snapshot>>),
     ReadConnectionSettings(oneshot::Sender<Result<crate::connection_settings::Snapshot>>),
     ReadSettings(oneshot::Sender<Result<ServiceSettings>>),
     ReadResources(oneshot::Sender<Result<crate::resource_inventory::Inventory>>),

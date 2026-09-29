@@ -1,7 +1,7 @@
 //! Crash-recoverable rollback record for a live Geo replacement.
 //! The data-directory lock is held by the caller. A pending marker is durable
 //! before publication; removing that marker is the commit point.
-use crate::geo_validation;
+use super::validation;
 use anyhow::{Context as _, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -21,7 +21,7 @@ struct Pending {
 }
 
 fn hash(data: &Path, name: &str) -> Result<Option<String>> {
-    Ok(geo_validation::snapshot(data, name)?.map(|bytes| geo_validation::sha256(&bytes)))
+    Ok(validation::snapshot(data, name)?.map(|bytes| validation::sha256(&bytes)))
 }
 
 use crate::secure_fs::sync_directory;
@@ -46,7 +46,7 @@ fn directory(data: &Path) -> Result<PathBuf> {
 
 fn validate_name(name: &str) -> Result<()> {
     ensure!(
-        geo_validation::MMDB_FILES.contains(&name) || crate::dat_validation::DAT_FILES.contains(&name),
+        validation::MMDB_FILES.contains(&name) || crate::geo::dat::DAT_FILES.contains(&name),
         "unsupported live Geo filename"
     );
     Ok(())
@@ -77,9 +77,9 @@ pub(crate) fn begin(data: &Path, name: &str, previous: Option<&str>, candidate: 
     );
     if let Some(previous) = previous {
         // A copy is required: Mihomo may still mutate its Geo inode before it is reaped.
-        let bytes = geo_validation::snapshot(data, name)?.context("Geo rollback source disappeared")?;
+        let bytes = validation::snapshot(data, name)?.context("Geo rollback source disappeared")?;
         ensure!(
-            geo_validation::sha256(&bytes) == previous,
+            validation::sha256(&bytes) == previous,
             "Geo changed while copying rollback file"
         );
         use std::os::unix::fs::OpenOptionsExt as _;
@@ -215,8 +215,8 @@ mod tests {
     fn pending_replacement_rolls_back_after_interruption() -> Result<()> {
         let data = Data::new()?;
         let name = "Country.mmdb";
-        let old = geo_validation::sha256(b"previous");
-        let new = geo_validation::sha256(b"candidate");
+        let old = validation::sha256(b"previous");
+        let new = validation::sha256(b"candidate");
         fs::write(data.0.join(name), b"previous")?;
         begin(&data.0, name, Some(&old), &new)?;
         fs::write(data.0.join("candidate"), b"candidate")?;
@@ -231,7 +231,7 @@ mod tests {
     fn missing_previous_rolls_back_and_committed_candidate_survives() -> Result<()> {
         let data = Data::new()?;
         let name = "geoip.dat";
-        let new = geo_validation::sha256(b"candidate");
+        let new = validation::sha256(b"candidate");
         begin(&data.0, name, None, &new)?;
         fs::write(data.0.join(name), b"candidate")?;
         assert!(recover(&data.0)?);
@@ -248,8 +248,8 @@ mod tests {
     fn outside_change_blocks_automatic_rollback() -> Result<()> {
         let data = Data::new()?;
         let name = "geosite.dat";
-        let old = geo_validation::sha256(b"previous");
-        let new = geo_validation::sha256(b"candidate");
+        let old = validation::sha256(b"previous");
+        let new = validation::sha256(b"candidate");
         fs::write(data.0.join(name), b"previous")?;
         begin(&data.0, name, Some(&old), &new)?;
         fs::write(data.0.join("other"), b"external")?;

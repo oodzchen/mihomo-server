@@ -272,7 +272,7 @@ pub(crate) fn validate(data: &[u8], name: &str) -> Result<Statistics> {
 }
 
 #[cfg(test)]
-#[path = "../tests/fixtures/dat.rs"]
+#[path = "../../tests/fixtures/dat.rs"]
 pub(crate) mod fixtures;
 #[cfg(test)]
 mod tests {

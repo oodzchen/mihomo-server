@@ -3,17 +3,7 @@ pub mod connection_settings;
 pub mod core_manager;
 pub mod core_release;
 pub mod core_upgrade;
-mod dat_validation;
-#[cfg(unix)]
-mod geo_live;
-#[cfg(unix)]
-pub mod geo_online;
-#[cfg(unix)]
-mod geo_resources;
-pub mod geo_settings;
-#[cfg(unix)]
-pub mod geo_update;
-pub mod geo_validation;
+pub mod geo;
 pub mod management;
 mod native_tun;
 mod proxy_access;

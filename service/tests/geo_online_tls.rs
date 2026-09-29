@@ -5,7 +5,7 @@ mod tls;
 use anyhow::Result;
 use mihomo_server::{
     core_manager::{CoreManager, CoreOptions},
-    geo_online::{Request, RouteChoice},
+    geo::online::{Request, RouteChoice},
 };
 use std::sync::atomic::Ordering;
 
