@@ -1958,7 +1958,7 @@ function ProxyPage({
                   <h2>{name}</h2>
                   <p className="muted">
                     {group.type} · {t(language, "proxyCurrent")}
-                    <strong style={{ color: "#1b6954", marginLeft: "4px" }}>
+                    <strong style={{ color: "#111827", marginLeft: "4px" }}>
                       {currentSelection}
                     </strong>
                   </p>
@@ -2000,7 +2000,9 @@ function ProxyPage({
                           void select("select_node", { group: name, node })
                         }
                       >
-                        <span style={{ fontWeight: isSelected ? 600 : 400 }}>{node}</span>
+                        <span className="node-name" style={{ fontWeight: isSelected ? 600 : 400 }}>
+                          {node}
+                        </span>
                         <div className="node-meta">
                           {renderDelayBadge(delay, isTesting)}
                           <span
@@ -2013,7 +2015,7 @@ function ProxyPage({
                           >
                             ⚡
                           </span>
-                          <span>
+                          <span className="node-select-text">
                             {t(language, isSelected ? "proxySelected" : "proxySelect")}
                           </span>
                         </div>
