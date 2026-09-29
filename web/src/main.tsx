@@ -22,16 +22,18 @@ import type {
   Profiles,
   Proxies,
   ProxyDelay,
-  ProxyProvider,
-  ProxyProviders,
 } from "./types";
 import "./style.css";
 
-const pages: [string, MessageKey, string][] = [
-  ["/", "overview", "01"], ["/profiles", "profiles", "02"],
-  ["/config", "config", "03"], ["/proxies", "proxies", "04"],
-  ["/rules", "rules", "05"], ["/logs", "logs", "06"],
-  ["/settings", "settings", "07"], ["/core", "core", "08"],
+const pages: [string, MessageKey][] = [
+  ["/", "overview"],
+  ["/proxies", "proxies"],
+  ["/profiles", "profiles"],
+  ["/config", "config"],
+  ["/rules", "rules"],
+  ["/logs", "logs"],
+  ["/settings", "settings"],
+  ["/core", "core"],
 ];
 const describe = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -110,7 +112,7 @@ function Login({
     <main className="login">
       <div className="login-art">
         <div className="brand">
-          MH<span>MIHOMO SERVER</span>
+          MHS<span>MIHOMO SERVER</span>
         </div>
         <div>
           <p className="eyebrow">{t(language, "loginEyebrow")}</p>
@@ -294,7 +296,7 @@ function Manager({
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          MH
+          MHS
           <span>
             MIHOMO
             <br />
@@ -303,14 +305,13 @@ function Manager({
         </div>
         <p className="nav-label">{t(language, "navLabel")}</p>
         <nav aria-label={t(language, "navAria")}>
-          {pages.map(([path, key, number]) => (
+          {pages.map(([path, key]) => (
             <a
               key={path}
               href={path}
               aria-current={route === path ? "page" : undefined}
               onClick={(event) => navigate(event, path)}
             >
-              <span>{number}</span>
               {t(language, key)}
             </a>
           ))}
@@ -1723,34 +1724,44 @@ function ProxyPage({
   perform: Perform;
 }) {
   const [proxies, setProxies] = useState<Proxies>(),
-    [providers, setProviders] = useState<ProxyProviders>(),
     [delays, setDelays] = useState<Record<string, number>>({}),
     [testingGroup, setTestingGroup] = useState<string | null>(null),
     [testingNode, setTestingNode] = useState<string | null>(null),
-    [updatingProvider, setUpdatingProvider] = useState<string | null>(null),
-    [healthcheckingProvider, setHealthcheckingProvider] = useState<string | null>(null),
     [testUrl, setTestUrl] = useState("http://www.gstatic.com/generate_204"),
     [error, setError] = useState(""),
     [revision, refresh] = useState(0),
     [loading, setLoading] = useState(false);
 
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("mhs-collapsed-groups") || "{}");
+    } catch {
+      return {};
+    }
+  });
+
+  const toggleGroup = (name: string) => {
+    setCollapsed((prev) => {
+      const next = { ...prev, [name]: !prev[name] };
+      try {
+        localStorage.setItem("mhs-collapsed-groups", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
   useEffect(() => {
     if (status.phase !== "running") {
       setProxies(undefined);
-      setProviders(undefined);
       return;
     }
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    Promise.all([
-      command<Proxies>(token, "proxies", {}, controller.signal),
-      command<ProxyProviders>(token, "proxy_providers", {}, controller.signal).catch(() => ({ providers: {} })),
-    ])
-      .then(([proxiesData, providersData]) => {
+    command<Proxies>(token, "proxies", {}, controller.signal)
+      .then((proxiesData) => {
         if (!controller.signal.aborted) {
           setProxies(proxiesData);
-          setProviders(providersData);
           setLoading(false);
         }
       })
@@ -1771,9 +1782,54 @@ function ProxyPage({
     revision,
   ]);
 
-  const groups = Object.entries(proxies?.proxies || {}).filter(([, group]) =>
+  const isDefaultProxies = (name: string) =>
+    name.toLowerCase() === "proxies" || name.toLowerCase() === "proxy";
+
+  const rawGroups = Object.entries(proxies?.proxies || {}).filter(([, group]) =>
     ["Selector", "URLTest", "Fallback", "LoadBalance"].includes(group.type),
   );
+
+  const groups = [...rawGroups].sort(([a], [b]) => {
+    const aDefault = isDefaultProxies(a);
+    const bDefault = isDefaultProxies(b);
+    if (aDefault && !bDefault) return -1;
+    if (!aDefault && bDefault) return 1;
+    if (a.toLowerCase() === "global") return 1;
+    if (b.toLowerCase() === "global") return -1;
+    return a.localeCompare(b);
+  });
+
+  if (!groups.some(([name]) => isDefaultProxies(name))) {
+    const standaloneNodes = Object.entries(proxies?.proxies || {})
+      .filter(
+        ([, p]) =>
+          ![
+            "Selector",
+            "URLTest",
+            "Fallback",
+            "LoadBalance",
+            "Direct",
+            "Reject",
+            "RejectDrop",
+            "Compatible",
+            "Pass",
+            "PassRule",
+          ].includes(p.type),
+      )
+      .map(([name]) => name);
+
+    if (standaloneNodes.length > 0) {
+      groups.unshift([
+        "Proxies",
+        {
+          type: "Selector",
+          now: proxies?.proxies["GLOBAL"]?.now || standaloneNodes[0],
+          all: standaloneNodes,
+          history: [],
+        } as any,
+      ]);
+    }
+  }
 
   async function select(name: string, fields: Record<string, unknown>) {
     await perform(name, fields);
@@ -1816,42 +1872,6 @@ function ProxyPage({
     }
   }
 
-  async function updateProvider(name: string) {
-    if (updatingProvider || busy) return;
-    setUpdatingProvider(name);
-    setError("");
-    try {
-      await perform("update_proxy_provider", { name });
-      refresh((v) => v + 1);
-    } catch (e) {
-      setError(describe(e));
-    } finally {
-      setUpdatingProvider(null);
-    }
-  }
-
-  async function healthcheckProvider(name: string) {
-    if (healthcheckingProvider || busy) return;
-    setHealthcheckingProvider(name);
-    setError("");
-    try {
-      await perform("healthcheck_proxy_provider", { name });
-      refresh((v) => v + 1);
-    } catch (e) {
-      setError(describe(e));
-    } finally {
-      setHealthcheckingProvider(null);
-    }
-  }
-
-  async function updateAllProviders() {
-    if (!providers || busy) return;
-    const names = Object.keys(providers.providers);
-    for (const name of names) {
-      await updateProvider(name);
-    }
-  }
-
   function getNodeDelay(node: string): number | undefined {
     if (node in delays) {
       return delays[node];
@@ -1881,8 +1901,6 @@ function ProxyPage({
     }
     return <span className="delay-badge delay-slow">{delay}ms</span>;
   }
-
-  const providerList = Object.entries(providers?.providers || {});
 
   return (
     <>
@@ -1925,121 +1943,95 @@ function ProxyPage({
       )}
       {loading && <p className="info">{t(language, "proxyLoading")}</p>}
 
-      {providerList.length > 0 && (
-        <section className="panel" style={{ marginBottom: "20px" }}>
-          <div className="panel-title">
-            <div>
-              <h2>{t(language, "proxyProviderTitle")}</h2>
-              <p className="muted">{t(language, "proxyProviderSummary").replace("{count}", String(providerList.length))}</p>
-            </div>
-            <button
-              disabled={busy || loading || !!updatingProvider}
-              onClick={() => void updateAllProviders()}
-            >
-              {t(language, "proxyProviderUpdateAll")}
-            </button>
-          </div>
-          <div className="provider-grid">
-            {providerList.map(([name, provider]) => (
-              <div className="provider-card" key={name}>
-                <div className="provider-header">
-                  <strong>{name}</strong>
-                  <span className="badge badge-info">{provider.vehicleType}</span>
-                </div>
-                <p className="muted" style={{ fontSize: "11px", margin: "4px 0" }}>
-                  {t(language, "proxyProviderNodes")}{provider.proxies?.length ?? 0}
-                  {provider.updatedAt ? ` · ${provider.updatedAt.slice(0, 19).replace("T", " ")}` : ""}
-                </p>
-                <div className="card-actions" style={{ gap: "6px" }}>
-                  <button
-                    disabled={busy || updatingProvider === name}
-                    onClick={() => void updateProvider(name)}
-                  >
-                    {t(language, updatingProvider === name ? "proxyProviderUpdating" : "proxyProviderUpdate")}
-                  </button>
-                  <button
-                    disabled={busy || healthcheckingProvider === name}
-                    onClick={() => void healthcheckProvider(name)}
-                  >
-                    {t(language, healthcheckingProvider === name ? "proxyProviderChecking" : "proxyProviderHealthcheck")}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {groups.map(([name, group]) => (
-        <section className="panel" key={name}>
-          <div className="panel-title">
-            <div>
-              <h2>{name}</h2>
-              <p className="muted">
-                {group.type} · {t(language, "proxyCurrent")}
-                {group.fixed || group.now || t(language, "proxyGroupWaiting")}
-              </p>
-            </div>
-            <div className="panel-actions">
+      {groups.map(([name, group]) => {
+        const isCollapsed = !!collapsed[name];
+        const currentSelection = group.fixed || group.now || t(language, "proxyGroupWaiting");
+        return (
+          <section className="panel" key={name}>
+            <div className={`panel-title group-header ${isCollapsed ? "collapsed" : ""}`}>
               <button
                 type="button"
-                disabled={busy || loading || testingGroup === name}
-                onClick={() => void testGroupDelay(name)}
+                className="group-title-btn"
+                onClick={() => toggleGroup(name)}
+                aria-expanded={!isCollapsed}
+                aria-label={`${name} ${isCollapsed ? "展开" : "折叠"}`}
               >
-                {t(language, testingGroup === name ? "proxyDelayWorking" : "proxyDelayAction")}
+                <span className={`group-toggle-icon ${isCollapsed ? "" : "expanded"}`}>▶</span>
+                <div>
+                  <h2>{name}</h2>
+                  <p className="muted">
+                    {group.type} · {t(language, "proxyCurrent")}
+                    <strong style={{ color: "#1b6954", marginLeft: "4px" }}>
+                      {currentSelection}
+                    </strong>
+                  </p>
+                </div>
               </button>
-              {group.type !== "Selector" && (
+              <div className="panel-actions">
                 <button
-                  disabled={busy || !status.active_profile}
-                  onClick={() => void select("unfix_node", { group: name })}
+                  type="button"
+                  disabled={busy || loading || testingGroup === name}
+                  onClick={() => void testGroupDelay(name)}
                 >
-                  {t(language, "proxyUnfix")}
+                  {t(language, testingGroup === name ? "proxyDelayWorking" : "proxyDelayAction")}
                 </button>
-              )}
+                {group.type !== "Selector" && (
+                  <button
+                    disabled={busy || !status.active_profile}
+                    onClick={() => void select("unfix_node", { group: name })}
+                  >
+                    {t(language, "proxyUnfix")}
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="nodes">
-            {group.all?.map((node) => {
-              const isSelected = (group.fixed || group.now) === node;
-              const delay = getNodeDelay(node);
-              const isTesting = testingNode === node || testingGroup === name;
-              return (
-                <button
-                  key={node}
-                  aria-label={`${t(language, "proxySelect")} ${name} / ${node}`}
-                  aria-pressed={isSelected}
-                  className={isSelected ? "selected" : ""}
-                  disabled={busy || !status.active_profile}
-                  onClick={() =>
-                    void select("select_node", { group: name, node })
-                  }
-                >
-                  <span style={{ fontWeight: isSelected ? 600 : 400 }}>{node}</span>
-                  <div className="node-meta">
-                    {renderDelayBadge(delay, isTesting)}
-                    <span
-                      className="node-test-btn"
-                      title={t(language, "proxyDelayNodeTitle").replace("{node}", node)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void testNodeDelay(node);
-                      }}
-                    >
-                      ⚡
-                    </span>
-                    <span>
-                      {t(language, isSelected ? "proxySelected" : "proxySelect")}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          {!group.all?.length && (
-            <p className="empty">{t(language, "proxyGroupEmpty")}</p>
-          )}
-        </section>
-      ))}
+            {!isCollapsed && (
+              <>
+                <div className="nodes">
+                  {group.all?.map((node) => {
+                    const isSelected = (group.fixed || group.now) === node;
+                    const delay = getNodeDelay(node);
+                    const isTesting = testingNode === node || testingGroup === name;
+                    return (
+                      <button
+                        key={node}
+                        aria-label={`${t(language, "proxySelect")} ${name} / ${node}`}
+                        aria-pressed={isSelected}
+                        className={isSelected ? "selected" : ""}
+                        disabled={busy || !status.active_profile}
+                        onClick={() =>
+                          void select("select_node", { group: name, node })
+                        }
+                      >
+                        <span style={{ fontWeight: isSelected ? 600 : 400 }}>{node}</span>
+                        <div className="node-meta">
+                          {renderDelayBadge(delay, isTesting)}
+                          <span
+                            className="node-test-btn"
+                            title={t(language, "proxyDelayNodeTitle").replace("{node}", node)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void testNodeDelay(node);
+                            }}
+                          >
+                            ⚡
+                          </span>
+                          <span>
+                            {t(language, isSelected ? "proxySelected" : "proxySelect")}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {!group.all?.length && (
+                  <p className="empty">{t(language, "proxyGroupEmpty")}</p>
+                )}
+              </>
+            )}
+          </section>
+        );
+      })}
     </>
   );
 }

@@ -31,7 +31,7 @@ export function saveLanguage(language: Language) {
 
 const zh = {
   language: "界面语言", navLabel: "工作空间", navAria: "主导航",
-  overview: "概览", profiles: "订阅", config: "配置", proxies: "节点", rules: "规则",
+  overview: "概览", proxies: "代理", profiles: "订阅", config: "配置", rules: "规则",
   logs: "日志", settings: "设置", core: "内核升级", logout: "退出登录",
   serviceManagement: "服务管理", eventConnection: "事件连接状态",
   stopped: "已停止", starting: "启动中", running: "运行中", stopping: "停止中",
@@ -155,9 +155,9 @@ const zh = {
   globalScriptSave: "保存全局脚本", globalScriptReset: "恢复默认全局脚本",
   globalScriptResetWarning: "将恢复返回原配置的默认脚本，替换已保存的脚本和当前输入。",
   proxyHelp: "节点选择按订阅保存，内核与服务重启后会尝试恢复。",
-  proxyRefresh: "刷新节点", proxyNeedsCore: "启动内核后可查看节点。",
+  proxyRefresh: "刷新代理", proxyNeedsCore: "启动内核后可查看代理。",
   proxyNeedsProfile: "先使用一个订阅，才能保存节点选择。",
-  proxyLoading: "加载节点与代理集…", proxyCurrent: "当前：",
+  proxyLoading: "加载代理…", proxyCurrent: "当前：",
   proxyGroupWaiting: "等待分组加载", proxyUnfix: "取消固定",
   proxySelected: "已选择", proxySelect: "选择",
   proxyGroupEmpty: "分组尚未加载节点，请稍后刷新。",
@@ -649,7 +649,7 @@ const en: Record<keyof typeof zh, string> = {
 
 const zhtw: Record<keyof typeof zh, string> = {
   language: "介面語言", navLabel: "工作空間", navAria: "主導航",
-  overview: "概覽", profiles: "訂閱", config: "設定", proxies: "節點", rules: "規則",
+  overview: "概覽", proxies: "代理", profiles: "訂閱", config: "設定", rules: "規則",
   logs: "記錄", settings: "設定", core: "核心升級", logout: "登出",
   serviceManagement: "服務管理", eventConnection: "事件連線狀態",
   stopped: "已停止", starting: "啟動中", running: "執行中", stopping: "停止中",
@@ -773,9 +773,9 @@ const zhtw: Record<keyof typeof zh, string> = {
   globalScriptSave: "儲存全域指令碼", globalScriptReset: "復原預設全域指令碼",
   globalScriptResetWarning: "將復原傳回原設定的預設指令碼，取代已儲存的指令碼與目前輸入。",
   proxyHelp: "節點選擇按訂閱儲存，核心與服務重啟後會嘗試復原。",
-  proxyRefresh: "重新整理節點", proxyNeedsCore: "啟動核心後可查看節點。",
+  proxyRefresh: "重新整理代理", proxyNeedsCore: "啟動核心後可查看代理。",
   proxyNeedsProfile: "先使用一個訂閱，才能儲存節點選擇。",
-  proxyLoading: "載入節點與代理集合…", proxyCurrent: "目前：",
+  proxyLoading: "載入代理…", proxyCurrent: "目前：",
   proxyGroupWaiting: "等待分組載入", proxyUnfix: "取消固定",
   proxySelected: "已選擇", proxySelect: "選擇",
   proxyGroupEmpty: "分組尚未載入節點，請稍後重新整理。",

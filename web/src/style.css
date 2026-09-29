@@ -227,15 +227,12 @@ nav {
 }
 nav a {
   display: flex;
-  gap: 22px;
-  padding: 12px 14px;
+  align-items: center;
+  padding: 10px 14px;
   color: #657f74;
   border-radius: 6px;
   font-weight: 600;
-}
-nav a span {
-  color: #a0b0a7;
-  font-size: 11px;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 nav a[aria-current="page"] {
   background: #d9e6df;
@@ -977,4 +974,48 @@ footer {
   display: flex;
   align-items: center;
   margin-top: 6px;
+}
+.group-header {
+  margin-bottom: 16px;
+}
+.group-header.collapsed {
+  margin-bottom: 0;
+}
+.group-title-btn {
+  background: none;
+  border: none;
+  padding: 6px 10px;
+  margin: -6px -10px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+.group-title-btn:hover {
+  background: #f4f8f5;
+}
+.group-title-btn h2 {
+  margin: 0;
+  display: inline-block;
+}
+.group-title-btn p {
+  margin: 4px 0 0;
+}
+.group-toggle-icon {
+  display: inline-block;
+  font-size: 11px;
+  color: #7d968a;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: rotate(0deg);
+  width: 14px;
+  text-align: center;
+  line-height: 1;
+}
+.group-toggle-icon.expanded {
+  transform: rotate(90deg);
 }
