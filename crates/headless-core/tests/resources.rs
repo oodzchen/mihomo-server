@@ -1,7 +1,7 @@
 use anyhow::Result;
 use headless_core::config::resources::{
-    AutoUpdateState, FileState, FreshnessState, GeoUpdatePolicy, Inventory,
-    MAX_PROVIDERS, ProviderSettings, Resource, validate_resource_declarations,
+    AutoUpdateState, FileState, FreshnessState, GeoUpdatePolicy, Inventory, MAX_PROVIDERS, ProviderSettings, Resource,
+    validate_resource_declarations,
 };
 use serde_yaml_ng::Mapping;
 use std::path::PathBuf;
@@ -223,22 +223,10 @@ fn test_geo_update_policy_evaluation() {
 
 #[test]
 fn test_freshness_evaluation() {
-    assert_eq!(
-        FreshnessState::evaluate_age(100, 300),
-        FreshnessState::Fresh
-    );
-    assert_eq!(
-        FreshnessState::evaluate_age(300, 300),
-        FreshnessState::Fresh
-    );
-    assert_eq!(
-        FreshnessState::evaluate_age(301, 300),
-        FreshnessState::Stale
-    );
-    assert_eq!(
-        FreshnessState::evaluate_age(100, 0),
-        FreshnessState::Indeterminate
-    );
+    assert_eq!(FreshnessState::evaluate_age(100, 300), FreshnessState::Fresh);
+    assert_eq!(FreshnessState::evaluate_age(300, 300), FreshnessState::Fresh);
+    assert_eq!(FreshnessState::evaluate_age(301, 300), FreshnessState::Stale);
+    assert_eq!(FreshnessState::evaluate_age(100, 0), FreshnessState::Indeterminate);
 }
 
 #[test]
@@ -247,14 +235,7 @@ fn test_inventory_serialization_roundtrip() -> Result<()> {
         data_dir: PathBuf::from("/data"),
         bundle_dir: Some(PathBuf::from("/bundle")),
         config_revision: Some("rev-123".into()),
-        geo_update: GeoUpdatePolicy::evaluate(
-            Some(true),
-            Some(24),
-            Some(true),
-            Some(24),
-            true,
-            false,
-        ),
+        geo_update: GeoUpdatePolicy::evaluate(Some(true), Some(24), Some(true), Some(24), true, false),
         geo: vec![Resource {
             section: "geo".into(),
             name: "GeoIP.dat".into(),

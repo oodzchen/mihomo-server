@@ -120,7 +120,7 @@ async fn upgrade(
     force: bool,
 ) -> Result<CoreUpgradeReport> {
     let downloads = manager.core_downloads.clone().unwrap();
-    let permit = Arc::clone(&manager.core_release_admission).try_acquire_owned()?;
+    let permit = Arc::clone(&manager.core_release_admission).acquire_owned().await?;
     let (reply, response) = oneshot::channel();
     manager
         .commands

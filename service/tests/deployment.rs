@@ -60,7 +60,10 @@ impl Service {
                 if let Some(status) = service.child.try_wait()? {
                     let mut err = Vec::new();
                     tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut err).await?;
-                    anyhow::bail!("bundle launcher exited before readiness ({status}): {}", String::from_utf8_lossy(&err));
+                    anyhow::bail!(
+                        "bundle launcher exited before readiness ({status}): {}",
+                        String::from_utf8_lossy(&err)
+                    );
                 }
                 if let Ok(token) = fs::read_to_string(data.join("management-token")) {
                     service.token = token.trim().to_owned();

@@ -48,7 +48,12 @@ pub(super) async fn serve(State(state): State<HttpState>, request: Request) -> R
         );
     }
     let Some(assets) = state.assets else {
-        return error_with_headers(&headers, StatusCode::NOT_FOUND, "not_found", "Web assets are not configured");
+        return error_with_headers(
+            &headers,
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Web assets are not configured",
+        );
     };
     let Ok(decoded) = percent_encoding::percent_decode_str(path).decode_utf8() else {
         return error_with_headers(&headers, StatusCode::BAD_REQUEST, "invalid_path", "invalid asset path");
@@ -89,6 +94,11 @@ pub(super) async fn serve(State(state): State<HttpState>, request: Request) -> R
                 .insert(header::REFERRER_POLICY, "no-referrer".parse().unwrap());
             response
         }
-        Err(_) => error_with_headers(&headers, StatusCode::INTERNAL_SERVER_ERROR, "asset_error", "cannot serve asset"),
+        Err(_) => error_with_headers(
+            &headers,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "asset_error",
+            "cannot serve asset",
+        ),
     }
 }

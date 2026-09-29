@@ -1095,4 +1095,3 @@ fn geo_lifecycle_and_resource_settings_helpers_and_mode_derivation() -> Result<(
 
     Ok(())
 }
-

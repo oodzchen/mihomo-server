@@ -311,9 +311,8 @@ fn geo_asset_paths_and_casing_variations_are_strictly_protected_from_provider_hi
         "ASN.mmdb",
         "geoip.metadb",
     ] {
-        let http_yaml = format!(
-            "proxy-providers: {{a: {{type: http, path: '{candidate}', url: 'https://remote.invalid'}}}}"
-        );
+        let http_yaml =
+            format!("proxy-providers: {{a: {{type: http, path: '{candidate}', url: 'https://remote.invalid'}}}}");
         assert!(
             dir.prepare(&http_yaml).is_err(),
             "accepted HTTP provider path targeting Geo asset: {candidate}"
@@ -336,5 +335,3 @@ fn geo_asset_paths_and_casing_variations_are_strictly_protected_from_provider_hi
 
     Ok(())
 }
-
-

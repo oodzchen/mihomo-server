@@ -85,7 +85,9 @@ async fn unprivileged_native_tun_rejects_live_settings_and_preserves_running_pro
         let settings = manager.settings().await?;
 
         let preflight_err = manager
-            .set_settings(serde_yaml_ng::from_str("tun: {enable: true, device: 'invalid:device:name'}")?)
+            .set_settings(serde_yaml_ng::from_str(
+                "tun: {enable: true, device: 'invalid:device:name'}",
+            )?)
             .await
             .unwrap_err();
         assert!(format!("{preflight_err:#}").contains("tun.device"), "{preflight_err:#}");
@@ -99,12 +101,16 @@ async fn unprivileged_native_tun_rejects_live_settings_and_preserves_running_pro
         match error {
             Ok(_) => {
                 assert_eq!(manager.status().phase, CorePhase::Running);
-                manager.set_settings(serde_yaml_ng::from_str("tun: {enable: false}")?).await?;
+                manager
+                    .set_settings(serde_yaml_ng::from_str("tun: {enable: false}")?)
+                    .await?;
             }
             Err(err) => {
                 let msg = format!("{err:#}");
                 assert!(
-                    msg.contains("CAP_NET_ADMIN") || msg.contains("TUN enable mismatch") || msg.contains("/dev/net/tun"),
+                    msg.contains("CAP_NET_ADMIN")
+                        || msg.contains("TUN enable mismatch")
+                        || msg.contains("/dev/net/tun"),
                     "unexpected error: {msg}"
                 );
                 assert_eq!(manager.status().phase, CorePhase::Running);
@@ -1358,14 +1364,21 @@ async fn remaining_authoritative_settings_apply_hot_reload_and_survive_restart()
         assert_eq!(restored.settings().await?, saved_settings);
         let restored_config = restored.runtime_config().await?;
         assert_eq!(restored_config["bind-address"].as_str(), Some("127.0.0.1"));
-        assert_eq!(restored_config["authentication"][0].as_str(), Some("testuser:secret123"));
+        assert_eq!(
+            restored_config["authentication"][0].as_str(),
+            Some("testuser:secret123")
+        );
         assert_eq!(restored_config["skip-auth-prefixes"][0].as_str(), Some("127.0.0.1/8"));
         assert_eq!(restored_config["lan-allowed-ips"][0].as_str(), Some("192.168.0.0/16"));
-        assert_eq!(restored_config["lan-disallowed-ips"][0].as_str(), Some("192.168.1.100/32"));
+        assert_eq!(
+            restored_config["lan-disallowed-ips"][0].as_str(),
+            Some("192.168.1.100/32")
+        );
         assert_eq!(restored_config["inbound-tfo"].as_bool(), Some(false));
         assert_eq!(restored_config["sniffing"].as_bool(), Some(false));
         Ok::<_, anyhow::Error>(())
-    }.await;
+    }
+    .await;
     let restore_cleanup = restored.shutdown().await;
     restore_result.and(restore_cleanup)
 }
@@ -1443,4 +1456,3 @@ async fn geo_lifecycle_settings_apply_readback_and_survive_restart() -> Result<(
     let restore_cleanup = restored.shutdown().await;
     restore_result.and(restore_cleanup)
 }
-

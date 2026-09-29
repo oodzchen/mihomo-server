@@ -46,6 +46,13 @@ pub enum RouteChoice {
 }
 
 pub(crate) fn source(config: &Mapping, name: &str) -> Result<(url::Url, String)> {
+    ensure!(
+        matches!(
+            name,
+            "geoip.dat" | "geosite.dat" | "Country.mmdb" | "geoip.metadb" | "ASN.mmdb"
+        ),
+        "unsupported online Geo filename"
+    );
     let key = headless_core::config::settings::GeoUrls::key_for_asset(name)
         .ok_or_else(|| anyhow::anyhow!("unsupported online Geo filename"))?;
     let text = config

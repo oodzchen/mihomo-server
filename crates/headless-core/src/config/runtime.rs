@@ -241,10 +241,7 @@ impl RuntimeStore {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
             if name_str.starts_with("rev-") && name_str.ends_with(".yaml") {
-                let mtime = entry
-                    .metadata()
-                    .and_then(|m| m.modified())
-                    .unwrap_or(UNIX_EPOCH);
+                let mtime = entry.metadata().and_then(|m| m.modified()).unwrap_or(UNIX_EPOCH);
                 entries.push((name_str.into_owned(), path, mtime));
             }
         }

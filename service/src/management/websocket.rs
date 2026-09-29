@@ -86,7 +86,12 @@ pub(super) async fn stream(
     }
 }
 
-fn upgrade_session(state: HttpState, headers: &axum::http::HeaderMap, upgrade: WebSocketUpgrade, feed: Option<Feed>) -> Response {
+fn upgrade_session(
+    state: HttpState,
+    headers: &axum::http::HeaderMap,
+    upgrade: WebSocketUpgrade,
+    feed: Option<Feed>,
+) -> Response {
     let Ok(permit) = Arc::clone(&state.sessions).try_acquire_owned() else {
         return error_with_headers(
             headers,

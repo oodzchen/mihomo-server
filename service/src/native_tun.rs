@@ -79,8 +79,7 @@ pub(crate) fn read_interface_flags(name: &str) -> Result<u32> {
         .with_context(|| format!("failed to read flags for interface '{name}' at {}", path.display()))?;
     let trimmed = content.trim();
     let hex = trimmed.strip_prefix("0x").unwrap_or(trimmed);
-    u32::from_str_radix(hex, 16)
-        .with_context(|| format!("invalid hex flags '{trimmed}' for interface '{name}'"))
+    u32::from_str_radix(hex, 16).with_context(|| format!("invalid hex flags '{trimmed}' for interface '{name}'"))
 }
 
 #[cfg(target_os = "linux")]
@@ -95,7 +94,9 @@ pub(crate) fn read_interface_mtu(name: &str) -> Result<u32> {
     let path = Path::new("/sys/class/net").join(name).join("mtu");
     let content = std::fs::read_to_string(&path)
         .with_context(|| format!("failed to read mtu for interface '{name}' at {}", path.display()))?;
-    content.trim().parse::<u32>()
+    content
+        .trim()
+        .parse::<u32>()
         .with_context(|| format!("invalid mtu '{content}' for interface '{name}'"))
 }
 
@@ -111,10 +112,7 @@ pub(crate) fn verify_linux_interface_and_routes(device: &str, auto_route: bool) 
         "TUN interface '{device}' exists but is not UP"
     );
     let mtu = read_interface_mtu(device)?;
-    ensure!(
-        mtu > 0,
-        "TUN interface '{device}' has invalid zero MTU"
-    );
+    ensure!(mtu > 0, "TUN interface '{device}' has invalid zero MTU");
     if auto_route {
         let operstate_path = Path::new("/sys/class/net").join(device).join("operstate");
         if let Ok(operstate) = std::fs::read_to_string(&operstate_path) {

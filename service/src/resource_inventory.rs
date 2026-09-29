@@ -9,12 +9,11 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-pub use headless_core::config::resources::{
-    AutoUpdateState, FileState, FreshnessState, GEO_ASSETS, GeoUpdatePolicy, HTTP_CACHE_ROOT,
-    Inventory, MAX_PROVIDERS, ProviderSettings, Resource, is_geo_asset,
-    validate_resource_declarations,
-};
 use headless_core::config::resource_paths::{metadata_below, relative_path};
+pub use headless_core::config::resources::{
+    AutoUpdateState, FileState, FreshnessState, GEO_ASSETS, GeoUpdatePolicy, HTTP_CACHE_ROOT, Inventory, MAX_PROVIDERS,
+    ProviderSettings, Resource, is_geo_asset, validate_resource_declarations,
+};
 
 pub trait GeoUpdatePolicyFromCore {
     fn from_config(config: &Mapping, core_running: bool, actual: Option<&GeoConfig>) -> Self;
@@ -68,7 +67,6 @@ pub(crate) fn inspect_with_now(
     geo_update: GeoUpdatePolicy,
     now_unix_seconds: Option<u64>,
 ) -> Result<Inventory> {
-    validate_resource_declarations(&config)?;
     let mut providers = Vec::new();
     for section in ["proxy-providers", "rule-providers"] {
         let Some(declarations) = config.get(section) else {

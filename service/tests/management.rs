@@ -1251,21 +1251,27 @@ async fn http_errors_localize_via_accept_language_and_preserve_default_fallback(
 
         // 1. Missing route (not_found)
         let mut req_zh = request(&token, "/api/absent", None)?;
-        req_zh.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9".parse()?);
+        req_zh
+            .headers_mut()
+            .insert(header::ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9".parse()?);
         let (status, body) = response(&app, req_zh).await?;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body["error"]["code"], "not_found");
         assert_eq!(body["error"]["message"], "未找到请求的资源");
 
         let mut req_en = request(&token, "/api/absent", None)?;
-        req_en.headers_mut().insert(header::ACCEPT_LANGUAGE, "en-US,en;q=0.9".parse()?);
+        req_en
+            .headers_mut()
+            .insert(header::ACCEPT_LANGUAGE, "en-US,en;q=0.9".parse()?);
         let (status, body) = response(&app, req_en).await?;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body["error"]["code"], "not_found");
         assert_eq!(body["error"]["message"], "Resource not found");
 
         let mut req_zhtw = request(&token, "/api/absent", None)?;
-        req_zhtw.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh-TW,zh;q=0.9".parse()?);
+        req_zhtw
+            .headers_mut()
+            .insert(header::ACCEPT_LANGUAGE, "zh-TW,zh;q=0.9".parse()?);
         let (status, body) = response(&app, req_zhtw).await?;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body["error"]["code"], "not_found");
@@ -1279,21 +1285,27 @@ async fn http_errors_localize_via_accept_language_and_preserve_default_fallback(
 
         // 2. Unauthorized
         let mut req_unauth_zh = request("wrong-token", "/api/commands", None)?;
-        req_unauth_zh.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9".parse()?);
+        req_unauth_zh
+            .headers_mut()
+            .insert(header::ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9".parse()?);
         let (status, body) = response(&app, req_unauth_zh).await?;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["error"]["code"], "unauthorized");
         assert_eq!(body["error"]["message"], "需要身份认证");
 
         let mut req_unauth_en = request("wrong-token", "/api/commands", None)?;
-        req_unauth_en.headers_mut().insert(header::ACCEPT_LANGUAGE, "en".parse()?);
+        req_unauth_en
+            .headers_mut()
+            .insert(header::ACCEPT_LANGUAGE, "en".parse()?);
         let (status, body) = response(&app, req_unauth_en).await?;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["error"]["code"], "unauthorized");
         assert_eq!(body["error"]["message"], "Authentication required");
 
         let mut req_unauth_zhtw = request("wrong-token", "/api/commands", None)?;
-        req_unauth_zhtw.headers_mut().insert(header::ACCEPT_LANGUAGE, "zhtw".parse()?);
+        req_unauth_zhtw
+            .headers_mut()
+            .insert(header::ACCEPT_LANGUAGE, "zhtw".parse()?);
         let (status, body) = response(&app, req_unauth_zhtw).await?;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["error"]["code"], "unauthorized");
@@ -1307,21 +1319,27 @@ async fn http_errors_localize_via_accept_language_and_preserve_default_fallback(
 
         // 3. Method not allowed
         let mut req_method_zh = request(&token, "/api/commands", None)?;
-        req_method_zh.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh".parse()?);
+        req_method_zh
+            .headers_mut()
+            .insert(header::ACCEPT_LANGUAGE, "zh".parse()?);
         let (status, body) = response(&app, req_method_zh).await?;
         assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
         assert_eq!(body["error"]["code"], "method_not_allowed");
         assert_eq!(body["error"]["message"], "不支持的请求方法");
 
         let mut req_method_en = request(&token, "/api/commands", None)?;
-        req_method_en.headers_mut().insert(header::ACCEPT_LANGUAGE, "en".parse()?);
+        req_method_en
+            .headers_mut()
+            .insert(header::ACCEPT_LANGUAGE, "en".parse()?);
         let (status, body) = response(&app, req_method_en).await?;
         assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
         assert_eq!(body["error"]["code"], "method_not_allowed");
         assert_eq!(body["error"]["message"], "Method is not allowed");
 
         let mut req_method_zhtw = request(&token, "/api/commands", None)?;
-        req_method_zhtw.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh-HK,zh;q=0.8".parse()?);
+        req_method_zhtw
+            .headers_mut()
+            .insert(header::ACCEPT_LANGUAGE, "zh-HK,zh;q=0.8".parse()?);
         let (status, body) = response(&app, req_method_zhtw).await?;
         assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
         assert_eq!(body["error"]["code"], "method_not_allowed");
@@ -1329,7 +1347,9 @@ async fn http_errors_localize_via_accept_language_and_preserve_default_fallback(
 
         // 4. Invalid query
         let mut req_query_zh = request(&token, "/api/status?bad=1", None)?;
-        req_query_zh.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh".parse()?);
+        req_query_zh
+            .headers_mut()
+            .insert(header::ACCEPT_LANGUAGE, "zh".parse()?);
         let (status, body) = response(&app, req_query_zh).await?;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["error"]["code"], "invalid_query");
@@ -1352,7 +1372,9 @@ async fn http_errors_localize_via_accept_language_and_preserve_default_fallback(
         assert_eq!(body["error"]["message"], "Service is shutting down");
 
         let mut req_shut_zhtw = request(&token, "/api/status", None)?;
-        req_shut_zhtw.headers_mut().insert(header::ACCEPT_LANGUAGE, "zh-Hant".parse()?);
+        req_shut_zhtw
+            .headers_mut()
+            .insert(header::ACCEPT_LANGUAGE, "zh-Hant".parse()?);
         let (status, body) = response(&app, req_shut_zhtw).await?;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["error"]["code"], "shutting_down");

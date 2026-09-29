@@ -123,12 +123,9 @@ async fn authenticate(State(state): State<HttpState>, request: Request, next: Ne
         )
     } else {
         match credentials(headers) {
-            Err(message) => error_with_language(
-                StatusCode::BAD_REQUEST,
-                "invalid_headers",
-                message,
-                language.as_deref(),
-            ),
+            Err(message) => {
+                error_with_language(StatusCode::BAD_REQUEST, "invalid_headers", message, language.as_deref())
+            }
             Ok(credentials)
                 if if websocket::is_route(request.uri().path()) || !super::assets::is_api(request.uri().path()) {
                     state
@@ -154,12 +151,14 @@ async fn authenticate(State(state): State<HttpState>, request: Request, next: Ne
                     .insert(header::WWW_AUTHENTICATE, "Bearer".parse().unwrap());
                 response
             }
-            Ok(_) if super::assets::is_api(request.uri().path()) && request.uri().query().is_some() => error_with_language(
-                StatusCode::BAD_REQUEST,
-                "invalid_query",
-                "query parameters are not supported",
-                language.as_deref(),
-            ),
+            Ok(_) if super::assets::is_api(request.uri().path()) && request.uri().query().is_some() => {
+                error_with_language(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_query",
+                    "query parameters are not supported",
+                    language.as_deref(),
+                )
+            }
             Ok(_) => next.run(request).await,
         }
     };
@@ -188,18 +187,9 @@ pub fn error_with_headers(headers: &HeaderMap, status: StatusCode, code: &str, m
     error_with_language(status, code, message, language.as_deref())
 }
 
-pub fn error_with_language(
-    status: StatusCode,
-    code: &str,
-    message: &str,
-    language: Option<&str>,
-) -> Response {
+pub fn error_with_language(status: StatusCode, code: &str, message: &str, language: Option<&str>) -> Response {
     let localized = clash_verge_i18n::translate_service_error(code, message, language);
-    (
-        status,
-        Json(json!({"error": {"code": code, "message": localized}})),
-    )
-        .into_response()
+    (status, Json(json!({"error": {"code": code, "message": localized}}))).into_response()
 }
 
 async fn backup(State(state): State<HttpState>, headers: HeaderMap, body: Bytes) -> Response {
@@ -260,13 +250,28 @@ async fn create_retained_backup(State(state): State<HttpState>, headers: HeaderM
 async fn list_retained_backups(State(state): State<HttpState>, headers: HeaderMap, body: Bytes) -> Response {
     retained_backup(state, &headers, crate::backup::RetainedOperation::List, body).await
 }
-async fn download_retained_backup(State(state): State<HttpState>, Path(id): Path<String>, headers: HeaderMap, body: Bytes) -> Response {
+async fn download_retained_backup(
+    State(state): State<HttpState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     retained_backup(state, &headers, crate::backup::RetainedOperation::Download(id), body).await
 }
-async fn delete_retained_backup(State(state): State<HttpState>, Path(id): Path<String>, headers: HeaderMap, body: Bytes) -> Response {
+async fn delete_retained_backup(
+    State(state): State<HttpState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     retained_backup(state, &headers, crate::backup::RetainedOperation::Delete(id), body).await
 }
-async fn retained_backup(state: HttpState, headers: &HeaderMap, operation: crate::backup::RetainedOperation, body: Bytes) -> Response {
+async fn retained_backup(
+    state: HttpState,
+    headers: &HeaderMap,
+    operation: crate::backup::RetainedOperation,
+    body: Bytes,
+) -> Response {
     use crate::backup::{RetainedOperation, RetainedOutcome};
     if !body.is_empty() {
         return error_with_headers(
@@ -279,7 +284,12 @@ async fn retained_backup(state: HttpState, headers: &HeaderMap, operation: crate
     if let RetainedOperation::Download(id) | RetainedOperation::Delete(id) = &operation
         && (id.len() != 24 || !id.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)))
     {
-        return error_with_headers(headers, StatusCode::BAD_REQUEST, "invalid_backup_id", "invalid local backup ID");
+        return error_with_headers(
+            headers,
+            StatusCode::BAD_REQUEST,
+            "invalid_backup_id",
+            "invalid local backup ID",
+        );
     }
     let (permit, shutdown) = match state.management.manager.admit_backup_upload() {
         Ok(admission) => admission,
@@ -325,7 +335,12 @@ async fn retained_backup(state: HttpState, headers: &HeaderMap, operation: crate
                     );
                 }
                 if cause.downcast_ref::<crate::backup::storage::Missing>().is_some() {
-                    return error_with_headers(headers, StatusCode::NOT_FOUND, "backup_not_found", "local backup not found");
+                    return error_with_headers(
+                        headers,
+                        StatusCode::NOT_FOUND,
+                        "backup_not_found",
+                        "local backup not found",
+                    );
                 }
             }
             if *shutdown.borrow() || *closing.borrow() {

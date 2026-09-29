@@ -49,7 +49,7 @@ impl GeoUpdatePolicy {
 
         let auto_update_state = if !core_running {
             AutoUpdateState::Stopped
-        } else if readback_error || (effective_enabled.is_none() && effective_interval_hours.is_none()) {
+        } else if readback_error {
             AutoUpdateState::Indeterminate
         } else if effective_enabled == Some(false) {
             AutoUpdateState::Disabled

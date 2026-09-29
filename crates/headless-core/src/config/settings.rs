@@ -251,8 +251,7 @@ impl RuntimeSettings {
         }
         if let Some(bind) = &self.bind_address {
             ensure!(
-                bind.len() <= 255
-                    && !bind.chars().any(|c| c.is_whitespace() || c.is_control()),
+                bind.len() <= 255 && !bind.chars().any(|c| c.is_whitespace() || c.is_control()),
                 "bind-address must not contain whitespace or control characters and must be at most 255 bytes"
             );
             ensure!(
@@ -282,9 +281,9 @@ impl RuntimeSettings {
                         let ip = ip_str
                             .parse::<std::net::IpAddr>()
                             .with_context(|| format!("invalid IP '{ip_str}' in {name} CIDR '{trimmed}'"))?;
-                        let prefix = prefix_str
-                            .parse::<u8>()
-                            .with_context(|| format!("invalid prefix length '{prefix_str}' in {name} CIDR '{trimmed}'"))?;
+                        let prefix = prefix_str.parse::<u8>().with_context(|| {
+                            format!("invalid prefix length '{prefix_str}' in {name} CIDR '{trimmed}'")
+                        })?;
                         match ip {
                             std::net::IpAddr::V4(_) => ensure!(prefix <= 32, "IPv4 prefix must be <= 32"),
                             std::net::IpAddr::V6(_) => ensure!(prefix <= 128, "IPv6 prefix must be <= 128"),

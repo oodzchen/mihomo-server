@@ -240,11 +240,7 @@ fn snake_to_camel(s: &str) -> String {
 ///
 /// Looks up `service.errors.<code_snake_case>` and `service.errors.<code_camel_case>`.
 /// If neither key exists or language is None, returns `Cow::Borrowed(default_message)`.
-pub fn translate_service_error<'a>(
-    code: &str,
-    default_message: &'a str,
-    language: Option<&str>,
-) -> Cow<'a, str> {
+pub fn translate_service_error<'a>(code: &str, default_message: &'a str, language: Option<&str>) -> Cow<'a, str> {
     let Some(lang) = language else {
         return Cow::Borrowed(default_message);
     };
@@ -360,9 +356,18 @@ mod tests {
 
     #[test]
     fn resolve_accept_language_parses_quality_and_variants() {
-        assert_eq!(resolve_accept_language("zh-CN,zh;q=0.9,en;q=0.8").as_deref(), Some("zh"));
-        assert_eq!(resolve_accept_language("en-US,en;q=0.9,zh;q=0.8").as_deref(), Some("en"));
-        assert_eq!(resolve_accept_language("fr-FR,fr;q=0.9,en;q=0.8").as_deref(), Some("en"));
+        assert_eq!(
+            resolve_accept_language("zh-CN,zh;q=0.9,en;q=0.8").as_deref(),
+            Some("zh")
+        );
+        assert_eq!(
+            resolve_accept_language("en-US,en;q=0.9,zh;q=0.8").as_deref(),
+            Some("en")
+        );
+        assert_eq!(
+            resolve_accept_language("fr-FR,fr;q=0.9,en;q=0.8").as_deref(),
+            Some("en")
+        );
         assert_eq!(resolve_accept_language("zh-TW,zh;q=0.8").as_deref(), Some("zhtw"));
         assert_eq!(resolve_accept_language("ja, en;q=0.5").as_deref(), Some("jp"));
         assert_eq!(resolve_accept_language("unknown-lang;q=1.0"), None);

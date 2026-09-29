@@ -163,7 +163,10 @@ fn revision_gc_cleans_orphans_and_bounds_retained_revisions() -> Result<()> {
     assert!(store.path(&rev2)?.is_file(), "pending revision was pruned");
 
     // Abandoned tmp must be cleaned
-    assert!(!directory.0.join("config/state-abandoned.tmp").exists(), "state-*.tmp was not cleaned");
+    assert!(
+        !directory.0.join("config/state-abandoned.tmp").exists(),
+        "state-*.tmp was not cleaned"
+    );
 
     Ok(())
 }
@@ -191,4 +194,3 @@ fn commit_loop_keeps_revisions_bounded() -> Result<()> {
 
     Ok(())
 }
-
