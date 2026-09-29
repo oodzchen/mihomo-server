@@ -182,116 +182,140 @@ export function RawEditor({
     }
   }
   return (
-    <section className="panel" aria-label={t(language, "rawEditorRegion")}>
-      <h2>{t(language, "rawEditorTitle")}</h2>
-      <p className="muted">
-        {t(language, "rawEditorIntro").replace("{name}", item.name || item.uid)}
-        {active
-          ? t(language, "rawEditorActive")
-          : t(language, "rawEditorInactive")}
-      </p>
-      <p className="hint">{t(language, "rawEditorHint")}</p>
-      {error && (
-        <p className="alert" role="alert">
-          {renderMessage(language, error)}
-        </p>
-      )}
-      {notice && (
-        <p className="info" role="status">
-          {renderMessage(language, notice)}
-        </p>
-      )}
-      {conflict && (
-        <p className="alert" role="alert">
-          {t(language, "rawConflict")}
-        </p>
-      )}
-      {uncertain && <p className="hint">{t(language, "rawUncertain")}</p>}
-      {base && (
-        <form onSubmit={save} aria-label={t(language, "rawForm")}>
-          <label>
-            {t(language, "rawYaml")}
-            <textarea
-              aria-label={t(language, "rawYaml")}
-              className="code"
-              rows={18}
-              disabled={disabled}
-              value={yaml}
-              spellCheck={false}
-              onChange={(event) => {
-                setYaml(event.target.value);
-                setError(null);
-                setNotice(null);
-                setConfirmation(undefined);
-              }}
-            />
-          </label>
-          <div className="form-actions">
-            <button
-              className="primary"
-              disabled={disabled || uncertain || conflict || !dirty}
-            >
-              {t(language, "rawSave")}
-            </button>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => void verify()}
-            >
-              {t(language, "rawVerify")}
-            </button>
-          </div>
-        </form>
-      )}
-      <div className="actions settings-reload">
-        <button
-          disabled={disabled}
-          onClick={() =>
-            base && (dirty || uncertain)
-              ? setConfirmation("reload")
-              : void reload()
-          }
-        >
-          {base ? t(language, "rawReload") : t(language, "rawRetry")}
-        </button>
-        <button
-          disabled={disabled}
-          onClick={() => (dirty ? setConfirmation("close") : onClose())}
-        >
-          {t(language, "rawClose")}
-        </button>
-      </div>
-      {confirmation && (
-        <div
-          className="reset-confirmation"
-          role="group"
-          aria-label={t(language, "rawConfirmRegion")}
-        >
-          <p>
-            {confirmation === "reload"
-              ? t(language, "rawReloadWarning")
-              : t(language, "rawCloseWarning")}
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          dirty ? setConfirmation("close") : onClose();
+        }
+      }}
+    >
+      <section
+        className="modal-dialog modal-dialog-lg"
+        aria-label={t(language, "rawEditorRegion")}
+      >
+        <div className="modal-header">
+          <h2>{t(language, "rawEditorTitle")}</h2>
+          <button
+            type="button"
+            className="modal-close"
+            onClick={() => (dirty ? setConfirmation("close") : onClose())}
+            aria-label={t(language, "close")}
+          >
+            ✕
+          </button>
+        </div>
+        <div className="modal-body">
+          <p className="muted">
+            {t(language, "rawEditorIntro").replace("{name}", item.name || item.uid)}
+            {active
+              ? t(language, "rawEditorActive")
+              : t(language, "rawEditorInactive")}
           </p>
-          <div className="actions">
+          <p className="hint">{t(language, "rawEditorHint")}</p>
+          {error && (
+            <p className="alert" role="alert">
+              {renderMessage(language, error)}
+            </p>
+          )}
+          {notice && (
+            <p className="info" role="status">
+              {renderMessage(language, notice)}
+            </p>
+          )}
+          {conflict && (
+            <p className="alert" role="alert">
+              {t(language, "rawConflict")}
+            </p>
+          )}
+          {uncertain && <p className="hint">{t(language, "rawUncertain")}</p>}
+          {base && (
+            <form onSubmit={save} aria-label={t(language, "rawForm")}>
+              <label>
+                {t(language, "rawYaml")}
+                <textarea
+                  aria-label={t(language, "rawYaml")}
+                  className="code"
+                  rows={18}
+                  disabled={disabled}
+                  value={yaml}
+                  spellCheck={false}
+                  onChange={(event) => {
+                    setYaml(event.target.value);
+                    setError(null);
+                    setNotice(null);
+                    setConfirmation(undefined);
+                  }}
+                />
+              </label>
+              <div className="form-actions">
+                <button
+                  className="primary"
+                  disabled={disabled || uncertain || conflict || !dirty}
+                >
+                  {t(language, "rawSave")}
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => void verify()}
+                >
+                  {t(language, "rawVerify")}
+                </button>
+              </div>
+            </form>
+          )}
+          <div className="actions settings-reload" style={{ marginTop: 14 }}>
             <button
               disabled={disabled}
               onClick={() =>
-                confirmation === "reload" ? void reload() : onClose()
+                base && (dirty || uncertain)
+                  ? setConfirmation("reload")
+                  : void reload()
               }
             >
-              {confirmation === "reload"
-                ? t(language, "rawConfirmReload")
-                : t(language, "rawConfirmClose")}
+              {base ? t(language, "rawReload") : t(language, "rawRetry")}
             </button>
             <button
               disabled={disabled}
-              onClick={() => setConfirmation(undefined)}
+              onClick={() => (dirty ? setConfirmation("close") : onClose())}
             >
-              {t(language, "rawKeepEditing")}
+              {t(language, "rawClose")}
             </button>
           </div>
+          {confirmation && (
+            <div
+              className="reset-confirmation"
+              role="group"
+              aria-label={t(language, "rawConfirmRegion")}
+            >
+              <p>
+                {confirmation === "reload"
+                  ? t(language, "rawReloadWarning")
+                  : t(language, "rawCloseWarning")}
+              </p>
+              <div className="actions">
+                <button
+                  disabled={disabled}
+                  onClick={() =>
+                    confirmation === "reload" ? void reload() : onClose()
+                  }
+                >
+                  {confirmation === "reload"
+                    ? t(language, "rawConfirmReload")
+                    : t(language, "rawConfirmClose")}
+                </button>
+                <button
+                  disabled={disabled}
+                  onClick={() => setConfirmation(undefined)}
+                >
+                  {t(language, "rawKeepEditing")}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
-      )}
-    </section>
+      </section>
+    </div>
   );
 }

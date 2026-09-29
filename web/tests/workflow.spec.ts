@@ -278,6 +278,7 @@ test("profile list switches language while keeping deletion confirmation", async
   await page.getByRole("button", { name: "连接服务" }).click();
   await expect(page.getByRole("heading", { name: "订阅列表" })).toBeVisible();
   await expect(page.getByText("还没有订阅。导入一个 YAML 文件开始使用。")).toBeVisible();
+  await page.getByRole("button", { name: "+ 本地订阅" }).first().click();
   await page.getByLabel("订阅名称", { exact: true }).fill("LanguageFixture");
   await page.getByLabel("订阅 YAML", { exact: true }).fill("proxies: []\nmode: direct\n");
   await page.getByRole("button", { name: "导入订阅", exact: true }).click();
@@ -290,6 +291,7 @@ test("profile list switches language while keeping deletion confirmation", async
   await expect(page.getByText("1 profile", { exact: true })).toBeVisible();
   await expect(item).toContainText("Local profile");
   await expect(item.getByRole("button", { name: "Use profile" })).toBeVisible();
+  await item.getByRole("button", { name: "Actions LanguageFixture" }).click();
   await item.getByRole("button", { name: "Delete profile LanguageFixture" }).click();
   await expect(item.getByText("Delete this profile, its exclusive auxiliary configurations and DNS preferences? Shared auxiliary configurations will remain.")).toBeVisible();
 
@@ -306,22 +308,34 @@ test("subscription import forms translate without losing drafts or changing impo
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务" }).click();
   await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+
+  // Open local modal in en
+  await page.getByRole("button", { name: "+ Local profile" }).first().click();
   await expect(page.getByRole("heading", { name: "Import local profile" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Download remote profile" })).toBeVisible();
   await page.getByLabel("Upload profile YAML").setInputFiles({
     name: "large.yaml", mimeType: "text/yaml", buffer: Buffer.alloc(8 * 1024 ** 2 + 1),
   });
   await expect(page.getByText("File must not exceed 8 MiB")).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
+
+  // Open remote modal in en
+  await page.getByRole("button", { name: "+ Remote profile" }).first().click();
+  await expect(page.getByRole("heading", { name: "Download remote profile" })).toBeVisible();
   await page.getByLabel("Subscription URL").fill(`${subscriptionUrl}/ok`);
   await page.getByLabel("Remote profile name (optional)").fill("RemoteDraft");
   await page.getByLabel("Allow invalid TLS certificates for downloads").check();
   const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
 
+  // Switch language to zh
   await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
-  await expect(page.getByText("文件不能超过 8 MiB")).toBeVisible();
   await expect(page.getByLabel("订阅链接")).toHaveValue(`${subscriptionUrl}/ok`);
   await expect(page.getByLabel("远程订阅名称（可选）")).toHaveValue("RemoteDraft");
   await expect(page.getByLabel("下载允许无效 TLS 证书")).toBeChecked();
+  await page.getByRole("button", { name: "关闭" }).click();
+
+  // Open local modal in zh
+  await page.getByRole("button", { name: "+ 本地订阅" }).first().click();
+  await expect(page.getByText("文件不能超过 8 MiB")).toBeVisible();
   await page.getByLabel("上传订阅 YAML").setInputFiles({
     name: "LocalDraft.yaml", mimeType: "text/yaml", buffer: Buffer.from("proxies: []\nmode: direct\n"),
   });
@@ -329,15 +343,22 @@ test("subscription import forms translate without losing drafts or changing impo
   await expect(page.getByText("文件不能超过 8 MiB")).toHaveCount(0);
   const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
   expect(after.generation).toBe(before.generation);
+  await page.getByRole("button", { name: "关闭" }).click();
 
+  // Switch to en and import both
   await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await page.getByRole("button", { name: "+ Local profile" }).first().click();
   await page.getByRole("button", { name: "Import profile", exact: true }).click();
   await expect(page.getByRole("heading", { name: "LocalDraft" })).toBeVisible();
+
+  await page.getByRole("button", { name: "+ Remote profile" }).first().click();
   await page.getByLabel("Allow invalid TLS certificates for downloads").uncheck();
   await page.getByRole("button", { name: "Download and import" }).click();
   await expect(page.getByRole("heading", { name: "RemoteDraft" })).toBeVisible();
+
   for (const profile of ["LocalDraft", "RemoteDraft"]) {
     const item = page.locator("article.profile").filter({ has: page.getByRole("heading", { name: profile }) });
+    await item.getByRole("button", { name: `Actions ${profile}` }).click();
     await item.getByRole("button", { name: `Delete profile ${profile}` }).click();
     await item.getByRole("button", { name: `Confirm deletion ${profile}` }).click();
   }
@@ -348,6 +369,7 @@ test("profile metadata editor keeps remote draft across language changes and sav
   await page.goto(`${base}/profiles`);
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByRole("button", { name: "+ 远程订阅" }).first().click();
   await page.getByLabel("订阅链接").fill(`${subscriptionUrl}/ok`);
   await page.getByLabel("远程订阅名称（可选）").fill("MetadataDraft");
   await page.getByRole("button", { name: "下载并导入" }).click();
@@ -355,6 +377,7 @@ test("profile metadata editor keeps remote draft across language changes and sav
   await expect(draft).toBeVisible();
   const uid = await draft.locator(".mono").textContent();
   const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  await draft.getByRole("button", { name: "操作 MetadataDraft" }).click();
   await draft.getByRole("button", { name: "编辑订阅 MetadataDraft" }).click();
   await page.getByLabel("修改订阅名称").fill("MetadataSaved");
   await page.getByLabel("订阅描述").fill("localized editor draft");
@@ -385,6 +408,7 @@ test("profile metadata editor keeps remote draft across language changes and sav
   expect(item.option.danger_accept_invalid_certs).toBe(true);
   const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
   expect(after.generation).toBe(before.generation);
+  await saved.getByRole("button", { name: "Actions MetadataSaved" }).click();
   await saved.getByRole("button", { name: "Delete profile MetadataSaved" }).click();
   await saved.getByRole("button", { name: "Confirm deletion MetadataSaved" }).click();
   await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
@@ -394,6 +418,7 @@ test("raw profile editor retranslates feedback and preserves draft across langua
   await page.goto(`${base}/profiles`);
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByRole("button", { name: "+ 本地订阅" }).first().click();
   await page.getByLabel("订阅名称", { exact: true }).fill("RawLanguage");
   await page.getByLabel("订阅 YAML", { exact: true }).fill("proxies: []\nmode: direct\n");
   await page.getByRole("button", { name: "导入订阅", exact: true }).click();
@@ -406,6 +431,7 @@ test("raw profile editor retranslates feedback and preserves draft across langua
     else await route.continue();
   };
   await page.route("**/api/commands", failRead);
+  await profile.getByRole("button", { name: "操作 RawLanguage" }).click();
   await profile.getByRole("button", { name: "编辑原始订阅 RawLanguage" }).click();
   await expect(page.getByRole("region", { name: "原始订阅编辑器" }).getByRole("alert")).toContainText("读取原始订阅失败");
   await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
@@ -432,6 +458,7 @@ test("raw profile editor retranslates feedback and preserves draft across langua
   expect(after.generation).toBe(before.generation);
   await chinese.getByRole("button", { name: "关闭原始编辑器" }).click();
   await chinese.getByRole("button", { name: "确认丢弃原始草稿" }).click();
+  await profile.getByRole("button", { name: "操作 RawLanguage" }).click();
   await profile.getByRole("button", { name: "删除订阅 RawLanguage" }).click();
   await profile.getByRole("button", { name: "确认删除 RawLanguage" }).click();
   await expect(page.getByText("还没有订阅。导入一个 YAML 文件开始使用。")).toBeVisible();
@@ -441,6 +468,7 @@ test("profile merge editor keeps its YAML draft when language changes", async ({
   await page.goto(`${base}/profiles`);
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByRole("button", { name: "+ 本地订阅" }).first().click();
   await page.getByLabel("订阅名称", { exact: true }).fill("MergeLanguage");
   await page.getByLabel("订阅 YAML", { exact: true }).fill("proxies: []\nmode: direct\n");
   await page.getByRole("button", { name: "导入订阅", exact: true }).click();
@@ -448,6 +476,7 @@ test("profile merge editor keeps its YAML draft when language changes", async ({
   await expect(profile).toBeVisible();
   const uid = await profile.locator(".mono").textContent();
   const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  await profile.getByRole("button", { name: "操作 MergeLanguage" }).click();
   await profile.getByRole("button", { name: "合并增强 MergeLanguage" }).click();
   const merge = "mode: direct\n";
   await page.getByLabel("合并增强 YAML").fill(merge);
@@ -464,12 +493,14 @@ test("profile merge editor keeps its YAML draft when language changes", async ({
   });
   expect(response.ok).toBe(true);
   expect((await response.json()).yaml).toBe(merge);
+  await profile.getByRole("button", { name: "Actions MergeLanguage" }).click();
   await profile.getByRole("button", { name: "Config merge MergeLanguage" }).click();
   await expect(page.getByLabel("Config merge YAML")).toHaveValue(merge);
   await page.getByRole("button", { name: "Remove merge" }).click();
   await expect(profile.getByText("Config merge linked")).toHaveCount(0);
   const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
   expect(after.generation).toBe(before.generation);
+  await profile.getByRole("button", { name: "Actions MergeLanguage" }).click();
   await profile.getByRole("button", { name: "Delete profile MergeLanguage" }).click();
   await profile.getByRole("button", { name: "Confirm deletion MergeLanguage" }).click();
   await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
@@ -479,6 +510,7 @@ test("profile sequence editor localizes kinds and keeps YAML across language cha
   await page.goto(`${base}/profiles`);
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByRole("button", { name: "+ 本地订阅" }).first().click();
   await page.getByLabel("订阅名称", { exact: true }).fill("SequenceLanguage");
   await page.getByLabel("订阅 YAML", { exact: true }).fill("proxies: []\nmode: direct\n");
   await page.getByRole("button", { name: "导入订阅", exact: true }).click();
@@ -486,6 +518,7 @@ test("profile sequence editor localizes kinds and keeps YAML across language cha
   await expect(profile).toBeVisible();
   const uid = await profile.locator(".mono").textContent();
   const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  await profile.getByRole("button", { name: "操作 SequenceLanguage" }).click();
   await profile.getByRole("button", { name: "序列增强 SequenceLanguage" }).click();
   const rules = "prepend: ['DOMAIN,language.test,DIRECT']\nappend: []\ndelete: []\n";
   await page.getByLabel("序列增强 YAML").fill(rules);
@@ -502,6 +535,7 @@ test("profile sequence editor localizes kinds and keeps YAML across language cha
   });
   expect(response.ok).toBe(true);
   expect((await response.json()).yaml).toBe(rules);
+  await profile.getByRole("button", { name: "Actions SequenceLanguage" }).click();
   await profile.getByRole("button", { name: "Sequence enhancement SequenceLanguage" }).click();
   await page.getByLabel("Sequence type").selectOption("groups");
   await expect(page.getByLabel("Sequence type")).toHaveValue("groups");
@@ -509,11 +543,13 @@ test("profile sequence editor localizes kinds and keeps YAML across language cha
   await expect(page.getByLabel("Sequence YAML")).toHaveValue(rules);
   await page.getByRole("button", { name: "Remove sequence" }).click();
   await expect(page.getByLabel("Sequence YAML")).toHaveCount(0);
+  await profile.getByRole("button", { name: "Actions SequenceLanguage" }).click();
   await profile.getByRole("button", { name: "Sequence enhancement SequenceLanguage" }).click();
   await expect(page.getByRole("button", { name: "Remove sequence" })).toBeDisabled();
   await page.getByRole("button", { name: "Cancel sequence editing" }).click();
   const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
   expect(after.generation).toBe(before.generation);
+  await profile.getByRole("button", { name: "Actions SequenceLanguage" }).click();
   await profile.getByRole("button", { name: "Delete profile SequenceLanguage" }).click();
   await profile.getByRole("button", { name: "Confirm deletion SequenceLanguage" }).click();
   await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
@@ -523,6 +559,7 @@ test("profile script editor preserves JavaScript draft across language changes",
   await page.goto(`${base}/profiles`);
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务" }).click();
+  await page.getByRole("button", { name: "+ 本地订阅" }).first().click();
   await page.getByLabel("订阅名称", { exact: true }).fill("ScriptLanguage");
   await page.getByLabel("订阅 YAML", { exact: true }).fill("proxies: []\nmode: direct\n");
   await page.getByRole("button", { name: "导入订阅", exact: true }).click();
@@ -530,6 +567,7 @@ test("profile script editor preserves JavaScript draft across language changes",
   await expect(profile).toBeVisible();
   const uid = await profile.locator(".mono").textContent();
   const before = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+  await profile.getByRole("button", { name: "操作 ScriptLanguage" }).click();
   await profile.getByRole("button", { name: "脚本增强 ScriptLanguage" }).click();
   const source = "function main(config, name) {\n  // localized draft\n  return config;\n}\n";
   await page.getByLabel("脚本增强 JavaScript").fill(source);
@@ -546,12 +584,14 @@ test("profile script editor preserves JavaScript draft across language changes",
   });
   expect(response.ok).toBe(true);
   expect((await response.json()).source).toBe(source);
+  await profile.getByRole("button", { name: "Actions ScriptLanguage" }).click();
   await profile.getByRole("button", { name: "Script enhancement ScriptLanguage" }).click();
   await expect(page.getByLabel("Script enhancement JavaScript")).toHaveValue(source);
   await page.getByRole("button", { name: "Remove script enhancement" }).click();
   await expect(profile.getByText("Script linked")).toHaveCount(0);
   const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
   expect(after.generation).toBe(before.generation);
+  await profile.getByRole("button", { name: "Actions ScriptLanguage" }).click();
   await profile.getByRole("button", { name: "Delete profile ScriptLanguage" }).click();
   await profile.getByRole("button", { name: "Confirm deletion ScriptLanguage" }).click();
   await expect(page.getByText("No profiles yet. Import a YAML file to get started.")).toBeVisible();
@@ -1212,6 +1252,7 @@ test("browser repairs failed startup, saves selection/config, restores after ser
     .click();
   const yaml =
     "mixed-port: 0\nmode: rule\nlog-level: info\nexternal-controller: ''\ndns: {enable: false}\ntun: {enable: false}\nprofile: {store-selected: false}\nproxy-groups:\n  - {name: Main, type: select, proxies: [DIRECT, REJECT]}\nrules: ['MATCH,Main']\n";
+  await page.getByRole("button", { name: "+ 本地订阅", exact: true }).click();
   await page.getByLabel("上传订阅 YAML").setInputFiles({
     name: "Browser.yaml",
     mimeType: "text/yaml",
@@ -1226,6 +1267,7 @@ test("browser repairs failed startup, saves selection/config, restores after ser
   ).toBeVisible();
   await page.getByRole("button", { name: "使用订阅" }).click();
   await expect(page.getByText("当前订阅", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "+ 远程订阅", exact: true }).click();
   await page
     .getByLabel("订阅链接", { exact: true })
     .fill(`${subscriptionUrl}/ok`);
@@ -1240,11 +1282,13 @@ test("browser repairs failed startup, saves selection/config, restores after ser
   await expect(
     page.locator("article.profile").filter({ hasText: "BrowserRemote.yaml" }),
   ).toContainText("已用");
+  await page.getByRole("button", { name: "+ 远程订阅", exact: true }).click();
   await page
     .getByLabel("订阅链接", { exact: true })
     .fill(`${subscriptionUrl}/error`);
   await page.getByRole("button", { name: "下载并导入", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("503");
+  await page.getByRole("button", { name: "取消", exact: true }).click();
   await expect(page.locator("article.profile")).toHaveCount(2);
   await page.getByRole("button", { name: "启动内核" }).click();
   await expect(page.locator("header")).toContainText("运行中");
@@ -1835,6 +1879,9 @@ test("profile metadata editing persists and deletion protects current profiles a
   const before = await api("status");
   const requests = subscriptionRequests;
   await remote
+    .getByRole("button", { name: "操作 BrowserRemote.yaml", exact: true })
+    .click();
+  await remote
     .getByRole("button", { name: "编辑订阅 BrowserRemote.yaml", exact: true })
     .click();
   await page.getByLabel("修改订阅名称").fill("EditedRemote");
@@ -1857,11 +1904,17 @@ test("profile metadata editing persists and deletion protects current profiles a
   expect((await api("status")).config_revision).toBe(before.config_revision);
   expect((await api("status")).pid).toBe(before.pid);
   expect(subscriptionRequests).toBe(requests);
+  await edited
+    .getByRole("button", { name: "操作 EditedRemote", exact: true })
+    .click();
   await expect(
     edited.getByRole("button", { name: "删除订阅 EditedRemote", exact: true }),
   ).toBeDisabled();
   await page.getByRole("button", { name: "停止内核", exact: true }).click();
   await expect(page.locator("header")).toContainText("已停止");
+  await edited
+    .getByRole("button", { name: "操作 EditedRemote", exact: true })
+    .click();
   await expect(
     edited.getByRole("button", { name: "删除订阅 EditedRemote", exact: true }),
   ).toBeDisabled();
@@ -1881,6 +1934,12 @@ test("profile metadata editing persists and deletion protects current profiles a
   expect(item.option.update_interval).toBe(180);
   expect(item.option.allow_auto_update).toBe(false);
   expect(item.url).toBe(`${subscriptionUrl}/ok?edited=1`);
+  const local = page.locator("article.profile").filter({
+    has: page.getByRole("heading", { name: "Browser", exact: true }),
+  });
+  await local
+    .getByRole("button", { name: "操作 Browser", exact: true })
+    .click();
   await page
     .getByRole("button", { name: "编辑订阅 Browser", exact: true })
     .click();
@@ -1894,14 +1953,17 @@ test("profile metadata editing persists and deletion protects current profiles a
       has: page.getByRole("heading", { name: "Browser", exact: true }),
     }),
   ).toContainText("Local browser description");
-  const local = page.locator("article.profile").filter({
-    has: page.getByRole("heading", { name: "Browser", exact: true }),
-  });
+  await local
+    .getByRole("button", { name: "操作 Browser", exact: true })
+    .click();
   await page
     .getByRole("button", { name: "删除订阅 Browser", exact: true })
     .click();
   await page.getByRole("button", { name: "取消删除", exact: true }).click();
   await expect(page.locator("article.profile")).toHaveCount(2);
+  await local
+    .getByRole("button", { name: "操作 Browser", exact: true })
+    .click();
   await page
     .getByRole("button", { name: "删除订阅 Browser", exact: true })
     .click();
@@ -1916,6 +1978,7 @@ test("profile metadata editing persists and deletion protects current profiles a
   await expect(
     readFile(join(directory, "profiles", removed.file)),
   ).rejects.toMatchObject({ code: "ENOENT" });
+  await page.getByRole("button", { name: "+ 本地订阅", exact: true }).click();
   await page.getByLabel("订阅名称", { exact: true }).fill("Replacement");
   await page
     .getByLabel("订阅 YAML", { exact: true })
@@ -1929,6 +1992,9 @@ test("profile metadata editing persists and deletion protects current profiles a
     .click();
   await expect(replacement).toContainText("当前订阅");
   const current = await api("status");
+  await edited
+    .getByRole("button", { name: "操作 EditedRemote", exact: true })
+    .click();
   await edited
     .getByRole("button", { name: "删除订阅 EditedRemote", exact: true })
     .click();
@@ -1985,6 +2051,9 @@ test("linked merge preserves raw subscriptions, rejects invalid updates and surv
   const raw = await readFile(join(directory, "profiles", item.file), "utf8");
   const before = await api("status");
   await replacement
+    .getByRole("button", { name: "操作 Replacement", exact: true })
+    .click();
+  await replacement
     .getByRole("button", { name: "合并增强 Replacement", exact: true })
     .click();
   const overlay = "# browser merge\nMODE: rule\n";
@@ -2018,6 +2087,9 @@ test("linked merge preserves raw subscriptions, rejects invalid updates and surv
   await expect(page.getByLabel("运行配置 YAML")).toHaveValue(/mode: rule/);
   await navigate(/订阅/);
   await replacement
+    .getByRole("button", { name: "操作 Replacement", exact: true })
+    .click();
+  await replacement
     .getByRole("button", { name: "合并增强 Replacement", exact: true })
     .click();
   await expect(page.getByLabel("合并增强 YAML")).toHaveValue(overlay);
@@ -2045,6 +2117,9 @@ test("linked merge preserves raw subscriptions, rejects invalid updates and surv
   await navigate(/配置/);
   await expect(page.getByLabel("运行配置 YAML")).toHaveValue(/mode: global/);
   await navigate(/订阅/);
+  await replacement
+    .getByRole("button", { name: "操作 Replacement", exact: true })
+    .click();
   await replacement
     .getByRole("button", { name: "合并增强 Replacement", exact: true })
     .click();
@@ -2110,6 +2185,9 @@ test("linked sequence editor saves each type, rejects invalid rules and restores
     ],
   ]) {
     await profile
+      .getByRole("button", { name: "操作 Replacement", exact: true })
+      .click();
+    await profile
       .getByRole("button", { name: "序列增强 Replacement", exact: true })
       .click();
     if (kind !== "rules") {
@@ -2140,6 +2218,9 @@ test("linked sequence editor saves each type, rejects invalid rules and restores
     }),
   ).toHaveAttribute("aria-pressed", "true");
   await navigate(/订阅/);
+  await profile
+    .getByRole("button", { name: "操作 Replacement", exact: true })
+    .click();
   await profile
     .getByRole("button", { name: "序列增强 Replacement", exact: true })
     .click();
@@ -2179,6 +2260,9 @@ test("linked sequence editor saves each type, rejects invalid rules and restores
   await navigate(/订阅/);
   await page.setViewportSize({ width: 390, height: 844 });
   for (const kind of ["rules", "groups", "proxies"]) {
+    await profile
+      .getByRole("button", { name: "操作 Replacement", exact: true })
+      .click();
     await profile
       .getByRole("button", { name: "序列增强 Replacement", exact: true })
       .click();
@@ -2250,6 +2334,9 @@ test("script editor validates failures, preserves raw content and restores after
   const source =
     "// browser script\nfunction main(config, name) { console.info('BrowserScript ' + name); config.mode = 'rule'; return config; }\n";
   await profile
+    .getByRole("button", { name: "操作 Replacement", exact: true })
+    .click();
+  await profile
     .getByRole("button", { name: "脚本增强 Replacement", exact: true })
     .click();
   await page.getByLabel("脚本增强 JavaScript").fill(source);
@@ -2268,6 +2355,9 @@ test("script editor validates failures, preserves raw content and restores after
     page.getByText(/BrowserScript Replacement/).first(),
   ).toBeVisible();
   await navigate(/订阅/);
+  await profile
+    .getByRole("button", { name: "操作 Replacement", exact: true })
+    .click();
   await profile
     .getByRole("button", { name: "脚本增强 Replacement", exact: true })
     .click();
@@ -2305,6 +2395,9 @@ test("script editor validates failures, preserves raw content and restores after
   await navigate(/配置/);
   await expect(page.getByLabel("运行配置 YAML")).toHaveValue(/mode: global/);
   await navigate(/订阅/);
+  await profile
+    .getByRole("button", { name: "操作 Replacement", exact: true })
+    .click();
   await profile
     .getByRole("button", { name: "脚本增强 Replacement", exact: true })
     .click();
@@ -3547,6 +3640,12 @@ test("raw subscription editor preserves failed drafts, reconciles lost responses
   await page.route("**/api/commands", failRead);
   await page
     .getByRole("button", {
+      name: "操作 Raw editor provider",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("button", {
       name: "编辑原始订阅 Raw editor provider",
       exact: true,
     })
@@ -3728,11 +3827,20 @@ test("raw subscription editor preserves failed drafts, reconciles lost responses
   expect((await api("profile_raw", { uid })).yaml).toBe(draft);
   await page
     .getByRole("button", {
+      name: "操作 Raw editor provider",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("button", {
       name: "编辑原始订阅 Raw editor provider",
       exact: true,
     })
     .click();
   await expect(input).toHaveValue(draft);
+  await editor
+    .getByRole("button", { name: "关闭原始编辑器", exact: true })
+    .click();
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
 });
 
@@ -3945,6 +4053,9 @@ test("deleting a linked subscription cascades auxiliaries and DNS preferences wh
     has: page.getByRole("heading", { name: "Cascade deletion", exact: true }),
   });
   await card
+    .getByRole("button", { name: "操作 Cascade deletion", exact: true })
+    .click();
+  await card
     .getByRole("button", { name: "删除订阅 Cascade deletion", exact: true })
     .click();
   await expect(card).toContainText("共享辅助配置会保留");
@@ -3972,12 +4083,21 @@ test("deleting a linked subscription cascades auxiliaries and DNS preferences wh
   ).toBe(true);
   expect((await status()).pid).toBe(before.pid);
   expect((await status()).config_revision).toBe(before.config_revision);
+  const retainedCard = page.locator("article.profile").filter({
+    has: page.getByRole("heading", { name: "Cascade retained", exact: true }),
+  });
+  await retainedCard
+    .getByRole("button", { name: "操作 Cascade retained", exact: true })
+    .click();
   await expect(
     page.getByRole("button", {
       name: "删除订阅 Cascade retained",
       exact: true,
     }),
   ).toBeDisabled();
+  await retainedCard
+    .getByRole("button", { name: "操作 Cascade retained", exact: true })
+    .click();
   await stop();
   await start();
   await expect(page.getByText("已连接", { exact: true })).toBeVisible({
@@ -3985,12 +4105,18 @@ test("deleting a linked subscription cascades auxiliaries and DNS preferences wh
   });
   await expect(card).toHaveCount(0);
   expect((await api("settings")).profile_dns[deleted.uid]).toBeUndefined();
+  await retainedCard
+    .getByRole("button", { name: "操作 Cascade retained", exact: true })
+    .click();
   await expect(
     page.getByRole("button", {
       name: "删除订阅 Cascade retained",
       exact: true,
     }),
   ).toBeDisabled();
+  await retainedCard
+    .getByRole("button", { name: "操作 Cascade retained", exact: true })
+    .click();
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
 });
 
@@ -4072,6 +4198,9 @@ test("local and remote imports create owned defaults, preserve links across refr
   });
   await expect(card).toBeVisible();
   await card
+    .getByRole("button", { name: "操作 Automatic defaults", exact: true })
+    .click();
+  await card
     .getByRole("button", { name: "合并增强 Automatic defaults", exact: true })
     .click();
   await expect(page.getByLabel("合并增强 YAML")).toHaveValue(
@@ -4105,6 +4234,9 @@ test("managed proxy downloads persist the mode, keep failed drafts and allow exp
       },
       body: JSON.stringify({ command, ...fields }),
     });
+    if (!response.ok) {
+      console.error(`API command ${command} failed (${response.status}):`, await response.text());
+    }
     expect(response.ok).toBe(true);
     return response.json();
   };
@@ -4123,6 +4255,7 @@ test("managed proxy downloads persist the mode, keep failed drafts and allow exp
   await page.goto(`${base}/profiles`);
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务", exact: true }).click();
+  await page.getByRole("button", { name: "+ 远程订阅", exact: true }).click();
   const url = `${subscriptionUrl}/ok?self_proxy=1`;
   await page.getByLabel("订阅链接", { exact: true }).fill(url);
   await page.getByLabel("远程订阅名称（可选）").fill("Managed download");
@@ -4148,6 +4281,7 @@ test("managed proxy downloads persist the mode, keep failed drafts and allow exp
   ).toBe(true);
   await api("stop");
   const requests = subscriptionRequests;
+  await page.getByRole("button", { name: "+ 远程订阅", exact: true }).click();
   await page.getByLabel("订阅链接", { exact: true }).fill(url);
   await page.getByLabel("远程订阅名称（可选）").fill("Keep proxy draft");
   await page.getByRole("button", { name: "下载并导入", exact: true }).click();
@@ -4162,6 +4296,10 @@ test("managed proxy downloads persist the mode, keep failed drafts and allow exp
     page.getByLabel("通过托管内核代理下载", { exact: true }),
   ).toBeChecked();
   expect(subscriptionRequests).toBe(requests);
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  await card
+    .getByRole("button", { name: "操作 Managed download", exact: true })
+    .click();
   await card
     .getByRole("button", { name: "编辑订阅 Managed download", exact: true })
     .click();
@@ -4177,6 +4315,7 @@ test("managed proxy downloads persist the mode, keep failed drafts and allow exp
   ).toBe(false);
   await api("refresh_profile", { uid: item.uid });
   expect(subscriptionRequests).toBe(requests + 1);
+  await page.getByRole("button", { name: "+ 远程订阅", exact: true }).click();
   await page.getByLabel("通过托管内核代理下载", { exact: true }).uncheck();
   await page.getByRole("button", { name: "下载并导入", exact: true }).click();
   await expect(
@@ -4204,6 +4343,7 @@ test("service system proxy import and refresh work while the core is stopped and
   await page.goto(`${base}/profiles`);
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务", exact: true }).click();
+  await page.getByRole("button", { name: "+ 远程订阅", exact: true }).click();
   const url = "http://browser-subscription.invalid/ok?system=1";
   await page.getByLabel("订阅链接", { exact: true }).fill(url);
   await page.getByLabel("远程订阅名称（可选）").fill("System download");
@@ -4234,6 +4374,9 @@ test("service system proxy import and refresh work while the core is stopped and
   ).toBe(true);
   await api("stop");
   await card
+    .getByRole("button", { name: "操作 System download", exact: true })
+    .click();
+  await card
     .getByRole("button", { name: "编辑订阅 System download", exact: true })
     .click();
   await expect(
@@ -4254,6 +4397,7 @@ test("service system proxy import and refresh work while the core is stopped and
   ).toBe(false);
   await api("refresh_profile", { uid: item.uid });
   const requests = subscriptionRequests;
+  await page.getByRole("button", { name: "+ 远程订阅", exact: true }).click();
   await page.getByLabel("订阅链接", { exact: true }).fill(url);
   await page.getByLabel("远程订阅名称（可选）").fill("Keep system draft");
   await page.getByLabel("通过托管内核代理下载", { exact: true }).check();
@@ -4298,6 +4442,7 @@ test("HTTPS certificate option is explicit, keeps failed drafts and persists acr
   await page.goto(`${base}/profiles`);
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务", exact: true }).click();
+  await page.getByRole("button", { name: "+ 远程订阅", exact: true }).click();
   await expect(
     page.getByLabel("下载允许无效 TLS 证书", { exact: true }),
   ).not.toBeChecked();
@@ -4332,6 +4477,9 @@ test("HTTPS certificate option is explicit, keeps failed drafts and persists acr
     timeout: 15000,
   });
   await api("stop");
+  await card
+    .getByRole("button", { name: "操作 TLS subscription", exact: true })
+    .click();
   await card
     .getByRole("button", { name: "编辑订阅 TLS subscription", exact: true })
     .click();
@@ -4428,6 +4576,12 @@ test("saved automatic update policy runs overdue subscriptions after restart and
       exact: true,
     }),
   });
+  await card
+    .getByRole("button", {
+      name: "操作 Scheduled subscription",
+      exact: true,
+    })
+    .click();
   await card
     .getByRole("button", {
       name: "编辑订阅 Scheduled subscription",

@@ -663,127 +663,146 @@ function ProfileEditor({
       onClose();
   }
   return (
-    <section className="panel">
-      <h2>{t(language, "profileEditorTitle")}</h2>
-      <p className="muted">{t(language, "profileEditorHelp")}</p>
-      <form onSubmit={save}>
-        <label>
-          {t(language, "profileEditorName")}
-          <input
-            required
-            maxLength={256}
-            disabled={busy}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </label>
-        <label>
-          {t(language, "profileEditorDescription")}
-          <textarea
-            maxLength={4096}
-            disabled={busy}
-            value={desc}
-            onChange={(event) => setDesc(event.target.value)}
-          />
-        </label>
-        {item.type === "remote" && (
-          <>
-            <label>
-              {t(language, "profileEditorUrl")}
-              <input
-                type="url"
-                required
-                maxLength={8192}
-                disabled={busy}
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-              />
-            </label>
-            <label>
-              {t(language, "profileEditorAgent")}
-              <input
-                maxLength={1024}
-                disabled={busy}
-                value={agent}
-                onChange={(event) => setAgent(event.target.value)}
-              />
-            </label>
-            <label>
-              {t(language, "profileEditorTimeout")}
-              <input
-                type="number"
-                required
-                min={1}
-                max={120}
-                step={1}
-                disabled={busy}
-                value={seconds}
-                onChange={(event) => setSeconds(event.target.value)}
-              />
-            </label>
-            <label>
-              {t(language, "profileEditorInterval")}
-              <input
-                type="number"
-                required
-                min={0}
-                max={Number.MAX_SAFE_INTEGER}
-                step={1}
-                disabled={busy}
-                value={interval}
-                onChange={(event) => setInterval(event.target.value)}
-              />
-            </label>
-            <label className="check-label">
-              <input
-                type="checkbox"
-                disabled={busy}
-                checked={auto}
-                onChange={(event) => setAuto(event.target.checked)}
-              />
-              {t(language, "profileEditorAuto")}
-            </label>
-            <label className="check-label">
-              <input
-                type="checkbox"
-                disabled={busy}
-                checked={selfProxy}
-                onChange={(event) => setSelfProxy(event.target.checked)}
-              />
-              {t(language, "profileEditorManaged")}
-            </label>
-            <label className="check-label">
-              <input
-                type="checkbox"
-                disabled={busy}
-                checked={withProxy}
-                onChange={(event) => setWithProxy(event.target.checked)}
-              />
-              {t(language, "profileEditorSystem")}
-            </label>
-            <label className="check-label">
-              <input
-                type="checkbox"
-                disabled={busy}
-                checked={invalidCerts}
-                onChange={(event) => setInvalidCerts(event.target.checked)}
-              />
-              {t(language, "profileEditorInvalidCerts")}
-            </label>
-            <p className="muted">{t(language, "profileEditorTlsHelp")}</p>
-            <p className="muted">{t(language, "profileEditorRouteHelp")}</p>
-          </>
-        )}
-        <div className="form-actions">
-          <button className="primary" disabled={busy}>
-            {t(language, "profileEditorSave")}
-          </button>
-          <button type="button" disabled={busy} onClick={onClose}>
-            {t(language, "profileEditorCancel")}
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <section className="modal-dialog" aria-label={t(language, "profileEditorTitle")}>
+        <div className="modal-header">
+          <h2>{t(language, "profileEditorTitle")}</h2>
+          <button
+            type="button"
+            className="modal-close"
+            onClick={onClose}
+            aria-label={t(language, "close")}
+          >
+            ✕
           </button>
         </div>
-      </form>
-    </section>
+        <div className="modal-body">
+          <p className="muted">{t(language, "profileEditorHelp")}</p>
+          <form onSubmit={save}>
+            <label>
+              {t(language, "profileEditorName")}
+              <input
+                required
+                maxLength={256}
+                disabled={busy}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </label>
+            <label>
+              {t(language, "profileEditorDescription")}
+              <textarea
+                maxLength={4096}
+                disabled={busy}
+                value={desc}
+                onChange={(event) => setDesc(event.target.value)}
+              />
+            </label>
+            {item.type === "remote" && (
+              <>
+                <label>
+                  {t(language, "profileEditorUrl")}
+                  <input
+                    type="url"
+                    required
+                    maxLength={8192}
+                    disabled={busy}
+                    value={url}
+                    onChange={(event) => setUrl(event.target.value)}
+                  />
+                </label>
+                <label>
+                  {t(language, "profileEditorAgent")}
+                  <input
+                    maxLength={1024}
+                    disabled={busy}
+                    value={agent}
+                    onChange={(event) => setAgent(event.target.value)}
+                  />
+                </label>
+                <label>
+                  {t(language, "profileEditorTimeout")}
+                  <input
+                    type="number"
+                    required
+                    min={1}
+                    max={120}
+                    step={1}
+                    disabled={busy}
+                    value={seconds}
+                    onChange={(event) => setSeconds(event.target.value)}
+                  />
+                </label>
+                <label>
+                  {t(language, "profileEditorInterval")}
+                  <input
+                    type="number"
+                    required
+                    min={0}
+                    max={Number.MAX_SAFE_INTEGER}
+                    step={1}
+                    disabled={busy}
+                    value={interval}
+                    onChange={(event) => setInterval(event.target.value)}
+                  />
+                </label>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={auto}
+                    onChange={(event) => setAuto(event.target.checked)}
+                  />
+                  {t(language, "profileEditorAuto")}
+                </label>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={selfProxy}
+                    onChange={(event) => setSelfProxy(event.target.checked)}
+                  />
+                  {t(language, "profileEditorManaged")}
+                </label>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={withProxy}
+                    onChange={(event) => setWithProxy(event.target.checked)}
+                  />
+                  {t(language, "profileEditorSystem")}
+                </label>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={invalidCerts}
+                    onChange={(event) => setInvalidCerts(event.target.checked)}
+                  />
+                  {t(language, "profileEditorInvalidCerts")}
+                </label>
+                <p className="muted">{t(language, "profileEditorTlsHelp")}</p>
+                <p className="muted">{t(language, "profileEditorRouteHelp")}</p>
+              </>
+            )}
+            <div className="form-actions">
+              <button className="primary" disabled={busy}>
+                {t(language, "profileEditorSave")}
+              </button>
+              <button type="button" disabled={busy} onClick={onClose}>
+                {t(language, "profileEditorCancel")}
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -813,39 +832,58 @@ function MergeEditor({
       onClose();
   }
   return (
-    <section className="panel">
-      <h2>{t(language, "mergeEditorTitle")}</h2>
-      <p className="muted">{t(language, "mergeEditorHelp").replace("{name}", item.name || item.uid)}</p>
-      <form onSubmit={save}>
-        <label>
-          {t(language, "mergeEditorYaml")}
-          <textarea
-            className="code"
-            rows={12}
-            disabled={busy}
-            value={yaml}
-            onChange={(event) => setYaml(event.target.value)}
-            spellCheck={false}
-            required
-          />
-        </label>
-        <div className="form-actions">
-          <button className="primary" disabled={busy}>
-            {t(language, "mergeEditorSave")}
-          </button>
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <section className="modal-dialog modal-dialog-lg" aria-label={t(language, "mergeEditorTitle")}>
+        <div className="modal-header">
+          <h2>{t(language, "mergeEditorTitle")}</h2>
           <button
             type="button"
-            disabled={busy || !content.uid}
-            onClick={() => void clear()}
+            className="modal-close"
+            onClick={onClose}
+            aria-label={t(language, "close")}
           >
-            {t(language, "mergeEditorRemove")}
-          </button>
-          <button type="button" disabled={busy} onClick={onClose}>
-            {t(language, "mergeEditorCancel")}
+            ✕
           </button>
         </div>
-      </form>
-    </section>
+        <div className="modal-body">
+          <p className="muted">{t(language, "mergeEditorHelp").replace("{name}", item.name || item.uid)}</p>
+          <form onSubmit={save}>
+            <label>
+              {t(language, "mergeEditorYaml")}
+              <textarea
+                className="code"
+                rows={12}
+                disabled={busy}
+                value={yaml}
+                onChange={(event) => setYaml(event.target.value)}
+                spellCheck={false}
+                required
+              />
+            </label>
+            <div className="form-actions">
+              <button className="primary" disabled={busy}>
+                {t(language, "mergeEditorSave")}
+              </button>
+              <button
+                type="button"
+                disabled={busy || !content.uid}
+                onClick={() => void clear()}
+              >
+                {t(language, "mergeEditorRemove")}
+              </button>
+              <button type="button" disabled={busy} onClick={onClose}>
+                {t(language, "mergeEditorCancel")}
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1080,39 +1118,58 @@ function ScriptEditor({
       onClose();
   }
   return (
-    <section className="panel">
-      <h2>{t(language, "scriptEditorTitle")}</h2>
-      <p className="muted">{t(language, "scriptEditorHelp").replace("{name}", item.name || item.uid)}</p>
-      <form onSubmit={save}>
-        <label>
-          {t(language, "scriptEditorSource")}
-          <textarea
-            className="code"
-            rows={12}
-            disabled={busy}
-            value={source}
-            onChange={(event) => setSource(event.target.value)}
-            spellCheck={false}
-            required
-          />
-        </label>
-        <div className="form-actions">
-          <button className="primary" disabled={busy}>
-            {t(language, "scriptEditorSave")}
-          </button>
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <section className="modal-dialog modal-dialog-lg" aria-label={t(language, "scriptEditorTitle")}>
+        <div className="modal-header">
+          <h2>{t(language, "scriptEditorTitle")}</h2>
           <button
             type="button"
-            disabled={busy || !content.uid}
-            onClick={() => void clear()}
+            className="modal-close"
+            onClick={onClose}
+            aria-label={t(language, "close")}
           >
-            {t(language, "scriptEditorRemove")}
-          </button>
-          <button type="button" disabled={busy} onClick={onClose}>
-            {t(language, "scriptEditorCancel")}
+            ✕
           </button>
         </div>
-      </form>
-    </section>
+        <div className="modal-body">
+          <p className="muted">{t(language, "scriptEditorHelp").replace("{name}", item.name || item.uid)}</p>
+          <form onSubmit={save}>
+            <label>
+              {t(language, "scriptEditorSource")}
+              <textarea
+                className="code"
+                rows={12}
+                disabled={busy}
+                value={source}
+                onChange={(event) => setSource(event.target.value)}
+                spellCheck={false}
+                required
+              />
+            </label>
+            <div className="form-actions">
+              <button className="primary" disabled={busy}>
+                {t(language, "scriptEditorSave")}
+              </button>
+              <button
+                type="button"
+                disabled={busy || !content.uid}
+                onClick={() => void clear()}
+              >
+                {t(language, "scriptEditorRemove")}
+              </button>
+              <button type="button" disabled={busy} onClick={onClose}>
+                {t(language, "scriptEditorCancel")}
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1156,51 +1213,317 @@ function SequenceEditor({
       onClose();
   }
   return (
-    <section className="panel">
-      <h2>{t(language, "sequenceEditorTitle")}</h2>
-      <p className="muted">{t(language, "sequenceEditorHelp").replace("{name}", item.name || item.uid)}</p>
-      <label>
-        {t(language, "sequenceEditorKind")}
-        <select
-          value={kind}
-          disabled={busy}
-          onChange={(event) => onKind(event.target.value as SequenceKind)}
-        >
-          <option value="rules">{t(language, "sequenceRules")}</option>
-          <option value="proxies">{t(language, "sequenceProxies")}</option>
-          <option value="groups">{t(language, "sequenceGroups")}</option>
-        </select>
-      </label>
-      <form onSubmit={save}>
-        <label>
-          {t(language, "sequenceEditorYaml")}
-          <textarea
-            className="code"
-            rows={12}
-            disabled={busy}
-            value={yaml}
-            onChange={(event) => setYaml(event.target.value)}
-            spellCheck={false}
-            required
-          />
-        </label>
-        <div className="form-actions">
-          <button className="primary" disabled={busy}>
-            {t(language, "sequenceEditorSave")}
-          </button>
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <section className="modal-dialog modal-dialog-lg" aria-label={t(language, "sequenceEditorTitle")}>
+        <div className="modal-header">
+          <h2>{t(language, "sequenceEditorTitle")}</h2>
           <button
             type="button"
-            disabled={busy || !content.uid}
-            onClick={() => void clear()}
+            className="modal-close"
+            onClick={onClose}
+            aria-label={t(language, "close")}
           >
-            {t(language, "sequenceEditorRemove")}
-          </button>
-          <button type="button" disabled={busy} onClick={onClose}>
-            {t(language, "sequenceEditorCancel")}
+            ✕
           </button>
         </div>
-      </form>
-    </section>
+        <div className="modal-body">
+          <p className="muted">{t(language, "sequenceEditorHelp").replace("{name}", item.name || item.uid)}</p>
+          <label>
+            {t(language, "sequenceEditorKind")}
+            <select
+              value={kind}
+              disabled={busy}
+              onChange={(event) => onKind(event.target.value as SequenceKind)}
+            >
+              <option value="rules">{t(language, "sequenceRules")}</option>
+              <option value="proxies">{t(language, "sequenceProxies")}</option>
+              <option value="groups">{t(language, "sequenceGroups")}</option>
+            </select>
+          </label>
+          <form onSubmit={save}>
+            <label>
+              {t(language, "sequenceEditorYaml")}
+              <textarea
+                className="code"
+                rows={12}
+                disabled={busy}
+                value={yaml}
+                onChange={(event) => setYaml(event.target.value)}
+                spellCheck={false}
+                required
+              />
+            </label>
+            <div className="form-actions">
+              <button className="primary" disabled={busy}>
+                {t(language, "sequenceEditorSave")}
+              </button>
+              <button
+                type="button"
+                disabled={busy || !content.uid}
+                onClick={() => void clear()}
+              >
+                {t(language, "sequenceEditorRemove")}
+              </button>
+              <button type="button" disabled={busy} onClick={onClose}>
+                {t(language, "sequenceEditorCancel")}
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProfileCardItem({
+  item,
+  language,
+  status,
+  busy,
+  rawEditing,
+  deleting,
+  perform,
+  onEdit,
+  onRawEdit,
+  onMerge,
+  onSequence,
+  onScript,
+  onDeleteStart,
+  onDeleteCancel,
+  onDeleteConfirm,
+}: {
+  item: Profile;
+  language: Language;
+  status: CoreStatus;
+  busy: boolean;
+  rawEditing?: string;
+  deleting: string | null;
+  perform: Perform;
+  onEdit: () => void;
+  onRawEdit: () => void;
+  onMerge: () => void;
+  onSequence: () => void;
+  onScript: () => void;
+  onDeleteStart: () => void;
+  onDeleteCancel: () => void;
+  onDeleteConfirm: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleClickOutside(event: globalThis.MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
+
+  return (
+    <article
+      className={`profile ${status.active_profile === item.uid ? "active-profile" : ""}`}
+      key={item.uid}
+    >
+      <div className="profile-info">
+        <div className="profile-heading-line">
+          <h3>{item.name || item.uid}</h3>
+          <span className="badge">
+            {item.type === "remote"
+              ? t(language, "profileRemote")
+              : t(language, "profileLocal")}
+          </span>
+          {status.active_profile === item.uid && (
+            <span className="badge good">{t(language, "profileCurrent")}</span>
+          )}
+        </div>
+        <p className="mono muted">{item.uid}</p>
+        {item.desc && (
+          <p className="muted profile-description">{item.desc}</p>
+        )}
+        {item.extra && (
+          <p className="muted">
+            {t(language, "profileUsed")}{" "}
+            {bytes(item.extra.upload + item.extra.download)} /{" "}
+            {bytes(item.extra.total)}
+          </p>
+        )}
+        <div className="profile-tags">
+          {item.option?.merge && (
+            <p className="muted">{t(language, "profileLinkedMerge")}</p>
+          )}
+          {item.option?.script && (
+            <p className="muted">{t(language, "profileLinkedScript")}</p>
+          )}
+          {(item.option?.rules ||
+            item.option?.proxies ||
+            item.option?.groups) && (
+            <p className="muted">{t(language, "profileLinkedSequence")}</p>
+          )}
+        </div>
+      </div>
+      <div className="profile-actions">
+        {item.type === "remote" && (
+          <button
+            disabled={busy}
+            aria-label={`${t(language, "profileRefresh")} ${item.name || item.uid}`}
+            onClick={() =>
+              void perform("refresh_profile", { uid: item.uid })
+            }
+          >
+            {t(language, "profileRefresh")}
+          </button>
+        )}
+        <button
+          disabled={busy}
+          className={status.active_profile === item.uid ? "primary" : ""}
+          onClick={() =>
+            void perform("select_profile", { uid: item.uid })
+          }
+        >
+          {status.active_profile === item.uid
+            ? t(language, "profileReapply")
+            : t(language, "profileUse")}
+        </button>
+        <div className="profile-dropdown" ref={menuRef}>
+          <button
+            type="button"
+            className="dropdown-trigger"
+            aria-label={`${t(language, "profileMoreActions")} ${item.name || item.uid}`}
+            title={t(language, "profileMoreActions")}
+            onClick={() => setMenuOpen(!menuOpen)}
+          >
+            ···
+          </button>
+          {menuOpen && (
+            <div className="dropdown-menu">
+              <button
+                type="button"
+                disabled={busy}
+                aria-label={`${t(language, "profileEditNamed")} ${item.name || item.uid}`}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onEdit();
+                }}
+              >
+                {t(language, "profileEdit")}
+              </button>
+              <button
+                type="button"
+                disabled={busy || rawEditing !== undefined}
+                aria-label={`${t(language, "profileEditRawNamed")} ${item.name || item.uid}`}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onRawEdit();
+                }}
+              >
+                {t(language, "profileRawYaml")}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                aria-label={`${t(language, "profileMerge")} ${item.name || item.uid}`}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onMerge();
+                }}
+              >
+                {t(language, "profileMerge")}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                aria-label={`${t(language, "profileSequence")} ${item.name || item.uid}`}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onSequence();
+                }}
+              >
+                {t(language, "profileSequence")}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                aria-label={`${t(language, "profileScript")} ${item.name || item.uid}`}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onScript();
+                }}
+              >
+                {t(language, "profileScript")}
+              </button>
+              <div className="dropdown-divider" />
+              <button
+                type="button"
+                className="dropdown-item-danger"
+                disabled={busy || status.active_profile === item.uid}
+                aria-label={`${t(language, "profileDeleteNamed")} ${item.name || item.uid}`}
+                title={
+                  status.active_profile === item.uid
+                    ? t(language, "profileSwitchFirst")
+                    : undefined
+                }
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDeleteStart();
+                }}
+              >
+                {t(language, "profileDelete")}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      {deleting === item.uid && (
+        <div
+          className="modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) onDeleteCancel();
+          }}
+        >
+          <div
+            className="modal-dialog modal-dialog-sm delete-confirmation"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="modal-header">
+              <h3>{`${t(language, "profileDeleteNamed")} ${item.name || item.uid}`}</h3>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={onDeleteCancel}
+                aria-label={t(language, "close")}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <p>{t(language, "profileDeleteWarning")}</p>
+              <div className="form-actions">
+                <button
+                  className="dropdown-item-danger"
+                  disabled={busy}
+                  onClick={onDeleteConfirm}
+                  aria-label={`${t(language, "profileConfirmDelete")} ${item.name || item.uid}`}
+                >
+                  {t(language, "profileConfirmDelete")}
+                </button>
+                <button disabled={busy} onClick={onDeleteCancel}>
+                  {t(language, "profileCancelDelete")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -1228,6 +1551,8 @@ function ProfilePage({
     [remoteSelfProxy, setRemoteSelfProxy] = useState(false),
     [remoteWithProxy, setRemoteWithProxy] = useState(false),
     [remoteInvalidCerts, setRemoteInvalidCerts] = useState(false),
+    [showRemoteModal, setShowRemoteModal] = useState(false),
+    [showLocalModal, setShowLocalModal] = useState(false),
     [error, setError] = useState<"too-large" | Error | null>(null);
   const [rawEditing, setRawEditing] = useState<string>();
   const [editing, setEditing] = useState<Profile | null>(null);
@@ -1303,6 +1628,7 @@ function ProfilePage({
     if (item) {
       setName("");
       setYaml("");
+      setShowLocalModal(false);
     }
   }
   async function importRemote(event: FormEvent) {
@@ -1319,6 +1645,7 @@ function ProfilePage({
     if (item) {
       setRemoteUrl("");
       setRemoteName("");
+      setShowRemoteModal(false);
     }
   }
   return (
@@ -1326,126 +1653,57 @@ function ProfilePage({
       <GlobalEnhancements language={language} status={status} busy={busy} perform={perform} />
       <section className="panel">
         <div className="panel-title">
-          <h2>{t(language, "profileListTitle")}</h2>
-          <span>{t(language, baseProfiles?.length === 1 ? "profileCountOne" : "profileCountOther").replace("{count}", String(baseProfiles?.length || 0))}</span>
+          <div>
+            <h2>{t(language, "profileListTitle")}</h2>
+            <span className="profile-count">
+              {t(
+                language,
+                baseProfiles?.length === 1 ? "profileCountOne" : "profileCountOther",
+              ).replace("{count}", String(baseProfiles?.length || 0))}
+            </span>
+          </div>
+          <div className="profile-header-actions">
+            <button
+              type="button"
+              className="primary"
+              onClick={() => setShowRemoteModal(true)}
+              aria-label={t(language, "profileAddRemote")}
+            >
+              {t(language, "profileAddRemote")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowLocalModal(true)}
+              aria-label={t(language, "profileAddLocal")}
+            >
+              {t(language, "profileAddLocal")}
+            </button>
+          </div>
         </div>
         {!baseProfiles?.length && (
-          <p className="empty">{t(language, "profileEmpty")}</p>
+          <div style={{ textAlign: "center", padding: "28px 0" }}>
+            <p className="empty">{t(language, "profileEmpty")}</p>
+          </div>
         )}
         {baseProfiles?.map((item) => (
-          <article className="profile" key={item.uid}>
-            <div>
-              <h3>{item.name || item.uid}</h3>
-              <p className="mono">{item.uid}</p>
-              <p className="muted">
-                {item.type === "remote" ? t(language, "profileRemote") : t(language, "profileLocal")}
-              </p>
-              {item.option?.merge && <p className="muted">{t(language, "profileLinkedMerge")}</p>}
-              {item.option?.script && <p className="muted">{t(language, "profileLinkedScript")}</p>}
-              {(item.option?.rules ||
-                item.option?.proxies ||
-                item.option?.groups) && <p className="muted">{t(language, "profileLinkedSequence")}</p>}
-              {item.desc && (
-                <p className="muted profile-description">{item.desc}</p>
-              )}
-              {item.extra && (
-                <p className="muted">
-                  {t(language, "profileUsed")} {bytes(item.extra.upload + item.extra.download)} /{" "}
-                  {bytes(item.extra.total)}
-                </p>
-              )}
-              {status.active_profile === item.uid && (
-                <span className="badge good">{t(language, "profileCurrent")}</span>
-              )}
-              {deleting === item.uid && (
-                <div className="delete-confirmation">
-                  <p>
-                    {t(language, "profileDeleteWarning")}
-                  </p>
-                  <div className="form-actions">
-                    <button
-                      disabled={busy}
-                      onClick={() => void remove(item)}
-                      aria-label={`${t(language, "profileConfirmDelete")} ${item.name || item.uid}`}
-                    >
-                      {t(language, "profileConfirmDelete")}
-                    </button>
-                    <button disabled={busy} onClick={() => setDeleting(null)}>
-                      {t(language, "profileCancelDelete")}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="profile-actions">
-              <button
-                disabled={busy}
-                aria-label={`${t(language, "profileScript")} ${item.name || item.uid}`}
-                onClick={() => void openScript(item)}
-              >
-                {t(language, "profileScript")}
-              </button>
-              <button
-                disabled={busy}
-                aria-label={`${t(language, "profileSequence")} ${item.name || item.uid}`}
-                onClick={() => void openSequence(item)}
-              >
-                {t(language, "profileSequence")}
-              </button>
-              <button
-                disabled={busy}
-                aria-label={`${t(language, "profileMerge")} ${item.name || item.uid}`}
-                onClick={() => void openMerge(item)}
-              >
-                {t(language, "profileMerge")}
-              </button>
-              <button
-                disabled={busy || rawEditing !== undefined}
-                aria-label={`${t(language, "profileEditRawNamed")} ${item.name || item.uid}`}
-                onClick={() => setRawEditing(item.uid)}
-              >
-                {t(language, "profileRawYaml")}
-              </button>
-              <button
-                disabled={busy}
-                aria-label={`${t(language, "profileEditNamed")} ${item.name || item.uid}`}
-                onClick={() => setEditing(item)}
-              >
-                {t(language, "profileEdit")}
-              </button>
-              {item.type === "remote" && (
-                <button
-                  disabled={busy}
-                  aria-label={`${t(language, "profileRefresh")} ${item.name || item.uid}`}
-                  onClick={() =>
-                    void perform("refresh_profile", { uid: item.uid })
-                  }
-                >
-                  {t(language, "profileRefresh")}
-                </button>
-              )}
-              <button
-                disabled={busy}
-                onClick={() =>
-                  void perform("select_profile", { uid: item.uid })
-                }
-              >
-                {status.active_profile === item.uid ? t(language, "profileReapply") : t(language, "profileUse")}
-              </button>
-              <button
-                disabled={busy || status.active_profile === item.uid}
-                aria-label={`${t(language, "profileDeleteNamed")} ${item.name || item.uid}`}
-                title={
-                  status.active_profile === item.uid
-                    ? t(language, "profileSwitchFirst")
-                    : undefined
-                }
-                onClick={() => setDeleting(item.uid)}
-              >
-                {t(language, "profileDelete")}
-              </button>
-            </div>
-          </article>
+          <ProfileCardItem
+            key={item.uid}
+            item={item}
+            language={language}
+            status={status}
+            busy={busy}
+            rawEditing={rawEditing}
+            deleting={deleting}
+            perform={perform}
+            onEdit={() => setEditing(item)}
+            onRawEdit={() => setRawEditing(item.uid)}
+            onMerge={() => void openMerge(item)}
+            onSequence={() => void openSequence(item)}
+            onScript={() => void openScript(item)}
+            onDeleteStart={() => setDeleting(item.uid)}
+            onDeleteCancel={() => setDeleting(null)}
+            onDeleteConfirm={() => void remove(item)}
+          />
         ))}
       </section>
       {rawEditing &&
@@ -1512,112 +1770,172 @@ function ProfilePage({
           onClose={() => setEditing(null)}
         />
       )}
-      <section className="panel">
-        <h2>{t(language, "remoteImportTitle")}</h2>
-        <p className="muted">{t(language, "remoteImportHelp")}</p>
-        <form onSubmit={importRemote}>
-          <label>
-            {t(language, "remoteImportUrl")}
-            <input
-              type="url"
-              value={remoteUrl}
-              required
-              maxLength={8192}
-              disabled={busy}
-              placeholder="https://example.com/subscription"
-              onChange={(event) => setRemoteUrl(event.target.value)}
-            />
-          </label>
-          <label>
-            {t(language, "remoteImportName")}
-            <input
-              value={remoteName}
-              maxLength={256}
-              disabled={busy}
-              onChange={(event) => setRemoteName(event.target.value)}
-            />
-          </label>
-          <label className="check-label">
-            <input
-              type="checkbox"
-              disabled={busy}
-              checked={remoteSelfProxy}
-              onChange={(event) => setRemoteSelfProxy(event.target.checked)}
-            />
-            {t(language, "remoteImportManaged")}
-          </label>
-          <label className="check-label">
-            <input
-              type="checkbox"
-              disabled={busy}
-              checked={remoteWithProxy}
-              onChange={(event) => setRemoteWithProxy(event.target.checked)}
-            />
-            {t(language, "remoteImportSystem")}
-          </label>
-          <label className="check-label">
-            <input
-              type="checkbox"
-              disabled={busy}
-              checked={remoteInvalidCerts}
-              onChange={(event) => setRemoteInvalidCerts(event.target.checked)}
-            />
-            {t(language, "remoteImportInvalidCerts")}
-          </label>
-          <p className="muted">{t(language, "remoteImportTlsHelp")}</p>
-          <p className="muted">{t(language, "remoteImportRouteHelp")}</p>
-          <button className="primary" disabled={busy || !remoteUrl.trim()}>
-            {t(language, "remoteImportSubmit")}
-          </button>
-        </form>
-      </section>
-      <section className="panel">
-        <h2>{t(language, "localImportTitle")}</h2>
-        <p className="muted">{t(language, "localImportHelp")}</p>
-        <form onSubmit={submit}>
-          <label>
-            {t(language, "localImportUpload")}
-            <input
-              type="file"
-              accept=".yaml,.yml,text/yaml,text/plain"
-              disabled={busy}
-              onChange={(event) => void upload(event.target.files?.[0])}
-            />
-          </label>
-          <label>
-            {t(language, "localImportName")}
-            <input
-              value={name}
-              required
-              maxLength={256}
-              disabled={busy}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </label>
-          <label>
-            {t(language, "localImportYaml")}
-            <textarea
-              className="code small"
-              value={yaml}
-              required
-              spellCheck={false}
-              disabled={busy}
-              onChange={(event) => setYaml(event.target.value)}
-            />
-          </label>
-          {error && (
-            <p className="alert" role="alert">
-              {error === "too-large" ? t(language, "localImportFileTooLarge") : describe(error)}
-            </p>
-          )}
-          <button
-            className="primary"
-            disabled={busy || !yaml.trim() || !name.trim()}
-          >
-            {t(language, "localImportSubmit")}
-          </button>
-        </form>
-      </section>
+      {showRemoteModal && (
+        <div
+          className="modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowRemoteModal(false);
+          }}
+        >
+          <section className="modal-dialog" aria-label={t(language, "remoteImportTitle")}>
+            <div className="modal-header">
+              <h2>{t(language, "remoteImportTitle")}</h2>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setShowRemoteModal(false)}
+                aria-label={t(language, "close")}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="muted">{t(language, "remoteImportHelp")}</p>
+              <form onSubmit={importRemote}>
+                <label>
+                  {t(language, "remoteImportUrl")}
+                  <input
+                    type="url"
+                    value={remoteUrl}
+                    required
+                    maxLength={8192}
+                    disabled={busy}
+                    placeholder="https://example.com/subscription"
+                    onChange={(event) => setRemoteUrl(event.target.value)}
+                  />
+                </label>
+                <label>
+                  {t(language, "remoteImportName")}
+                  <input
+                    value={remoteName}
+                    maxLength={256}
+                    disabled={busy}
+                    onChange={(event) => setRemoteName(event.target.value)}
+                  />
+                </label>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={remoteSelfProxy}
+                    onChange={(event) => setRemoteSelfProxy(event.target.checked)}
+                  />
+                  {t(language, "remoteImportManaged")}
+                </label>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={remoteWithProxy}
+                    onChange={(event) => setRemoteWithProxy(event.target.checked)}
+                  />
+                  {t(language, "remoteImportSystem")}
+                </label>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={remoteInvalidCerts}
+                    onChange={(event) => setRemoteInvalidCerts(event.target.checked)}
+                  />
+                  {t(language, "remoteImportInvalidCerts")}
+                </label>
+                <p className="muted">{t(language, "remoteImportTlsHelp")}</p>
+                <p className="muted">{t(language, "remoteImportRouteHelp")}</p>
+                <div className="form-actions">
+                  <button className="primary" disabled={busy || !remoteUrl.trim()}>
+                    {t(language, "remoteImportSubmit")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setShowRemoteModal(false)}
+                  >
+                    {t(language, "cancel")}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </section>
+        </div>
+      )}
+      {showLocalModal && (
+        <div
+          className="modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowLocalModal(false);
+          }}
+        >
+          <section className="modal-dialog" aria-label={t(language, "localImportTitle")}>
+            <div className="modal-header">
+              <h2>{t(language, "localImportTitle")}</h2>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setShowLocalModal(false)}
+                aria-label={t(language, "close")}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="muted">{t(language, "localImportHelp")}</p>
+              <form onSubmit={submit}>
+                <label>
+                  {t(language, "localImportUpload")}
+                  <input
+                    type="file"
+                    accept=".yaml,.yml,text/yaml,text/plain"
+                    disabled={busy}
+                    onChange={(event) => void upload(event.target.files?.[0])}
+                  />
+                </label>
+                <label>
+                  {t(language, "localImportName")}
+                  <input
+                    value={name}
+                    required
+                    maxLength={256}
+                    disabled={busy}
+                    onChange={(event) => setName(event.target.value)}
+                  />
+                </label>
+                <label>
+                  {t(language, "localImportYaml")}
+                  <textarea
+                    className="code small"
+                    value={yaml}
+                    required
+                    spellCheck={false}
+                    disabled={busy}
+                    onChange={(event) => setYaml(event.target.value)}
+                  />
+                </label>
+                {error && (
+                  <p className="alert" role="alert">
+                    {error === "too-large" ? t(language, "localImportFileTooLarge") : describe(error)}
+                  </p>
+                )}
+                <div className="form-actions">
+                  <button
+                    className="primary"
+                    disabled={busy || !yaml.trim() || !name.trim()}
+                  >
+                    {t(language, "localImportSubmit")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setShowLocalModal(false)}
+                  >
+                    {t(language, "cancel")}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
