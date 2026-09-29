@@ -53,9 +53,9 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task:** Code-quality refactor step 2 — `core_manager` split into domain modules (see below).
+**Latest completed task:** Code-quality refactor step 3 — typed Web connection state and per-page modules (see below).
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
-**Next implementation task:** Code-quality refactor step 3 — typed Web connection state and per-page modules.
+**Next implementation task:** Code-quality refactor step 4 — real module directories for backup, core release/upgrade and Geo.
 
 ## Code-quality refactor (behavior-preserving)
 
@@ -98,6 +98,18 @@ pre-refactor baseline.
    `CommandMessage::fail`, API methods share `CoreManager::call`, and
    `execute` has one arm per operation. Method bodies, error messages and the
    serialized actor semantics are unchanged; the move was verified line by line.
+3. **Typed Web connection state and per-page modules — done.** WebSocket state
+   is the `Connection` union (`connecting | connected | reconnecting |
+   unauthorized | badData`) exported by `web/src/api.ts`; it doubles as the
+   i18n key, so components compare against stable values instead of Chinese
+   display text and every language shows the translated label. The fallback
+   request error is localized (`requestFailed`). `web/src/main.tsx` keeps the
+   app shell (App, Login, Manager, routing); pages moved verbatim to
+   `overview.tsx`, `profiles.tsx`, `enhancement-editors.tsx`, `config.tsx`,
+   `proxies.tsx` and `logs.tsx`, with shared `describe`/`bytes` in `format.ts`.
+Not changed on purpose: the remaining hard-coded Chinese text in the settings
+pages (translation content, not a refactor), and this document's long
+increment history (the autonomous workbench appends to it).
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 

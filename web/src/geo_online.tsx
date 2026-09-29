@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError, command } from "./api";
+import { ApiError, command, type Connection } from "./api";
 import { t, type Language } from "./i18n";
 import type { CoreStatus } from "./types";
 
@@ -8,7 +8,7 @@ type Receipt = { changed: boolean; durable: boolean; cleanup_pending: boolean; c
 type Route = "direct" | "system" | "managed";
 
 export function GeoOnlineAction({ name, token, status, connection, logout, installed, language = "zh" }: {
-  name: string; token: string; status: CoreStatus; connection: string;
+  name: string; token: string; status: CoreStatus; connection: Connection;
   logout: (reason?: string) => void; installed: (message: string) => void;
   language?: Language;
 }) {
@@ -69,7 +69,7 @@ export function GeoOnlineAction({ name, token, status, connection, logout, insta
     }
   }
   return <div>
-    <button type="button" disabled={busy || connection !== "已连接"} onClick={() => void run(false)}>{t(language, "geoOnlineRead", { name })}</button>
+    <button type="button" disabled={busy || connection !== "connected"} onClick={() => void run(false)}>{t(language, "geoOnlineRead", { name })}</button>
     {info && <>
       <p>{t(language, "geoOnlineCommittedFingerprint")}<code>{info.source_sha256}</code></p>
       <p>{t(language, "geoOnlineCurrentFile")}<code>{info.current_sha256 || t(language, "geoSeedFileMissing")}</code></p>
@@ -82,7 +82,7 @@ export function GeoOnlineAction({ name, token, status, connection, logout, insta
       {!dat && <label><input type="checkbox" checked={accept} disabled={busy} onChange={event => setAccept(event.target.checked)} />{t(language, "geoSeedAllowEmptyMmdb")}</label>}
       {status.phase === "running" && <p className="info">{t(language, "geoOnlineRunningNotice")}</p>}
       {!(["running", "stopped"] as string[]).includes(status.phase) && <p className="info">{t(language, "geoOnlinePhaseNotice")}</p>}
-      <button type="button" disabled={busy || connection !== "已连接" || !(["running", "stopped"] as string[]).includes(status.phase) || (route === "managed" && status.phase !== "running")} onClick={() => void run(true)}>{t(language, "geoOnlineUpdate", { name })}</button>
+      <button type="button" disabled={busy || connection !== "connected" || !(["running", "stopped"] as string[]).includes(status.phase) || (route === "managed" && status.phase !== "running")} onClick={() => void run(true)}>{t(language, "geoOnlineUpdate", { name })}</button>
     </>}
     {busy && <p role="status">{t(language, "geoOnlineWorking")}</p>}
     {error && <p role="alert" className="alert">{t(language, "geoOnlineFailed", { message: error })}</p>}

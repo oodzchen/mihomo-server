@@ -1,5 +1,7 @@
 // Browser language stays in this origin's storage; it never changes the
 // service-wide locale. The fallback and regional aliases follow upstream i18n.
+import type { Connection } from "./api";
+
 export type Language = "zh" | "en" | "zhtw";
 const STORAGE_KEY = "mihomo-server-language";
 
@@ -37,7 +39,7 @@ const zh = {
   stopped: "已停止", starting: "启动中", running: "运行中", stopping: "停止中",
   recovering: "恢复中", failed: "启动失败", shutdown: "服务关闭",
   connecting: "连接中", connected: "已连接", reconnecting: "重连中",
-  unauthorized: "认证失败", badData: "数据错误",
+  unauthorized: "认证失败", badData: "数据错误", requestFailed: "请求失败 ({status})",
   coreName: "Mihomo 内核", noProfile: "未选择订阅", coreStopped: "内核未运行",
   startCore: "启动内核", stopCore: "停止内核", restartCore: "重启内核",
   coreManagement: "内核控制", corePid: "进程 PID", coreRunningPhase: "运行状态",
@@ -349,7 +351,7 @@ const en: Record<keyof typeof zh, string> = {
   stopped: "Stopped", starting: "Starting", running: "Running", stopping: "Stopping",
   recovering: "Recovering", failed: "Start failed", shutdown: "Service closed",
   connecting: "Connecting", connected: "Connected", reconnecting: "Reconnecting",
-  unauthorized: "Authentication failed", badData: "Invalid data",
+  unauthorized: "Authentication failed", badData: "Invalid data", requestFailed: "Request failed ({status})",
   coreName: "Mihomo core", noProfile: "No profile selected", coreStopped: "Core not running",
   startCore: "Start core", stopCore: "Stop core", restartCore: "Restart core",
   coreManagement: "Core control", corePid: "Process PID", coreRunningPhase: "Running state",
@@ -661,7 +663,7 @@ const zhtw: Record<keyof typeof zh, string> = {
   stopped: "已停止", starting: "啟動中", running: "執行中", stopping: "停止中",
   recovering: "復原中", failed: "啟動失敗", shutdown: "服務關閉",
   connecting: "連線中", connected: "已連線", reconnecting: "重新連線中",
-  unauthorized: "認證失敗", badData: "資料錯誤",
+  unauthorized: "認證失敗", badData: "資料錯誤", requestFailed: "請求失敗 ({status})",
   coreName: "Mihomo 核心", noProfile: "未選擇訂閱", coreStopped: "核心未執行",
   startCore: "啟動核心", stopCore: "停止核心", restartCore: "重啟核心",
   coreManagement: "核心控制", corePid: "進程 PID", coreRunningPhase: "運行狀態",
@@ -988,10 +990,6 @@ export function phaseLabel(language: Language, phase: string): string {
   return phaseKeys[phase] ? t(language, phaseKeys[phase]) : phase;
 }
 
-const connectionKeys: Record<string, MessageKey> = {
-  "连接中": "connecting", "已连接": "connected", "重连中": "reconnecting",
-  "认证失败": "unauthorized", "数据错误": "badData",
-};
-export function connectionLabel(language: Language, connection: string): string {
-  return connectionKeys[connection] ? t(language, connectionKeys[connection]) : connection;
+export function connectionLabel(language: Language, connection: Connection): string {
+  return t(language, connection);
 }

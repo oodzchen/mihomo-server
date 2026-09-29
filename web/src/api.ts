@@ -1,5 +1,13 @@
-import { savedLanguage } from "./i18n";
+import { savedLanguage, t } from "./i18n";
 import type { EventMessage } from "./types";
+
+/** WebSocket session state; also the i18n key used to display it. */
+export type Connection =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "unauthorized"
+  | "badData";
 
 export type Perform = <T>(
   name: string,
@@ -35,8 +43,7 @@ export async function command<T>(
   const body = await response.json();
   if (!response.ok)
     throw new ApiError(
-      body.error?.message ||
-        (lang === "en" ? `Request failed (${response.status})` : `请求失败 (${response.status})`),
+      body.error?.message || t(lang, "requestFailed", { status: response.status }),
       response.status,
     );
   return body as T;
@@ -47,7 +54,7 @@ export function subscribe(
   token: string,
   path: string,
   receive: (message: EventMessage) => void,
-  connection: (state: string) => void,
+  connection: (state: Connection) => void,
 ): () => void {
   let stopped = false,
     socket: WebSocket | undefined,
@@ -55,7 +62,7 @@ export function subscribe(
     attempts = 0;
   function open() {
     if (stopped) return;
-    connection(attempts ? "重连中" : "连接中");
+    connection(attempts ? "reconnecting" : "connecting");
     const current = new WebSocket(
       `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${path}`,
     );
@@ -70,26 +77,26 @@ export function subscribe(
         const message = JSON.parse(data) as EventMessage;
         if (message.type === "ready") {
           attempts = 0;
-          connection("已连接");
+          connection("connected");
         }
         if (message.code === "unauthorized") {
           stopped = true;
-          connection("认证失败");
+          connection("unauthorized");
           current.close();
         }
         receive(message);
       } catch {
-        connection("数据错误");
+        connection("badData");
         current.close();
       }
     };
     current.onclose = (event) => {
       if (stopped || socket !== current) return;
       if (event.code === 1008) {
-        connection("认证失败");
+        connection("unauthorized");
         return;
       }
-      connection("重连中");
+      connection("reconnecting");
       timer = setTimeout(open, Math.min(1000 * 2 ** attempts++, 10000));
     };
     current.onerror = () => current.close();

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError, command, type Perform } from "./api";
+import { ApiError, command, type Perform, type Connection } from "./api";
 import { phaseLabel, t, type Language } from "./i18n";
 import type { CoreStatus } from "./types";
 
@@ -20,7 +20,7 @@ export function CoreUpgradePage({
   token: string;
   language: Language;
   status: CoreStatus;
-  connection: string;
+  connection: Connection;
   busy: boolean;
   perform: Perform;
   logout: (reason?: string) => void;
@@ -47,7 +47,7 @@ export function CoreUpgradePage({
     setVersion(undefined);
     setInstallation(undefined);
     setError("");
-    if (connection !== "已连接") return;
+    if (connection !== "connected") return;
     const controller = new AbortController();
     let active = true;
     void Promise.allSettled([
@@ -117,7 +117,7 @@ export function CoreUpgradePage({
     "recovering",
     "shutdown",
   ].includes(status.phase);
-  const disabled = busy || working || connection !== "已连接" || !version;
+  const disabled = busy || working || connection !== "connected" || !version;
   return (
     <>
       <section className="panel" aria-label={t(language, "coreStatus")}>
@@ -176,7 +176,7 @@ export function CoreUpgradePage({
         <h2>{t(language, "coreUpgradeTitle", { label })}</h2>
         <button
           type="button"
-          disabled={busy || working || connection !== "已连接"}
+          disabled={busy || working || connection !== "connected"}
           onClick={() => setRefresh((value) => value + 1)}
         >
           {t(language, "coreUpgradeRefresh")}
@@ -186,7 +186,7 @@ export function CoreUpgradePage({
         {t(language, "coreUpgradeChannel")}
         <select
           value={channel}
-          disabled={busy || working || connection !== "已连接"}
+          disabled={busy || working || connection !== "connected"}
           onChange={(event) => {
             if (locked.current || busy) return;
             setChannel(event.target.value === "alpha" ? "alpha" : "stable");
@@ -204,7 +204,7 @@ export function CoreUpgradePage({
       {channel === "alpha" && (
         <p className="info">{t(language, "coreUpgradeAlphaNotice")}</p>
       )}
-      {connection !== "已连接" ? (
+      {connection !== "connected" ? (
         <p className="info">{t(language, "coreUpgradeDisconnected")}</p>
       ) : error ? (
         <p className="alert" role="alert">
@@ -213,7 +213,7 @@ export function CoreUpgradePage({
       ) : !version ? (
         <p className="info">{t(language, "coreUpgradeReadingInstalled")}</p>
       ) : null}
-      {version && connection === "已连接" && (
+      {version && connection === "connected" && (
         <dl className="proxy-details">
           <div>
             <dt>{t(language, "coreUpgradeInstalledVersion")}</dt>

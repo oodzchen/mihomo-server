@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError, command, type Perform } from "./api";
+import { ApiError, command, type Perform, type Connection } from "./api";
 import type { CoreStatus } from "./types";
 
 type State = {
@@ -36,7 +36,7 @@ export function ProfileDnsPanel({
 }: {
   token: string;
   status: CoreStatus;
-  connection: string;
+  connection: Connection;
   hasDns: boolean;
   blocked: boolean;
   perform: Perform;
@@ -93,7 +93,7 @@ export function ProfileDnsPanel({
     };
   }, []);
   useEffect(() => {
-    if (connection !== "已连接") {
+    if (connection !== "connected") {
       ++serial.current;
       setChallenge(undefined);
       setUncertain(true);
@@ -167,7 +167,7 @@ export function ProfileDnsPanel({
       if (alive.current) setWorking(false);
     }
   }
-  const disabled = blocked || working || uncertain || connection !== "已连接";
+  const disabled = blocked || working || uncertain || connection !== "connected";
   return (
     <section className="panel profile-dns" aria-label="订阅 DNS 覆盖">
       <h2>当前订阅 DNS 覆盖</h2>

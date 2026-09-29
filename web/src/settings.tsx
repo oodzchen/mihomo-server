@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ApiError, command, type Perform } from "./api";
+import { ApiError, command, type Perform, type Connection } from "./api";
 import type { CoreStatus } from "./types";
 import {
   NetworkFields,
@@ -192,7 +192,7 @@ export function SettingsPage({
   language?: Language;
   changeLanguage?: (value: string) => void;
   status: CoreStatus;
-  connection: string;
+  connection: Connection;
   busy: boolean;
   perform: Perform;
   logout: (reason?: string) => void;
@@ -211,7 +211,7 @@ export function SettingsPage({
   const dirty = saved ? !matches(draft, saved) : false;
 
   function portDescription(key: string) {
-    if (connection !== "已连接") return "服务连接中断，当前端口待核对。";
+    if (connection !== "connected") return "服务连接中断，当前端口待核对。";
     if (access.error) return "读取当前端口失败，请刷新端口信息。";
     const port = access.value?.ports.find(port => port.key === key);
     if (!port) return "正在读取当前端口…";
@@ -224,7 +224,7 @@ export function SettingsPage({
 
   function portPlaceholder(key: string) {
     const port = access.value?.ports.find(port => port.key === key);
-    if (!port || !access.value?.has_config || connection !== "已连接") return "留空继承";
+    if (!port || !access.value?.has_config || connection !== "connected") return "留空继承";
     if (port.actual !== null && port.actual === port.configured)
       return port.actual ? `继承当前端口 ${port.actual}` : "留空继承（当前禁用）";
     return port.configured ? `继承配置端口 ${port.configured}` : "留空继承（配置禁用）";
@@ -439,7 +439,7 @@ export function SettingsPage({
                 </label>
               ))}
             </div>
-            <button type="button" className="port-refresh" onClick={access.refresh} disabled={connection !== "已连接"}>
+            <button type="button" className="port-refresh" onClick={access.refresh} disabled={connection !== "connected"}>
               刷新端口信息
             </button>
             <GeoFields draft={draft} disabled={disabled} change={(key, value) => {

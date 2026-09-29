@@ -1,3 +1,4 @@
+import type { Connection } from "./api";
 import { SettingsReadback } from "./settings-readback";
 import type { CoreStatus } from "./types";
 import type { Runtime, Draft } from "./network-settings";
@@ -78,6 +79,6 @@ export function GeoFields({ draft, disabled, change }: { draft: Draft; disabled:
   </fieldset>;
 }
 
-export function GeoReadback(props: { token: string; status: CoreStatus; connection: string; logout: (reason?: string) => void; settingsKey?: string }) {
+export function GeoReadback(props: { token: string; status: CoreStatus; connection: Connection; logout: (reason?: string) => void; settingsKey?: string }) {
   return <SettingsReadback {...props} label="Geo 设置读回" refreshLabel="刷新 Geo 设置读回" operation="geo_settings" hint="读回不证明 Geo 文件有效或已被规则加载。未指定的配置项可能使用内核默认值。" />;
 }

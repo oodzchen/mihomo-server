@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ApiError, command } from "./api";
+import { ApiError, command, type Connection } from "./api";
 import type { CoreStatus } from "./types";
 
 type ConnectionValues = {
@@ -30,7 +30,7 @@ const labels: Record<string, string> = {
 export function useProxyAccess({ token, status, connection, logout }: {
   token: string;
   status: CoreStatus;
-  connection: string;
+  connection: Connection;
   logout: (reason?: string) => void;
 }) {
   const [value, setValue] = useState<Access>();
@@ -39,7 +39,7 @@ export function useProxyAccess({ token, status, connection, logout }: {
   useEffect(() => {
     setValue(undefined);
     setError("");
-    if (connection !== "已连接") return;
+    if (connection !== "connected") return;
     let active = true;
     let pending: AbortController | undefined;
     const read = async () => {
@@ -67,7 +67,7 @@ export function useProxyAccess({ token, status, connection, logout }: {
 export function ProxyAccessPanel(props: {
   token: string;
   status: CoreStatus;
-  connection: string;
+  connection: Connection;
   logout: (reason?: string) => void;
 }) {
   const { value, error, refresh } = useProxyAccess(props);
@@ -86,9 +86,9 @@ export function ProxyAccessPanel(props: {
     <section className="panel proxy-access" aria-label="代理连接信息">
       <div className="panel-title">
         <h2>代理连接信息</h2>
-        <button type="button" onClick={refresh} disabled={connection !== "已连接"}>刷新连接信息</button>
+        <button type="button" onClick={refresh} disabled={connection !== "connected"}>刷新连接信息</button>
       </div>
-      {connection !== "已连接" ? <p className="info">服务连接中断，连接信息待重新核对。</p> : error ? <p className="alert" role="alert">读取连接信息失败：{error}</p> : !value ? <p className="muted">正在读取连接信息…</p> : <>
+      {connection !== "connected" ? <p className="info">服务连接中断，连接信息待重新核对。</p> : error ? <p className="alert" role="alert">读取连接信息失败：{error}</p> : !value ? <p className="muted">正在读取连接信息…</p> : <>
         {!value.has_config && <p className="info">尚无运行配置，导入并使用订阅后显示配置端口。</p>}
         {!value.running && <p className="info">内核未运行，下方配置端口当前不可用。</p>}
         {value.core_error && <p className="alert" role="alert">无法读取内核实际端口：{value.core_error}。暂不能确认代理入口。</p>}

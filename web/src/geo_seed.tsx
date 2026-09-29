@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError, command } from "./api";
+import { ApiError, command, type Connection } from "./api";
 import { t, type Language } from "./i18n";
 import type { CoreStatus } from "./types";
 
@@ -7,7 +7,7 @@ type Seed = { name: string; current_sha256: string | null; seed_sha256: string; 
 type Receipt = { changed: boolean; durable: boolean; cleanup_pending: boolean; core_load_verified?: boolean; validation: { verified: boolean; sha256: string } };
 
 export function GeoSeedAction({ name, token, status, connection, logout, installed, language = "zh" }: {
-  name: string; token: string; status: CoreStatus; connection: string;
+  name: string; token: string; status: CoreStatus; connection: Connection;
   logout: (reason?: string) => void; installed: (message: string) => void;
   language?: Language;
 }) {
@@ -59,13 +59,13 @@ export function GeoSeedAction({ name, token, status, connection, logout, install
     }
   }
   return <div>
-    <button type="button" disabled={busy || connection !== "已连接"} onClick={() => void run(false)}>{t(language, "geoSeedRead", { name })}</button>
+    <button type="button" disabled={busy || connection !== "connected"} onClick={() => void run(false)}>{t(language, "geoSeedRead", { name })}</button>
     {seed && <>
       <p>{t(language, "geoSeedCandidate", { bytes: seed.seed_bytes })}<code>{seed.seed_sha256}</code></p>
       <p>{t(language, "geoSeedCurrent")}<code>{seed.current_sha256 || t(language, "geoSeedFileMissing")}</code></p>
       {!dat && <label><input type="checkbox" checked={accept} disabled={busy} onChange={event => setAccept(event.target.checked)} />{t(language, "geoSeedAllowEmptyMmdb")}</label>}
       {status.phase !== "stopped" && <p className="info">{t(language, "geoSeedStoppedNotice")}</p>}
-      <button type="button" disabled={busy || connection !== "已连接" || status.phase !== "stopped"} onClick={() => void run(true)}>{t(language, "geoSeedInstall", { name })}</button>
+      <button type="button" disabled={busy || connection !== "connected" || status.phase !== "stopped"} onClick={() => void run(true)}>{t(language, "geoSeedInstall", { name })}</button>
     </>}
     {busy && <p role="status">{t(language, "geoSeedWorking")}</p>}
     {error && <p role="alert" className="alert">{t(language, "geoSeedFailed", { message: error })}</p>}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError, command } from "./api";
+import { ApiError, command, type Connection } from "./api";
 import { GeoSeedAction } from "./geo_seed";
 import { GeoOnlineAction } from "./geo_online";
 import { t, type Language, type MessageKey } from "./i18n";
@@ -84,7 +84,7 @@ function modifiedLabel(language: Language, seconds?: number | null) {
 export function ResourcesPanel({ token, status, connection, logout, language = "zh" }: {
   token: string;
   status: CoreStatus;
-  connection: string;
+  connection: Connection;
   logout: (reason?: string) => void;
   language?: Language;
 }) {
@@ -137,7 +137,7 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
     setChecks({});
     setChecking(undefined);
     setError("");
-    if (connection !== "已连接") { setValue(undefined); return; }
+    if (connection !== "connected") { setValue(undefined); return; }
     let active = true;
     const controller = new AbortController();
     void command<Inventory>(token, "resources", {}, controller.signal).then(next => {
@@ -244,9 +244,9 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
   }
 
   return <section className="panel" aria-label={t(language, "resourceRegion")}>
-    <div className="panel-title"><h2>{t(language, "resourceTitle")}</h2><button type="button" disabled={connection !== "已连接"} onClick={() => setRefresh(value => value + 1)}>{t(language, "resourceRefresh")}</button></div>
+    <div className="panel-title"><h2>{t(language, "resourceTitle")}</h2><button type="button" disabled={connection !== "connected"} onClick={() => setRefresh(value => value + 1)}>{t(language, "resourceRefresh")}</button></div>
     {notice && <p role="status" className="info">{notice}</p>}
-    {connection !== "已连接" ? <p className="info">{t(language, "resourceDisconnected")}</p> : error ? <p className="alert" role="alert">{t(language, "resourceReadFailed", { message: error })}</p> : !value ? <p className="muted">{t(language, "resourceReading")}</p> : <>
+    {connection !== "connected" ? <p className="info">{t(language, "resourceDisconnected")}</p> : error ? <p className="alert" role="alert">{t(language, "resourceReadFailed", { message: error })}</p> : !value ? <p className="muted">{t(language, "resourceReading")}</p> : <>
       <p>{t(language, "resourceDataDir")}<code>{value.data_dir}</code></p>
       {value.bundle_dir && <p>{t(language, "resourceBundleDir")}<code>{value.bundle_dir}</code></p>}
       {!value.config_revision && <p className="info">{t(language, "resourceNoConfig")}</p>}
