@@ -4,8 +4,8 @@ use super::super::{
     runtime::{Revision, RuntimeStore},
     settings::{MAX_SETTINGS_BYTES, ServiceSettings, SettingsStore},
 };
-use super::*;
 use super::sha256_hex as hash;
+use super::*;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,

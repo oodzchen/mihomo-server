@@ -53,9 +53,9 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task:** Code-quality refactor step 1 — shared `secure_fs` filesystem primitives (see below).
+**Latest completed task:** Code-quality refactor step 2 — `core_manager` split into domain modules (see below).
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
-**Next implementation task:** Code-quality refactor step 2 — split `core_manager.rs` into domain modules.
+**Next implementation task:** Code-quality refactor step 3 — typed Web connection state and per-page modules.
 
 ## Code-quality refactor (behavior-preserving)
 
@@ -71,6 +71,33 @@ pre-refactor baseline.
    release/upgrade and TUN modules call these; each keeps its own ownership and
    permission policy and its original error messages. `headless-core`
    `profile_store` shares one SHA-256 helper between import and restore journals.
+
+2. **Core manager domain modules — done.** The 4,100-line
+   `service/src/core_manager.rs` is now `service/src/core_manager/`:
+
+   ```text
+   core_manager/
+   ├── mod.rs        Public types, CoreOptions, CoreManager::spawn/call, Actor state, run loop
+   ├── messages.rs   Operation, CommandMessage (+ fail), ProfileChange, ConfigCandidate
+   ├── dispatch.rs   Journal recovery gate, record_error/publish_profiles, command routing
+   ├── lifecycle.rs  start/stop/reload/exit observation/recovery, Operation execution
+   ├── apply.rs      stage/apply/apply_with_change transactions and rollback
+   ├── profiles.rs   imports, raw edits, enhancements, remote refresh, deletion
+   ├── settings.rs   settings/DNS decisions, connection-settings readback
+   ├── selection.rs  node selection and saved-selection restoration
+   ├── geo.rs        Geo seeds, online updates, validation, resource inventory
+   ├── upgrade.rs    core release discovery, staging, upgrade and activation
+   ├── backup.rs     export, retained storage, validation and restore
+   ├── scheduler.rs  scheduled subscription updates (unchanged)
+   └── upgrade_tests.rs
+   ```
+
+   Each domain file holds both the `CoreManager` API methods and the `Actor`
+   handlers for that domain. The command match left `tokio::select!` (so
+   rustfmt formats it), recovery failures reply through one
+   `CommandMessage::fail`, API methods share `CoreManager::call`, and
+   `execute` has one arm per operation. Method bodies, error messages and the
+   serialized actor semantics are unchanged; the move was verified line by line.
 
 ## Recent update: Multi-agent autonomous workbench (Codex & Antigravity CLI)
 

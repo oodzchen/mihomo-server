@@ -5,11 +5,9 @@ use std::{
     ffi::{CString, OsStr, OsString},
     fs::{self, File, Metadata, OpenOptions},
     io,
-    os::{
-        unix::{
-            ffi::OsStrExt as _,
-            fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _},
-        },
+    os::unix::{
+        ffi::OsStrExt as _,
+        fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _},
     },
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -120,8 +118,7 @@ fn remove_contents(dir: &File, depth: usize, keep_lease: bool, budget: &mut Budg
         match open_at(dir, &child, true) {
             Ok(nested) => {
                 ensure!(
-                    nested.metadata()?.uid() == secure_fs::euid()
-                        && nested.metadata()?.dev() == dir.metadata()?.dev(),
+                    nested.metadata()?.uid() == secure_fs::euid() && nested.metadata()?.dev() == dir.metadata()?.dev(),
                     "unsafe restore scratch child directory"
                 );
                 writable(&nested)?;

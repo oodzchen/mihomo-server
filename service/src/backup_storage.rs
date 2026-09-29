@@ -7,9 +7,7 @@ use std::{
     ffi::{CString, OsStr},
     fs::{self, File, Metadata, OpenOptions},
     io::{Read as _, Write as _},
-    os::{
-        unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _},
-    },
+    os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _},
     path::Path,
     time::{Duration, Instant},
 };
