@@ -104,32 +104,14 @@ function Login({
   }
   return (
     <main className="login">
-      <div className="login-art">
-        <div className="brand">
-          MHS<span>MIHOMO SERVER</span>
-        </div>
-        <div>
-          <p className="eyebrow">{t(language, "loginEyebrow")}</p>
-          <h1>
-            {t(language, "loginTitleFirst")}
-            <br />
-            {t(language, "loginTitleSecond")}
-          </h1>
-          <p>
-            {t(language, "loginIntroFirst")}
-            <br />
-            {t(language, "loginIntroSecond")}
-          </p>
-        </div>
-        <span className="login-foot">Mihomo / Headless</span>
-      </div>
-      <section className="login-form">
+      <div className="login-lang">
         <LanguagePicker language={language} changeLanguage={changeLanguage} />
-        <p className="eyebrow">{t(language, "loginEntry")}</p>
-        <h2>{t(language, "loginTitle")}</h2>
-        <p className="muted">
-          {t(language, "loginHelp")}
-        </p>
+      </div>
+      <section className="login-card">
+        <div className="login-header">
+          <h1>{t(language, "loginTitle")}</h1>
+          <p className="muted">{t(language, "loginHelp")}</p>
+        </div>
         <form onSubmit={submit}>
           <label>
             {t(language, "token")}
@@ -325,9 +307,6 @@ function Manager({
           <button className="quiet" onClick={() => logout()}>
             {t(language, "logout")}
           </button>
-          <div className="sidebar-version mono" title={status.version || t(language, "coreName")}>
-            {status.version || t(language, "coreName")}
-          </div>
         </div>
       </aside>
       <div className="workspace">

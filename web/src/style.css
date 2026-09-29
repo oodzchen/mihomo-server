@@ -122,46 +122,54 @@ h3 {
 }
 .login {
   min-height: 100vh;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-}
-.login-art {
-  background: #18181b;
-  color: #f4f4f5;
-  padding: 48px;
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: #f4f4f5;
+  position: relative;
 }
-.login-art h1 {
-  font-size: clamp(36px, 5vw, 64px);
-  line-height: 1.15;
-  letter-spacing: -2px;
-  margin: 16px 0 24px;
-  color: #fafafa;
+.login-lang {
+  position: absolute;
+  top: 18px;
+  right: 24px;
 }
-.login-art .eyebrow {
-  color: #a1a1aa;
-}
-.login-art p {
-  color: #d4d4d8;
-  font-size: 14px;
-}
-.login-foot {
-  font-size: 11px;
-  letter-spacing: 1.5px;
+.login-lang .language-picker {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
   color: #71717a;
 }
-.login-form {
-  align-self: center;
-  max-width: 420px;
-  padding: 32px;
-  margin: auto;
+.login-lang .language-picker select {
+  margin-top: 0;
+  width: auto;
+  padding: 4px 8px;
+  font-size: 12px;
 }
-.login-form h2 {
-  font-size: 24px;
-  margin-bottom: 14px;
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: #ffffff;
+  border: 1px solid #e4e4e7;
+  border-radius: 6px;
+  padding: 32px 28px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.login-header {
+  margin-bottom: 22px;
+}
+.login-header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #18181b;
+  margin-bottom: 8px;
+}
+.login-header .muted {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #71717a;
 }
 .language-picker {
   display: block;
@@ -173,13 +181,20 @@ h3 {
   margin-top: 4px;
   font-size: 12px;
 }
-.login-form form {
-  margin-top: 24px;
+.login-card form {
+  margin-top: 20px;
 }
-.login-form .primary {
+.login-card label {
+  margin: 0 0 6px;
+}
+.login-card .primary {
   width: 100%;
-  margin-top: 12px;
+  margin-top: 14px;
   padding: 8px 14px;
+}
+.login-card .hint {
+  margin-top: 12px;
+  line-height: 1.4;
 }
 label {
   display: block;
@@ -844,22 +859,14 @@ footer {
 }
 @media (max-width: 760px) {
   .login {
-    grid-template-columns: 1fr;
+    padding: 16px;
   }
-  .login-art {
-    min-height: auto;
-    padding: 28px;
-    gap: 24px;
+  .login-lang {
+    top: 12px;
+    right: 14px;
   }
-  .login-art h1 {
-    font-size: 36px;
-  }
-  .login-art .login-foot {
-    display: none;
-  }
-  .login-form {
-    margin: 20px auto;
-    padding: 20px;
+  .login-card {
+    padding: 24px 20px;
   }
   .shell {
     display: block;
@@ -957,9 +964,6 @@ footer {
   }
   .profile button {
     flex-shrink: 0;
-  }
-  .login-form .muted {
-    font-size: 12px;
   }
 }
 
