@@ -286,6 +286,24 @@ nav a:hover {
   word-break: break-all;
   line-height: 1.4;
 }
+.sidebar-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.status-item {
+  display: flex;
+  align-items: center;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.status-label {
+  color: #71717a;
+}
+.status-item .dot {
+  margin-left: 2px;
+  margin-right: 6px;
+}
 .dot {
   display: inline-block;
   width: 6px;
@@ -296,6 +314,9 @@ nav a:hover {
 }
 .dot.good {
   background: #10b981;
+}
+.dot.bad {
+  background: #ef4444;
 }
 .workspace {
   width: 100%;
@@ -877,17 +898,20 @@ footer {
     display: flex;
     justify-content: flex-end;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .sidebar-status {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
   }
   .sidebar-bottom .quiet {
     display: inline-block;
     margin: 0;
     padding: 0;
-  }
-  .sidebar-bottom .language-picker {
-    width: 110px;
-    margin: 0;
   }
   .sidebar-bottom .sidebar-version {
     display: none;

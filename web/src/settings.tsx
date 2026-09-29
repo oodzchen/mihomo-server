@@ -24,7 +24,8 @@ import {
   authorityRuntime,
   validateAuthority,
 } from "./authority-settings";
-import type { Language } from "./i18n";
+import { t, type Language } from "./i18n";
+import { LanguagePicker } from "./language-picker";
 
 type Settings = { schema_version: number; runtime: Runtime };
 const fields = [
@@ -180,6 +181,7 @@ const explain = (error: unknown) =>
 export function SettingsPage({
   token,
   language = "zh",
+  changeLanguage,
   status,
   connection,
   busy,
@@ -188,6 +190,7 @@ export function SettingsPage({
 }: {
   token: string;
   language?: Language;
+  changeLanguage?: (value: string) => void;
   status: CoreStatus;
   connection: string;
   busy: boolean;
@@ -546,6 +549,21 @@ export function SettingsPage({
         </p>
       </section>
       <div className="settings-side">
+        {changeLanguage && (
+          <section className="panel" aria-label={t(language, "language")}>
+            <div className="panel-title">
+              <h2>{t(language, "language")}</h2>
+            </div>
+            <p className="muted">
+              {language === "en"
+                ? "Select the user interface display language. It is saved in your browser."
+                : language === "zhtw"
+                ? "選擇使用者介面顯示語言，僅儲存在目前瀏覽器中。"
+                : "选择用户界面显示语言，仅保存在当前浏览器中。"}
+            </p>
+            <LanguagePicker language={language} changeLanguage={changeLanguage} />
+          </section>
+        )}
         <SettingsReadback label="连接设置读回" operation="connection_settings" hint="显示核心报告的设置，不保证已识别进程或改善连接速度。未指定项可能使用核心默认值。路由标记可能以有符号 32 位整数读回，同一位模式视为一致。" token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
         <GeoReadback token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
         <ResourcesPanel token={token} status={status} connection={connection} logout={logout} language={language} />

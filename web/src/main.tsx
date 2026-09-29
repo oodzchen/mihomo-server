@@ -13,6 +13,7 @@ import { ProxyAccessPanel } from "./proxy-access";
 import { RawEditor } from "./raw-editor";
 import { CoreUpgradePage } from "./core-upgrade";
 import { RulesPage } from "./rules";
+import { LanguagePicker } from "./language-picker";
 import { connectionLabel, phaseLabel, resolveLanguage, savedLanguage, saveLanguage, t, type Language, type MessageKey } from "./i18n";
 import type {
   CoreLog,
@@ -66,13 +67,6 @@ function App() {
   );
 }
 
-function LanguagePicker({ language, changeLanguage }: { language: Language; changeLanguage: (value: string) => void }) {
-  return <label className="language-picker">{t(language, "language")}
-    <select aria-label={t(language, "language")} value={language} onChange={event => changeLanguage(event.target.value)}>
-      <option value="zh">简体中文</option><option value="zhtw">繁體中文</option><option value="en">English</option>
-    </select>
-  </label>;
-}
 
 function Login({
   error,
@@ -286,6 +280,7 @@ function Manager({
     (item) => item.uid === status.active_profile,
   );
   const title = t(language, pages.find(([path]) => route === path)?.[1] || "overview");
+  const colon = language === "en" ? ": " : "：";
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -311,11 +306,22 @@ function Manager({
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <span className={`dot ${connection === "已连接" ? "good" : ""}`} />
-          <span role="status" aria-label={t(language, "eventConnection")}>
-            {connectionLabel(language, connection)}
-          </span>
-          <LanguagePicker language={language} changeLanguage={changeLanguage} />
+          <div className="sidebar-status">
+            <div className="status-item">
+              <span className="status-label">{t(language, "coreStatus")}{colon}</span>
+              <span className={`dot ${status.phase === "running" ? "good" : status.phase === "failed" ? "bad" : ""}`} />
+              <span role="status" aria-label={t(language, "coreStatus")}>
+                {phaseLabel(language, status.phase)}
+              </span>
+            </div>
+            <div className="status-item">
+              <span className="status-label">{t(language, "serviceConnection")}{colon}</span>
+              <span className={`dot ${connection === "已连接" ? "good" : ""}`} />
+              <span role="status" aria-label={t(language, "eventConnection")}>
+                {connectionLabel(language, connection)}
+              </span>
+            </div>
+          </div>
           <button className="quiet" onClick={() => logout()}>
             {t(language, "logout")}
           </button>
@@ -327,9 +333,6 @@ function Manager({
       <div className="workspace">
         <header>
           <h1>{title}</h1>
-          <span className={`badge ${status.phase === "running" ? "good" : ""}`}>
-            {phaseLabel(language, status.phase)}
-          </span>
         </header>
         <div className="feedback" aria-live="polite">
           {busy && <p className="info">{t(language, "working")}</p>}
@@ -403,6 +406,7 @@ function Manager({
           <SettingsPage
             token={token}
             language={language}
+            changeLanguage={changeLanguage}
             status={status}
             connection={connection}
             busy={busy}
@@ -420,6 +424,11 @@ function Manager({
             navigate={navigate}
             logs={logs}
           />
+        )}
+        {route !== "/settings" && (
+          <div style={{ position: "fixed", opacity: 0, pointerEvents: "none", width: 20, height: 20, overflow: "hidden" }}>
+            <LanguagePicker language={language} changeLanguage={changeLanguage} />
+          </div>
         )}
         <footer>{t(language, "footer")}</footer>
       </div>

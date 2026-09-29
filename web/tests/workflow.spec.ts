@@ -1224,7 +1224,7 @@ test("browser repairs failed startup, saves selection/config, restores after ser
     page.getByRole("heading", { name: "概览", exact: true }),
   ).toBeVisible();
   await expect(page.getByText("已连接", { exact: true })).toBeVisible();
-  await expect(page.locator("header")).toContainText("启动失败");
+  await expect(page.locator(".sidebar-status")).toContainText("启动失败");
   await page
     .getByRole("navigation", { name: "主导航" })
     .getByRole("link", { name: /设置/ })
@@ -1241,7 +1241,7 @@ test("browser repairs failed startup, saves selection/config, restores after ser
   await expect(
     page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }),
   ).toBeVisible();
-  await expect(page.locator("header")).toContainText("启动失败");
+  await expect(page.locator(".sidebar-status")).toContainText("启动失败");
   await page.getByRole("button", { name: "全部改为继承", exact: true }).click();
   await page.getByRole("button", { name: "确认改为继承", exact: true }).click();
   await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
@@ -1294,7 +1294,7 @@ test("browser repairs failed startup, saves selection/config, restores after ser
   await expect(page.locator("article.profile")).toHaveCount(2);
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "启动内核" }).click();
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await page
     .getByRole("navigation", { name: "主导航" })
     .getByRole("link", { name: /代理/ })
@@ -1315,7 +1315,7 @@ test("browser repairs failed startup, saves selection/config, restores after ser
     .fill("mode: rule\nrules: ['INVALID,DIRECT']\n");
   await page.getByRole("button", { name: "校验并应用" }).click();
   await expect(page.getByRole("alert")).toBeVisible();
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await page
     .getByLabel("运行配置 YAML")
     .fill(yaml.replace("mode: rule", "mode: direct"));
@@ -1323,12 +1323,12 @@ test("browser repairs failed startup, saves selection/config, restores after ser
   await expect(page.getByText("此配置已通过校验并提交。")).toBeVisible();
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "停止内核" }).click();
-  await expect(page.locator("header")).toContainText("已停止");
+  await expect(page.locator(".sidebar-status")).toContainText("已停止");
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /配置/ }).click();
   await expect(page.getByLabel("运行配置 YAML")).toBeEnabled();
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "重启内核" }).click();
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await page
     .getByRole("navigation", { name: "主导航" })
     .getByRole("link", { name: /日志/ })
@@ -1837,7 +1837,7 @@ test("manual remote refresh keeps identity, applies active config and preserves 
   );
   expect(await api("profiles")).toEqual(saved);
   expect((await api("status")).config_revision).toBe(status.config_revision);
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await expect(page.locator("article.profile")).toHaveCount(2);
   const requests = subscriptionRequests;
   await stop();
@@ -1918,7 +1918,7 @@ test("profile metadata editing persists and deletion protects current profiles a
   ).toBeDisabled();
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "停止内核", exact: true }).click();
-  await expect(page.locator("header")).toContainText("已停止");
+  await expect(page.locator(".sidebar-status")).toContainText("已停止");
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /订阅/ }).click();
   await edited
     .getByRole("button", { name: "操作 EditedRemote", exact: true })
@@ -1928,7 +1928,7 @@ test("profile metadata editing persists and deletion protects current profiles a
   ).toBeDisabled();
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "启动内核", exact: true }).click();
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /订阅/ }).click();
   await stop();
   await start();
@@ -2123,7 +2123,7 @@ test("linked merge preserves raw subscriptions, rejects invalid updates and surv
     timeout: 15000,
   });
   await expect(replacement).toContainText("已关联合并增强");
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await navigate(/配置/);
   await expect(page.getByLabel("运行配置 YAML")).toHaveValue(/mode: global/);
   await navigate(/订阅/);
@@ -2143,7 +2143,7 @@ test("linked merge preserves raw subscriptions, rejects invalid updates and surv
   );
   await navigate(/配置/);
   await expect(page.getByLabel("运行配置 YAML")).toHaveValue(/mode: direct/);
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await page.getByRole("button", { name: "退出登录" }).click();
 });
 
@@ -2309,7 +2309,7 @@ test("linked sequence editor saves each type, rejects invalid rules and restores
   expect(
     await readFile(join(directory, "profiles", baseItem.file), "utf8"),
   ).toBe(raw);
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await page.getByRole("button", { name: "退出登录" }).click();
 });
 
@@ -2427,7 +2427,7 @@ test("script editor validates failures, preserves raw content and restores after
   );
   await navigate(/配置/);
   await expect(page.getByLabel("运行配置 YAML")).toHaveValue(/mode: direct/);
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await page.getByRole("button", { name: "退出登录" }).click();
 });
 
@@ -2536,7 +2536,7 @@ test("global commands validate and persist edits, preserve failures and reset de
     .getByRole("link", { name: /配置/ })
     .click();
   await expect(page.getByLabel("运行配置 YAML")).toHaveValue(/mode: direct/);
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await page.getByRole("button", { name: "退出登录" }).click();
 });
 
@@ -2713,7 +2713,7 @@ test("global editors save, retain failed drafts, confirm resets and work while s
   ).toHaveCount(0);
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "停止内核", exact: true }).click();
-  await expect(page.locator("header")).toContainText("已停止");
+  await expect(page.locator(".sidebar-status")).toContainText("已停止");
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /订阅/ }).click();
   await global
     .getByRole("button", { name: "编辑全局合并", exact: true })
@@ -2799,7 +2799,7 @@ test("global editors save, retain failed drafts, confirm resets and work while s
   await api("select_profile", { uid });
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "启动内核", exact: true }).click();
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /订阅/ }).click();
   await expect(page.locator("article.profile")).toHaveCount(1);
   await page.getByRole("button", { name: "退出登录" }).click();
@@ -2839,7 +2839,7 @@ test("online settings commands apply to the browser runtime and retain stopped s
   await expect(page.getByLabel("运行配置 YAML")).toHaveValue(/mode: global/);
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "停止内核", exact: true }).click();
-  await expect(page.locator("header")).toContainText("已停止");
+  await expect(page.locator(".sidebar-status")).toContainText("已停止");
   await api("set_settings", { runtime: { mode: "rule", "mixed-port": 0 } });
   await reopenConfig();
   await expect(page.getByLabel("运行配置 YAML")).toHaveValue(/mode: rule/);
@@ -2849,7 +2849,7 @@ test("online settings commands apply to the browser runtime and retain stopped s
   await expect(page.getByLabel("运行配置 YAML")).toHaveValue(/mode: direct/);
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "启动内核", exact: true }).click();
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /配置/ }).click();
   await stop();
   await start();
@@ -3050,7 +3050,7 @@ test("settings editor preserves inheritance, failed drafts and uncertain saves w
   await page.unroute("**/api/commands", lostReply);
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "停止内核", exact: true }).click();
-  await expect(page.locator("header")).toContainText("已停止");
+  await expect(page.locator(".sidebar-status")).toContainText("已停止");
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /设置/ }).click();
   await page
     .getByRole("button", { name: "核对已保存设置", exact: true })
@@ -3100,7 +3100,7 @@ test("settings editor preserves inheritance, failed drafts and uncertain saves w
   await api("select_profile", { uid });
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "启动内核", exact: true }).click();
-  await expect(page.locator("header")).toContainText("运行中");
+  await expect(page.locator(".sidebar-status")).toContainText("运行中");
   await stop();
   await start();
   await expect(page.getByText("已连接", { exact: true })).toBeVisible({
