@@ -143,7 +143,9 @@ followed by remaining enhancement and scheduled workflows.
 
 ## License
 
-The project uses GPL-3.0-only; see [LICENSE](LICENSE). The extracted Mihomo
-plugin has no upstream license declaration and does not inherit that license.
-See [docs/UPSTREAM.md](docs/UPSTREAM.md) for provenance and the unresolved plugin
-licensing status.
+This project is licensed under GPL-3.0-only; see [LICENSE](LICENSE). It derives
+from [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev)
+(GPL-3.0-only), and per-file extraction provenance is recorded in
+[docs/UPSTREAM.md](docs/UPSTREAM.md); third-party components are inventoried in
+[LICENSES.txt](LICENSES.txt). The extracted Mihomo plugin has no upstream
+license declaration and does not inherit that license.
