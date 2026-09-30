@@ -1,0 +1,89 @@
+name: release
+
+# Build, package and publish an installable bundle on v* tags only.
+# Ordinary pushes run the full test suite via ci.yml.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build-release:
+    name: Build and package release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # required to create the GitHub Release
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install pinned Rust toolchain (rust-toolchain.toml)
+        run: cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Read pinned core
+        id: pin
+        run: |
+          echo "version=$(jq -r .version deploy/core-pin.json)" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(jq -r .sha256 deploy/core-pin.json)" >> "$GITHUB_OUTPUT"
+          url=$(jq -r .download deploy/core-pin.json)
+          echo "url=${url/\{version\}/$(jq -r .version deploy/core-pin.json)}" >> "$GITHUB_OUTPUT"
+
+      - name: Download and verify pinned core
+        run: |
+          mkdir -p .core
+          curl -fsSL --retry 3 -o .core/core.gz "${{ steps.pin.outputs.url }}"
+          gunzip -c .core/core.gz > .core/verge-mihomo
+          chmod +x .core/verge-mihomo
+          echo "${{ steps.pin.outputs.sha256 }}  .core/verge-mihomo" | sha256sum -c -
+          .core/verge-mihomo -v
+
+      - name: Build and package bundle
+        run: |
+          python3 scripts/package_bundle.py --build \
+            --target "$TARGET" \
+            --mihomo .core/verge-mihomo \
+            --core-version "${{ steps.pin.outputs.version }}" \
+            --core-sha256 "${{ steps.pin.outputs.sha256 }}" \
+            --output "dist/mihomo-server-$GITHUB_REF_NAME-$TARGET"
+
+      - name: Smoke test bundle binary
+        run: |
+          dist/mihomo-server-$GITHUB_REF_NAME-$TARGET/bin/mihomo-server --help >/dev/null
+          echo "Binary runs on this glibc version."
+
+      - name: Create tarball and checksum
+        run: |
+          cd dist
+          tar -czf "mihomo-server-$GITHUB_REF_NAME-$TARGET.tar.gz" \
+            "mihomo-server-$GITHUB_REF_NAME-$TARGET"
+          sha256sum "mihomo-server-$GITHUB_REF_NAME-$TARGET.tar.gz" \
+            > "mihomo-server-$GITHUB_REF_NAME-$TARGET.tar.gz.sha256"
+          sha256sum -c "mihomo-server-$GITHUB_REF_NAME-$TARGET.tar.gz.sha256"
+
+      - name: Render install.sh with repository slug
+        run: |
+          sed "s/^REPO=\"__REPO_SLUG__\"/REPO=\"$GITHUB_REPOSITORY\"/" \
+            scripts/install_remote.sh > dist/install.sh
+          chmod +x dist/install.sh
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
+            "dist/mihomo-server-$GITHUB_REF_NAME-$TARGET.tar.gz" \
+            "dist/mihomo-server-$GITHUB_REF_NAME-$TARGET.tar.gz.sha256" \
+            dist/install.sh

@@ -219,6 +219,42 @@ private. Actual user systemd service lifecycle—including boot/start, authentic
 process supervision, child Mihomo reaping (`ESRCH`), journalctl logging, configuration
 restoration, and real proxy traffic/node selection—is fully implemented and Linux-verified.
 
+## Install from a GitHub Release
+
+Releases are produced by `.github/workflows/release.yml` on `v*` tags. Ordinary
+pushes run the full test suite via `.github/workflows/ci.yml` instead. Each
+release publishes:
+
+- `mihomo-server-<tag>-x86_64-linux-gnu.tar.gz` — the pinned bundle
+- `mihomo-server-<tag>-x86_64-linux-gnu.tar.gz.sha256`
+- `install.sh` — a rendered copy of `scripts/install_remote.sh` with the
+  publishing repository slug baked in
+
+The bundle embeds the pinned Mihomo core recorded in `deploy/core-pin.json`
+(version + uncompressed-binary SHA-256, verified against the upstream release
+before packaging). Upgrading the pinned core means editing that one file in a
+PR.
+
+### One-shot install
+
+```sh
+curl -fsSL https://github.com/OWNER/REPO/releases/latest/download/install.sh \
+  | bash -s -- --enable --start
+```
+
+The script refuses root, requires `x86_64`, verifies the tarball checksum,
+downloads `scripts/install_service.py` from the same tag and installs the
+systemd user service. Extra arguments after `--` are passed to the installer
+(e.g. `--listen 127.0.0.1:9090 --data-dir ~/.local/share/mihomo-server`);
+with none it defaults to `--enable --start`.
+
+### Manual install from a downloaded tarball
+
+```sh
+tar -xzf mihomo-server-<tag>-x86_64-linux-gnu.tar.gz
+python3 scripts/install_service.py install --bundle mihomo-server-<tag>-x86_64-linux-gnu --enable --start
+```
+
 ## Validation
 
 ```sh

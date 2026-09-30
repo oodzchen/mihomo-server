@@ -53,7 +53,8 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task:** Code-quality refactor step 4 — real module directories for backup, core release/upgrade and Geo (see below).
+**Latest completed task:** GitHub Actions release pipeline (`ci.yml` full tests on every push, `release.yml` tarball bundle on `v*` tags), pinned core file `deploy/core-pin.json`, and remote one-shot installer `scripts/install_remote.sh` with locally verified end-to-end install (see "Increment: CI release pipeline and remote installer").
+**Previous completed task:** Code-quality refactor step 4 — real module directories for backup, core release/upgrade and Geo (see below).
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
 **Next implementation task:** Maintain deployed Linux service, support user feature queries, and expand deferred capabilities upon request.
 
@@ -5216,6 +5217,52 @@ Delivery step 7 (P1) completes the remaining full settings and resource lifecycl
   - Workspace checks: `cargo check --workspace --tests` and `cargo clippy --workspace --all-targets -- -D warnings` pass with 0 warnings; all 20 python tests in `scripts/tests` pass.
 
 The tree above marks Remaining full settings/resource lifecycle UI as implemented and browser verified. All active P1, P2, P3, and P4 tasks are now fully delivered and verified.
+
+## Increment: CI release pipeline and remote installer
+
+Status: `[Implemented; locally verified pipeline, Release publication pending first pushed tag]`
+
+Delivered:
+
+- `deploy/core-pin.json`: single auditable pin for the bundled Mihomo core
+  (version + uncompressed linux-amd64 SHA-256 + upstream download URL template).
+  Current pin: `v1.19.31` / `08787faafea19c1ab0f83fa5a1b22363b7d03ea78da18091a4c883aecaaa5979`
+  (official MetaCubeX release; verified locally via download + `sha256sum -c` + `-v`).
+- `.github/workflows/ci.yml` (trigger: every ordinary push): rustfmt check,
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `cargo test --workspace --locked -- --test-threads=1`, the Python suite
+  (`scripts/tests`), web build (`npm ci && npm run build`), and the full
+  Playwright e2e suite against the pinned core (`MIHOMO_TEST_BINARY`),
+  plus a parallel `shellcheck` job for the install script.
+- `.github/workflows/release.yml` (trigger: `v*` tags only): downloads and
+  verifies the pinned core, runs `scripts/package_bundle.py --build` for
+  `x86_64-unknown-linux-gnu`, smoke-tests `bin/mihomo-server --help`, tars the
+  bundle as `mihomo-server-<tag>-x86_64-linux-gnu.tar.gz` with a
+  `sha256sum -c`-compatible checksum file, renders `install.sh` with the
+  repository slug baked in, and publishes all three as GitHub Release assets.
+- `scripts/install_remote.sh`: one-shot remote installer (refuses root,
+  requires x86_64, verifies checksum, fetches `install_service.py` from the
+  same tag, installs the systemd user service; defaults to `--enable --start`).
+  `__REPO_SLUG__` is replaced only on the `REPO=` assignment line by CI so the
+  baked-in-slug guard stays intact.
+
+Verification performed locally on Linux x86_64:
+
+- Full packaging run with the pinned official core: `npm ci` + `vite build` +
+  release build + bundle assembly + `checksums.sha256` all succeeded.
+- End-to-end install rehearsal against a local HTTP server emulating GitHub
+  Releases (latest-tag resolution, checksum verification — including a
+  negative mismatch case, extraction, `install_service.py install --dry-run`,
+  then a real `--enable --start` install).
+- Real installed service: `systemctl --user status mihomo-server` active,
+  management API on `127.0.0.1:9090`, managed core `v1.19.31` running the
+  imported profile from `./data` with listeners on `:7890`/`:7891`.
+- `cargo fmt --all --check`, clippy `-D warnings`, full workspace tests
+  (424 passed, `--test-threads=1`), Python suite (19 OK), Playwright suite
+  (49 passed, 5 skipped).
+
+Remaining: first real `v*` tag push to publish a GitHub Release; other
+architectures (aarch64/musl) and RPM/deb packaging stay deferred.
 
 ## Final status synchronization: active scope completion
 

@@ -1,0 +1,87 @@
+name: ci
+
+# Full test suite on every ordinary push. Release builds are handled by
+# release.yml and only run on v* tags.
+
+on:
+  push:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: Shellcheck scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck -s bash scripts/install_remote.sh
+
+  test:
+    name: Full test suite
+    runs-on: ubuntu-latest
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install pinned Rust toolchain (rust-toolchain.toml)
+        run: cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Rust lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --workspace --locked -- --test-threads=1
+
+      - name: Python packaging/installer tests
+        run: python3 -m unittest discover -s scripts/tests
+
+      - name: Build web frontend
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
+
+      - name: Download and verify pinned core (e2e fixture)
+        id: pin
+        run: |
+          version=$(jq -r .version deploy/core-pin.json)
+          sha256=$(jq -r .sha256 deploy/core-pin.json)
+          url=$(jq -r .download deploy/core-pin.json)
+          url=${url/\{version\}/$version}
+          mkdir -p .core
+          curl -fsSL --retry 3 -o .core/core.gz "$url"
+          gunzip -c .core/core.gz > .core/verge-mihomo
+          chmod +x .core/verge-mihomo
+          echo "$sha256  .core/verge-mihomo" | sha256sum -c -
+          .core/verge-mihomo -v
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+
+      - name: Web end-to-end tests
+        env:
+          MIHOMO_TEST_BINARY: ${{ github.workspace }}/.core/verge-mihomo
+        run: npx playwright test
+        working-directory: web
+
+      - name: Upload Playwright failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failures
+          path: web/test-results/
+          if-no-files-found: ignore
