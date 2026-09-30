@@ -38,8 +38,8 @@ if [ "$AGENT_TYPE" = "antigravity" ]; then
 fi
 
 # 可执行文件路径探测
-CODEX_BIN="${CODEX_BIN:-$(command -v codex || echo "/home/kholin/.nvm/versions/node/v24.18.0/bin/codex")}"
-AGY_BIN="${AGY_BIN:-$(command -v agy || echo "/home/kholin/.local/bin/agy")}"
+CODEX_BIN="${CODEX_BIN:-$(command -v codex || echo "$HOME/.nvm/versions/node/current/bin/codex")}"
+AGY_BIN="${AGY_BIN:-$(command -v agy || echo "$HOME/.local/bin/agy")}"
 
 # 参数与超限控制 (可通过环境变量自定义)
 INACTIVITY_TIMEOUT="${INACTIVITY_TIMEOUT:-600}"          # 请求无响应超时时间 (秒, 默认 10 分钟)
@@ -860,7 +860,7 @@ $handover_info
    （注意：严禁在 COMMIT 块中包含“验证通过/Tests passed/cargo check/browser tests”等测试流水表述，只陈述实际代码与功能改动本身！）
 
    [第 2 段 - 本轮完成的功能点总结]：
-   已完成本轮 [P1/P2/...] 子任务：<清晰陈述本轮实质完成的功能点或修复>。完整架构树与进度已同步更新至 [ARCHITECTURE.md](/home/kholin/github/mihomo-server/docs/ARCHITECTURE.md)。
+   已完成本轮 [P1/P2/...] 子任务：<清晰陈述本轮实质完成的功能点或修复>。完整架构树与进度已同步更新至 [ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
    [第 3 段 - 验证与测试结果]：
    \`cargo check --workspace\` 通过；<具体测试项/浏览器回归/真实内核或节点验证情况>。
@@ -923,7 +923,7 @@ $extra_warning
    （严禁包含“验证通过/Tests passed/cargo test”等流水表述，只陈述实际代码与功能改动本身）
 
    [第 2 段 - 本轮完成的功能点总结]：
-   已完成本轮 [P1/P2/...] 子任务：<清晰陈述本轮实质完成的功能点或修复>。完整架构树与进度已同步更新至 [ARCHITECTURE.md](/home/kholin/github/mihomo-server/docs/ARCHITECTURE.md)。
+   已完成本轮 [P1/P2/...] 子任务：<清晰陈述本轮实质完成的功能点或修复>。完整架构树与进度已同步更新至 [ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
    [第 3 段 - 验证与测试结果]：
    \`cargo check --workspace\` 通过；<具体测试项/浏览器回归/真实内核或节点验证情况>。
