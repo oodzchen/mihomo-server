@@ -5246,6 +5246,12 @@ Delivered:
   `__REPO_SLUG__` is replaced only on the `REPO=` assignment line by CI so the
   baked-in-slug guard stays intact.
 
+Maintenance (2026-10): workflow actions upgraded off the deprecated Node.js 20
+runtime — `actions/checkout` v4→v5, `actions/setup-node` v4→v5,
+`actions/upload-artifact` v4→v6 (v5 still defaulted to node20);
+`Swatinem/rust-cache@v2` already tracks a node24 release (v2.9.1) and was
+left untouched.
+
 Verification performed locally on Linux x86_64:
 
 - Full packaging run with the pinned official core: `npm ci` + `vite build` +
