@@ -42,7 +42,7 @@ jobs:
           version=$(jq -r .version deploy/core-pin.json)
           sha256=$(jq -r .sha256 deploy/core-pin.json)
           url=$(jq -r .download deploy/core-pin.json)
-          url=${url/\{version\}/$version}
+          url=$(printf '%s' "$url" | sed "s/{version}/$version/g")
           mkdir -p .core
           curl -fsSL --retry 3 -o .core/core.gz "$url"
           gunzip -c .core/core.gz > .core/verge-mihomo

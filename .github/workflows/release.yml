@@ -38,7 +38,8 @@ jobs:
           echo "version=$(jq -r .version deploy/core-pin.json)" >> "$GITHUB_OUTPUT"
           echo "sha256=$(jq -r .sha256 deploy/core-pin.json)" >> "$GITHUB_OUTPUT"
           url=$(jq -r .download deploy/core-pin.json)
-          echo "url=${url/\{version\}/$(jq -r .version deploy/core-pin.json)}" >> "$GITHUB_OUTPUT"
+          url=$(printf '%s' "$url" | sed "s/{version}/$(jq -r .version deploy/core-pin.json)/g")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Download and verify pinned core
         run: |
