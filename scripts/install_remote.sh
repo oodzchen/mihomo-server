@@ -49,6 +49,26 @@ fetch() {
     fi
 }
 
+fetch_progress() {
+    # fetch_progress URL DEST — like fetch, but shows a live progress bar on stderr.
+    if command -v curl >/dev/null 2>&1; then
+        if [ -t 2 ]; then
+            curl -fL --retry 3 --progress-bar -o "$2" "$1"
+        else
+            curl -fsSL --retry 3 -o "$2" "$1"
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if [ -t 2 ]; then
+            wget -q --show-progress -O "$2" "$1"
+        else
+            wget -q -O "$2" "$1"
+        fi
+    else
+        echo "error: need curl or wget to download files" >&2
+        exit 1
+    fi
+}
+
 die() {
     echo "error: $*" >&2
     exit 1
@@ -118,7 +138,7 @@ NAME="mihomo-server-$TAG-x86_64-unknown-linux-gnu"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 echo "==> downloading $NAME"
-fetch "$BASE_URL/$REPO/releases/download/$TAG/$NAME.tar.gz" "$work/$NAME.tar.gz" \
+fetch_progress "$BASE_URL/$REPO/releases/download/$TAG/$NAME.tar.gz" "$work/$NAME.tar.gz" \
     || die "download failed: $NAME.tar.gz"
 fetch "$BASE_URL/$REPO/releases/download/$TAG/$NAME.tar.gz.sha256" "$work/$NAME.tar.gz.sha256" \
     || die "download failed: checksum file"

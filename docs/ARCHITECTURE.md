@@ -5243,6 +5243,9 @@ Delivered:
 - `scripts/install_remote.sh`: one-shot remote installer (refuses root,
   requires x86_64, verifies checksum, fetches `install_service.py` from the
   same tag, installs the systemd user service; defaults to `--enable --start`).
+  The tarball download uses `fetch_progress`, which shows a live progress bar
+  (curl `--progress-bar` / wget `--show-progress`) when stderr is a TTY and
+  stays quiet otherwise (piped/CI logs); small metadata fetches remain silent.
   `__REPO_SLUG__` is replaced only on the `REPO=` assignment line by CI so the
   baked-in-slug guard stays intact.
 
