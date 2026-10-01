@@ -5250,7 +5250,10 @@ Maintenance (2026-10): workflow actions upgraded off the deprecated Node.js 20
 runtime — `actions/checkout` v4→v5, `actions/setup-node` v4→v5,
 `actions/upload-artifact` v4→v6 (v5 still defaulted to node20);
 `Swatinem/rust-cache@v2` already tracks a node24 release (v2.9.1) and was
-left untouched.
+left untouched. Runners pinned from `ubuntu-latest` to `ubuntu-24.04`:
+`ubuntu-latest` starts rolling to Ubuntu 26.04 on 2026-10-19 (runner-images
+issue #14748), and release binaries must keep linking against the 24.04
+glibc so bundles stay runnable on older distros.
 
 Verification performed locally on Linux x86_64:
 

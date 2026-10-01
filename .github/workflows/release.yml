@@ -13,7 +13,10 @@ permissions:
 jobs:
   build-release:
     name: Build and package release
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest migrates to Ubuntu 26.04 from 2026-10-19. Release
+    # binaries must keep linking against the 24.04 glibc so the bundle stays
+    # runnable on older distros (Debian 12, Ubuntu 22.04, etc.).
+    runs-on: ubuntu-24.04
     permissions:
       contents: write # required to create the GitHub Release
     env:
