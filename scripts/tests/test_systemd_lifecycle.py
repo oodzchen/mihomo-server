@@ -3,7 +3,7 @@
 
 Tests the full lifecycle under real systemd:
 1. Package bundle with package_bundle.py
-2. Install bundle and unit with install_service.py
+2. Install bundle and unit with scripts/install_remote.sh --bundle
 3. Start service with systemctl --user start
 4. Verify HTTP management status, child core process, and bearer auth
 5. Verify real proxy node data from ./data, node selection, and delay testing
@@ -29,7 +29,58 @@ import unittest
 import urllib.parse
 import urllib.request
 
-import scripts.install_service as installer
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+INSTALL_SH = ROOT / "scripts" / "install_remote.sh"
+
+
+class installer:
+    """Thin helpers around systemctl and the shell installer under test."""
+
+    @staticmethod
+    def detect_systemctl_prefix() -> list[str]:
+        base = ["systemctl", "--user"]
+        res = subprocess.run(base + ["is-active", "dbus.service"], capture_output=True, text=True)
+        err = res.stderr or ""
+        if res.returncode != 0 and (
+            "Failed to connect to user scope bus" in err
+            or "Object is remote" in err
+            or "No data available" in err
+            or "没有可用的数据" in err
+        ):
+            return base + ["-M", f"{getpass.getuser()}@.host"]
+        return base
+
+    @staticmethod
+    def run_systemctl(args, prefix=None, check=True):
+        cmd = (prefix or installer.detect_systemctl_prefix()) + args
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if check and res.returncode != 0:
+            raise RuntimeError(f"{' '.join(cmd)} failed: {res.stdout}{res.stderr}")
+        return res
+
+    @staticmethod
+    def run_installer(args, prefix):
+        env = dict(os.environ, SYSTEMCTL_USER_PREFIX=" ".join(prefix))
+        res = subprocess.run(["bash", str(INSTALL_SH), *args], capture_output=True, text=True, env=env)
+        if res.returncode != 0:
+            raise RuntimeError(f"install_remote.sh failed: {res.stdout}{res.stderr}")
+        return res
+
+    @staticmethod
+    def install_service(bundle_src, install_dir, data_dir, unit_dir, unit_name, listen, systemctl_prefix):
+        return installer.run_installer(
+            ["--bundle", str(bundle_src), "--install-dir", str(install_dir), "--data-dir", str(data_dir),
+             "--unit-dir", str(unit_dir), "--unit-name", unit_name, "--listen", listen, "--no-start"],
+            systemctl_prefix,
+        )
+
+    @staticmethod
+    def uninstall_service(unit_name, unit_dir, install_dir, data_dir, remove_bundle, purge_data, systemctl_prefix):
+        return installer.run_installer(
+            ["--uninstall", "--install-dir", str(install_dir), "--data-dir", str(data_dir),
+             "--unit-dir", str(unit_dir), "--unit-name", unit_name, *(["--purge-data"] if purge_data else [])],
+            systemctl_prefix,
+        )
 
 
 def find_free_port() -> int:
@@ -165,7 +216,7 @@ class TestSystemdLifecycle(unittest.TestCase):
                 txt = txt.replace("listen: :1053", "listen: 127.0.0.1:0")
                 p.write_text(txt)
 
-        # 3. Install systemd service unit via install_service.py
+        # 3. Install systemd service unit via install_remote.sh
         installer.install_service(
             bundle_src=self.bundle_dir,
             install_dir=self.install_dir,

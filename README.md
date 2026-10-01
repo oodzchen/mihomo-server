@@ -6,7 +6,7 @@
 
 ## 安装
 
-需要 x86_64 Linux，并已安装 systemd、Python 3 和 curl（或 wget）。以普通用户执行：
+需要 x86_64 Linux，并已安装 systemd 和 curl（或 wget），无需 Python。以普通用户执行：
 
 ```sh
 curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash
@@ -18,7 +18,7 @@ curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/in
 
 ```sh
 curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh \
-  | bash -s -- --enable --start --listen 0.0.0.0:9090 \
+  | bash -s -- --listen 0.0.0.0:9090 \
       --extra-args "--public-origin http://服务器IP:9090"
 ```
 

@@ -5242,9 +5242,13 @@ Delivered:
   bundle as `mihomo-server-<tag>-x86_64-unknown-linux-gnu.tar.gz` with a
   `sha256sum -c`-compatible checksum file, renders `install.sh` with the
   repository slug baked in, and publishes all three as GitHub Release assets.
-- `scripts/install_remote.sh`: one-shot remote installer (refuses root,
-  requires x86_64, verifies checksum, fetches `install_service.py` from the
-  same tag, installs the systemd user service; defaults to `--enable --start`).
+- `scripts/install_remote.sh`: pure-shell one-shot installer (refuses root,
+  requires x86_64, verifies checksum, copies the bundle, renders the unit from
+  the bundled `mihomo-server.service` with awk, enables+starts by default;
+  also `--bundle DIR`, `--no-start`, `--uninstall [--purge-data]`). Python is
+  no longer a user-side dependency: `scripts/install_service.py` and its unit
+  tests were removed (2026-10), and `test_systemd_lifecycle.py` now drives the
+  shell installer. Lifecycle management is plain `systemctl`/`journalctl --user`.
   The tarball download uses `fetch_progress`, which shows a live progress bar
   (curl `--progress-bar` / wget `--show-progress`) when stderr is a TTY and
   stays quiet otherwise (piped/CI logs); small metadata fetches remain silent.

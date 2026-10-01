@@ -190,26 +190,22 @@ every Geo database format. Select suitable assets for the configuration's Geo mo
 defaulting to `%h/.local/opt/mihomo-server/launch` with persistent data in
 `%h/.local/share/mihomo-server`.
 
-Use `scripts/install_service.py` to automate bundle installation, unit registration,
-and daemon lifecycle management:
+`scripts/install_remote.sh` (published as `install.sh`) is a pure-shell installer
+(no Python) that installs the bundle, renders the unit from the bundled template
+and registers it. Day-to-day management uses plain systemd tooling:
 
 ```sh
-# Install bundle to ~/.local/opt/mihomo-server and register systemd user unit:
-python3 scripts/install_service.py install --bundle /path/to/bundle --enable --start
-
-# Inspect rendered unit or run dry-run:
-python3 scripts/install_service.py unit
-python3 scripts/install_service.py install --bundle /path/to/bundle --dry-run
+# Install from an extracted bundle (enables and starts unless --no-start):
+bash scripts/install_remote.sh --bundle /path/to/bundle [--listen 127.0.0.1:9090]
 
 # Manage service lifecycle:
-python3 scripts/install_service.py status
-python3 scripts/install_service.py is-active
-python3 scripts/install_service.py logs -n 50
-python3 scripts/install_service.py restart
-python3 scripts/install_service.py stop
+systemctl --user status mihomo-server
+journalctl --user -u mihomo-server -n 50
+systemctl --user restart mihomo-server
+systemctl --user stop mihomo-server
 
-# Uninstall unit without purging data:
-python3 scripts/install_service.py uninstall
+# Uninstall unit and bundle, keeping data (add --purge-data to delete it):
+bash scripts/install_remote.sh --uninstall
 ```
 
 The unit uses `KillMode=mixed` so SIGTERM reaches Rust first and its child is
@@ -239,20 +235,21 @@ PR.
 
 ```sh
 curl -fsSL https://github.com/OWNER/REPO/releases/latest/download/install.sh \
-  | bash -s -- --enable --start
+  | bash
 ```
 
-The script refuses root, requires `x86_64`, verifies the tarball checksum,
-downloads `scripts/install_service.py` from the same tag and installs the
-systemd user service. Extra arguments after `--` are passed to the installer
-(e.g. `--listen 127.0.0.1:9090 --data-dir ~/.local/share/mihomo-server`);
-with none it defaults to `--enable --start`.
+The script refuses root, requires `x86_64`, verifies the tarball checksum and
+installs the systemd user service, enabling and starting it by default. It needs
+only `tar`, `sha256sum` (or `shasum`), `systemctl` and `curl`/`wget`. Options:
+`--listen`, `--extra-args`, `--install-dir`, `--data-dir`, `--version`,
+`--no-start`, `--uninstall [--purge-data]` (`--enable`/`--start` are accepted
+and ignored).
 
 ### Manual install from a downloaded tarball
 
 ```sh
 tar -xzf mihomo-server-<tag>-x86_64-unknown-linux-gnu.tar.gz
-python3 scripts/install_service.py install --bundle mihomo-server-<tag>-x86_64-unknown-linux-gnu --enable --start
+bash scripts/install_remote.sh --bundle mihomo-server-<tag>-x86_64-unknown-linux-gnu
 ```
 
 ## Validation
@@ -266,5 +263,5 @@ MIHOMO_TEST_BINARY=/usr/bin/verge-mihomo cargo test -p mihomo-server \
 ```
 
 The validation suite covers:
-- Python test suite (`scripts/tests/test_package_bundle.py`, `scripts/tests/test_install_service.py`, and `scripts/tests/test_systemd_lifecycle.py`), verifying bundle layout, checksums, license inventory, unit generation, live systemd startup/restart/stop, child process reaping, and real proxy selection from `./data`.
+- Python test suite (`scripts/tests/test_package_bundle.py` and `scripts/tests/test_systemd_lifecycle.py`, the latter driving `install_remote.sh`), verifying bundle layout, checksums, license inventory, unit generation, live systemd startup/restart/stop, child process reaping, and real proxy selection from `./data`.
 - Opt-in Rust deployment test (`service/tests/deployment.rs`), packaging the actual service/core, launching from an unrelated working directory, testing first-use initialization, local-profile import/validation/start/node/config changes, failed validation, service restart, restored records and retained managed core, and requiring SIGTERM child reaping.
