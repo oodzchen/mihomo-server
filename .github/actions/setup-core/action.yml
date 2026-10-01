@@ -8,7 +8,7 @@ runs:
       run: |
         echo "sha256=$(jq -r .sha256 deploy/core-pin.json)" >> "$GITHUB_OUTPUT"
     - id: cache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: .core/verge-mihomo
         key: core-${{ steps.pin.outputs.sha256 }}

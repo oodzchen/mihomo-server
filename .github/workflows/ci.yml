@@ -57,9 +57,9 @@ jobs:
         env:
           MIHOMO_TEST_BINARY: ${{ github.workspace }}/.core/verge-mihomo
         run: cargo test --workspace --locked -- --test-threads=1
+      # No MIHOMO_TEST_BINARY here: the systemd lifecycle test needs the
+      # git-ignored ./data profiles and must stay skipped on CI.
       - name: Python packaging/installer tests
-        env:
-          MIHOMO_TEST_BINARY: ${{ github.workspace }}/.core/verge-mihomo
         run: python3 -m unittest discover -s scripts/tests
 
   web-e2e:
@@ -91,7 +91,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
