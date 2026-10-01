@@ -114,7 +114,7 @@ else
     RAW_URL="$BASE_URL/raw"
 fi
 
-NAME="mihomo-server-$TAG-x86_64-linux-gnu"
+NAME="mihomo-server-$TAG-x86_64-unknown-linux-gnu"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 echo "==> downloading $NAME"

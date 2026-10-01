@@ -5237,7 +5237,7 @@ Delivered:
 - `.github/workflows/release.yml` (trigger: `v*` tags only): downloads and
   verifies the pinned core, runs `scripts/package_bundle.py --build` for
   `x86_64-unknown-linux-gnu`, smoke-tests `bin/mihomo-server --help`, tars the
-  bundle as `mihomo-server-<tag>-x86_64-linux-gnu.tar.gz` with a
+  bundle as `mihomo-server-<tag>-x86_64-unknown-linux-gnu.tar.gz` with a
   `sha256sum -c`-compatible checksum file, renders `install.sh` with the
   repository slug baked in, and publishes all three as GitHub Release assets.
 - `scripts/install_remote.sh`: one-shot remote installer (refuses root,

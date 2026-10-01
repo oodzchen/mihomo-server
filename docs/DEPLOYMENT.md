@@ -225,8 +225,8 @@ Releases are produced by `.github/workflows/release.yml` on `v*` tags. Ordinary
 pushes run the full test suite via `.github/workflows/ci.yml` instead. Each
 release publishes:
 
-- `mihomo-server-<tag>-x86_64-linux-gnu.tar.gz` — the pinned bundle
-- `mihomo-server-<tag>-x86_64-linux-gnu.tar.gz.sha256`
+- `mihomo-server-<tag>-x86_64-unknown-linux-gnu.tar.gz` — the pinned bundle
+- `mihomo-server-<tag>-x86_64-unknown-linux-gnu.tar.gz.sha256`
 - `install.sh` — a rendered copy of `scripts/install_remote.sh` with the
   publishing repository slug baked in
 
@@ -251,8 +251,8 @@ with none it defaults to `--enable --start`.
 ### Manual install from a downloaded tarball
 
 ```sh
-tar -xzf mihomo-server-<tag>-x86_64-linux-gnu.tar.gz
-python3 scripts/install_service.py install --bundle mihomo-server-<tag>-x86_64-linux-gnu --enable --start
+tar -xzf mihomo-server-<tag>-x86_64-unknown-linux-gnu.tar.gz
+python3 scripts/install_service.py install --bundle mihomo-server-<tag>-x86_64-unknown-linux-gnu --enable --start
 ```
 
 ## Validation
