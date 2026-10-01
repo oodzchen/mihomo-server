@@ -198,7 +198,7 @@ chmod 700 "$DATA_DIR"
 if [ "$(cd "$BUNDLE" && pwd -P)" != "$(cd "$INSTALL_DIR" && pwd -P)" ]; then
     # Stop a running instance first so replaced binaries are not busy.
     "${SYSTEMCTL[@]}" stop "$UNIT_NAME" >/dev/null 2>&1 || true
-    rm -rf "$INSTALL_DIR/bin" "$INSTALL_DIR/resources" "$INSTALL_DIR/docs"
+    rm -rf "${INSTALL_DIR:?}/bin" "${INSTALL_DIR:?}/resources" "${INSTALL_DIR:?}/docs"
     cp -a "$BUNDLE"/. "$INSTALL_DIR"/
 fi
 chmod 755 "$INSTALL_DIR" "$INSTALL_DIR/launch" "$INSTALL_DIR/bin/mihomo-server"
