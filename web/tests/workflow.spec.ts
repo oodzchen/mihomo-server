@@ -1364,12 +1364,11 @@ test("browser repairs failed startup, saves selection/config, restores after ser
     .click();
   await expect(page.getByLabel("运行配置 YAML")).toHaveValue(/mode: direct/);
   await page.reload();
-  await expect(
-    page.getByRole("heading", { name: "连接你的服务" }),
-  ).toBeVisible();
-  await page.getByLabel("管理令牌").fill(token);
-  await page.getByRole("button", { name: "连接服务" }).click();
+  // The session token is cached per tab, so a refresh keeps the login.
   await expect(page.getByLabel("运行配置 YAML")).toBeVisible();
+  expect(
+    await page.evaluate(() => Object.keys(localStorage).join()),
+  ).not.toContain("token");
   await page.setViewportSize({ width: 390, height: 844 });
   await page
     .getByRole("navigation", { name: "主导航" })
@@ -1389,6 +1388,10 @@ test("browser repairs failed startup, saves selection/config, restores after ser
   await page.screenshot({ path: "test-results/mobile.png", fullPage: true });
   await page.getByRole("button", { name: "退出登录" }).click();
   await expect(page.getByLabel("管理令牌")).toHaveValue("");
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "连接你的服务" }),
+  ).toBeVisible();
   expect(errors).toEqual([]);
 });
 
