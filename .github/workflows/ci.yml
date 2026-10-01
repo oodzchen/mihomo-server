@@ -1,7 +1,7 @@
 name: ci
 
-# Full test suite on every ordinary push. Release builds are handled by
-# release.yml and only run on v* tags.
+# Full test suite on every ordinary push, split into parallel jobs. Release
+# builds are handled by release.yml and only run on v* tags.
 
 on:
   push:
@@ -10,23 +10,61 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same ref supersedes any run still in flight.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Only main writes the cargo build cache; other branches restore from it.
+  SAVE_CACHE: ${{ github.ref == 'refs/heads/main' }}
+
+# Pinned runners: ubuntu-latest migrates to Ubuntu 26.04 from 2026-10-19; a
+# newer glibc would raise the minimum distro requirement for released bundles.
 jobs:
   shellcheck:
     name: Shellcheck scripts
-    # Pinned: ubuntu-latest migrates to Ubuntu 26.04 from 2026-10-19; a newer
-    # glibc would raise the minimum distro requirement for released bundles.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - run: shellcheck -s bash scripts/install_remote.sh
 
-  test:
-    name: Full test suite
-    # Pinned: ubuntu-latest migrates to Ubuntu 26.04 from 2026-10-19; a newer
-    # glibc would raise the minimum distro requirement for released bundles.
+  lint:
+    name: Rust fmt and clippy
     runs-on: ubuntu-24.04
-    env:
-      TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-rust
+        with:
+          save-cache: ${{ env.SAVE_CACHE }}
+          cache-key: lint
+      - name: Rust formatting
+        run: cargo fmt --all --check
+      - name: Rust lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  rust-test:
+    name: Rust and packaging tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-rust
+        with:
+          save-cache: ${{ env.SAVE_CACHE }}
+          cache-key: test
+      - uses: ./.github/actions/setup-core
+      - name: Rust tests
+        env:
+          MIHOMO_TEST_BINARY: ${{ github.workspace }}/.core/verge-mihomo
+        run: cargo test --workspace --locked -- --test-threads=1
+      - name: Python packaging/installer tests
+        env:
+          MIHOMO_TEST_BINARY: ${{ github.workspace }}/.core/verge-mihomo
+        run: python3 -m unittest discover -s scripts/tests
+
+  web-e2e:
+    name: Web build and end-to-end tests
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
@@ -36,45 +74,36 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install pinned Rust toolchain (rust-toolchain.toml)
-        run: cargo --version
+      - uses: ./.github/actions/setup-rust
+        with:
+          save-cache: ${{ env.SAVE_CACHE }}
+          cache-key: e2e
+      - uses: ./.github/actions/setup-core
 
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Download and verify pinned core
-        run: |
-          version=$(jq -r .version deploy/core-pin.json)
-          sha256=$(jq -r .sha256 deploy/core-pin.json)
-          url=$(jq -r .download deploy/core-pin.json)
-          url=$(printf '%s' "$url" | sed "s/{version}/$version/g")
-          mkdir -p .core
-          curl -fsSL --retry 3 -o .core/core.gz "$url"
-          gunzip -c .core/core.gz > .core/verge-mihomo
-          chmod +x .core/verge-mihomo
-          echo "$sha256  .core/verge-mihomo" | sha256sum -c -
-          .core/verge-mihomo -v
-
-      - name: Rust formatting
-        run: cargo fmt --all --check
-
-      - name: Rust lint
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: Rust tests
-        env:
-          MIHOMO_TEST_BINARY: ${{ github.workspace }}/.core/verge-mihomo
-        run: cargo test --workspace --locked -- --test-threads=1
-
-      - name: Python packaging/installer tests
-        run: python3 -m unittest discover -s scripts/tests
+      # The e2e suite spawns target/debug/mihomo-server.
+      - name: Build service binary
+        run: cargo build --locked
 
       - name: Build web frontend
         run: |
           npm --prefix web ci
           npm --prefix web run build
 
+      - name: Cache Playwright browsers
+        id: playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+
       - name: Install Playwright browsers
+        if: steps.playwright.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
+        working-directory: web
+
+      - name: Install Playwright system dependencies (browser cached)
+        if: steps.playwright.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
         working-directory: web
 
       - name: Web end-to-end tests

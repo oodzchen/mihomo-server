@@ -30,28 +30,18 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install pinned Rust toolchain (rust-toolchain.toml)
-        run: cargo --version
+      - uses: ./.github/actions/setup-rust
+        with:
+          save-cache: "false"
+          cache-key: release
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-core
 
       - name: Read pinned core
         id: pin
         run: |
           echo "version=$(jq -r .version deploy/core-pin.json)" >> "$GITHUB_OUTPUT"
           echo "sha256=$(jq -r .sha256 deploy/core-pin.json)" >> "$GITHUB_OUTPUT"
-          url=$(jq -r .download deploy/core-pin.json)
-          url=$(printf '%s' "$url" | sed "s/{version}/$(jq -r .version deploy/core-pin.json)/g")
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-
-      - name: Download and verify pinned core
-        run: |
-          mkdir -p .core
-          curl -fsSL --retry 3 -o .core/core.gz "${{ steps.pin.outputs.url }}"
-          gunzip -c .core/core.gz > .core/verge-mihomo
-          chmod +x .core/verge-mihomo
-          echo "${{ steps.pin.outputs.sha256 }}  .core/verge-mihomo" | sha256sum -c -
-          .core/verge-mihomo -v
 
       - name: Build and package bundle
         run: |

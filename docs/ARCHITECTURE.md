@@ -5348,3 +5348,12 @@ remaining integration limits, and the next step. Include the complete target
 architecture with status markers, keeping scaffold status separate from
 completed migrations. Update provenance for copied code and this document for
 implementation status in the same increment.
+
+## Increment: CI speed-up (parallel jobs and caching)
+
+- `ci.yml` is split into parallel jobs: `shellcheck`, `lint` (fmt + clippy), `rust-test` (cargo test with `--test-threads=1`, then the Python packaging/installer tests, which need the built binary and core), and `web-e2e` (builds `target/debug/mihomo-server`, the web bundle, then Playwright). Wall time is the slowest job rather than the sum.
+- `concurrency` cancels in-flight runs of the same ref when a newer push arrives.
+- Shared steps are local composite actions: `.github/actions/setup-rust` (caches `~/.rustup/toolchains` keyed on `rust-toolchain.toml`, then `Swatinem/rust-cache` with a per-job key) and `.github/actions/setup-core` (caches `.core/verge-mihomo` keyed on the pin sha256; the checksum and `-v` check still run on every job). `release.yml` reuses both.
+- Only `main` writes the cargo build cache (`save-if`); other branches and tag builds restore only, so feature branches no longer evict main's cache.
+- Playwright's Chromium is cached under `~/.cache/ms-playwright` keyed on `web/package-lock.json`; on a hit only `playwright install-deps` runs.
+- Not done: parallelizing `cargo test`/Playwright (`--test-threads=1`, `workers: 1`) — needs an audit of shared ports/data dirs first.

@@ -1,0 +1,25 @@
+name: Set up Rust
+description: Cache the pinned rustup toolchain, then restore the cargo build cache.
+inputs:
+  save-cache:
+    description: Whether this run may write the cargo build cache.
+    default: "true"
+  cache-key:
+    description: Extra rust-cache key to keep job caches separate.
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.rustup/toolchains
+          ~/.rustup/update-hashes
+        key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+    - name: Install pinned Rust toolchain (rust-toolchain.toml)
+      shell: bash
+      run: cargo --version
+    - uses: Swatinem/rust-cache@v2
+      with:
+        save-if: ${{ inputs.save-cache }}
+        key: ${{ inputs.cache-key }}
