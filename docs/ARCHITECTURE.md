@@ -5236,7 +5236,9 @@ Delivered:
   (`scripts/tests`), web build (`npm ci && npm run build`), and the full
   Playwright e2e suite against the pinned core (`MIHOMO_TEST_BINARY`),
   plus a parallel `shellcheck` job for the install script.
-- `.github/workflows/release.yml` (trigger: `v*` tags only): downloads and
+- `.github/workflows/release.yml` (trigger: `v*` tags only): first calls
+  `ci.yml` as a reusable workflow (`test` job); the build/publish job
+  `needs: test`, so a failing test suite blocks the release. Then downloads and
   verifies the pinned core, runs `scripts/package_bundle.py --build` for
   `x86_64-unknown-linux-gnu`, smoke-tests `bin/mihomo-server --help`, tars the
   bundle as `mihomo-server-<tag>-x86_64-unknown-linux-gnu.tar.gz` with a
@@ -5361,6 +5363,7 @@ implementation status in the same increment.
 ## Increment: CI speed-up (parallel jobs and caching)
 
 - `ci.yml` is split into parallel jobs: `shellcheck`, `lint` (fmt + clippy), `rust-test` (cargo test with `--test-threads=1`, then the Python packaging/installer tests, which need the built binary and core), and `web-e2e` (builds `target/debug/mihomo-server`, the web bundle, then Playwright). Wall time is the slowest job rather than the sum.
+- `ci.yml` also declares `workflow_call`; `release.yml` runs it as a gate, so every release has passed the full suite (lint, Rust, packaging, web e2e) on the tagged commit.
 - `concurrency` cancels in-flight runs of the same ref when a newer push arrives.
 - Shared steps are local composite actions: `.github/actions/setup-rust` (caches `~/.rustup/toolchains` keyed on `rust-toolchain.toml`, then `Swatinem/rust-cache` with a per-job key) and `.github/actions/setup-core` (caches `.core/verge-mihomo` keyed on the pin sha256; the checksum and `-v` check still run on every job). `release.yml` reuses both.
 - Only `main` writes the cargo build cache (`save-if`); other branches and tag builds restore only, so feature branches no longer evict main's cache.

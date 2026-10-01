@@ -1,7 +1,7 @@
 name: release
 
 # Build, package and publish an installable bundle on v* tags only.
-# Ordinary pushes run the full test suite via ci.yml.
+# The full test suite (ci.yml) must pass before anything is built or published.
 
 on:
   push:
@@ -11,7 +11,12 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    name: Full test suite
+    uses: ./.github/workflows/ci.yml
+
   build-release:
+    needs: test
     name: Build and package release
     # Pinned: ubuntu-latest migrates to Ubuntu 26.04 from 2026-10-19. Release
     # binaries must keep linking against the 24.04 glibc so the bundle stays

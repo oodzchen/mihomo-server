@@ -1,11 +1,13 @@
 name: ci
 
 # Full test suite on every ordinary push, split into parallel jobs. Release
-# builds are handled by release.yml and only run on v* tags.
+# builds are handled by release.yml, which reuses this workflow (workflow_call)
+# and only builds once every job here has passed.
 
 on:
   push:
     branches: ["**"]
+  workflow_call:
 
 permissions:
   contents: read
