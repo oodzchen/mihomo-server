@@ -128,8 +128,9 @@ fetch "$BASE_URL/$REPO/releases/download/$TAG/$NAME.tar.gz.sha256" "$work/$NAME.
 echo "==> extracting bundle"
 tar -xzf "$work/$NAME.tar.gz" -C "$work"
 BUNDLE="$work/$NAME"
-[ -f "$BUNDLE/launch" ] && [ -f "$BUNDLE/mihomo-server.service" ] \
-    || die "unexpected tarball layout (missing launch/unit)"
+if [ ! -f "$BUNDLE/launch" ] || [ ! -f "$BUNDLE/mihomo-server.service" ]; then
+    die "unexpected tarball layout (missing launch/unit)"
+fi
 
 echo "==> fetching installer from tag $TAG"
 fetch "$RAW_URL/$REPO/$TAG/scripts/install_service.py" "$work/install_service.py" \
