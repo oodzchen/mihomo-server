@@ -37,25 +37,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Rust formatting
-        run: cargo fmt --all --check
-
-      - name: Rust lint
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: Rust tests
-        run: cargo test --workspace --locked -- --test-threads=1
-
-      - name: Python packaging/installer tests
-        run: python3 -m unittest discover -s scripts/tests
-
-      - name: Build web frontend
-        run: |
-          npm --prefix web ci
-          npm --prefix web run build
-
-      - name: Download and verify pinned core (e2e fixture)
-        id: pin
+      - name: Download and verify pinned core
         run: |
           version=$(jq -r .version deploy/core-pin.json)
           sha256=$(jq -r .sha256 deploy/core-pin.json)
@@ -67,6 +49,25 @@ jobs:
           chmod +x .core/verge-mihomo
           echo "$sha256  .core/verge-mihomo" | sha256sum -c -
           .core/verge-mihomo -v
+
+      - name: Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Rust lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Rust tests
+        env:
+          MIHOMO_TEST_BINARY: ${{ github.workspace }}/.core/verge-mihomo
+        run: cargo test --workspace --locked -- --test-threads=1
+
+      - name: Python packaging/installer tests
+        run: python3 -m unittest discover -s scripts/tests
+
+      - name: Build web frontend
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
