@@ -75,7 +75,7 @@ jobs:
 
       - name: Render install.sh with repository slug
         run: |
-          sed "s/^REPO=\"__REPO_SLUG__\"/REPO=\"$GITHUB_REPOSITORY\"/" \
+          sed "s|^REPO=\"__REPO_SLUG__\"|REPO=\"$GITHUB_REPOSITORY\"|" \
             scripts/install_remote.sh > dist/install.sh
           chmod +x dist/install.sh
 
