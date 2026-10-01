@@ -33,6 +33,20 @@ const pages: [string, MessageKey][] = [
   ["/core", "core"],
 ];
 
+const TOKEN_KEY = "mihomo.token";
+
+function savedToken() {
+  try { return window.sessionStorage.getItem(TOKEN_KEY) || ""; }
+  catch { return ""; }
+}
+
+function storeToken(token: string) {
+  try {
+    if (token) window.sessionStorage.setItem(TOKEN_KEY, token);
+    else window.sessionStorage.removeItem(TOKEN_KEY);
+  } catch { /* Private browser storage can be unavailable. */ }
+}
+
 function App() {
   const [language, setLanguage] = useState<Language>(savedLanguage);
   const [session, setSession] = useState<{
@@ -40,7 +54,9 @@ function App() {
     status: CoreStatus;
   }>();
   const [loginError, setLoginError] = useState("");
+  const [restoring, setRestoring] = useState(() => !!savedToken());
   const logout = useCallback((reason = "") => {
+    storeToken("");
     setSession(undefined);
     setLoginError(reason);
   }, []);
@@ -50,14 +66,31 @@ function App() {
     setLanguage(next);
     setLoginError("");
   }, []);
+  const login = useCallback((value: { token: string; status: CoreStatus }) => {
+    storeToken(value.token);
+    setSession(value);
+  }, []);
+  useEffect(() => {
+    const token = savedToken();
+    if (!token) return;
+    let active = true;
+    command<CoreStatus>(token, "status")
+      .then((status) => active && setSession({ token, status }))
+      .catch((error) => {
+        if (error instanceof ApiError && error.status === 401) storeToken("");
+      })
+      .finally(() => active && setRestoring(false));
+    return () => { active = false; };
+  }, []);
   useEffect(() => {
     document.documentElement.lang = language === "en" ? "en" : language === "zhtw" ? "zh-TW" : "zh-CN";
     document.title = `Mihomo · ${t(language, "serviceManagement")}`;
   }, [language]);
+  if (restoring) return null;
   return session ? (
     <Manager token={session.token} initial={session.status} logout={logout} language={language} changeLanguage={changeLanguage} />
   ) : (
-    <Login error={loginError} login={setSession} language={language} changeLanguage={changeLanguage} />
+    <Login error={loginError} login={login} language={language} changeLanguage={changeLanguage} />
   );
 }
 

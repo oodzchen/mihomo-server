@@ -55,6 +55,8 @@ Do not resume backup work based on an older chapter's next-task paragraph.
 
 **Latest completed task:** GitHub Actions release pipeline (`ci.yml` full tests on every push, `release.yml` tarball bundle on `v*` tags), pinned core file `deploy/core-pin.json`, and remote one-shot installer `scripts/install_remote.sh` with locally verified end-to-end install (see "Increment: CI release pipeline and remote installer").
 **Previous completed task:** Code-quality refactor step 4 — real module directories for backup, core release/upgrade and Geo (see below).
+**Previous completed task:** Persistent login. The web UI caches the management token in sessionStorage and re-validates it on load, so refreshing keeps the session; logout/401 clears it.
+
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
 **Next implementation task:** Maintain deployed Linux service, support user feature queries, and expand deferred capabilities upon request.
 
@@ -634,7 +636,7 @@ The responsive UI provides token login, core state/start/stop/restart, local YAM
 file/content import and profile selection, runtime YAML editing, proxy-group node
 selection/unfix, a bounded core-output viewer, and traffic/memory/connection-count
 metrics. HTTP commands and first-frame-authenticated WebSocket adapters use only
-the management listener. Tokens stay in React memory; refresh requires login.
+the management listener. The token is cached in browser sessionStorage (`mihomo.token`, per-tab, never localStorage) and re-validated via `status` on page load, so refresh keeps the session; logout or a 401 clears it.
 Event reconnection receives current snapshots, feed views clear stale samples,
 and view disposal/logout closes owned sockets and cancels pending HTTP requests.
 Core startup/validation failures remain visible and repairable in the browser.
