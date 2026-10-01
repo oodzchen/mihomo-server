@@ -592,11 +592,16 @@ dd {
   display: inline-block;
 }
 .dropdown-trigger {
-  padding: 5px 9px;
-  font-size: 12px;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 0;
+  padding: 0;
   line-height: 1;
   border-radius: 4px;
+  color: #52525b;
 }
 .dropdown-menu {
   position: absolute;
