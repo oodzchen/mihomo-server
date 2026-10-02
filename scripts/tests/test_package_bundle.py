@@ -120,6 +120,9 @@ class PackageBoundaries(unittest.TestCase):
         checksums = (output / "checksums.sha256").read_text()
         self.assertIn("  LICENSES.txt\n", checksums)
         self.assertIn("  LICENSE\n", checksums)
+        helper = output / "mihomo-server-user"
+        self.assertTrue(helper.is_file() and helper.stat().st_mode & 0o111)
+        self.assertIn("  mihomo-server-user\n", checksums)
         for line in checksums.strip().splitlines():
             digest, rel_path = line.split("  ", 1)
             self.assertEqual(packager.sha256(output / rel_path), digest)

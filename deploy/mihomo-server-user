@@ -1,0 +1,172 @@
+#!/bin/sh
+# Per-user control of a system-wide (multi-user) mihomo-server installation.
+#
+# Usage: mihomo-server-user COMMAND [OPTIONS]
+#
+# Commands:
+#   init [--listen ADDR] [--public-origin URL] [--extra-args "ARGS"]
+#               Enable and start your own instance, then print its details.
+#               Options are saved in ~/.config/mihomo-server/env.
+#   info        Show your slot, management URL, proxy port and TUN state
+#   token       Print your management token
+#   status      systemctl --user status mihomo-server
+#   logs        Follow your service log
+#   restart     Restart your instance
+#   disable     Stop and disable your instance (data kept)
+#   purge --yes Disable, then delete your data, settings and slot claim
+#
+# The administrator installs the bundle once with `install.sh --system`.
+# Each slot N owns ports 20000+10N (management), +1 (mixed proxy), +2 (DNS).
+set -eu
+
+UNIT=mihomo-server
+SLOT_DIR="${MIHOMO_SERVER_SLOT_DIR:-/var/lib/mihomo-server/slots}"
+SYSTEM_ROOT="${MIHOMO_SERVER_SYSTEM_ROOT:-/opt/mihomo-server}"
+DATA_DIR="$HOME/.local/share/mihomo-server"
+ENV_FILE="$HOME/.config/mihomo-server/env"
+PORT_BASE=20000
+SLOTS=64
+
+die() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+usage() {
+    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+    exit "${1:-0}"
+}
+
+[ "$(id -u)" -ne 0 ] || die "run this as the user who owns the instance, not root"
+
+slot() {
+    n=0
+    while [ "$n" -lt "$SLOTS" ]; do
+        if [ -f "$SLOT_DIR/$n" ] && [ "$(stat -c %u "$SLOT_DIR/$n")" = "$(id -u)" ]; then
+            echo "$n"
+            return 0
+        fi
+        n=$((n + 1))
+    done
+    return 1
+}
+
+# The service logs its slot and TUN state once per start.
+service_line() {
+    journalctl --user -u "$UNIT" -o cat -n 200 2>/dev/null | grep '^multi-user slot ' | tail -n 1
+}
+
+listen_addr() {
+    # An explicit --listen in the env file wins over the slot default.
+    if [ -f "$ENV_FILE" ]; then
+        addr="$(sed -n 's/.*--listen[ =]\([^ "]*\).*/\1/p' "$ENV_FILE" | head -n 1)"
+        [ -z "$addr" ] || { echo "$addr"; return; }
+    fi
+    echo "127.0.0.1:$((PORT_BASE + 10 * $1))"
+}
+
+info() {
+    state="$(systemctl --user is-active "$UNIT" 2>/dev/null || true)"
+    if ! n="$(slot)"; then
+        echo "service:   $state (no slot claimed yet; run: mihomo-server-user init)"
+        return 0
+    fi
+    line="$(service_line)"
+    case "$line" in
+        *"(available)"*) tun="available" ;;
+        *"not in the TUN group"*)
+            tun="unavailable (not in group mihomo-tun)"
+            if id -nG | tr ' ' '\n' | grep -qx mihomo-tun; then
+                tun="$tun; you were added recently: ask the administrator to run
+             'systemctl restart user@$(id -u).service', or log out of every session"
+            fi
+            ;;
+        *)
+            # No service log line (not started, or no user journal): check the file.
+            if [ -r "$SYSTEM_ROOT/current/resources/core/verge-mihomo-tun" ]; then
+                tun="available to your login groups"
+            else
+                tun="unavailable (not in group mihomo-tun)"
+            fi
+            ;;
+    esac
+    cat <<EOF
+service:   $state
+slot:      $n
+manage:    http://$(listen_addr "$n")
+token:     $DATA_DIR/management-token
+proxy:     HTTP/SOCKS 127.0.0.1:$((PORT_BASE + 10 * n + 1)) (unless changed in Settings)
+tun:       $tun   (device ms$(id -u))
+data:      $DATA_DIR
+EOF
+}
+
+init() {
+    args=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --listen | --public-origin)
+                [ $# -ge 2 ] || die "$1 requires a value"
+                args="$args $1 $2"
+                shift 2
+                ;;
+            --extra-args)
+                [ $# -ge 2 ] || die "$1 requires a value"
+                args="$args $2"
+                shift 2
+                ;;
+            *) die "unknown init option: $1" ;;
+        esac
+    done
+    systemctl --user cat "$UNIT" >/dev/null 2>&1 \
+        || die "no system-wide $UNIT unit found; ask the administrator to run install.sh --system"
+    if [ -n "$args" ]; then
+        mkdir -p "$(dirname "$ENV_FILE")"
+        printf 'MIHOMO_SERVER_ARGS="%s"\n' "${args# }" >"$ENV_FILE"
+    fi
+    systemctl --user daemon-reload
+    systemctl --user enable "$UNIT" >/dev/null 2>&1
+    systemctl --user restart "$UNIT"
+    tries=0
+    until [ -s "$DATA_DIR/management-token" ] && slot >/dev/null; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 60 ] || ! systemctl --user is-active --quiet "$UNIT"; then
+            journalctl --user -u "$UNIT" -o cat -n 20 >&2 || true
+            die "$UNIT did not start; see the log above"
+        fi
+        sleep 0.5
+    done
+    info
+    if command -v loginctl >/dev/null 2>&1 \
+        && [ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)" = "no" ]; then
+        echo "note:      to keep running after logout: loginctl enable-linger"
+    fi
+}
+
+purge() {
+    [ "${1:-}" = "--yes" ] || die "purge deletes $DATA_DIR; rerun as: mihomo-server-user purge --yes"
+    systemctl --user disable --now "$UNIT" >/dev/null 2>&1 || true
+    if n="$(slot)"; then
+        rm -f "$SLOT_DIR/$n"
+    fi
+    rm -rf "$DATA_DIR"
+    rm -f "$ENV_FILE"
+    rmdir "$(dirname "$ENV_FILE")" 2>/dev/null || true
+    echo "Removed your instance data and slot claim"
+}
+
+[ $# -gt 0 ] || usage 1
+command="$1"
+shift
+case "$command" in
+    init) init "$@" ;;
+    info) info ;;
+    token) cat "$DATA_DIR/management-token" ;;
+    status) exec systemctl --user status "$UNIT" ;;
+    logs) exec journalctl --user -u "$UNIT" -f ;;
+    restart) systemctl --user restart "$UNIT" && info ;;
+    disable) systemctl --user disable --now "$UNIT" && echo "Disabled; data kept in $DATA_DIR" ;;
+    purge) purge "$@" ;;
+    -h | --help | help) usage 0 ;;
+    *) die "unknown command: $command (see --help)" ;;
+esac

@@ -138,6 +138,8 @@ def package(args):
         shutil.copyfile(ROOT / "deploy" / "launch.sh", stage / "launch")
         (stage / "launch").chmod(0o755)
         shutil.copyfile(ROOT / "deploy" / "mihomo-server.service", stage / "mihomo-server.service")
+        shutil.copyfile(ROOT / "deploy" / "mihomo-server-user", stage / "mihomo-server-user")
+        (stage / "mihomo-server-user").chmod(0o755)
         shutil.copyfile(ROOT / "LICENSE", stage / "LICENSE")
         shutil.copyfile(ROOT / "LICENSES.txt", stage / "LICENSES.txt")
         (stage / "docs").mkdir()

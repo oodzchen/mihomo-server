@@ -22,9 +22,12 @@ pub const PORTS_PER_SLOT: u16 = 10;
 const RULE_INDEX_BASE: u32 = 10000;
 const RULES_PER_SLOT: u32 = 32;
 const TABLE_INDEX_BASE: u32 = 10000;
-// 198.18.0.0/15 split into /21 blocks: 2048 fake IPs per user.
-const FAKE_IP_BLOCK: u32 = 2048;
-const FAKE_IP_PREFIX: u8 = 21;
+// 198.19.0.0/16 split into /22 blocks: 1024 fake IPs per user. 198.18.0.0/16
+// is avoided because it is the default of every other Clash/Mihomo, and the
+// route to a TUN's own /30 is not limited to its owner's UID.
+const FAKE_IP_BASE: Ipv4Addr = Ipv4Addr::new(198, 19, 0, 0);
+const FAKE_IP_BLOCK: u32 = 1024;
+const FAKE_IP_PREFIX: u8 = 22;
 
 /// Listener fields a user may still choose explicitly on the settings page.
 const LISTENERS: [&str; 5] = ["mixed-port", "port", "socks-port", "redir-port", "tproxy-port"];
@@ -76,7 +79,7 @@ impl Isolation {
 
     /// Mihomo derives the TUN IPv4 address from this range, so it must be unique.
     pub fn fake_ip_range(&self) -> String {
-        let first = u32::from(Ipv4Addr::new(198, 18, 0, 0)) + u32::from(self.slot) * FAKE_IP_BLOCK + 1;
+        let first = u32::from(FAKE_IP_BASE) + u32::from(self.slot) * FAKE_IP_BLOCK + 1;
         format!("{}/{FAKE_IP_PREFIX}", Ipv4Addr::from(first))
     }
 

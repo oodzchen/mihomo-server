@@ -53,13 +53,14 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task:** Multi-user system installation, step 1 of 4 — service-side per-user isolation (`--multi-user`), shared administrator-managed core with TUN-group detection, slot registry, and Web hints (see "Increment: multi-user system installation").
+**Latest completed task:** Multi-user system installation, step 2 of 4 — `install_remote.sh --system` (shared versioned bundle, `mihomo-tun` group with a file-capability core, slot registry, global user unit, upgrade/uninstall) and the per-user `mihomo-server-user` helper, verified in a privileged systemd container with two users and real-node TUN traffic (see "Increment: multi-user system installation").
+**Previous completed task:** Multi-user step 1 — service-side per-user isolation (`--multi-user`).
 **Previous completed task:** GitHub Actions release pipeline (`ci.yml` full tests on every push, `release.yml` tarball bundle on `v*` tags), pinned core file `deploy/core-pin.json`, and remote one-shot installer `scripts/install_remote.sh` with locally verified end-to-end install (see "Increment: CI release pipeline and remote installer").
 **Previous completed task:** Code-quality refactor step 4 — real module directories for backup, core release/upgrade and Geo (see below).
 **Previous completed task:** Persistent login. The web UI caches the management token in sessionStorage and re-validates it on load, so refreshing keeps the session; logout/401 clears it.  The e2e restart test now asserts refresh keeps the session and logout+refresh returns to the login page.
 
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
-**Next implementation task:** Multi-user step 2 — `install_remote.sh --system` (bundle under `/opt/mihomo-server/releases/<tag>` + `current` link, `mihomo-tun` group, `setcap` on the TUN core variant, slot registry, global user unit in `/etc/systemd/user`) and the per-user `mihomo-server-user` helper.
+**Next implementation task:** Multi-user step 3 — scripted container end-to-end test (`scripts/tests/multiuser/`): two TUN users at once with real nodes, per-UID traffic separation, upgrade restart, rule cleanup on stop/uninstall.
 
 ## Increment: multi-user system installation
 
@@ -71,7 +72,7 @@ administrator owns the bundle and the core.
 Plan and status:
 
 1. **Service-side isolation — done** `[Implemented; Linux verified with real core and ./data nodes]`.
-2. Installer `--system` mode and `mihomo-server-user` helper — pending.
+2. **Installer `--system` mode and `mihomo-server-user` helper — done** `[Implemented; verified in a privileged systemd container]`.
 3. Container (privileged systemd) end-to-end test: two users, concurrent TUN,
    real nodes, rule cleanup — pending. A QEMU/KVM VM acceptance run follows.
 4. README/DEPLOYMENT documentation — pending.
@@ -91,7 +92,7 @@ Plan and status:
     ├── mixed-port = slot port unless set on the settings page;
     │   port/socks-port/redir-port/tproxy-port removed unless set there
     ├── dns.listen -> 127.0.0.1:<slot port + 2> unless set on the settings page
-    ├── dns.fake-ip-range = unique /21 in 198.18.0.0/15 (Mihomo derives the TUN
+    ├── dns.fake-ip-range = unique /22 in 198.19.0.0/16 (Mihomo derives the TUN
     │   IPv4 address from it); fake-ip-range6 = 2001:2:0:<slot>::1/64
     └── tun (when present): device ms<uid>, include-uid [uid], no include-uid-range,
         iproute2-table-index 10000+slot, iproute2-rule-index 10000+32*slot,
@@ -141,6 +142,69 @@ Verification (step 1):
   (HTTP `generate_204` → 204; SOCKS5 exit country HK). SIGTERM reaped the core.
 - Live TUN with file capabilities and two concurrent users is deferred to the
   container test (step 3), which needs root inside an isolated network namespace.
+
+### Step 2: system installer and per-user helper
+
+```text
+install.sh --system [--bundle DIR | --version TAG] [--tun-user USER]...   (root)
+├── /opt/mihomo-server/releases/<tag>/   root-owned, go-w; current + previous kept
+│   └── resources/core/verge-mihomo-tun  root:mihomo-tun 0750,
+│                                        cap_net_admin,cap_net_bind_service,cap_net_raw+ep
+├── /opt/mihomo-server/current -> releases/<tag>   (atomic ln + mv -T switch)
+├── /var/lib/mihomo-server/slots          root 1777 slot registry
+├── /etc/systemd/user/mihomo-server.service
+│     Environment=MIHOMO_SERVER_DATA_DIR=%h/.local/share/mihomo-server
+│     EnvironmentFile=-%h/.config/mihomo-server/env
+│     ExecStart=/opt/mihomo-server/current/launch --multi-user --slot-registry … $MIHOMO_SERVER_ARGS
+├── /usr/local/bin/mihomo-server-user -> current/mihomo-server-user
+├── group mihomo-tun (created; --tun-user adds members)
+└── upgrade: daemon-reload + try-restart in every running user manager
+    (loginctl list-users, systemctl --user -M user@); stopped instances stay stopped
+install.sh --system --uninstall [--purge-data]: stop instances, remove unit, helper
+    link and /opt bundle; --purge-data also removes the slot registry. Users' homes
+    and the group are never touched.
+
+mihomo-server-user init [--listen ADDR] [--public-origin URL] [--extra-args …]   (user)
+    writes ~/.config/mihomo-server/env, enables/starts the user unit, waits for the
+    token and slot claim, prints slot, management URL, proxy port and TUN state
+    (from the service's "multi-user slot …" journal line); also info, token,
+    status, logs, restart, disable, purge --yes (data, env and own slot claim).
+```
+
+The per-user installer path is unchanged; its existing removals are now guarded
+with `${VAR:?}`. `package_bundle.py` ships `mihomo-server-user` (0755) and CI
+shellchecks it.
+
+Finding during verification: the first slot layout used 198.18.0.0/15. In the
+container, the resolver address inherited from the host (198.18.0.2, the host's
+own Clash TUN DNS) fell inside slot 0's TUN /30, and sing-tun's "to the TUN /30"
+rule is not UID-scoped, so other users' DNS queries entered alice's TUN. Slots
+now use 198.19.0.0/16 (/22 each, 1022 fake IPs), away from the 198.18.0.0/16
+default of every other Clash/Mihomo. Other host software that routes
+198.19.0.0/16 would still conflict.
+
+Verification (step 2), privileged Fedora 44 systemd container
+(`scripts/tests/multiuser/Containerfile`, own network namespace):
+
+- `install.sh --system --bundle … --tun-user alice`: layout, capabilities
+  (`getcap` shows `cap_net_bind_service,cap_net_admin,cap_net_raw=ep`), sticky
+  registry, rendered unit and group membership as above.
+- alice and bob (lingering) `mihomo-server-user init`: slots 0/1, management
+  20000/20010, mixed 20001/20011; alice runs `verge-mihomo-tun` with TUN
+  available, bob the plain core with TUN unavailable.
+- alice enables TUN and selects the real `./data` subscription: device
+  `ms1000` 198.19.0.1/30, rules at 10000–10010 with `uidrange` skips for every
+  other UID, table 10000. alice's plain `curl` goes through her TUN and real
+  nodes (204; exit HK); bob's and root's direct traffic is unaffected (exit US,
+  the container's own route); bob's own mixed port works (204).
+- Upgrade by reinstalling a new bundle: `current` switched atomically, both
+  running instances restarted onto the new release (new PIDs, exe in the new
+  release), previous release kept.
+- shellcheck clean for both scripts; Python packager tests pass. The existing
+  `test_systemd_lifecycle` per-user test fails on this workstation only because
+  the user's deployed instance already holds 127.0.0.1:7890 (journal:
+  "mixed-port listener mismatch: configured 7890, core reports 0"), which the
+  test's real `./data` settings also use; unrelated to this change.
 
 ## Code-quality refactor (behavior-preserving)
 

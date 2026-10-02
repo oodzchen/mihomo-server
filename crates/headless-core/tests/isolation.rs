@@ -47,12 +47,12 @@ fn slot_values_are_unique_and_within_host_limits() -> Result<()> {
         let range = isolation.fake_ip_range();
         let (address, prefix) = range.split_once('/').unwrap();
         let octets = address.parse::<std::net::Ipv4Addr>()?.octets();
-        assert!(octets[0] == 198 && (octets[1] == 18 || octets[1] == 19), "{address}");
-        assert_eq!(prefix, "21");
+        assert!(octets[0] == 198 && octets[1] == 19, "{address}");
+        assert_eq!(prefix, "22");
     }
-    assert_eq!(Isolation::new(1000, 0)?.fake_ip_range(), "198.18.0.1/21");
-    assert_eq!(Isolation::new(1000, 1)?.fake_ip_range(), "198.18.8.1/21");
-    assert_eq!(Isolation::new(1000, SLOTS - 1)?.fake_ip_range(), "198.19.248.1/21");
+    assert_eq!(Isolation::new(1000, 0)?.fake_ip_range(), "198.19.0.1/22");
+    assert_eq!(Isolation::new(1000, 1)?.fake_ip_range(), "198.19.4.1/22");
+    assert_eq!(Isolation::new(1000, SLOTS - 1)?.fake_ip_range(), "198.19.252.1/22");
     assert!(Isolation::new(1000, SLOTS).is_err());
     Ok(())
 }
@@ -67,7 +67,7 @@ fn subscription_listeners_and_tun_move_into_the_user_slot() -> Result<()> {
     assert_eq!(config["custom"].as_str(), Some("retained"));
     assert_eq!(config["dns"]["enable"].as_bool(), Some(true));
     assert_eq!(config["dns"]["listen"].as_str(), Some("127.0.0.1:20032"));
-    assert_eq!(config["dns"]["fake-ip-range"].as_str(), Some("198.18.24.1/21"));
+    assert_eq!(config["dns"]["fake-ip-range"].as_str(), Some("198.19.12.1/22"));
     assert_eq!(config["dns"]["fake-ip-range6"].as_str(), Some("2001:2:0:3::1/64"));
     let tun = &config["tun"];
     assert_eq!(tun["enable"].as_bool(), Some(true));
@@ -137,7 +137,7 @@ fn configs_without_tun_or_dns_only_get_a_private_mixed_port() -> Result<()> {
 #[test]
 fn tun_without_dns_section_still_gets_a_unique_interface_address() -> Result<()> {
     let (config, _) = Isolation::new(1000, 5)?.apply(mapping("tun: {enable: true}")?, &RuntimeSettings::default());
-    assert_eq!(config["dns"]["fake-ip-range"].as_str(), Some("198.18.40.1/21"));
+    assert_eq!(config["dns"]["fake-ip-range"].as_str(), Some("198.19.20.1/22"));
     assert!(config["dns"].get("enable").is_none());
     Ok(())
 }

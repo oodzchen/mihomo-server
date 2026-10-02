@@ -30,6 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: shellcheck -s bash scripts/install_remote.sh
+      - run: shellcheck deploy/mihomo-server-user
 
   lint:
     name: Rust fmt and clippy

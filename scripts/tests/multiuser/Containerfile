@@ -1,0 +1,9 @@
+# Privileged systemd host for multi-user install tests (scripts/tests/multiuser/run.sh).
+# Its own network namespace keeps TUN devices and policy rules away from the host.
+FROM fedora:44
+RUN dnf -y install systemd libcap iproute procps-ng curl shadow-utils util-linux \
+        python3 findutils && dnf clean all \
+    && systemctl mask systemd-resolved.service getty@tty1.service \
+    && useradd -m alice && useradd -m bob && useradd -m carol
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

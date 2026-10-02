@@ -78,6 +78,7 @@ bundle/
 │   ├── minimal.yaml               # bootstrap only; committed config wins
 │   └── web/                       # built React assets
 ├── mihomo-server.service           # optional user systemd unit template
+├── mihomo-server-user              # per-user control of a --system installation
 ├── checksums.sha256
 ├── LICENSE
 ├── LICENSES.txt                   # third-party license and dependency inventory
@@ -215,31 +216,53 @@ private. Actual user systemd service lifecycle—including boot/start, authentic
 process supervision, child Mihomo reaping (`ESRCH`), journalctl logging, configuration
 restoration, and real proxy traffic/node selection—is fully implemented and Linux-verified.
 
-## Multi-user mode (service flags)
+## Multi-user system installation
 
-One read-only bundle can serve several local users, each running their own
-service with private data. The installer integration is in progress; the
-service side is available now:
+Install once as root; every local user then enables their own instance with
+private data, ports and TUN routing:
 
 ```sh
-launch --multi-user [--slot N | --slot-registry /var/lib/mihomo-server/slots]
+# Administrator (root): shared bundle, TUN group, slot registry, global user unit
+bash install.sh --system [--bundle DIR | --version TAG] [--tun-user alice ...]
+
+# Each user
+mihomo-server-user init          # enable + start, print URL/token/ports/TUN state
+mihomo-server-user info | token | status | logs | restart | disable
+mihomo-server-user purge --yes   # delete own data and release the slot
+loginctl enable-linger           # optional: keep running after logout
 ```
 
-- `--multi-user` requires `--resource-dir` (added by `launch`) and runs the
-  bundle core in place: `resources/core/verge-mihomo-tun` when the user can read
-  it (intended as `root:mihomo-tun 0750` with
-  `cap_net_admin,cap_net_bind_service,cap_net_raw+ep`), otherwise
-  `resources/core/verge-mihomo`. Both must match the manifest SHA-256 and must
-  not be group/other writable. Web core upgrades are disabled; the administrator
-  upgrades the bundle.
-- Each user owns a slot (0–63), claimed once in a root-owned sticky registry
-  directory (`chmod 1777`) or fixed with `--slot`. Slot `s` uses management port
-  `20000+10s` (the default `--listen`), mixed port `+1` and DNS listener `+2`.
+Layout: `/opt/mihomo-server/releases/<tag>` (root-owned; the current and the
+previous release are kept), `/opt/mihomo-server/current` (atomic link),
+`/etc/systemd/user/mihomo-server.service`, `/usr/local/bin/mihomo-server-user`,
+`/var/lib/mihomo-server/slots` (root, mode 1777). Users' data stays in
+`~/.local/share/mihomo-server`; per-user launcher options (for example
+`--listen 0.0.0.0:20000 --public-origin URL`) are kept in
+`~/.config/mihomo-server/env` by `mihomo-server-user init`.
+
+- The bundle core runs in place: `resources/core/verge-mihomo-tun`
+  (`root:mihomo-tun 0750`, `cap_net_admin,cap_net_bind_service,cap_net_raw+ep`,
+  set by the installer with `setcap`) for members of `mihomo-tun`, otherwise
+  `resources/core/verge-mihomo`. Both must match the manifest SHA-256. Web core
+  upgrades are disabled; upgrade by re-running the installer, which restarts
+  running instances onto the new release.
+- Each user owns a slot (0–63) claimed once in the registry. Slot `s` uses
+  management port `20000+10s`, mixed port `+1` and DNS listener `+2`.
 - Every committed runtime is rewritten into the slot: listeners from
-  subscriptions are replaced (settings-page values are kept), and TUN gets a
-  per-user device `ms<uid>`, `include-uid: [uid]`, unique policy-routing
-  table/rule indexes and a unique fake-IP range. `auto-redirect` is disabled.
-- Without the capable core, enabling TUN is rejected before reload.
+  subscriptions are replaced (settings-page values are kept), and TUN gets the
+  device `ms<uid>`, `include-uid: [uid]`, unique policy-routing table/rule
+  indexes and a unique fake-IP /22 in `198.19.0.0/16`. `auto-redirect` is
+  disabled. Without the capable core, enabling TUN is rejected before reload.
+- Group membership applies to new logins. For a lingering user whose manager
+  is already running: `systemctl restart user@<uid>.service`.
+- Membership of `mihomo-tun` is the security boundary: a member can run the
+  capable core directly with arbitrary routes. Grant it only to trusted users.
+- `install.sh --system --uninstall [--purge-data]` removes the unit, helper and
+  bundle (and with `--purge-data` the slot registry); users' homes and the
+  group are kept.
+
+The service flags behind this are `--multi-user` (requires `--resource-dir`)
+with `--slot-registry DIR` or a fixed `--slot N`.
 
 ## Install from a GitHub Release
 
