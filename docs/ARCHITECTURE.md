@@ -53,12 +53,94 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task:** GitHub Actions release pipeline (`ci.yml` full tests on every push, `release.yml` tarball bundle on `v*` tags), pinned core file `deploy/core-pin.json`, and remote one-shot installer `scripts/install_remote.sh` with locally verified end-to-end install (see "Increment: CI release pipeline and remote installer").
+**Latest completed task:** Multi-user system installation, step 1 of 4 — service-side per-user isolation (`--multi-user`), shared administrator-managed core with TUN-group detection, slot registry, and Web hints (see "Increment: multi-user system installation").
+**Previous completed task:** GitHub Actions release pipeline (`ci.yml` full tests on every push, `release.yml` tarball bundle on `v*` tags), pinned core file `deploy/core-pin.json`, and remote one-shot installer `scripts/install_remote.sh` with locally verified end-to-end install (see "Increment: CI release pipeline and remote installer").
 **Previous completed task:** Code-quality refactor step 4 — real module directories for backup, core release/upgrade and Geo (see below).
 **Previous completed task:** Persistent login. The web UI caches the management token in sessionStorage and re-validates it on load, so refreshing keeps the session; logout/401 clears it.  The e2e restart test now asserts refresh keeps the session and logout+refresh returns to the login page.
 
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
-**Next implementation task:** Maintain deployed Linux service, support user feature queries, and expand deferred capabilities upon request.
+**Next implementation task:** Multi-user step 2 — `install_remote.sh --system` (bundle under `/opt/mihomo-server/releases/<tag>` + `current` link, `mihomo-tun` group, `setcap` on the TUN core variant, slot registry, global user unit in `/etc/systemd/user`) and the per-user `mihomo-server-user` helper.
+
+## Increment: multi-user system installation
+
+Goal (user request): install once system-wide, let every local user enable their
+own instance (`systemctl --user`), keep each user's configuration independent, and
+support TUN for several users at the same time. Users enable their own service; the
+administrator owns the bundle and the core.
+
+Plan and status:
+
+1. **Service-side isolation — done** `[Implemented; Linux verified with real core and ./data nodes]`.
+2. Installer `--system` mode and `mihomo-server-user` helper — pending.
+3. Container (privileged systemd) end-to-end test: two users, concurrent TUN,
+   real nodes, rule cleanup — pending. A QEMU/KVM VM acceptance run follows.
+4. README/DEPLOYMENT documentation — pending.
+
+### Step 1 design
+
+```text
+--multi-user (requires --resource-dir, conflicts --core-dir)
+├── Slot: --slot N, or a claim in --slot-registry (default /var/lib/mihomo-server/slots,
+│         root-owned sticky dir; a file named N owned by the user; stable across restarts)
+├── Shared core: resources/core/verge-mihomo-tun if readable (root:mihomo-tun 0750 +
+│         file caps), else resources/core/verge-mihomo; run in place, SHA-256 checked
+│         against the manifest, never copied into <data>/core
+├── Core upgrades/installation commands: disabled ("managed by the system administrator")
+├── Default --listen: 127.0.0.1:<management port of the slot>
+└── Isolation overlay (headless-core enhance::isolation), applied after finalize:
+    ├── mixed-port = slot port unless set on the settings page;
+    │   port/socks-port/redir-port/tproxy-port removed unless set there
+    ├── dns.listen -> 127.0.0.1:<slot port + 2> unless set on the settings page
+    ├── dns.fake-ip-range = unique /21 in 198.18.0.0/15 (Mihomo derives the TUN
+    │   IPv4 address from it); fake-ip-range6 = 2001:2:0:<slot>::1/64
+    └── tun (when present): device ms<uid>, include-uid [uid], no include-uid-range,
+        iproute2-table-index 10000+slot, iproute2-rule-index 10000+32*slot,
+        inet6-address fdfe:dcba:9876:<slot>::1/126, auto-redirect forced off
+        (its nftables tables are host-wide)
+```
+
+Slot `s` (0–63) owns ports `20000+10s` (management), `+1` (mixed), `+2` (DNS).
+The overlay runs wherever a runtime is committed: `stage` (all profile, raw,
+settings and bootstrap applications), inactive-candidate validation and backup
+regeneration. At start, a committed runtime that does not conform (from a former
+single-user install or another slot) is re-staged and committed with the core
+start, rolling back on failure. Archived backup restore keeps exact bytes, so in
+multi-user mode it is rejected when those bytes conflict with the slot
+("choose regeneration"). Overridden fields are logged as
+"<field> is managed by the multi-user slot; override discarded".
+
+TUN gating: the service reads the shared core's `security.capability` xattr.
+Without effective `CAP_NET_ADMIN`, enabling TUN fails before any reload with
+"TUN is not available to this user … TUN group", and the running core stays
+unchanged. The security boundary is the `mihomo-tun` group: anyone who can run
+the capable core could run it directly with any routes, so `include-uid` in the
+overlay prevents accidental cross-user capture but is not an access control.
+
+Management: `multi_user` command returns `{uid, slot, mixed_port, dns_listen,
+tun_device, tun_capable}` or `null`. The overview shows a multi-user panel, and
+the core page shows "managed by the system administrator".
+
+Verification (step 1):
+
+- `cargo test --workspace --locked -- --test-threads=1`: 433 passed, 0 failed,
+  92 ignored (baseline 424/91 plus 5 isolation, 3 slot-registry, 1 shared-core
+  tests; 1 new ignored live test).
+- Live-core suite (`--ignored --no-fail-fast`, real `./data` copy): 91 passed,
+  1 failed — only the known `linked_sequences_select_refresh_validate_rollback_restore_and_reject_stale_downloads`
+  failure. Web e2e (Playwright): 49 passed, 5 skipped (baseline).
+- New live test `service/tests/multi_user.rs` (real core): single-user runtime
+  re-staged into the slot on first multi-user start; fixed subscription ports,
+  DNS listen, fake-IP range and TUN fields moved into the slot; TUN enable
+  rejected without the capable core with revision/phase unchanged; explicit
+  settings-page port kept; no `<data>/core` copy; core installation command
+  reports administrator management.
+- Manual smoke with the real `./data` subscription (`port: 7890`, `socks-port:
+  7891`, while another Mihomo already listened on 127.0.0.1:7890): service
+  claimed slot 0 from a sticky registry, listened on 20000/20001/20002, removed
+  the conflicting listeners, and real-node traffic worked through the slot port
+  (HTTP `generate_204` → 204; SOCKS5 exit country HK). SIGTERM reaped the core.
+- Live TUN with file capabilities and two concurrent users is deferred to the
+  container test (step 3), which needs root inside an isolated network namespace.
 
 ## Code-quality refactor (behavior-preserving)
 

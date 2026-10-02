@@ -191,6 +191,11 @@ pub struct CoreOptions {
     pub policy: LifecyclePolicy,
     pub resources: Option<crate::resources::Resources>,
     pub core_dir: Option<PathBuf>,
+    /// Shared multi-user installation: run the administrator's core in place
+    /// and rewrite ports/TUN routing into this user's slot.
+    pub isolation: Option<headless_core::enhance::isolation::Isolation>,
+    /// Whether the shared core may create TUN devices; known only in multi-user mode.
+    pub(crate) tun_capable: Option<bool>,
 }
 
 impl CoreOptions {
@@ -203,7 +208,14 @@ impl CoreOptions {
             policy: LifecyclePolicy::default(),
             resources: None,
             core_dir: None,
+            isolation: None,
+            tun_capable: None,
         }
+    }
+
+    /// The core lives in the data directory and can be upgraded from the Web.
+    pub(crate) fn managed_core(&self) -> bool {
+        self.resources.is_some() && self.isolation.is_none()
     }
 
     fn prepare(&mut self) -> Result<(File, String)> {
@@ -244,11 +256,24 @@ impl CoreOptions {
         #[cfg(unix)]
         crate::geo::live::recover(&self.data_dir).context("live Geo rollback recovery failed")?;
         if let Some(resources) = &self.resources {
-            let core_directory = self.core_dir.clone().unwrap_or_else(|| self.data_dir.join("core"));
-            crate::core_upgrade::recover(&core_directory).context("managed core upgrade recovery failed")?;
-            self.binary = resources.initialize_core(&core_directory)?;
+            if self.isolation.is_some() {
+                ensure!(self.core_dir.is_none(), "multi-user mode uses the shared core");
+                #[cfg(target_os = "linux")]
+                {
+                    let core = resources.shared_core()?;
+                    self.binary = core.path;
+                    self.tun_capable = Some(core.tun_capable);
+                }
+                #[cfg(not(target_os = "linux"))]
+                bail!("multi-user mode requires Linux");
+            } else {
+                let core_directory = self.core_dir.clone().unwrap_or_else(|| self.data_dir.join("core"));
+                crate::core_upgrade::recover(&core_directory).context("managed core upgrade recovery failed")?;
+                self.binary = resources.initialize_core(&core_directory)?;
+            }
             resources.initialize_geo(&self.data_dir)?;
         } else {
+            ensure!(self.isolation.is_none(), "multi-user mode requires bundle resources");
             ensure!(self.core_dir.is_none(), "core directory requires bundle resources");
         }
         let run = self.data_dir.join("run");
@@ -288,8 +313,21 @@ impl CoreOptions {
     }
 }
 
+/// This user's share of a multi-user installation, for the Web and logs.
+#[derive(Debug, Clone, Serialize)]
+pub struct MultiUser {
+    pub uid: u32,
+    pub slot: u16,
+    pub mixed_port: u16,
+    pub dns_listen: String,
+    pub tun_device: String,
+    /// The shared core may create TUN devices (the user is in the TUN group).
+    pub tun_capable: bool,
+}
+
 #[derive(Clone)]
 pub struct CoreManager {
+    multi_user: Option<MultiUser>,
     backup_admission: Arc<tokio::sync::Semaphore>,
     core_release_admission: Arc<tokio::sync::Semaphore>,
     core_downloads: Option<Arc<crate::core_release::CoreDownloads>>,
@@ -305,6 +343,10 @@ pub struct CoreManager {
 }
 
 impl CoreManager {
+    pub fn multi_user(&self) -> Option<&MultiUser> {
+        self.multi_user.as_ref()
+    }
+
     /// Send one command to the actor and await its reply.
     async fn call<T>(
         &self,
@@ -321,7 +363,15 @@ impl CoreManager {
 
     pub fn spawn(mut options: CoreOptions) -> Result<Self> {
         let (lock, socket) = options.prepare()?;
-        let core_downloads = if options.resources.is_some() {
+        let multi_user = options.isolation.map(|isolation| MultiUser {
+            uid: isolation.uid(),
+            slot: isolation.slot(),
+            mixed_port: isolation.mixed_port(),
+            dns_listen: isolation.dns_listen(),
+            tun_device: isolation.tun_device(),
+            tun_capable: options.tun_capable == Some(true),
+        });
+        let core_downloads = if options.managed_core() {
             Some(Arc::new(crate::core_release::CoreDownloads::new(
                 options.binary.parent().context("managed core directory missing")?,
             )?))
@@ -397,6 +447,7 @@ impl CoreManager {
         });
         let (scheduler_finished, scheduler_completion) = watch::channel(false);
         let manager = Self {
+            multi_user,
             backup_admission: Arc::new(tokio::sync::Semaphore::new(1)),
             core_release_admission: Arc::new(tokio::sync::Semaphore::new(1)),
             core_downloads,

@@ -1,7 +1,8 @@
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{Context as _, Result};
-use clap::{Arg, ArgAction, Command, value_parser};
+use clap::{Arg, ArgAction, ArgMatches, Command, parser::ValueSource, value_parser};
+use headless_core::enhance::isolation::Isolation;
 use mihomo_server::{
     core_manager::{CoreManager, CoreOptions},
     management::{
@@ -23,6 +24,28 @@ fn main() -> Result<()> {
         .block_on(run())
 }
 
+#[cfg(target_os = "linux")]
+fn isolation(arguments: &ArgMatches) -> Result<Isolation> {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::geteuid() };
+    let slot = match arguments.get_one::<u16>("slot") {
+        Some(slot) => *slot,
+        None => {
+            let registry = arguments
+                .get_one::<PathBuf>("slot-registry")
+                .cloned()
+                .unwrap_or_else(|| mihomo_server::multi_user::DEFAULT_SLOT_REGISTRY.into());
+            mihomo_server::multi_user::claim_slot(&registry, uid)?
+        }
+    };
+    Isolation::new(uid, slot)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn isolation(_: &ArgMatches) -> Result<Isolation> {
+    anyhow::bail!("multi-user mode requires Linux")
+}
+
 async fn run() -> Result<()> {
     let arguments = Command::new("mihomo-server")
         .version(env!("CARGO_PKG_VERSION"))
@@ -40,6 +63,29 @@ async fn run() -> Result<()> {
                 .value_parser(value_parser!(PathBuf))
                 .requires("resource-dir")
                 .help("Persistent managed core directory; defaults to <data-dir>/core"),
+        )
+        .arg(
+            Arg::new("multi-user")
+                .long("multi-user")
+                .action(ArgAction::SetTrue)
+                .requires("resource-dir")
+                .conflicts_with("core-dir")
+                .help("Shared system installation: run the bundle core in place and isolate ports/TUN per user"),
+        )
+        .arg(
+            Arg::new("slot")
+                .long("slot")
+                .value_parser(value_parser!(u16))
+                .requires("multi-user")
+                .help("Fixed multi-user slot instead of a registry claim"),
+        )
+        .arg(
+            Arg::new("slot-registry")
+                .long("slot-registry")
+                .value_parser(value_parser!(PathBuf))
+                .requires("multi-user")
+                .conflicts_with("slot")
+                .help("Root-owned sticky directory of slot claims [default: /var/lib/mihomo-server/slots]"),
         )
         .arg(
             Arg::new("listen")
@@ -149,14 +195,38 @@ async fn run() -> Result<()> {
         .get_one::<PathBuf>("web-dir")
         .cloned()
         .or_else(|| resources.as_ref().map(Resources::web_dir));
+    let isolation = if arguments.get_flag("multi-user") {
+        Some(isolation(&arguments)?)
+    } else {
+        None
+    };
     let mut signals = ShutdownSignals::register()?;
     let mut options = CoreOptions::new(binary, data_dir.clone(), config);
     options.resources = resources;
     options.core_dir = arguments.get_one::<PathBuf>("core-dir").cloned();
+    options.isolation = isolation;
     let manager = CoreManager::spawn(options)?;
-    let listen = *arguments
+    let mut listen = *arguments
         .get_one::<SocketAddr>("listen")
         .context("missing listener argument")?;
+    if let Some(isolation) = isolation {
+        if arguments.value_source("listen") == Some(ValueSource::DefaultValue) {
+            listen.set_port(isolation.management_port());
+        }
+        let user = manager.multi_user().context("multi-user state missing")?;
+        eprintln!(
+            "multi-user slot {} (uid {}): mixed port {}, TUN device {} ({})",
+            user.slot,
+            user.uid,
+            user.mixed_port,
+            user.tun_device,
+            if user.tun_capable {
+                "available"
+            } else {
+                "unavailable: not in the TUN group"
+            }
+        );
+    }
     // Bind the management surface before beginning any core startup operation.
     let setup = async {
         let authentication = Authentication::load_or_create(

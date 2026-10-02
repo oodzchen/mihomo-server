@@ -168,7 +168,7 @@ impl Actor {
         let path = tokio::fs::canonicalize(path).await?;
         check_config(&path).await?;
         crate::validation::resource_paths(&self.options.data_dir, &path, &self.options.binary).await?;
-        crate::native_tun::preflight(&read_config(&path).await?)?;
+        self.tun_preflight(&read_config(&path).await?)?;
         tokio::select! {
             biased;
             _ = closing(&mut self.shutdown) => bail!("reload cancelled during shutdown"),
@@ -177,6 +177,22 @@ impl Actor {
         self.verify_proxy_ports(&path).await?;
         self.options.config = path;
         self.status.send_modify(|state| state.error = None);
+        Ok(())
+    }
+
+    /// Host TUN checks, plus the shared core's capability in multi-user mode.
+    pub(super) fn tun_preflight(&self, config: &Mapping) -> Result<()> {
+        crate::native_tun::preflight(config)?;
+        let enabled = config
+            .get("tun")
+            .and_then(|tun| tun.get("enable"))
+            .and_then(serde_yaml_ng::Value::as_bool)
+            == Some(true);
+        ensure!(
+            !enabled || self.options.tun_capable != Some(false),
+            "TUN is not available to this user: the shared core lacks CAP_NET_ADMIN for it; \
+             ask the administrator to add this user to the TUN group"
+        );
         Ok(())
     }
 
@@ -194,7 +210,7 @@ impl Actor {
     }
 
     pub(super) async fn start_core(&mut self) -> Result<()> {
-        if self.options.resources.is_some() && self.process.is_none() {
+        if self.options.managed_core() && self.process.is_none() {
             crate::core_upgrade::recover(self.options.binary.parent().context("managed core directory missing")?)?;
         }
         self.cancel_restoration();
@@ -202,13 +218,26 @@ impl Actor {
         let previous = self.store.state();
         let bootstrap = previous.current.is_none() && previous.pending.is_none();
         let source = self.options.config.clone();
+        // Multi-user mode: a runtime committed before isolation (or for another
+        // slot) is re-staged so the core never starts with conflicting listeners.
+        let restage = match &self.options.isolation {
+            // An unreadable runtime fails below with the ordinary start error.
+            Some(isolation) if previous.current.is_some() && previous.pending.is_none() => self
+                .store
+                .read_current()
+                .is_ok_and(|current| isolation.apply(current.clone(), &self.settings.runtime).0 != current),
+            _ => false,
+        };
         let result = async {
             if bootstrap {
                 let config = read_config(&source).await?;
                 self.options.config = self.stage(config.into(), None).await?.0;
+            } else if restage {
+                let config = self.store.read_current()?;
+                self.options.config = self.stage(config.into(), previous.active_profile.clone()).await?.0;
             }
             self.start_inner().await?;
-            if bootstrap {
+            if bootstrap || restage {
                 self.store.commit()?;
                 self.status.send_modify(|state| {
                     state.config_revision = self.store.state().current.map(|revision| revision.file);
@@ -219,7 +248,7 @@ impl Actor {
         .await;
         if let Err(error) = result {
             let mut error = error;
-            if bootstrap {
+            if bootstrap || restage {
                 self.options.config = source;
                 if let Err(rollback) = self.store.restore(previous) {
                     error = error.context(format!("initial configuration rollback failed: {rollback:#}"));
@@ -246,7 +275,7 @@ impl Actor {
         );
         check_config(&self.options.config).await?;
         crate::validation::resource_paths(&self.options.data_dir, &self.options.config, &self.options.binary).await?;
-        crate::native_tun::preflight(&read_config(&self.options.config).await?)?;
+        self.tun_preflight(&read_config(&self.options.config).await?)?;
         if self.store.state().pending.is_none() {
             crate::validation::validate(
                 &self.options.binary,

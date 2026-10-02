@@ -74,9 +74,11 @@ export function CoreUpgradePage({
           const message =
             error instanceof Error ? error.message : String(error);
           setError(
-            message.includes("bundle-managed resources")
-              ? t(language, "coreUpgradeNotSupported")
-              : t(language, "coreUpgradeReadFailed", { message }),
+            message.includes("system administrator")
+              ? t(language, "coreManagedBySystem")
+              : message.includes("bundle-managed resources")
+                ? t(language, "coreUpgradeNotSupported")
+                : t(language, "coreUpgradeReadFailed", { message }),
           );
         }
       });

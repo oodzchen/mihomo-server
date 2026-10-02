@@ -135,6 +135,7 @@ fn unix_now() -> u64 {
 // Holding a strong command sender in an idle background scheduler would prevent
 // the actor from stopping when its last external manager is dropped.
 pub(super) struct Access {
+    multi_user: Option<super::MultiUser>,
     backup_admission: Arc<tokio::sync::Semaphore>,
     core_release_admission: Arc<tokio::sync::Semaphore>,
     core_downloads: Option<Arc<crate::core_release::CoreDownloads>>,
@@ -151,6 +152,7 @@ pub(super) struct Access {
 impl Access {
     pub(super) fn new(manager: &CoreManager) -> Self {
         Self {
+            multi_user: manager.multi_user.clone(),
             backup_admission: Arc::clone(&manager.backup_admission),
             core_release_admission: Arc::clone(&manager.core_release_admission),
             core_downloads: manager.core_downloads.clone(),
@@ -167,6 +169,7 @@ impl Access {
     }
     fn upgrade(&self) -> Option<CoreManager> {
         Some(CoreManager {
+            multi_user: self.multi_user.clone(),
             backup_admission: Arc::clone(&self.backup_admission),
             core_release_admission: Arc::clone(&self.core_release_admission),
             core_downloads: self.core_downloads.clone(),

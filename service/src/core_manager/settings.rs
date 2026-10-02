@@ -178,6 +178,21 @@ impl Actor {
         Ok(enforced)
     }
 
+    /// Multi-user mode: move listeners and TUN routing into this user's slot.
+    pub(super) fn isolate(&self, config: Mapping, runtime: &RuntimeSettings) -> Mapping {
+        let Some(isolation) = &self.options.isolation else {
+            return config;
+        };
+        let (config, changed) = isolation.apply(config, runtime);
+        for field in changed {
+            self.logs.append(
+                "settings",
+                format!("{field} is managed by the multi-user slot; override discarded"),
+            );
+        }
+        config
+    }
+
     pub(super) fn read_profile_dns(&self, uid: &str) -> Result<DnsOverrideState> {
         self.profile_store
             .dns_source(uid)

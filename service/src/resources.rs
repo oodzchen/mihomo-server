@@ -39,6 +39,14 @@ struct Core {
     sha256: String,
 }
 
+/// The administrator-managed core of a multi-user installation.
+#[derive(Debug, Clone)]
+pub struct SharedCore {
+    pub path: PathBuf,
+    /// The binary's file capabilities grant `CAP_NET_ADMIN`, as TUN requires.
+    pub tun_capable: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct Resources {
     root: PathBuf,
@@ -160,6 +168,63 @@ impl Resources {
             .get(&request.name)
             .ok_or_else(|| anyhow::anyhow!("no pinned bundle seed for this Geo file"))?;
         crate::geo::update::prepare(&self.root.join("geo"), data, seed, request)
+    }
+
+    /// Multi-user installations run the administrator's read-only core in place.
+    /// The TUN variant carries file capabilities and is readable only by its group,
+    /// so other users fall back to the plain core.
+    #[cfg(target_os = "linux")]
+    pub fn shared_core(&self) -> Result<SharedCore> {
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+        for (name, tun) in [("core/verge-mihomo-tun", true), ("core/verge-mihomo", false)] {
+            let path = self.root.join(name);
+            let file = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                .open(&path);
+            let mut file = match file {
+                Ok(file) => file,
+                Err(error)
+                    if tun
+                        && matches!(
+                            error.kind(),
+                            std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+                        ) =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error).with_context(|| format!("open shared core {name}")),
+            };
+            let metadata = file.metadata()?;
+            let mode = metadata.permissions().mode();
+            ensure!(
+                metadata.is_file() && metadata.len() > 0,
+                "shared core {name} must be a nonempty regular file"
+            );
+            ensure!(mode & 0o111 != 0, "shared core {name} must be executable");
+            ensure!(
+                mode & 0o022 == 0,
+                "shared core {name} must not be writable by group or others"
+            );
+            let mut digest = Context::new(&SHA256);
+            let mut buffer = [0_u8; 65536];
+            loop {
+                let count = file.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                digest.update(&buffer[..count]);
+            }
+            ensure!(
+                crate::secure_fs::hex(digest.finish().as_ref()) == self.hash,
+                "shared core {name} does not match the bundle SHA-256 pin"
+            );
+            return Ok(SharedCore {
+                tun_capable: tun && crate::secure_fs::file_grants_net_admin(&path),
+                path,
+            });
+        }
+        unreachable!("the plain core is always tried last")
     }
 
     /// Called only while the manager owns its data-directory lock.

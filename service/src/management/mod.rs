@@ -41,6 +41,7 @@ pub enum ManagementCommand {
     },
     CoreInstallation {},
     InstalledCoreVersion {},
+    MultiUser {},
     UpgradeClashCore {
         force: bool,
     },
@@ -290,6 +291,7 @@ impl Management {
                 serde_json::to_value(self.manager.activate_core_upgrade(id).await?)?
             }
             ManagementCommand::CoreInstallation {} => serde_json::to_value(self.manager.core_installation().await?)?,
+            ManagementCommand::MultiUser {} => serde_json::to_value(self.manager.multi_user())?,
             ManagementCommand::InstalledCoreVersion {} => {
                 serde_json::to_value(self.manager.installed_core_version().await?)?
             }

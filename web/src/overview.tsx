@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { subscribe, type Connection } from "./api";
 import { ProxyAccessPanel } from "./proxy-access";
+import { MultiUserPanel } from "./multi-user";
 import { phaseLabel, t, type Language } from "./i18n";
 import type { CoreLog, CoreStatus, Profile } from "./types";
 import { bytes } from "./format";
@@ -86,6 +87,7 @@ export function Overview({
         connection={connection}
         logout={logout}
       />
+      <MultiUserPanel token={token} language={language} connection={connection} />
       <div className="two-column">
         <section className="panel">
           <div className="panel-title">

@@ -69,6 +69,37 @@ mod unix {
         unsafe { libc::geteuid() }
     }
 
+    /// Whether a file's capability xattr grants effective `CAP_NET_ADMIN` on exec.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn file_grants_net_admin(path: &std::path::Path) -> bool {
+        use std::os::unix::ffi::OsStrExt as _;
+        const REVISION_MASK: u32 = 0xff00_0000;
+        const FLAGS_EFFECTIVE: u32 = 0x1;
+        const CAP_NET_ADMIN: u32 = 1 << 12;
+        let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+            return false;
+        };
+        // vfs_cap_data revision 1 is 12 bytes, 2 is 20 and 3 is 24.
+        let mut data = [0_u8; 24];
+        // SAFETY: both C strings are valid and the length matches the buffer.
+        let length = unsafe {
+            libc::getxattr(
+                path.as_ptr(),
+                c"security.capability".as_ptr(),
+                data.as_mut_ptr().cast(),
+                data.len(),
+            )
+        };
+        if length < 12 {
+            return false;
+        }
+        let word = |at: usize| u32::from_le_bytes([data[at], data[at + 1], data[at + 2], data[at + 3]]);
+        let (magic, permitted) = (word(0), word(4));
+        matches!(magic & REVISION_MASK, 0x0100_0000 | 0x0200_0000 | 0x0300_0000)
+            && magic & FLAGS_EFFECTIVE != 0
+            && permitted & CAP_NET_ADMIN != 0
+    }
+
     /// `openat(2)` relative to an open directory; `mode` applies only with `O_CREAT`.
     pub(crate) fn open_at(parent: &File, name: &CStr, flags: libc::c_int, mode: libc::mode_t) -> io::Result<File> {
         // SAFETY: both pointers are valid for the call; the variadic mode is a plain integer.

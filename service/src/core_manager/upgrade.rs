@@ -2,6 +2,16 @@
 use super::*;
 
 impl CoreManager {
+    fn downloads(&self, action: &str) -> Result<Arc<crate::core_release::CoreDownloads>> {
+        match &self.core_downloads {
+            Some(downloads) => Ok(Arc::clone(downloads)),
+            None if self.multi_user.is_some() => {
+                bail!("{action} is managed by the system administrator in multi-user mode")
+            }
+            None => bail!("{action} requires bundle-managed resources"),
+        }
+    }
+
     /// Core release network work is independent of the lifecycle actor and subscriptions.
     pub async fn core_release(&self, version: Option<String>) -> Result<crate::core_release::CoreRelease> {
         self.core_release_for(version, crate::core_release::ReleaseChannel::Stable)
@@ -49,10 +59,7 @@ impl CoreManager {
         channel: crate::core_release::ReleaseChannel,
     ) -> Result<crate::core_release::PreparedCore> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
-        let downloads = self
-            .core_downloads
-            .as_ref()
-            .context("core preparation requires bundle-managed resources")?;
+        let downloads = self.downloads("core preparation")?;
         let _permit = Arc::clone(&self.core_release_admission)
             .try_acquire_owned()
             .context("core release request already in progress")?;
@@ -70,18 +77,12 @@ impl CoreManager {
         let _permit = Arc::clone(&self.core_release_admission)
             .try_acquire_owned()
             .context("core release request already in progress")?;
-        self.core_downloads
-            .as_ref()
-            .context("core preparation requires bundle-managed resources")?
-            .inspect(id)
+        self.downloads("core preparation")?.inspect(id)
     }
 
     pub async fn stage_core_upgrade(&self, id: String) -> Result<crate::core_release::StagedCore> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
-        let downloads = self
-            .core_downloads
-            .clone()
-            .context("core staging requires bundle-managed resources")?;
+        let downloads = self.downloads("core staging")?;
         let _permit = Arc::clone(&self.core_release_admission)
             .try_acquire_owned()
             .context("core release request already in progress")?;
@@ -102,18 +103,12 @@ impl CoreManager {
         let _permit = Arc::clone(&self.core_release_admission)
             .try_acquire_owned()
             .context("core release request already in progress")?;
-        self.core_downloads
-            .as_ref()
-            .context("core staging requires bundle-managed resources")?
-            .inspect_stage(id)
+        self.downloads("core staging")?.inspect_stage(id)
     }
 
     pub async fn activate_core_upgrade(&self, id: String) -> Result<CoreActivation> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
-        let downloads = self
-            .core_downloads
-            .clone()
-            .context("core activation requires bundle-managed resources")?;
+        let downloads = self.downloads("core activation")?;
         let _permit = Arc::clone(&self.core_release_admission)
             .try_acquire_owned()
             .context("core release request already in progress")?;
@@ -131,20 +126,16 @@ impl CoreManager {
 
     pub async fn core_installation(&self) -> Result<Option<crate::core_upgrade::CoreInstallation>> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
-        ensure!(
-            self.core_downloads.is_some(),
-            "core installation requires bundle-managed resources"
-        );
+        self.downloads("core installation")?;
         self.call(CommandMessage::CoreInstallation, "core manager stopped")
             .await
     }
 
     pub async fn installed_core_version(&self) -> Result<String> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
-        ensure!(
-            self.core_downloads.is_some(),
-            "core upgrade requires bundle-managed resources"
-        );
+        if self.multi_user.is_none() {
+            self.downloads("core upgrade")?;
+        }
         self.call(CommandMessage::InstalledCoreVersion, "core manager stopped")
             .await
     }
@@ -165,10 +156,7 @@ impl CoreManager {
         channel: crate::core_release::ReleaseChannel,
     ) -> Result<CoreUpgradeReport> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");
-        let downloads = self
-            .core_downloads
-            .clone()
-            .context("core upgrade requires bundle-managed resources")?;
+        let downloads = self.downloads("core upgrade")?;
         let permit = Arc::clone(&self.core_release_admission)
             .try_acquire_owned()
             .context("core release request already in progress")?;
@@ -238,7 +226,7 @@ impl CoreManager {
 
 impl Actor {
     pub(super) async fn recover_core_upgrade(&mut self) -> Result<()> {
-        if self.options.resources.is_none() {
+        if !self.options.managed_core() {
             return Ok(());
         }
         let core = self
@@ -264,7 +252,7 @@ impl Actor {
     }
 
     pub(super) async fn installed_version(&mut self) -> Result<String> {
-        if self.options.resources.is_some() {
+        if self.options.managed_core() {
             crate::core_upgrade::repairable(&self.options.binary)?;
             #[cfg(unix)]
             {
@@ -277,7 +265,7 @@ impl Actor {
         }
         match crate::validation::probe_version(&self.options.binary, &mut self.shutdown, Duration::from_secs(5)).await {
             Ok(version) => Ok(version),
-            Err(_) if self.options.resources.is_some() && !*self.shutdown.borrow() => {
+            Err(_) if self.options.managed_core() && !*self.shutdown.borrow() => {
                 // An unreadable/broken core must not block the operation that repairs it.
                 crate::core_upgrade::repairable(&self.options.binary)?;
                 Ok("unknown".into())

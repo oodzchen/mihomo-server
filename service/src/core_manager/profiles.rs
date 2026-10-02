@@ -406,11 +406,15 @@ impl Actor {
     }
 
     pub(super) async fn validate_inactive_candidate(&mut self, candidate: &ConfigCandidate) -> Result<()> {
-        let config = match candidate {
-            ConfigCandidate::Raw(config) => config.clone(),
-            ConfigCandidate::Enhanced { config, .. } => config.clone(),
+        let (config, runtime) = match candidate {
+            ConfigCandidate::Raw(config) => (config.clone(), &self.settings.runtime),
+            ConfigCandidate::Enhanced { config, runtime, .. } => (config.clone(), &**runtime),
         };
         let config = headless_core::enhance::finalize::finalize(config);
+        let config = match &self.options.isolation {
+            Some(isolation) => isolation.apply(config, runtime).0,
+            None => config,
+        };
         validate_resource_declarations(&config)?;
         let validation_config = headless_core::config::resource_paths::prepare_owned(
             config,

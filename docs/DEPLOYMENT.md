@@ -215,6 +215,32 @@ private. Actual user systemd service lifecycle—including boot/start, authentic
 process supervision, child Mihomo reaping (`ESRCH`), journalctl logging, configuration
 restoration, and real proxy traffic/node selection—is fully implemented and Linux-verified.
 
+## Multi-user mode (service flags)
+
+One read-only bundle can serve several local users, each running their own
+service with private data. The installer integration is in progress; the
+service side is available now:
+
+```sh
+launch --multi-user [--slot N | --slot-registry /var/lib/mihomo-server/slots]
+```
+
+- `--multi-user` requires `--resource-dir` (added by `launch`) and runs the
+  bundle core in place: `resources/core/verge-mihomo-tun` when the user can read
+  it (intended as `root:mihomo-tun 0750` with
+  `cap_net_admin,cap_net_bind_service,cap_net_raw+ep`), otherwise
+  `resources/core/verge-mihomo`. Both must match the manifest SHA-256 and must
+  not be group/other writable. Web core upgrades are disabled; the administrator
+  upgrades the bundle.
+- Each user owns a slot (0–63), claimed once in a root-owned sticky registry
+  directory (`chmod 1777`) or fixed with `--slot`. Slot `s` uses management port
+  `20000+10s` (the default `--listen`), mixed port `+1` and DNS listener `+2`.
+- Every committed runtime is rewritten into the slot: listeners from
+  subscriptions are replaced (settings-page values are kept), and TUN gets a
+  per-user device `ms<uid>`, `include-uid: [uid]`, unique policy-routing
+  table/rule indexes and a unique fake-IP range. `auto-redirect` is disabled.
+- Without the capable core, enabling TUN is rejected before reload.
+
 ## Install from a GitHub Release
 
 Releases are produced by `.github/workflows/release.yml` on `v*` tags. Ordinary

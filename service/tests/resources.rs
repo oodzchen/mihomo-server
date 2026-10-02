@@ -306,3 +306,39 @@ fn manifest_with_license_inventory_is_exposed() -> Result<()> {
     assert_eq!(licenses.inventory.as_deref(), Some("LICENSES.txt"));
     Ok(())
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn shared_core_runs_in_place_and_falls_back_from_an_unreadable_tun_variant() -> Result<()> {
+    let dir = Directory::new()?;
+    let plain = dir.0.join("resources/core/verge-mihomo");
+    fs::set_permissions(&plain, fs::Permissions::from_mode(0o755))?;
+    let core = dir.resources()?.shared_core()?;
+    assert_eq!(core.path, dir.resources()?.directory().join("core/verge-mihomo"));
+    assert!(!core.tun_capable);
+
+    // A readable TUN variant is preferred; without file capabilities it cannot run TUN.
+    let tun = dir.0.join("resources/core/verge-mihomo-tun");
+    fs::write(&tun, b"owned test core")?;
+    fs::set_permissions(&tun, fs::Permissions::from_mode(0o750))?;
+    let core = dir.resources()?.shared_core()?;
+    assert!(core.path.ends_with("core/verge-mihomo-tun"));
+    assert!(!core.tun_capable);
+
+    // Users outside the TUN group cannot open the variant and use the plain core.
+    fs::set_permissions(&tun, fs::Permissions::from_mode(0o000))?;
+    if fs::File::open(&tun).is_err() {
+        assert!(dir.resources()?.shared_core()?.path.ends_with("core/verge-mihomo"));
+    }
+
+    // Writable or tampered shared cores are rejected instead of executed.
+    fs::set_permissions(&tun, fs::Permissions::from_mode(0o770))?;
+    assert!(format!("{:#}", dir.resources()?.shared_core().unwrap_err()).contains("writable"));
+    fs::write(&tun, b"tampered core")?;
+    fs::set_permissions(&tun, fs::Permissions::from_mode(0o750))?;
+    assert!(format!("{:#}", dir.resources()?.shared_core().unwrap_err()).contains("SHA-256"));
+    fs::remove_file(&tun)?;
+    symlink(&plain, &tun)?;
+    assert!(dir.resources()?.shared_core().is_err());
+    Ok(())
+}

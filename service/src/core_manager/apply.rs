@@ -26,6 +26,7 @@ impl Actor {
         };
         let config = self.enforce_runtime_settings(config, &runtime)?;
         let config = headless_core::enhance::finalize::finalize(config);
+        let config = self.isolate(config, &runtime);
         validate_resource_declarations(&config)?;
         let config = headless_core::config::resource_paths::prepare_owned(
             config,
@@ -95,7 +96,7 @@ impl Actor {
         let result = async {
             if was_running {
                 let config = read_config(&candidate).await?;
-                crate::native_tun::preflight(&config)?;
+                self.tun_preflight(&config)?;
             }
             if setting {
                 self.settings_store.begin(settings_candidate, self.store.state().pending.context("settings candidate revision missing")?)?;

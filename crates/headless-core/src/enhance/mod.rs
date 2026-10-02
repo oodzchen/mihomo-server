@@ -2,6 +2,7 @@
 
 pub mod field;
 pub mod finalize;
+pub mod isolation;
 pub mod merge;
 pub mod script;
 pub mod seq;

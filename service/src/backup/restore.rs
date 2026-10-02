@@ -9,6 +9,7 @@ use headless_core::{
         runtime::{self, MAX_CONFIG_BYTES},
         settings::ServiceSettings,
     },
+    enhance::isolation::Isolation,
 };
 use std::{
     fs::{self, Metadata, OpenOptions},
@@ -306,6 +307,7 @@ async fn script(
 async fn regenerate(
     generation: GenerationPlan,
     settings: &ServiceSettings,
+    isolation: Option<&Isolation>,
     worker: &Path,
     stop: &mut watch::Receiver<bool>,
     timeout: Duration,
@@ -335,6 +337,10 @@ async fn regenerate(
     let config = runtime::generate(config, &generation.profile_merge)?;
     let config = script(config, generation.script, generation.name, worker, stop, timeout).await?;
     let config = headless_core::enhance::finalize::finalize(authority.enforce(config)?);
+    let config = match isolation {
+        Some(isolation) => isolation.apply(config, &authority).0,
+        None => config,
+    };
     resource_paths(&config)?;
     let bytes = serde_yaml_ng::to_string(&config)?.into_bytes();
     ensure!(
@@ -380,6 +386,7 @@ async fn probe(
             let (bytes, requires_confirmation) = regenerate(
                 generation,
                 &candidate.settings,
+                options.isolation.as_ref(),
                 &worker,
                 &mut stop,
                 options.policy.script_timeout,
@@ -457,6 +464,14 @@ pub(crate) async fn publication(
                     candidate.generation.as_ref().is_none_or(|g| g.dns_source.is_none()),
                     "archived runtime has protected provider DNS; choose regeneration"
                 );
+                if let Some(isolation) = &options.isolation {
+                    let config = runtime::parse(std::str::from_utf8(&candidate.runtime)?)?;
+                    ensure!(
+                        isolation.apply(config.clone(), &candidate.settings.runtime).0 == config,
+                        "archived runtime uses listeners or TUN routing outside this user's multi-user slot; \
+                         choose regeneration"
+                    );
+                }
                 candidate.runtime.clone()
             }
             BackupRuntimePolicy::Regenerated => {
