@@ -1,17 +1,15 @@
 # Privileged systemd host for multi-user install tests (scripts/tests/multiuser/run.sh).
 # Its own network namespace keeps TUN devices and policy rules away from the host.
-# Lingering user managers (user@.service) need no password-database checks: on
-# Ubuntu hosts (GitHub runners) the host AppArmor profile "unix-chkpwd" attaches
-# to the container's unix_chkpwd by path and denies it /etc/shadow, failing the
-# pam_unix account step with status 224/PAM. pam_loginuid is optional for the
-# same reason (container hosts may refuse to set the audit login UID).
+# On Ubuntu hosts (GitHub runners) the host AppArmor profile "unix-chkpwd"
+# attaches to the container's unix_chkpwd by path and strips its DAC override
+# capabilities, so it cannot read Fedora's mode-0000 shadow files and every
+# pam_unix account step (user@.service, systemctl --user -M user@) fails with
+# 224/PAM. Owner-readable shadow files need no capability.
 FROM fedora:44
 RUN dnf -y install systemd libcap iproute procps-ng curl shadow-utils util-linux \
         python3 findutils && dnf clean all \
     && systemctl mask systemd-resolved.service getty@tty1.service \
     && useradd -m alice && useradd -m bob && useradd -m carol \
-    && sed -e '/^-\?account/d' -e '1a account  required   pam_permit.so' \
-        -e 's/^session *required *pam_loginuid.so/session  optional   pam_loginuid.so/' \
-        /usr/lib/pam.d/systemd-user >/etc/pam.d/systemd-user
+    && chmod 0400 /etc/shadow /etc/gshadow
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]
