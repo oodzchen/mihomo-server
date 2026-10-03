@@ -1,13 +1,17 @@
 # Privileged systemd host for multi-user install tests (scripts/tests/multiuser/run.sh).
 # Its own network namespace keeps TUN devices and policy rules away from the host.
-# Hosts that refuse to reset the audit login UID (immutable loginuid, as on some
-# CI kernels) would fail user@.service in PAM, so pam_loginuid is optional here.
+# Lingering user managers (user@.service) need no password-database checks: on
+# Ubuntu hosts (GitHub runners) the host AppArmor profile "unix-chkpwd" attaches
+# to the container's unix_chkpwd by path and denies it /etc/shadow, failing the
+# pam_unix account step with status 224/PAM. pam_loginuid is optional for the
+# same reason (container hosts may refuse to set the audit login UID).
 FROM fedora:44
 RUN dnf -y install systemd libcap iproute procps-ng curl shadow-utils util-linux \
         python3 findutils && dnf clean all \
     && systemctl mask systemd-resolved.service getty@tty1.service \
     && useradd -m alice && useradd -m bob && useradd -m carol \
-    && sed 's/^session *required *pam_loginuid.so/session  optional   pam_loginuid.so/' \
+    && sed -e '/^-\?account/d' -e '1a account  required   pam_permit.so' \
+        -e 's/^session *required *pam_loginuid.so/session  optional   pam_loginuid.so/' \
         /usr/lib/pam.d/systemd-user >/etc/pam.d/systemd-user
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]

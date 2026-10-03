@@ -216,9 +216,11 @@ Verification (step 2), privileged Fedora 44 systemd container
 bundle, installer, `inside.sh` and `api.py` in, and runs `inside.sh` as root.
 Without a profile a DIRECT-only fake-IP profile is used, so CI needs no
 `./data`. `KEEP=1` keeps the container. CI job `multiuser-e2e` packages a debug
-service with the pinned core and runs it. The image makes `pam_loginuid`
-optional for `systemd-user` (hosts with an immutable audit login UID otherwise
-fail `user@.service` in PAM); `run.sh` fails if the container's systemd does
+service with the pinned core and runs it. The image's `systemd-user` PAM stack
+uses `pam_permit` for the account step and an optional `pam_loginuid`: on
+Ubuntu hosts (GitHub runners) the host AppArmor `unix-chkpwd` profile confines
+the container's `unix_chkpwd`, which then cannot read `/etc/shadow`, and
+`user@.service` fails with 224/PAM. `run.sh` fails if the container's systemd does
 not finish booting and, on any failure, prints failed units, the users'
 `user@`/`user-runtime-dir@` status and the journal, since CI drops the container.
 
