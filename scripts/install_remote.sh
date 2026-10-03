@@ -47,9 +47,9 @@ verify_bundle() {
     fi
 }
 each_user_manager() {
-    local user failed=0
-    while read -r _ user _; do
-        [ -n "$user" ] || continue
+    local uid user failed=0
+    while read -r uid user _; do
+        if [ -z "$user" ] || [ ! -S "/run/user/$uid/bus" ]; then continue; fi
         if [ "${1:-}" = disable ] && [ "$(systemctl --user -M "$user@" show mihomo-server -p LoadState --value)" = not-found ]; then continue; fi
         if ! systemctl --user -M "$user@" "$@"; then
             echo "error: $* failed for $user" >&2
@@ -61,7 +61,7 @@ each_user_manager() {
 
 # Runs as the instance owner, never root. Keep old files for rollback.
 activate_user() {
-    local home=$1 config_home=$2 helper=$3 unit exec_line data_line args old_root
+    local home=$1 config_home=$2 helper=$3 unit exec_line data_line args old_root dropins
     local backup='' was_active='' was_enabled='' env_file="$config_home/mihomo-server/env"
     local env_backup='' old_dropin='' dropin_backup=''
     unit=$(systemctl --user show mihomo-server -p FragmentPath --value)
@@ -71,11 +71,17 @@ activate_user() {
         if awk '
             /^[[:space:]]*($|#|;)/ {next}
             /^\[(Unit|Service|Install)\]$/ {next}
-            /^(Description|After|Type|Restart|RestartSec|KillSignal|KillMode|TimeoutStopSec|UMask|WantedBy)=/ {next}
+            /^Description=/ {next}
+            /^(After=network.target|Type=simple|Restart=on-failure|RestartSec=3|KillSignal=SIGTERM|KillMode=mixed|TimeoutStopSec=30|UMask=0077|WantedBy=default.target)$/ {next}
             /^Environment=MIHOMO_SERVER_DATA_DIR=/ {next}
             /^ExecStart=/ {next}
             {exit 1}' "$unit"; then :; else die "custom unit requires manual migration: $unit"; fi
-        [ -z "$(systemctl --user show mihomo-server -p DropInPaths --value)" ] || die 'custom legacy drop-ins require manual migration'
+        dropins=$(systemctl --user show mihomo-server -p DropInPaths --value)
+        # Distro-wide vendor drop-ins also apply to the new shared unit. Only
+        # user/admin-specific overrides need review before replacing a unit.
+        if [ -n "$dropins" ] && ! [[ "$dropins" =~ ^(/(usr/)?lib/systemd/user/[^[:space:]]+[[:space:]]*)+$ ]]; then
+            die 'custom legacy drop-ins require manual migration'
+        fi
         [ "$(grep -c '^ExecStart=' "$unit")" = 1 ] || die 'ambiguous legacy ExecStart'
         [ "$(grep -c '^Environment=MIHOMO_SERVER_DATA_DIR=' "$unit")" = 1 ] || die 'ambiguous legacy data directory'
         exec_line=$(sed -n 's/^ExecStart=//p' "$unit")
@@ -193,9 +199,9 @@ install_shared() {
     fi
     # Upgrade all other running instances. Caller has already been verified.
     if [ -n "$previous" ]; then
-        local user
-        while read -r _ user _; do
-            if [ -z "$user" ] || [ "$user" = "$caller" ]; then continue; fi
+        local user manager_uid
+        while read -r manager_uid user _; do
+            if [ -z "$user" ] || [ "$user" = "$caller" ] || [ ! -S "/run/user/$manager_uid/bus" ]; then continue; fi
             systemctl --user -M "$user@" try-restart mihomo-server.service
         done < <(loginctl list-users --no-legend)
     fi

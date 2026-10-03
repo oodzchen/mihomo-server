@@ -92,9 +92,40 @@ out of scope; sockets stay under `<data-dir>/run`.
    immediate TUN authorization without relogin, linger, slot 0 at 9090/7890,
    authenticated API and running core. Full download/migration/traffic acceptance
    follows in step 3.
-3. **Installer/systemd/real-node acceptance and deployment docs — pending.**
+3. **Installer/systemd/real-node acceptance and deployment docs — implemented.**
+   README and deployment docs now describe one zero-argument shared installation,
+   typed per-user env settings, familiar slot-0 ports and opt-in additional users.
+   The host lifecycle test uses a unique copy of the shared unit rather than
+   changing shared host files; CI also checks the launcher with ShellCheck.
+   The private-network systemd-container acceptance now serves a rendered release
+   fixture and checksummed tarballs, runs the real normal-user curl-to-bash and
+   sudo paths, and restarts the whole container to verify boot restoration.
+   Live verification uses a copy of the real `./data` subscription.
 
-**Latest completed task:** Zero-argument shared installation, step 2 of 3 — unified installer, automatic authorization/linger and guarded legacy migration.
+   Acceptance fixes: only users with an actual manager bus receive daemon-reload;
+   distro vendor service drop-ins are compatible with guarded legacy migration;
+   EnvironmentFile paths preserve spaces/percent signs using systemd's filename
+   syntax rather than assignment quoting; stopped helpers resolve explicit legacy
+   data paths through systemd; management listeners no longer use SO_REUSEPORT,
+   so an occupied port produces a clear failure rather than sharing a listener.
+   Test users use login PAM sessions to represent logged-in non-lingering users.
+   The external download probe uses OVH's 1 MiB file; the former Cloudflare speed
+   endpoint failed TLS even for direct root traffic in this environment.
+
+   Verification: **95 container checks passed, 0 failed**, including immediate
+   authorization with a stale user manager, new caller without a manager, custom
+   XDG roots (spaces and percent), named-setting precedence/public-origin auth,
+   occupied port rejection, successful legacy migration, failed migration rollback,
+   custom-unit preservation, real proxy/TUN/DNS traffic, per-UID isolation, crash
+   recovery, upgrade, reboot, child/TUN/routing cleanup and data-preserving uninstall.
+   **434 workspace Rust tests passed, 0 failed, 92 ignored**; 25 Python tests
+   passed (including the actual host user-unit lifecycle); fmt, clippy and all
+   ShellCheck checks passed. Both opt-in deployment/multi-user live Rust tests
+   passed outside the device-restricted sandbox. No global installation was made
+   on the host; real-node data remains private and unchanged.
+
+**Latest completed task:** Zero-argument shared installation, step 3 of 3 — isolated download/systemd/migration/real-node/reboot acceptance (95 checks), deployment docs and acceptance fixes.
+**Previous completed task:** Zero-argument shared installation, step 2 of 3 — unified installer, automatic authorization/linger and guarded legacy migration.
 **Previous completed task:** Zero-argument shared installation, step 1 of 3 — slot-0 ports, XDG-aware launcher and per-user enable/readiness helper (above).
 **Previous completed task:** Multi-user system installation, step 4 of 4 — README, fixes from a one-off QEMU/KVM acceptance run (sniffing for TUN behind shared resolvers, TUN start settle, helper unit check/readiness, SELinux relabel); further acceptance is manual on real machines (see "Increment: multi-user system installation").
 **Previous completed task:** Multi-user step 3 — scripted end-to-end test in a privileged systemd container (`scripts/tests/multiuser/run.sh`, 59 checks; also a CI job): two concurrent TUN users with real nodes, per-UID routing and DNS, core crash recovery, upgrade restart, stop/uninstall rule cleanup (see "Increment: multi-user system installation").
@@ -105,7 +136,7 @@ out of scope; sockets stay under `<data-dir>/run`.
 **Previous completed task:** Persistent login. The web UI caches the management token in sessionStorage and re-validates it on load, so refreshing keeps the session; logout/401 clears it.  The e2e restart test now asserts refresh keeps the session and logout+refresh returns to the login page.
 
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
-**Next implementation task:** Complete zero-argument download/systemd/migration acceptance, real-node traffic and user documentation.
+**Next implementation task:** None for the zero-argument installation plan. All three increments are complete; publishing a release or installing shared host files remains a separate action.
 
 ## Increment: multi-user system installation
 
@@ -145,7 +176,8 @@ Plan and status:
         (its nftables tables are host-wide)
 ```
 
-Slot `s` (0–63) owns ports `20000+10s` (management), `+1` (mixed), `+2` (DNS).
+Slot 0 now owns 9090 (management), 7890 (mixed) and 1053 (DNS). Slots `s`
+(1–63) own `20000+10s` (management), `+1` (mixed) and `+2` (DNS).
 The overlay runs wherever a runtime is committed: `stage` (all profile, raw,
 settings and bootstrap applications), inactive-candidate validation and backup
 regeneration. At start, a committed runtime that does not conform (from a former
@@ -189,6 +221,10 @@ Verification (step 1):
   container test (step 3), which needs root inside an isolated network namespace.
 
 ### Step 2: system installer and per-user helper
+
+Historical implementation below; the zero-argument increment above supersedes
+its CLI, default unit and activation behavior.
+
 
 ```text
 install.sh --system [--bundle DIR | --version TAG] [--tun-user USER]...   (root)

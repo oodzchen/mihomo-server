@@ -77,8 +77,8 @@ bundle/
 │   ├── core/verge-mihomo           # immutable initial independent core
 │   ├── minimal.yaml               # bootstrap only; committed config wins
 │   └── web/                       # built React assets
-├── mihomo-server.service           # optional user systemd unit template
-├── mihomo-server-user              # per-user control of a --system installation
+├── mihomo-server.service           # shared systemd user unit
+├── mihomo-server-user              # per-user control of the shared installation
 ├── checksums.sha256
 ├── LICENSE
 ├── LICENSES.txt                   # third-party license and dependency inventory
@@ -93,7 +93,9 @@ redistribution; this path prepares local artifacts.
 
 ## Foreground launch and stop
 
-Choose an absolute persistent data directory outside the bundle:
+The launcher defaults to `${XDG_DATA_HOME:-$HOME/.local/share}/mihomo-server`
+(ignoring relative XDG values). To use an explicit persistent directory outside
+the bundle:
 
 ```sh
 MIHOMO_SERVER_DATA_DIR=/absolute/path/to/private-data /path/to/bundle/launch
@@ -185,125 +187,98 @@ Inspect installed files in the Web settings resource panel or the authenticated
 by this initialization path: matching SHA-256 proves integrity, not validity of
 every Geo database format. Select suitable assets for the configuration's Geo mode.
 
-## Linux user systemd service management
+## Shared Linux installation
 
-`deploy/mihomo-server.service` runs the bundle launcher as a systemd user service,
-defaulting to `%h/.local/opt/mihomo-server/launch` with persistent data in
-`%h/.local/share/mihomo-server`.
+Releases are produced by `.github/workflows/release.yml` on `v*` tags after CI.
+They contain a pinned tarball, its SHA-256 checksum and a rendered `install.sh`.
+The embedded core pin is recorded in `deploy/core-pin.json`.
 
-`scripts/install_remote.sh` (published as `install.sh`) is a pure-shell installer
-(no Python) that installs the bundle, renders the unit from the bundled template
-and registers it. Day-to-day management uses plain systemd tooling:
+As a normal user, run without arguments:
 
 ```sh
-# Install from an extracted bundle (enables and starts unless --no-start):
-bash scripts/install_remote.sh --bundle /path/to/bundle [--listen 127.0.0.1:9090]
-
-# Manage service lifecycle:
-systemctl --user status mihomo-server
-journalctl --user -u mihomo-server -n 50
-systemctl --user restart mihomo-server
-systemctl --user stop mihomo-server
-
-# Uninstall unit and bundle, keeping data (add --purge-data to delete it):
-bash scripts/install_remote.sh --uninstall
+curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash
 ```
 
-The unit uses `KillMode=mixed` so SIGTERM reaches Rust first and its child is
-reaped through the shared shutdown path; the remaining control group is killed
-only if shutdown exceeds the 30-second deadline. `UMask=0077` makes service-created data
-private. Actual user systemd service lifecycle—including boot/start, authentication,
-process supervision, child Mihomo reaping (`ESRCH`), journalctl logging, configuration
-restoration, and real proxy traffic/node selection—is fully implemented and Linux-verified.
+The installer verifies the download before sudo elevation, deploys the shared
+bundle, adds the caller to `mihomo-tun`, enables linger and starts the user's
+instance. Readiness requires an authenticated API and running core; TUN
+capability and linger are also checked. Group refresh uses `sg` for the service
+process, without restarting the user manager. Direct root invocation deploys
+shared files only; `SUDO_USER` identifies a caller when invoked through sudo.
 
-## Multi-user system installation
+Required tools: Bash, systemd (`systemctl`, `loginctl`, `systemd-run`), tar,
+SHA-256 (`sha256sum` or `shasum`), curl or wget, getent, groupadd, usermod,
+runuser, sg and libcap's setcap/getcap; non-root invocation also requires sudo.
+Runtime does not require Python or Node.
 
-Install once as root; every local user then enables their own instance with
-private data, ports and TUN routing:
+Layout:
+
+- `/opt/mihomo-server/releases/<tag>` and atomic `current` link: root-owned,
+  current and previous releases retained.
+- `/etc/systemd/user/mihomo-server.service`: shared user unit, copied verbatim.
+- `/usr/local/bin/mihomo-server-user`: user helper.
+- `/var/lib/mihomo-server/slots`: root-owned 1777 stable slot registry.
+- `${XDG_CONFIG_HOME:-$HOME/.config}/mihomo-server/env`: optional startup settings.
+- `${XDG_DATA_HOME:-$HOME/.local/share}/mihomo-server`: existing persistent layout.
+  Runtime sockets remain in `<data-dir>/run`; no state/cache/backup format migration.
+
+The helper persists resolved XDG config/data paths in a private managed user
+drop-in, found using the user manager's configuration root. `%E` uses the manager
+configuration root; the drop-in supplies the actual EnvironmentFile path when
+terminal XDG values differ. Unset variables reuse saved values; empty/relative
+values use XDG defaults. Explicit `MIHOMO_SERVER_DATA_DIR` remains supported.
+
+For remote access, edit the displayed `env` file:
+
+```ini
+MIHOMO_SERVER_LISTEN=0.0.0.0:9090
+MIHOMO_SERVER_PUBLIC_ORIGIN=https://proxy.example.com
+```
+
+Named settings override matching options in legacy `MIHOMO_SERVER_ARGS`.
+Restart the instance to apply changes. API Host/origin and token checks remain
+active, including for installer readiness checks behind a public origin.
 
 ```sh
-# Administrator (root): shared bundle, TUN group, slot registry, global user unit
-bash install.sh --system [--bundle DIR | --version TAG] [--tun-user alice ...]
-
-# Each user
-mihomo-server-user init          # enable + start, print URL/token/ports/TUN state
-mihomo-server-user info | token | status | logs | restart | disable
-mihomo-server-user purge --yes   # delete own data and release the slot
-loginctl enable-linger           # optional: keep running after logout
+mihomo-server-user enable        # init is a compatibility alias
+mihomo-server-user info          # also the default without arguments
+mihomo-server-user token
+mihomo-server-user status
+mihomo-server-user logs
+mihomo-server-user restart
+mihomo-server-user disable       # keep data
+mihomo-server-user purge --yes   # delete own data/config and release slot
 ```
 
-Layout: `/opt/mihomo-server/releases/<tag>` (root-owned; the current and the
-previous release are kept), `/opt/mihomo-server/current` (atomic link),
-`/etc/systemd/user/mihomo-server.service`, `/usr/local/bin/mihomo-server-user`,
-`/var/lib/mihomo-server/slots` (root, mode 1777). Users' data stays in
-`~/.local/share/mihomo-server`; per-user launcher options (for example
-`--listen 0.0.0.0:20000 --public-origin URL`) are kept in
-`~/.config/mihomo-server/env` by `mihomo-server-user init`.
+Other users opt in with `enable`; administrators separately grant their TUN and
+linger with `usermod -aG mihomo-tun USER` and `loginctl enable-linger USER`.
+Slot 0 uses management 9090, mixed proxy 7890 and DNS 1053. Slots 1–63 use
+management `20000+10N`, proxy `20001+10N` and DNS `20002+10N`. Port conflicts are
+reported rather than silently allocating alternatives. Existing slot-0 defaults
+change on upgrade; explicit user ports are preserved.
 
-- The bundle core runs in place: `resources/core/verge-mihomo-tun`
-  (`root:mihomo-tun 0750`, `cap_net_admin,cap_net_bind_service,cap_net_raw+ep`,
-  set by the installer with `setcap`) for members of `mihomo-tun`, otherwise
-  `resources/core/verge-mihomo`. Both must match the manifest SHA-256. Web core
-  upgrades are disabled; upgrade by re-running the installer, which restarts
-  running instances onto the new release.
-- Each user owns a slot (0–63) claimed once in the registry. Slot `s` uses
-  management port `20000+10s`, mixed port `+1` and DNS listener `+2`.
-- Every committed runtime is rewritten into the slot: listeners from
-  subscriptions are replaced (settings-page values are kept), and TUN gets the
-  device `ms<uid>`, `include-uid: [uid]`, unique policy-routing table/rule
-  indexes and a unique fake-IP /22 in `198.19.0.0/16`. `auto-redirect` is
-  disabled. Without the capable core, enabling TUN is rejected before reload.
-- A per-user TUN cannot see DNS answered by a shared resolver such as
-  systemd-resolved, so with TUN enabled the sniffer is turned on and
-  `parse-pure-ip` is forced; domains are recovered from TLS/HTTP/QUIC traffic.
-  An explicit `sniffer.enable: false` is respected.
-- Group membership applies to new logins. For a lingering user whose manager
-  is already running: `systemctl restart user@<uid>.service`.
-- Membership of `mihomo-tun` is the security boundary: a member can run the
-  capable core directly with arbitrary routes. Grant it only to trusted users.
-- `install.sh --system --uninstall [--purge-data]` removes the unit, helper and
-  bundle (and with `--purge-data` the slot registry); users' homes and the
-  group are kept.
+The bundle core runs in place, with a root:mihomo-tun 0750 capable copy for
+members and the plain core otherwise. Both match the manifest core SHA-256.
+Web core upgrades stay disabled. Multi-user isolation still replaces subscription
+listeners, retains explicit settings-page values, scopes TUN to `ms<uid>` and
+`include-uid: [uid]`, assigns independent routing and fake-IP blocks and disables
+host-wide auto-redirect. Shared-resolver traffic uses the existing domain sniffer.
+Group members can run the capable core with arbitrary routes; authorize only
+trusted users.
 
-The service flags behind this are `--multi-user` (requires `--resource-dir`)
-with `--slot-registry DIR` or a fixed `--slot N`.
-
-## Install from a GitHub Release
-
-Releases are produced by `.github/workflows/release.yml` on `v*` tags. Ordinary
-pushes run the full test suite via `.github/workflows/ci.yml` instead. Each
-release publishes:
-
-- `mihomo-server-<tag>-x86_64-unknown-linux-gnu.tar.gz` — the pinned bundle
-- `mihomo-server-<tag>-x86_64-unknown-linux-gnu.tar.gz.sha256`
-- `install.sh` — a rendered copy of `scripts/install_remote.sh` with the
-  publishing repository slug baked in
-
-The bundle embeds the pinned Mihomo core recorded in `deploy/core-pin.json`
-(version + uncompressed-binary SHA-256, verified against the upstream release
-before packaging). Upgrading the pinned core means editing that one file in a
-PR.
-
-### One-shot install
+Re-running the installer upgrades the caller and other running instances. Other
+stopped instances stay stopped. Known legacy user units are backed up, original
+data and arguments are preserved, and the old program directory is retained.
+Activation failure restores the old unit; custom units/drop-ins require review.
 
 ```sh
-curl -fsSL https://github.com/OWNER/REPO/releases/latest/download/install.sh \
-  | bash
+curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash -s -- --uninstall
 ```
 
-The script refuses root, requires `x86_64`, verifies the tarball checksum and
-installs the systemd user service, enabling and starting it by default. It needs
-only `tar`, `sha256sum` (or `shasum`), `systemctl` and `curl`/`wget`. Options:
-`--listen`, `--extra-args`, `--install-dir`, `--data-dir`, `--version`,
-`--no-start`, `--uninstall [--purge-data]` (`--enable`/`--start` are accepted
-and ignored).
-
-### Manual install from a downloaded tarball
-
-```sh
-tar -xzf mihomo-server-<tag>-x86_64-unknown-linux-gnu.tar.gz
-bash scripts/install_remote.sh --bundle mihomo-server-<tag>-x86_64-unknown-linux-gnu
-```
+Uninstall removes shared files and enablement while retaining data, slots, group
+authorization and linger. Public options are only `--help` and `--uninstall`.
+For manual local deployment, verify the downloaded tarball and use the foreground
+launcher described above; local-bundle installer overrides are internal to tests.
 
 ## Validation
 
@@ -316,5 +291,5 @@ MIHOMO_TEST_BINARY=/usr/bin/verge-mihomo cargo test -p mihomo-server \
 ```
 
 The validation suite covers:
-- Python test suite (`scripts/tests/test_package_bundle.py` and `scripts/tests/test_systemd_lifecycle.py`, the latter driving `install_remote.sh`), verifying bundle layout, checksums, license inventory, unit generation, live systemd startup/restart/stop, child process reaping, and real proxy selection from `./data`.
+- Python tests verify packaging, integrity/transport failures, launcher argument boundaries and isolated service lifecycle. The privileged multi-user container tests the actual zero-argument download and sudo path, opt-in users, XDG persistence, immediate authorization, real-node traffic, upgrade, container reboot and uninstall. The host lifecycle test uses a unique unit instead of installing shared host files.
 - Opt-in Rust deployment test (`service/tests/deployment.rs`), packaging the actual service/core, launching from an unrelated working directory, testing first-use initialization, local-profile import/validation/start/node/config changes, failed validation, service restart, restored records and retained managed core, and requiring SIGTERM child reaping.

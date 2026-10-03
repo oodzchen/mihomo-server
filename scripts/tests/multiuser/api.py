@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Call one authenticated management command: api.py PORT TOKEN_FILE COMMAND [JSON_FIELDS | @FILE]."""
 import json
+import os
 import sys
 import urllib.request
 
@@ -11,7 +12,8 @@ token = open(token_file).read().strip()
 request = urllib.request.Request(
     f"http://127.0.0.1:{port}/api/commands",
     data=json.dumps({"command": command, **fields}).encode(),
-    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+             "Host":os.environ.get("MIHOMO_TEST_HOST", f"127.0.0.1:{port}")},
 )
 # The management API is local; never route it through an inherited proxy.
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))

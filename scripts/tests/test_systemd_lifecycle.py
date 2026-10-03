@@ -3,7 +3,7 @@
 
 Tests the full lifecycle under real systemd:
 1. Package bundle with package_bundle.py
-2. Install bundle and unit with scripts/install_remote.sh --bundle
+2. Install an isolated copy of the shared service template
 3. Start service with systemctl --user start
 4. Verify HTTP management status, child core process, and bearer auth
 5. Verify real proxy node data from ./data, node selection, and delay testing
@@ -30,7 +30,6 @@ import urllib.parse
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-INSTALL_SH = ROOT / "scripts" / "install_remote.sh"
 
 
 class installer:
@@ -59,28 +58,30 @@ class installer:
         return res
 
     @staticmethod
-    def run_installer(args, prefix):
-        env = dict(os.environ, SYSTEMCTL_USER_PREFIX=" ".join(prefix))
-        res = subprocess.run(["bash", str(INSTALL_SH), *args], capture_output=True, text=True, env=env)
-        if res.returncode != 0:
-            raise RuntimeError(f"install_remote.sh failed: {res.stdout}{res.stderr}")
-        return res
+    def install_service(bundle_src, data_dir, unit_dir, unit_name, listen, systemctl_prefix):
+        # Exercise the service template in isolation; the shared installer is
+        # verified inside the privileged, private-network systemd container.
+        template = (ROOT / "deploy/mihomo-server.service").read_text()
+        lines = []
+        for line in template.splitlines():
+            if line.startswith("EnvironmentFile="):
+                continue
+            if line.startswith("ExecStart="):
+                line = f"ExecStart={bundle_src}/launch --multi-user --slot 63 --listen {listen}"
+            lines.append(line)
+        unit_dir.mkdir(parents=True, exist_ok=True)
+        (unit_dir / unit_name).write_text("\n".join(lines) + "\n")
+        dropin = unit_dir / (unit_name + ".d")
+        dropin.mkdir()
+        (dropin / "data.conf").write_text(f"[Service]\nEnvironment=MIHOMO_SERVER_DATA_DIR={data_dir}\n")
+        installer.run_systemctl(["daemon-reload"], prefix=systemctl_prefix)
 
     @staticmethod
-    def install_service(bundle_src, install_dir, data_dir, unit_dir, unit_name, listen, systemctl_prefix):
-        return installer.run_installer(
-            ["--bundle", str(bundle_src), "--install-dir", str(install_dir), "--data-dir", str(data_dir),
-             "--unit-dir", str(unit_dir), "--unit-name", unit_name, "--listen", listen, "--no-start"],
-            systemctl_prefix,
-        )
-
-    @staticmethod
-    def uninstall_service(unit_name, unit_dir, install_dir, data_dir, remove_bundle, purge_data, systemctl_prefix):
-        return installer.run_installer(
-            ["--uninstall", "--install-dir", str(install_dir), "--data-dir", str(data_dir),
-             "--unit-dir", str(unit_dir), "--unit-name", unit_name, *(["--purge-data"] if purge_data else [])],
-            systemctl_prefix,
-        )
+    def uninstall_service(unit_name, unit_dir, systemctl_prefix):
+        installer.run_systemctl(["disable", "--now", unit_name], prefix=systemctl_prefix, check=False)
+        (unit_dir / unit_name).unlink(missing_ok=True)
+        shutil.rmtree(unit_dir / (unit_name + ".d"), ignore_errors=True)
+        installer.run_systemctl(["daemon-reload"], prefix=systemctl_prefix)
 
 
 def find_free_port() -> int:
@@ -120,6 +121,9 @@ class TestSystemdLifecycle(unittest.TestCase):
         parts = ver_proc.stdout.split()
         cls.core_version = next((p for p in parts if p.startswith("v")), "v1.19.31")
 
+        if not (ROOT / "data/profiles.yaml").is_file():
+            raise unittest.SkipTest("Requires local real-node ./data profiles")
+
         cls._verified_on_host = False
         if "-M" in cls.prefix and os.environ.get("SYSTEMD_RUN_HOST") != "1":
             user = getpass.getuser()
@@ -155,10 +159,6 @@ class TestSystemdLifecycle(unittest.TestCase):
             installer.uninstall_service(
                 unit_name=self.unit_name,
                 unit_dir=self.unit_dir,
-                install_dir=self.install_dir,
-                data_dir=self.data_dir,
-                remove_bundle=True,
-                purge_data=True,
                 systemctl_prefix=self.prefix,
             )
         except Exception:
@@ -216,10 +216,9 @@ class TestSystemdLifecycle(unittest.TestCase):
                 txt = txt.replace("listen: :1053", "listen: 127.0.0.1:0")
                 p.write_text(txt)
 
-        # 3. Install systemd service unit via install_remote.sh
+        # 3. Install an isolated service template with no shared-system writes
         installer.install_service(
             bundle_src=self.bundle_dir,
-            install_dir=self.install_dir,
             data_dir=self.data_dir,
             unit_dir=self.unit_dir,
             unit_name=self.unit_name,
@@ -410,10 +409,6 @@ class TestSystemdLifecycle(unittest.TestCase):
         installer.uninstall_service(
             unit_name=self.unit_name,
             unit_dir=self.unit_dir,
-            install_dir=self.install_dir,
-            data_dir=self.data_dir,
-            remove_bundle=True,
-            purge_data=True,
             systemctl_prefix=self.prefix,
         )
         self.assertFalse(self.unit_path.exists(), "Unit file was not unlinked on uninstall")

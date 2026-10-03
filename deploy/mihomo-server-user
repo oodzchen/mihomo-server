@@ -53,6 +53,16 @@ paths() {
     fi
     ENV_FILE="$CONFIG_HOME/mihomo-server/env"
     DATA_DIR="$DATA_HOME/mihomo-server"
+    # Let systemd parse its own EnvironmentFile format, including quoted paths.
+    # This also resolves explicit data overrides while an instance is stopped.
+    if [ -f "$ENV_FILE" ]; then
+        local configured
+        # shellcheck disable=SC2016
+        configured=$(systemd-run --user --pipe --wait --collect --quiet \
+            --property="EnvironmentFile=-$ENV_FILE" \
+            /bin/sh -c 'printf "%s" "${MIHOMO_SERVER_DATA_DIR:-}"' 2>/dev/null) || configured=''
+        case "$configured" in /?*) DATA_DIR=$configured ;; esac
+    fi
 }
 
 # Quote a systemd assignment/path, including literal percent specifiers.
@@ -79,8 +89,8 @@ CONFIG
         printf '# Managed by mihomo-server-user; user settings belong in the env file.\n'
         printf '# config-home=%s\n# data-home=%s\n[Service]\n' "$CONFIG_HOME" "$DATA_HOME"
         printf 'Environment='; unit_quote "XDG_CONFIG_HOME=$CONFIG_HOME"; printf ' '
-        unit_quote "XDG_DATA_HOME=$DATA_HOME"; printf '\nEnvironmentFile=\nEnvironmentFile=-'
-        unit_quote "$ENV_FILE"; printf '\n'
+        unit_quote "XDG_DATA_HOME=$DATA_HOME"; printf '\nEnvironmentFile=\nEnvironmentFile='
+        printf -- '-%s\n' "${ENV_FILE//%/%%}"
     } > "$temporary"
     mv -f "$temporary" "$DROPIN"
 }

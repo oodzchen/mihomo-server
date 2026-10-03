@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: shellcheck -s bash scripts/install_remote.sh
-      - run: shellcheck deploy/mihomo-server-user
+      - run: shellcheck deploy/launch.sh deploy/mihomo-server-user
       - run: shellcheck -s bash scripts/tests/multiuser/run.sh scripts/tests/multiuser/inside.sh
 
   lint:

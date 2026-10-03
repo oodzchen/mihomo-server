@@ -75,11 +75,24 @@ fi
 "$engine" cp "$bundle" "$name:/work/bundle"
 "$engine" cp "$root/scripts/install_remote.sh" "$name:/work/install.sh"
 "$engine" cp "$here/inside.sh" "$name:/work/inside.sh"
+"$engine" cp "$here/release_fixture.py" "$name:/work/release_fixture.py"
 "$engine" cp "$here/api.py" "$name:/usr/local/bin/msapi"
 [ -z "$profile" ] || "$engine" cp "$profile" "$name:/work/profile.yaml"
 "$engine" exec "$name" chmod 755 /usr/local/bin/msapi /work/inside.sh
 
-"$engine" exec "$name" /work/inside.sh || {
+"$engine" exec "$name" /work/inside.sh before-reboot || {
+    diagnose
+    exit 1
+}
+
+# Verify actual boot restoration, rather than starting the instance manually.
+"$engine" restart "$name" >/dev/null
+for _ in $(seq 1 120); do
+    state="$("$engine" exec "$name" systemctl is-system-running 2>/dev/null || true)"
+    case "$state" in running | degraded) break ;; esac
+    sleep 0.5
+done
+"$engine" exec "$name" /work/inside.sh after-reboot || {
     diagnose
     exit 1
 }
