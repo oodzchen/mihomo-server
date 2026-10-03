@@ -76,10 +76,26 @@ out of scope; sockets stay under `<data-dir>/run`.
    Verification: 6 isolation tests; 5 launcher boundary tests (including spaces,
    quotes, legacy precedence and stale group reexecution); 11 packaging tests;
    launcher/helper ShellCheck. Real systemd acceptance follows in step 3.
-2. **Unified installer, automatic authorization and legacy migration — pending.**
+2. **Unified installer, automatic authorization and legacy migration — implemented.**
+   Public CLI accepts only no arguments, help and uninstall. `main` defers piped
+   execution until the script definitions are complete; verified bundles are
+   downloaded before elevation. Explicit function serialization and argv preserve
+   caller/XDG context without rereading stdin. The shared unit is copied verbatim;
+   root performs only deployment, group authorization and linger, then activation
+   runs as the instance owner. Known legacy user units retain their data/arguments
+   and a rollback copy; custom units/drop-ins require review. Failed migration
+   restores the prior unit. Shared releases are pruned only after successful user
+   activation. Uninstall retains all data, slots, group membership and linger.
+   The release workflow renders the repository assignment inside `main`.
+   Verification: 8 installer boundary/transport tests; ShellCheck; an isolated
+   systemd-container smoke with an already-running alice user manager confirmed
+   immediate TUN authorization without relogin, linger, slot 0 at 9090/7890,
+   authenticated API and running core. Full download/migration/traffic acceptance
+   follows in step 3.
 3. **Installer/systemd/real-node acceptance and deployment docs — pending.**
 
-**Latest completed task:** Zero-argument shared installation, step 1 of 3 — slot-0 ports, XDG-aware launcher and per-user enable/readiness helper (above).
+**Latest completed task:** Zero-argument shared installation, step 2 of 3 — unified installer, automatic authorization/linger and guarded legacy migration.
+**Previous completed task:** Zero-argument shared installation, step 1 of 3 — slot-0 ports, XDG-aware launcher and per-user enable/readiness helper (above).
 **Previous completed task:** Multi-user system installation, step 4 of 4 — README, fixes from a one-off QEMU/KVM acceptance run (sniffing for TUN behind shared resolvers, TUN start settle, helper unit check/readiness, SELinux relabel); further acceptance is manual on real machines (see "Increment: multi-user system installation").
 **Previous completed task:** Multi-user step 3 — scripted end-to-end test in a privileged systemd container (`scripts/tests/multiuser/run.sh`, 59 checks; also a CI job): two concurrent TUN users with real nodes, per-UID routing and DNS, core crash recovery, upgrade restart, stop/uninstall rule cleanup (see "Increment: multi-user system installation").
 **Previous completed task:** Multi-user step 2 — `install_remote.sh --system` (shared versioned bundle, `mihomo-tun` group with a file-capability core, slot registry, global user unit, upgrade/uninstall) and the per-user `mihomo-server-user` helper, verified in a privileged systemd container with two users and real-node TUN traffic (see "Increment: multi-user system installation").
@@ -89,7 +105,7 @@ out of scope; sockets stay under `<data-dir>/run`.
 **Previous completed task:** Persistent login. The web UI caches the management token in sessionStorage and re-validates it on load, so refreshing keeps the session; logout/401 clears it.  The e2e restart test now asserts refresh keeps the session and logout+refresh returns to the login page.
 
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
-**Next implementation task:** Zero-argument installer, automatic TUN/linger and legacy migration, followed by isolated systemd acceptance.
+**Next implementation task:** Complete zero-argument download/systemd/migration acceptance, real-node traffic and user documentation.
 
 ## Increment: multi-user system installation
 

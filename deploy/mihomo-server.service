@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
+Environment=MIHOMO_SERVER_ARGS=
 EnvironmentFile=-%E/mihomo-server/env
 ExecStart=/opt/mihomo-server/current/launch --multi-user $MIHOMO_SERVER_ARGS
 Restart=on-failure
