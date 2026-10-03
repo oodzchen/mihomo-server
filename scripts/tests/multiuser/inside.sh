@@ -190,9 +190,9 @@ phase_install() {
         'id -nG alice | grep -qw mihomo-tun && id -nG bob | grep -qw mihomo-tun && ! id -nG carol | grep -qw mihomo-tun'
 
     # Linger after the group change, so each user manager starts with its groups.
-    loginctl enable-linger alice bob carol
+    loginctl enable-linger alice bob carol || fatal "enable-linger failed"
     for user in alice bob carol; do
-        wait_for 40 test -S "/run/user/$(id -u $user)/bus" || fatal "$user manager did not start"
+        wait_for 120 test -S "/run/user/$(id -u $user)/bus" || fatal "$user manager did not start"
     done
 }
 

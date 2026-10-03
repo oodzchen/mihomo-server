@@ -20,10 +20,10 @@ engine="${CONTAINER_ENGINE:-docker}"
 image="mihomo-server-multiuser-test"
 name="mihomo-server-multiuser-$$"
 
-[ -f "$bundle/launch" ] && [ -f "$bundle/mihomo-server-user" ] || {
+if [ ! -f "$bundle/launch" ] || [ ! -f "$bundle/mihomo-server-user" ]; then
     echo "error: $bundle is not a bundle with mihomo-server-user" >&2
     exit 1
-}
+fi
 
 # Inherited host proxy settings (often 127.0.0.1) are wrong inside the container.
 no_proxy_args=()
@@ -46,11 +46,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for _ in $(seq 1 60); do
+# Systemd state for CI logs, where the container is gone after a failure.
+diagnose() {
+    echo "== container diagnostics"
+    "$engine" exec "$name" systemctl --failed --no-pager || true
+    local user uid
+    for user in alice bob carol; do
+        uid="$("$engine" exec "$name" id -u "$user")" || continue
+        "$engine" exec "$name" systemctl status "user@$uid.service" "user-runtime-dir@$uid.service" \
+            --no-pager -l || true
+    done
+    "$engine" exec "$name" journalctl -b --no-pager -n 200 || true
+}
+
+booted=0
+for _ in $(seq 1 120); do
     state="$("$engine" exec "$name" systemctl is-system-running 2>/dev/null || true)"
-    case "$state" in running | degraded) break ;; esac
+    case "$state" in running | degraded) booted=1 && break ;; esac
     sleep 0.5
 done
+if [ "$booted" != 1 ]; then
+    echo "error: container systemd did not finish booting (state: ${state:-unknown})" >&2
+    diagnose
+    exit 1
+fi
 
 "$engine" exec "$name" mkdir -p /work
 "$engine" cp "$bundle" "$name:/work/bundle"
@@ -60,4 +79,7 @@ done
 [ -z "$profile" ] || "$engine" cp "$profile" "$name:/work/profile.yaml"
 "$engine" exec "$name" chmod 755 /usr/local/bin/msapi /work/inside.sh
 
-"$engine" exec "$name" /work/inside.sh
+"$engine" exec "$name" /work/inside.sh || {
+    diagnose
+    exit 1
+}
