@@ -253,6 +253,10 @@ previous release are kept), `/opt/mihomo-server/current` (atomic link),
   device `ms<uid>`, `include-uid: [uid]`, unique policy-routing table/rule
   indexes and a unique fake-IP /22 in `198.19.0.0/16`. `auto-redirect` is
   disabled. Without the capable core, enabling TUN is rejected before reload.
+- A per-user TUN cannot see DNS answered by a shared resolver such as
+  systemd-resolved, so with TUN enabled the sniffer is turned on and
+  `parse-pure-ip` is forced; domains are recovered from TLS/HTTP/QUIC traffic.
+  An explicit `sniffer.enable: false` is respected.
 - Group membership applies to new logins. For a lingering user whose manager
   is already running: `systemctl restart user@<uid>.service`.
 - Membership of `mihomo-tun` is the security boundary: a member can run the

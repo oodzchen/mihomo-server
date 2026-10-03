@@ -101,6 +101,16 @@ data:      $DATA_DIR
 EOF
 }
 
+# Started: token and slot exist (possibly from an earlier run) and the
+# management port is listening again.
+ready() {
+    [ -s "$DATA_DIR/management-token" ] || return 1
+    n="$(slot)" || return 1
+    command -v ss >/dev/null 2>&1 || return 0
+    addr="$(listen_addr "$n")"
+    ss -Hltn "sport = :${addr##*:}" 2>/dev/null | grep -q .
+}
+
 init() {
     args=""
     while [ $# -gt 0 ]; do
@@ -118,7 +128,8 @@ init() {
             *) die "unknown init option: $1" ;;
         esac
     done
-    systemctl --user cat "$UNIT" >/dev/null 2>&1 \
+    # Not `systemctl cat`: with output discarded it can exit 141 (SIGPIPE).
+    [ "$(systemctl --user show -p LoadState --value "$UNIT" 2>/dev/null)" = loaded ] \
         || die "no system-wide $UNIT unit found; ask the administrator to run install.sh --system"
     if [ -n "$args" ]; then
         mkdir -p "$(dirname "$ENV_FILE")"
@@ -128,7 +139,7 @@ init() {
     systemctl --user enable "$UNIT" >/dev/null 2>&1
     systemctl --user restart "$UNIT"
     tries=0
-    until [ -s "$DATA_DIR/management-token" ] && slot >/dev/null; do
+    until ready; do
         tries=$((tries + 1))
         if [ "$tries" -gt 60 ] || ! systemctl --user is-active --quiet "$UNIT"; then
             journalctl --user -u "$UNIT" -o cat -n 20 >&2 || true

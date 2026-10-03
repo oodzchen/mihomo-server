@@ -53,7 +53,8 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task:** Multi-user system installation, step 3 of 4 — scripted end-to-end test in a privileged systemd container (`scripts/tests/multiuser/run.sh`, 59 checks; also a CI job): two concurrent TUN users with real nodes, per-UID routing and DNS, core crash recovery, upgrade restart, stop/uninstall rule cleanup (see "Increment: multi-user system installation").
+**Latest completed task:** Multi-user system installation, step 4 of 4 — README, fixes from a one-off QEMU/KVM acceptance run (sniffing for TUN behind shared resolvers, TUN start settle, helper unit check/readiness, SELinux relabel); further acceptance is manual on real machines (see "Increment: multi-user system installation").
+**Previous completed task:** Multi-user step 3 — scripted end-to-end test in a privileged systemd container (`scripts/tests/multiuser/run.sh`, 59 checks; also a CI job): two concurrent TUN users with real nodes, per-UID routing and DNS, core crash recovery, upgrade restart, stop/uninstall rule cleanup (see "Increment: multi-user system installation").
 **Previous completed task:** Multi-user step 2 — `install_remote.sh --system` (shared versioned bundle, `mihomo-tun` group with a file-capability core, slot registry, global user unit, upgrade/uninstall) and the per-user `mihomo-server-user` helper, verified in a privileged systemd container with two users and real-node TUN traffic (see "Increment: multi-user system installation").
 **Previous completed task:** Multi-user step 1 — service-side per-user isolation (`--multi-user`).
 **Previous completed task:** GitHub Actions release pipeline (`ci.yml` full tests on every push, `release.yml` tarball bundle on `v*` tags), pinned core file `deploy/core-pin.json`, and remote one-shot installer `scripts/install_remote.sh` with locally verified end-to-end install (see "Increment: CI release pipeline and remote installer").
@@ -61,7 +62,7 @@ Do not resume backup work based on an older chapter's next-task paragraph.
 **Previous completed task:** Persistent login. The web UI caches the management token in sessionStorage and re-validates it on load, so refreshing keeps the session; logout/401 clears it.  The e2e restart test now asserts refresh keeps the session and logout+refresh returns to the login page.
 
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
-**Next implementation task:** Multi-user step 4 — README/user documentation for the system installation, then a QEMU/KVM VM acceptance run (real boot, logins, linger).
+**Next implementation task:** User's manual acceptance of the multi-user installation on real machines; open item: occasional TUN start failure for one user right after boot (below).
 
 ## Increment: multi-user system installation
 
@@ -75,8 +76,8 @@ Plan and status:
 1. **Service-side isolation — done** `[Implemented; Linux verified with real core and ./data nodes]`.
 2. **Installer `--system` mode and `mihomo-server-user` helper — done** `[Implemented; verified in a privileged systemd container]`.
 3. **Container end-to-end test — done** `[Implemented; Linux verified, also a CI job]`.
-   A QEMU/KVM VM acceptance run follows with step 4.
-4. README/DEPLOYMENT documentation — pending.
+4. **Documentation and VM findings — done.** Automated VM acceptance was dropped
+   at the user's request (too slow to iterate); acceptance continues manually.
 
 ### Step 1 design
 
@@ -217,7 +218,7 @@ Without a profile a DIRECT-only fake-IP profile is used, so CI needs no
 `./data`. `KEEP=1` keeps the container. CI job `multiuser-e2e` packages a debug
 service with the pinned core and runs it.
 
-`inside.sh` (59 checks): users alice and bob (TUN group) and carol (not).
+`inside.sh` (61 checks): users alice and bob (TUN group) and carol (not).
 
 - Install: TUN core caps and `750 root:mihomo-tun`, no group/other-writable
   bundle file, registry `1777 root`, unit, helper, group membership.
@@ -249,6 +250,43 @@ Verification: three consecutive runs with the real `./data` subscription,
 one DIRECT-only run with the release bundle and one CI-shaped run (debug
 service, DIRECT-only) — 59/59 each. The first draft's carol check had a shell
 syntax error (fixed); no product failure was observed.
+
+### Step 4: documentation and findings from a real VM
+
+README documents the system installation, `mihomo-server-user`, slot ports and
+TUN group. A one-off QEMU/KVM Fedora 44 Cloud run of the container suite plus
+reboot/login checks found issues the container could not:
+
+- **Shared resolvers bypass per-user TUN DNS.** With systemd-resolved, apps
+  query 127.0.0.53 and `systemd-resolve` sends the upstream queries, so a
+  user's TUN never sees them: no fake-IP, rules see plain (possibly poisoned)
+  IPs. The overlay now, when `tun.enable` is true, ensures `sniffer` is enabled
+  (default HTTP/TLS/QUIC sniffing with `override-destination` if absent) and
+  forces `sniffer.parse-pure-ip: true`; an explicit `sniffer.enable: false` is
+  kept. The e2e now checks that each TUN user's core logs the connection by
+  domain; fake-IP checks are skipped behind a local stub resolver.
+- **TUN start race.** Mihomo enables TUN asynchronously after its API is ready;
+  a core started with TUN already enabled (boot, upgrade) failed the single
+  `/configs` check. `verify_proxy_ports` now polls for up to 15 s when TUN is
+  expected (failing early if the core exits).
+- **Helper unit check.** `systemctl --user cat` with discarded output exited
+  141 (SIGPIPE) on the VM; the helper uses `show -p LoadState`. `init` now also
+  waits for the management port, since a token from an earlier run exists
+  before the restarted service listens.
+- **SELinux labels.** `cp -a` kept `default_t` under `/opt`; the installer runs
+  `restorecon` (file capabilities are a separate xattr and survive).
+- Test-environment only: OpenSSH PerSourcePenalties locked out the probing
+  host when the caller's `~/.ssh/config` offered extra identities.
+
+VM results: one full pass (59 checks + reboot persistence without login, a real
+SSH login session's traffic in the user's TUN, cleanup). A second run under heavy
+host load had one user's TUN fail to come up after reboot while another user's
+did; not yet diagnosed (likely the network not being ready when lingering user
+managers start — user units cannot order after the system's
+network-online.target). Open item for manual testing.
+
+Final verification: Rust 434 passed / 0 failed / 92 ignored; live multi-user
+test passes; container e2e 61/61 with the real `./data` subscription.
 
 ## Code-quality refactor (behavior-preserving)
 

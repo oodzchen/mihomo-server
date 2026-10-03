@@ -197,16 +197,41 @@ impl Actor {
     }
 
     pub(super) async fn verify_proxy_ports(&mut self, path: &Path) -> Result<()> {
+        // Mihomo brings TUN up asynchronously after its API is ready (it may wait
+        // for the default interface), so an expected TUN is polled before failing.
+        const TUN_SETTLE: Duration = Duration::from_secs(15);
         let config = read_config(path).await?;
-        let core = tokio::select! {
-            biased;
-            _ = closing(&mut self.shutdown) => bail!("listener verification cancelled during shutdown"),
-            result = timeout(self.options.policy.probe_timeout, self.client.get_base_config()) => {
-                result.context("listener verification timed out")??
+        let tun_expected = config
+            .get("tun")
+            .and_then(|tun| tun.get("enable"))
+            .and_then(serde_yaml_ng::Value::as_bool)
+            == Some(true);
+        let deadline = Instant::now() + TUN_SETTLE;
+        loop {
+            let core = tokio::select! {
+                biased;
+                _ = closing(&mut self.shutdown) => bail!("listener verification cancelled during shutdown"),
+                result = timeout(self.options.policy.probe_timeout, self.client.get_base_config()) => {
+                    result.context("listener verification timed out")??
+                }
+            };
+            crate::proxy_access::verify_ports(&config, &core)?;
+            match crate::native_tun::verify(&config, &core) {
+                Err(_) if tun_expected && Instant::now() < deadline => {}
+                result => return result,
             }
-        };
-        crate::proxy_access::verify_ports(&config, &core)?;
-        crate::native_tun::verify(&config, &core)
+            if let Some(process) = self.process.as_mut() {
+                ensure!(
+                    process.child.try_wait()?.is_none(),
+                    "Mihomo exited while TUN was starting"
+                );
+            }
+            tokio::select! {
+                biased;
+                _ = closing(&mut self.shutdown) => bail!("TUN verification cancelled during shutdown"),
+                _ = sleep(Duration::from_millis(250)) => {}
+            }
+        }
     }
 
     pub(super) async fn start_core(&mut self) -> Result<()> {

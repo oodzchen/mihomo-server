@@ -96,6 +96,25 @@ fake_ip_in() {
     python3 -c 'import ipaddress,sys; sys.exit(ipaddress.ip_address(sys.argv[1]) not in ipaddress.ip_network(f"198.19.{4*int(sys.argv[2])}.0/22"))' \
         "${address:-0.0.0.0}" "$slot" || { echo "      got '$address' for slot $slot"; return 1; }
 }
+# Shared local stub resolvers (systemd-resolved) answer for every user, so a
+# per-user TUN never sees those DNS queries; sniffing recovers the domain.
+stub_resolver() { grep -q '^nameserver 127\.' /etc/resolv.conf; }
+check_unless_stub() {
+    if stub_resolver; then
+        echo "SKIP  $1 (local stub resolver)"
+    else
+        check "$@"
+    fi
+}
+# The user's core routed their connection by domain (fake-IP or sniffing).
+sees_domain() {
+    fetch "$1" || return 1
+    api "$1" logs | python3 -c '
+import json, sys
+logs = json.load(sys.stdin)
+logs = logs if isinstance(logs, list) else logs.get("logs", [])
+sys.exit(not any("--> www.gstatic.com:443" in str(entry) for entry in logs[-300:]))'
+}
 not_fake_ip() {
     local address
     address="$(as "$1" getent ahostsv4 www.example.com | awk 'NR==1 {print $1}')"
@@ -134,6 +153,7 @@ profile_import() {
         python3 - "$request" <<'EOF'
 import json, sys
 yaml = """mode: rule
+log-level: info
 dns: {enable: true, enhanced-mode: fake-ip, nameserver: [223.5.5.5, 1.1.1.1]}
 proxies: []
 proxy-groups: [{name: Main, type: select, proxies: [DIRECT]}]
@@ -147,131 +167,157 @@ EOF
     uid="$(api "$user" import_profile "@$request" | python3 -c 'import json,sys; print(json.load(sys.stdin)["uid"])')" || return 1
     api "$user" select_profile "{\"uid\":\"$uid\"}" >/dev/null
 }
-TUN_ON='{"runtime":{"tun":{"enable":true,"stack":"mixed","auto-route":true,"auto-detect-interface":true,"dns-hijack":["any:53"]}}}'
-
-# ---------------------------------------------------------------- install
-echo "== system install"
-bash /work/install.sh --system --bundle /work/bundle --tun-user alice --tun-user bob >/tmp/install.log 2>&1 \
-    || { cat /tmp/install.log; fatal "system install failed"; }
-TUN_CORE=/opt/mihomo-server/current/resources/core/verge-mihomo-tun
-check "tun core has file capabilities" bash -c "getcap $TUN_CORE | grep -q 'cap_net_admin'"
-check "tun core is root:mihomo-tun 0750" test "$(stat -c '%a %U:%G' $TUN_CORE)" = "750 root:mihomo-tun"
-check "bundle is not writable by users" bash -c '! find /opt/mihomo-server/releases -perm /022 -not -type l | grep -q .'
-check "slot registry is root 1777" test "$(stat -c '%a %U' /var/lib/mihomo-server/slots)" = "1777 root"
-check "global user unit installed" test -f /etc/systemd/user/mihomo-server.service
-check "helper on PATH" test -x /usr/local/bin/mihomo-server-user
-check "alice and bob in TUN group, carol not" bash -c \
-    'id -nG alice | grep -qw mihomo-tun && id -nG bob | grep -qw mihomo-tun && ! id -nG carol | grep -qw mihomo-tun'
-
-# Linger after the group change, so each user manager starts with its groups.
-loginctl enable-linger alice bob carol
-for user in alice bob carol; do
-    wait_for 40 test -S "/run/user/$(id -u $user)/bus" || fatal "$user manager did not start"
-done
-
-# ---------------------------------------------------------------- per-user init
-echo "== per-user init"
-for user in alice bob carol; do
-    as "$user" mihomo-server-user init >"/tmp/init-$user.log" 2>&1 \
-        || { cat "/tmp/init-$user.log"; fatal "$user init failed"; }
-done
-check "three distinct slots" test "$(find /var/lib/mihomo-server/slots -type f | wc -l)" = 3
-for user in alice bob carol; do
-    check "$user management + mixed ports listen" bash -c \
-        "ss -ltn | grep -q '127.0.0.1:$(port $user) ' && ss -ltn | grep -q ':$(($(port $user) + 1)) '"
-done
-check "alice init reports TUN available" grep -q 'tun:.*available ' /tmp/init-alice.log
-check "carol init reports TUN unavailable" grep -q 'tun:.*unavailable' /tmp/init-carol.log
-check "alice runs the TUN core" bash -c "pgrep -u alice -x verge-mihomo-tu >/dev/null"
-check "carol runs the plain core" bash -c "pgrep -u carol -x verge-mihomo >/dev/null"
-
-# ---------------------------------------------------------------- concurrent TUN
-echo "== concurrent TUN for alice and bob"
-for user in alice bob carol; do
-    profile_import "$user" || fatal "$user profile import failed"
-done
-for user in alice bob; do
-    api "$user" set_settings "$TUN_ON" >/dev/null || fatal "$user TUN enable failed"
-done
-check "carol TUN enable is rejected" carol_tun_rejected
-check "carol core still running after rejection" bash -c "pgrep -u carol -x verge-mihomo >/dev/null"
-check "no TUN device for carol" bash -c "! ip link show $(dev carol) >/dev/null 2>&1"
-check "alice TUN device up" link_up "$(dev alice)"
-check "bob TUN device up" link_up "$(dev bob)"
-A_ADDR="$(ip -4 -o addr show "$(dev alice)" | awk '{print $4}')"
-B_ADDR="$(ip -4 -o addr show "$(dev bob)" | awk '{print $4}')"
-check "TUN addresses are distinct slot /30s ($A_ADDR, $B_ADDR)" bash -c \
-    "[ '$A_ADDR' != '$B_ADDR' ] && [[ '$A_ADDR' == 198.19.*/30 ]] && [[ '$B_ADDR' == 198.19.*/30 ]]"
-A_RULES="$(slot_rules "$(slot_of alice)")"
-B_RULES="$(slot_rules "$(slot_of bob)")"
-check "each TUN user owns rules in its slot range ($A_RULES, $B_RULES)" test "$A_RULES" -gt 0 -a "$B_RULES" -gt 0
-check "kernel routes alice via her TUN" routes_via alice "$(dev alice)"
-check "kernel routes bob via his TUN" routes_via bob "$(dev bob)"
-check "kernel routes carol directly" routes_direct carol
-check "kernel routes root directly" routes_direct root
-check "alice traffic uses only alice's TUN" uses_tun alice alice
-check "bob traffic uses only bob's TUN" uses_tun bob bob
-check "carol traffic uses no TUN" uses_tun carol none
-check "root traffic uses no TUN" uses_tun root none
-check "carol proxy port works" fetch carol -x "http://127.0.0.1:$(($(port carol) + 1))"
-check "alice DNS answers from alice's fake-IP range" fake_ip_in alice
-check "bob DNS answers from bob's fake-IP range" fake_ip_in bob
-check "carol DNS is not hijacked into a slot" not_fake_ip carol
 parallel() {
     fetch alice & local a=$!
     fetch bob & local b=$!
     wait $a && wait $b
 }
-check "alice and bob fetch in parallel" parallel
+TUN_ON='{"runtime":{"tun":{"enable":true,"stack":"mixed","auto-route":true,"auto-detect-interface":true,"dns-hijack":["any:53"]}}}'
 
-# ---------------------------------------------------------------- core crash
-echo "== core crash recovery"
-OLD_CORE="$(core_pid bob)"
-kill -KILL "$OLD_CORE"
-recovered() { local p; p="$(core_pid bob)"; [ -n "$p" ] && [ "$p" != "$OLD_CORE" ] && link_up "$(dev bob)"; }
-check "bob core restarted with TUN after SIGKILL" wait_for 60 recovered
-sleep 2
-check "bob rule count unchanged after crash ($B_RULES)" test "$(slot_rules "$(slot_of bob)")" = "$B_RULES"
-check "bob traffic still uses only bob's TUN" uses_tun bob bob
-check "alice unaffected by bob's crash" uses_tun alice alice
+phase_install() {
+    # ---------------------------------------------------------------- install
+    echo "== system install"
+    bash /work/install.sh --system --bundle /work/bundle --tun-user alice --tun-user bob >/tmp/install.log 2>&1 \
+        || { cat /tmp/install.log; fatal "system install failed"; }
+    TUN_CORE=/opt/mihomo-server/current/resources/core/verge-mihomo-tun
+    check "tun core has file capabilities" bash -c "getcap $TUN_CORE | grep -q 'cap_net_admin'"
+    check "tun core is root:mihomo-tun 0750" test "$(stat -c '%a %U:%G' $TUN_CORE)" = "750 root:mihomo-tun"
+    check "bundle is not writable by users" bash -c '! find /opt/mihomo-server/releases -perm /022 -not -type l | grep -q .'
+    check "slot registry is root 1777" test "$(stat -c '%a %U' /var/lib/mihomo-server/slots)" = "1777 root"
+    check "global user unit installed" test -f /etc/systemd/user/mihomo-server.service
+    check "helper on PATH" test -x /usr/local/bin/mihomo-server-user
+    check "alice and bob in TUN group, carol not" bash -c \
+        'id -nG alice | grep -qw mihomo-tun && id -nG bob | grep -qw mihomo-tun && ! id -nG carol | grep -qw mihomo-tun'
 
-# ---------------------------------------------------------------- upgrade
-echo "== upgrade restarts running instances"
-OLD_A="$(pgrep -u alice -x mihomo-server)"
-OLD_C="$(pgrep -u carol -x mihomo-server)"
-cp -a /work/bundle /work/bundle-next
-bash /work/install.sh --system --bundle /work/bundle-next >/tmp/upgrade.log 2>&1 \
-    || { cat /tmp/upgrade.log; fatal "upgrade failed"; }
-check "current points at the new release" test "$(readlink /opt/mihomo-server/current)" = releases/bundle-next
-check "previous release kept" test -d /opt/mihomo-server/releases/bundle
-restarted() { local p; p="$(pgrep -u "$1" -x mihomo-server)"; [ -n "$p" ] && [ "$p" != "$2" ]; }
-check "alice instance restarted" wait_for 40 restarted alice "$OLD_A"
-check "carol instance restarted" wait_for 40 restarted carol "$OLD_C"
-check "alice runs from the new release" wait_for 40 bash -c \
-    "readlink /proc/\$(pgrep -u alice -x mihomo-server)/exe | grep -q /releases/bundle-next/"
-check "alice TUN back after upgrade" wait_for 60 link_up "$(dev alice)"
-check "bob TUN back after upgrade" wait_for 60 link_up "$(dev bob)"
-sleep 2
-check "alice rules not duplicated after upgrade" test "$(slot_rules "$(slot_of alice)")" = "$A_RULES"
-check "alice traffic uses only alice's TUN after upgrade" uses_tun alice alice
-check "bob traffic uses only bob's TUN after upgrade" uses_tun bob bob
+    # Linger after the group change, so each user manager starts with its groups.
+    loginctl enable-linger alice bob carol
+    for user in alice bob carol; do
+        wait_for 40 test -S "/run/user/$(id -u $user)/bus" || fatal "$user manager did not start"
+    done
+}
 
-# ---------------------------------------------------------------- disable + cleanup
-echo "== disable and uninstall cleanup"
-as alice mihomo-server-user disable >/dev/null
-check "alice TUN device removed on stop" wait_for 40 bash -c "! ip link show $(dev alice) >/dev/null 2>&1"
-check "alice slot rules removed on stop" test "$(slot_rules "$(slot_of alice)")" = 0
-check "alice now routes directly" routes_direct alice
-check "bob unaffected by alice stopping" uses_tun bob bob
-check "alice keeps her slot after disable" test -n "$(slot_of alice)"
+phase_init() {
+    # ---------------------------------------------------------------- per-user init
+    echo "== per-user init"
+    for user in alice bob carol; do
+        as "$user" mihomo-server-user init >"/tmp/init-$user.log" 2>&1 \
+            || { cat "/tmp/init-$user.log"; fatal "$user init failed"; }
+    done
+    check "three distinct slots" test "$(find /var/lib/mihomo-server/slots -type f | wc -l)" = 3
+    for user in alice bob carol; do
+        check "$user management + mixed ports listen" bash -c \
+            "ss -ltn | grep -q '127.0.0.1:$(port $user) ' && ss -ltn | grep -q ':$(($(port $user) + 1)) '"
+    done
+    check "alice init reports TUN available" grep -q 'tun:.*available ' /tmp/init-alice.log
+    check "carol init reports TUN unavailable" grep -q 'tun:.*unavailable' /tmp/init-carol.log
+    check "alice runs the TUN core" bash -c "pgrep -u alice -x verge-mihomo-tu >/dev/null"
+    check "carol runs the plain core" bash -c "pgrep -u carol -x verge-mihomo >/dev/null"
+}
 
-bash /work/install.sh --system --uninstall >/tmp/uninstall.log 2>&1 || { cat /tmp/uninstall.log; fatal "uninstall failed"; }
-check "no instances left" wait_for 40 bash -c "! pgrep -x mihomo-server >/dev/null && ! pgrep verge-mihomo >/dev/null"
-check "all TUN devices removed" bash -c "! ip -o link | grep -q ': ms[0-9]'"
-check "only default policy rules remain" only_default_rules
-check "bundle, unit and helper removed" bash -c \
-    "[ ! -e /opt/mihomo-server ] && [ ! -e /etc/systemd/user/mihomo-server.service ] && [ ! -e /usr/local/bin/mihomo-server-user ]"
-check "users' data kept" bash -c "[ -s /home/alice/.local/share/mihomo-server/management-token ] && [ -s /home/bob/.local/share/mihomo-server/management-token ]"
+tun_enable() {
+    # ---------------------------------------------------------------- concurrent TUN
+    echo "== concurrent TUN for alice and bob"
+    for user in alice bob carol; do
+        profile_import "$user" || fatal "$user profile import failed"
+    done
+    for user in alice bob; do
+        api "$user" set_settings "$TUN_ON" >/dev/null || fatal "$user TUN enable failed"
+    done
+    check "carol TUN enable is rejected" carol_tun_rejected
+    check "carol core still running after rejection" bash -c "pgrep -u carol -x verge-mihomo >/dev/null"
+}
+
+tun_assert() {
+    # ---------------------------------------------------------------- TUN assertions
+    check "no TUN device for carol" bash -c "! ip link show $(dev carol) >/dev/null 2>&1"
+    check "alice TUN device up" link_up "$(dev alice)"
+    check "bob TUN device up" link_up "$(dev bob)"
+    A_ADDR="$(ip -4 -o addr show "$(dev alice)" | awk '{print $4}')"
+    B_ADDR="$(ip -4 -o addr show "$(dev bob)" | awk '{print $4}')"
+    check "TUN addresses are distinct slot /30s ($A_ADDR, $B_ADDR)" bash -c \
+        "[ '$A_ADDR' != '$B_ADDR' ] && [[ '$A_ADDR' == 198.19.*/30 ]] && [[ '$B_ADDR' == 198.19.*/30 ]]"
+    A_RULES="$(slot_rules "$(slot_of alice)")"
+    B_RULES="$(slot_rules "$(slot_of bob)")"
+    check "each TUN user owns rules in its slot range ($A_RULES, $B_RULES)" test "$A_RULES" -gt 0 -a "$B_RULES" -gt 0
+    check "kernel routes alice via her TUN" routes_via alice "$(dev alice)"
+    check "kernel routes bob via his TUN" routes_via bob "$(dev bob)"
+    check "kernel routes carol directly" routes_direct carol
+    check "kernel routes root directly" routes_direct root
+    check "alice traffic uses only alice's TUN" uses_tun alice alice
+    check "bob traffic uses only bob's TUN" uses_tun bob bob
+    check "carol traffic uses no TUN" uses_tun carol none
+    check "root traffic uses no TUN" uses_tun root none
+    check "carol proxy port works" fetch carol -x "http://127.0.0.1:$(($(port carol) + 1))"
+    check "alice's core sees the domain of her connection" sees_domain alice
+    check "bob's core sees the domain of his connection" sees_domain bob
+    check_unless_stub "alice DNS answers from alice's fake-IP range" fake_ip_in alice
+    check_unless_stub "bob DNS answers from bob's fake-IP range" fake_ip_in bob
+    check "carol DNS is not hijacked into a slot" not_fake_ip carol
+    check "alice and bob fetch in parallel" parallel
+}
+
+phase_crash() {
+    # ---------------------------------------------------------------- core crash
+    echo "== core crash recovery"
+    OLD_CORE="$(core_pid bob)"
+    kill -KILL "$OLD_CORE"
+    recovered() { local p; p="$(core_pid bob)"; [ -n "$p" ] && [ "$p" != "$OLD_CORE" ] && link_up "$(dev bob)"; }
+    check "bob core restarted with TUN after SIGKILL" wait_for 60 recovered
+    sleep 2
+    check "bob rule count unchanged after crash ($B_RULES)" test "$(slot_rules "$(slot_of bob)")" = "$B_RULES"
+    check "bob traffic still uses only bob's TUN" uses_tun bob bob
+    check "alice unaffected by bob's crash" uses_tun alice alice
+}
+
+phase_upgrade() {
+    # ---------------------------------------------------------------- upgrade
+    echo "== upgrade restarts running instances"
+    OLD_A="$(pgrep -u alice -x mihomo-server)"
+    OLD_C="$(pgrep -u carol -x mihomo-server)"
+    cp -a /work/bundle /work/bundle-next
+    bash /work/install.sh --system --bundle /work/bundle-next >/tmp/upgrade.log 2>&1 \
+        || { cat /tmp/upgrade.log; fatal "upgrade failed"; }
+    check "current points at the new release" test "$(readlink /opt/mihomo-server/current)" = releases/bundle-next
+    check "previous release kept" test -d /opt/mihomo-server/releases/bundle
+    restarted() { local p; p="$(pgrep -u "$1" -x mihomo-server)"; [ -n "$p" ] && [ "$p" != "$2" ]; }
+    check "alice instance restarted" wait_for 40 restarted alice "$OLD_A"
+    check "carol instance restarted" wait_for 40 restarted carol "$OLD_C"
+    check "alice runs from the new release" wait_for 40 bash -c \
+        "readlink /proc/\$(pgrep -u alice -x mihomo-server)/exe | grep -q /releases/bundle-next/"
+    check "alice TUN back after upgrade" wait_for 60 link_up "$(dev alice)"
+    check "bob TUN back after upgrade" wait_for 60 link_up "$(dev bob)"
+    sleep 2
+    check "alice rules not duplicated after upgrade" test "$(slot_rules "$(slot_of alice)")" = "$A_RULES"
+    check "alice traffic uses only alice's TUN after upgrade" uses_tun alice alice
+    check "bob traffic uses only bob's TUN after upgrade" uses_tun bob bob
+}
+
+phase_cleanup() {
+    # ---------------------------------------------------------------- disable + cleanup
+    echo "== disable and uninstall cleanup"
+    as alice mihomo-server-user disable >/dev/null
+    check "alice TUN device removed on stop" wait_for 40 bash -c "! ip link show $(dev alice) >/dev/null 2>&1"
+    check "alice slot rules removed on stop" test "$(slot_rules "$(slot_of alice)")" = 0
+    check "alice now routes directly" routes_direct alice
+    check "bob unaffected by alice stopping" uses_tun bob bob
+    check "alice keeps her slot after disable" test -n "$(slot_of alice)"
+
+    bash /work/install.sh --system --uninstall >/tmp/uninstall.log 2>&1 || { cat /tmp/uninstall.log; fatal "uninstall failed"; }
+    check "no instances left" wait_for 40 bash -c "! pgrep -x mihomo-server >/dev/null && ! pgrep verge-mihomo >/dev/null"
+    check "all TUN devices removed" bash -c "! ip -o link | grep -q ': ms[0-9]'"
+    check "only default policy rules remain" only_default_rules
+    check "bundle, unit and helper removed" bash -c \
+        "[ ! -e /opt/mihomo-server ] && [ ! -e /etc/systemd/user/mihomo-server.service ] && [ ! -e /usr/local/bin/mihomo-server-user ]"
+    check "users' data kept" bash -c "[ -s /home/alice/.local/share/mihomo-server/management-token ] && [ -s /home/bob/.local/share/mihomo-server/management-token ]"
+}
+
+phase_install
+phase_init
+tun_enable
+tun_assert
+phase_crash
+phase_upgrade
+phase_cleanup
 
 echo
 echo "multi-user e2e: $PASS passed, $FAIL failed"

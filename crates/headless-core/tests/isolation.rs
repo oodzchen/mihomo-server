@@ -141,3 +141,34 @@ fn tun_without_dns_section_still_gets_a_unique_interface_address() -> Result<()>
     assert!(config["dns"].get("enable").is_none());
     Ok(())
 }
+
+#[test]
+fn enabled_tun_sniffs_pure_ip_connections() -> Result<()> {
+    let isolation = Isolation::new(1000, 0)?;
+    let runtime = RuntimeSettings::default();
+
+    // No sniffer: a default one is added because shared resolvers bypass TUN DNS.
+    let (config, changed) = isolation.apply(mapping("tun: {enable: true}")?, &runtime);
+    assert_eq!(config["sniffer"]["enable"].as_bool(), Some(true));
+    assert_eq!(config["sniffer"]["parse-pure-ip"].as_bool(), Some(true));
+    assert!(config["sniffer"]["sniff"]["TLS"]["ports"].is_sequence());
+    assert!(changed.iter().any(|field| field == "sniffer"));
+
+    // A subscription's sniffer keeps its settings but must parse pure IPs.
+    let (config, changed) = isolation.apply(
+        mapping("tun: {enable: true}\nsniffer: {enable: true, parse-pure-ip: false, skip-domain: [example.com]}")?,
+        &runtime,
+    );
+    assert_eq!(config["sniffer"]["parse-pure-ip"].as_bool(), Some(true));
+    assert_eq!(config["sniffer"]["skip-domain"][0].as_str(), Some("example.com"));
+    assert!(config["sniffer"].get("sniff").is_none());
+    assert_eq!(changed.iter().filter(|field| field.starts_with("sniffer")).count(), 1);
+
+    // An explicitly disabled sniffer and a disabled TUN are left alone.
+    let (config, _) = isolation.apply(mapping("tun: {enable: true}\nsniffer: {enable: false}")?, &runtime);
+    assert_eq!(config["sniffer"]["enable"].as_bool(), Some(false));
+    assert!(config["sniffer"].get("parse-pure-ip").is_none());
+    let (config, _) = isolation.apply(mapping("tun: {enable: false}")?, &runtime);
+    assert!(!config.contains_key("sniffer"));
+    Ok(())
+}

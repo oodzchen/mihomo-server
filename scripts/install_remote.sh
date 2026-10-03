@@ -179,6 +179,11 @@ system_install() {
     ' "$release/mihomo-server.service" > "$UNIT_DIR/$UNIT_NAME"
     chmod 644 "$UNIT_DIR/$UNIT_NAME"
     ln -sfn "$INSTALL_DIR/current/mihomo-server-user" "$BIN_DIR/mihomo-server-user"
+    # cp -a keeps the source's SELinux labels (often default_t); apply the policy's.
+    # File capabilities live in another xattr and are not affected.
+    if command -v restorecon >/dev/null 2>&1; then
+        restorecon -R "$INSTALL_DIR" "$SLOT_DIR" "$UNIT_DIR/$UNIT_NAME" "$BIN_DIR/mihomo-server-user" 2>/dev/null || true
+    fi
 
     # Running instances move to the new bundle; stopped ones stay stopped.
     each_user_manager daemon-reload

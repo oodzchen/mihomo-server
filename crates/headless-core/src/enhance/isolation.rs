@@ -3,8 +3,9 @@
 //! Each user owns one slot. The slot selects private listener ports, a TUN
 //! device, policy-routing indexes and fake-IP ranges, so several Mihomo
 //! instances on one host never collide; `include-uid` limits each TUN to its
-//! owner's traffic. Runs after finalization, so it wins over subscriptions,
-//! scripts and manual enhancements.
+//! owner's traffic, with sniffing enabled for the plain-IP connections a shared
+//! system resolver produces. Runs after finalization, so it wins over
+//! subscriptions, scripts and manual enhancements.
 use std::net::Ipv4Addr;
 
 use anyhow::{Result, ensure};
@@ -175,10 +176,41 @@ impl Isolation {
                 tun.insert("auto-redirect".into(), false.into());
                 changed.push("tun.auto-redirect".into());
             }
+            let enabled = tun.get("enable").and_then(Value::as_bool) == Some(true);
             config.insert("tun".into(), tun.into());
+            if enabled {
+                sniff_pure_ip(&mut config, &mut changed);
+            }
         }
         (config, changed)
     }
+}
+
+/// A per-user TUN cannot hijack DNS answered by a shared resolver
+/// (systemd-resolved, nscd), so its connections arrive as plain IPs. Sniffing
+/// them recovers the domain for rules and remote resolution. An explicitly
+/// disabled sniffer is kept.
+fn sniff_pure_ip(config: &mut Mapping, changed: &mut Vec<String>) {
+    let mut sniffer = section(config, "sniffer");
+    if sniffer.get("enable").and_then(Value::as_bool) != Some(false) {
+        if sniffer.is_empty() {
+            sniffer = serde_yaml_ng::from_str(
+                "{enable: true, override-destination: true, sniff: {HTTP: {ports: [80, 8080-8880]}, \
+                 TLS: {ports: [443, 8443]}, QUIC: {ports: [443, 8443]}}}",
+            )
+            .expect("static sniffer mapping");
+            changed.push("sniffer".into());
+        }
+        set(&mut sniffer, "enable", true.into(), changed, "sniffer.enable");
+        set(
+            &mut sniffer,
+            "parse-pure-ip",
+            true.into(),
+            changed,
+            "sniffer.parse-pure-ip",
+        );
+    }
+    config.insert("sniffer".into(), sniffer.into());
 }
 
 fn section(config: &mut Mapping, name: &str) -> Mapping {
