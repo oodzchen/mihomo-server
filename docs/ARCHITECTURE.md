@@ -53,14 +53,15 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task:** Multi-user system installation, step 2 of 4 — `install_remote.sh --system` (shared versioned bundle, `mihomo-tun` group with a file-capability core, slot registry, global user unit, upgrade/uninstall) and the per-user `mihomo-server-user` helper, verified in a privileged systemd container with two users and real-node TUN traffic (see "Increment: multi-user system installation").
+**Latest completed task:** Multi-user system installation, step 3 of 4 — scripted end-to-end test in a privileged systemd container (`scripts/tests/multiuser/run.sh`, 59 checks; also a CI job): two concurrent TUN users with real nodes, per-UID routing and DNS, core crash recovery, upgrade restart, stop/uninstall rule cleanup (see "Increment: multi-user system installation").
+**Previous completed task:** Multi-user step 2 — `install_remote.sh --system` (shared versioned bundle, `mihomo-tun` group with a file-capability core, slot registry, global user unit, upgrade/uninstall) and the per-user `mihomo-server-user` helper, verified in a privileged systemd container with two users and real-node TUN traffic (see "Increment: multi-user system installation").
 **Previous completed task:** Multi-user step 1 — service-side per-user isolation (`--multi-user`).
 **Previous completed task:** GitHub Actions release pipeline (`ci.yml` full tests on every push, `release.yml` tarball bundle on `v*` tags), pinned core file `deploy/core-pin.json`, and remote one-shot installer `scripts/install_remote.sh` with locally verified end-to-end install (see "Increment: CI release pipeline and remote installer").
 **Previous completed task:** Code-quality refactor step 4 — real module directories for backup, core release/upgrade and Geo (see below).
 **Previous completed task:** Persistent login. The web UI caches the management token in sessionStorage and re-validates it on load, so refreshing keeps the session; logout/401 clears it.  The e2e restart test now asserts refresh keeps the session and logout+refresh returns to the login page.
 
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
-**Next implementation task:** Multi-user step 3 — scripted container end-to-end test (`scripts/tests/multiuser/`): two TUN users at once with real nodes, per-UID traffic separation, upgrade restart, rule cleanup on stop/uninstall.
+**Next implementation task:** Multi-user step 4 — README/user documentation for the system installation, then a QEMU/KVM VM acceptance run (real boot, logins, linger).
 
 ## Increment: multi-user system installation
 
@@ -73,8 +74,8 @@ Plan and status:
 
 1. **Service-side isolation — done** `[Implemented; Linux verified with real core and ./data nodes]`.
 2. **Installer `--system` mode and `mihomo-server-user` helper — done** `[Implemented; verified in a privileged systemd container]`.
-3. Container (privileged systemd) end-to-end test: two users, concurrent TUN,
-   real nodes, rule cleanup — pending. A QEMU/KVM VM acceptance run follows.
+3. **Container end-to-end test — done** `[Implemented; Linux verified, also a CI job]`.
+   A QEMU/KVM VM acceptance run follows with step 4.
 4. README/DEPLOYMENT documentation — pending.
 
 ### Step 1 design
@@ -205,6 +206,49 @@ Verification (step 2), privileged Fedora 44 systemd container
   the user's deployed instance already holds 127.0.0.1:7890 (journal:
   "mixed-port listener mismatch: configured 7890, core reports 0"), which the
   test's real `./data` settings also use; unrelated to this change.
+
+### Step 3: container end-to-end test
+
+`scripts/tests/multiuser/run.sh BUNDLE_DIR [PROFILE_YAML]` builds
+`Containerfile` (Fedora 44 + systemd), starts it `--privileged
+--cgroupns=private` with inherited host proxy variables blanked, copies the
+bundle, installer, `inside.sh` and `api.py` in, and runs `inside.sh` as root.
+Without a profile a DIRECT-only fake-IP profile is used, so CI needs no
+`./data`. `KEEP=1` keeps the container. CI job `multiuser-e2e` packages a debug
+service with the pinned core and runs it.
+
+`inside.sh` (59 checks): users alice and bob (TUN group) and carol (not).
+
+- Install: TUN core caps and `750 root:mihomo-tun`, no group/other-writable
+  bundle file, registry `1777 root`, unit, helper, group membership.
+- Init (lingering managers started after the group change): three distinct
+  slots, management and mixed ports listening, `info` TUN state, TUN core for
+  alice, plain core for carol.
+- Concurrent TUN for alice and bob with the subscription selected: carol's TUN
+  enable rejected ("TUN group") with her core still running and no device;
+  distinct `198.19.*/30` addresses; rules in each slot range;
+  `ip route get … uid` sends alice/bob into their own device and carol/root
+  directly; a 2 MB download per user lands only on the expected TUN (none for
+  carol/root); carol's proxy port works; alice/bob DNS answers come from their
+  own slot's fake-IP /22 and carol's are not hijacked; parallel fetches.
+- Crash: SIGKILL of bob's core → service recovers it with TUN, the slot's
+  rule count is unchanged (no stale duplicates), alice unaffected.
+- Upgrade: reinstall a renamed bundle → `current` switched, previous kept,
+  running instances restarted from the new release, TUN back without
+  duplicated rules, routing still per user.
+- Stop/uninstall: `mihomo-server-user disable` removes alice's device and
+  slot rules while bob keeps working and alice keeps her slot; `--system
+  --uninstall` leaves no processes, no `ms*` devices, only the default policy
+  rules (0/32766/32767), and keeps users' data.
+
+Measurement note: per-device `tx_bytes` was too noisy (fresh TUN devices emit
+IPv6 RS/MLD packets), so traffic attribution uses a 2 MB download and the
+devices' `rx_bytes` (≥1.5 MB on the expected device, <200 kB elsewhere).
+
+Verification: three consecutive runs with the real `./data` subscription,
+one DIRECT-only run with the release bundle and one CI-shaped run (debug
+service, DIRECT-only) — 59/59 each. The first draft's carol check had a shell
+syntax error (fixed); no product failure was observed.
 
 ## Code-quality refactor (behavior-preserving)
 
