@@ -53,7 +53,34 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
-**Latest completed task:** Multi-user system installation, step 4 of 4 — README, fixes from a one-off QEMU/KVM acceptance run (sniffing for TUN behind shared resolvers, TUN start settle, helper unit check/readiness, SELinux relabel); further acceptance is manual on real machines (see "Increment: multi-user system installation").
+## Increment: zero-argument shared installation
+
+Accepted design: one system-wide bundle and per-user systemd instances. The
+installing user receives automatic startup, linger and TUN group authorization;
+other users opt in with `mihomo-server-user enable`. Public installation takes no
+arguments; only help and data-preserving uninstall remain. Root without a caller
+only deploys the shared bundle. Runtime/state/cache splitting is intentionally
+out of scope; sockets stay under `<data-dir>/run`.
+
+1. **Ports, launcher and user CLI — implemented.** Slot 0 uses management 9090,
+   mixed 7890 and DNS 1053; slots 1–63 retain the existing 20000+10N layout.
+   The global user unit reads `%E/mihomo-server/env`. The launcher defaults to
+   XDG_DATA_HOME (ignoring relative values), retains explicit data overrides and
+   lets named listener/origin settings override legacy arguments. For authorized
+   users whose manager has stale groups, it reexecutes through `sg` without
+   restarting other user services. The Bash user helper adds `enable` (`init`
+   alias), a commented env template and an atomic, private user drop-in retaining
+   XDG paths across reboots. Readiness requires a running core through the
+   authenticated API, rather than merely an open TCP port. Current process
+   arguments provide effective listener, origin and token paths.
+   Verification: 6 isolation tests; 5 launcher boundary tests (including spaces,
+   quotes, legacy precedence and stale group reexecution); 11 packaging tests;
+   launcher/helper ShellCheck. Real systemd acceptance follows in step 3.
+2. **Unified installer, automatic authorization and legacy migration — pending.**
+3. **Installer/systemd/real-node acceptance and deployment docs — pending.**
+
+**Latest completed task:** Zero-argument shared installation, step 1 of 3 — slot-0 ports, XDG-aware launcher and per-user enable/readiness helper (above).
+**Previous completed task:** Multi-user system installation, step 4 of 4 — README, fixes from a one-off QEMU/KVM acceptance run (sniffing for TUN behind shared resolvers, TUN start settle, helper unit check/readiness, SELinux relabel); further acceptance is manual on real machines (see "Increment: multi-user system installation").
 **Previous completed task:** Multi-user step 3 — scripted end-to-end test in a privileged systemd container (`scripts/tests/multiuser/run.sh`, 59 checks; also a CI job): two concurrent TUN users with real nodes, per-UID routing and DNS, core crash recovery, upgrade restart, stop/uninstall rule cleanup (see "Increment: multi-user system installation").
 **Previous completed task:** Multi-user step 2 — `install_remote.sh --system` (shared versioned bundle, `mihomo-tun` group with a file-capability core, slot registry, global user unit, upgrade/uninstall) and the per-user `mihomo-server-user` helper, verified in a privileged systemd container with two users and real-node TUN traffic (see "Increment: multi-user system installation").
 **Previous completed task:** Multi-user step 1 — service-side per-user isolation (`--multi-user`).
@@ -62,7 +89,7 @@ Do not resume backup work based on an older chapter's next-task paragraph.
 **Previous completed task:** Persistent login. The web UI caches the management token in sessionStorage and re-validates it on load, so refreshing keeps the session; logout/401 clears it.  The e2e restart test now asserts refresh keeps the session and logout+refresh returns to the login page.
 
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
-**Next implementation task:** User's manual acceptance of the multi-user installation on real machines; open item: occasional TUN start failure for one user right after boot (below).
+**Next implementation task:** Zero-argument installer, automatic TUN/linger and legacy migration, followed by isolated systemd acceptance.
 
 ## Increment: multi-user system installation
 

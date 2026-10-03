@@ -15,7 +15,7 @@ use crate::config::settings::RuntimeSettings;
 
 /// Number of users one host can serve.
 pub const SLOTS: u16 = 64;
-/// First port of slot 0; each slot owns `PORTS_PER_SLOT` consecutive ports.
+/// Base for slots 1–63; slot 0 keeps the familiar single-user ports.
 pub const PORT_BASE: u16 = 20000;
 pub const PORTS_PER_SLOT: u16 = 10;
 // Below the main (32766) and default (32767) rules; sing-tun uses about ten
@@ -54,15 +54,28 @@ impl Isolation {
     }
 
     pub fn management_port(&self) -> u16 {
-        PORT_BASE + self.slot * PORTS_PER_SLOT
+        if self.slot == 0 {
+            9090
+        } else {
+            PORT_BASE + self.slot * PORTS_PER_SLOT
+        }
     }
 
     pub fn mixed_port(&self) -> u16 {
-        self.management_port() + 1
+        if self.slot == 0 {
+            7890
+        } else {
+            self.management_port() + 1
+        }
     }
 
     pub fn dns_listen(&self) -> String {
-        format!("127.0.0.1:{}", self.management_port() + 2)
+        let port = if self.slot == 0 {
+            1053
+        } else {
+            self.management_port() + 2
+        };
+        format!("127.0.0.1:{port}")
     }
 
     /// "ms" plus at most ten UID digits stays within the 15-byte interface limit.

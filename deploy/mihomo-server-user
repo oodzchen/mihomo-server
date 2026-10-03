@@ -1,183 +1,238 @@
-#!/bin/sh
-# Per-user control of a system-wide (multi-user) mihomo-server installation.
-#
-# Usage: mihomo-server-user COMMAND [OPTIONS]
-#
-# Commands:
-#   init [--listen ADDR] [--public-origin URL] [--extra-args "ARGS"]
-#               Enable and start your own instance, then print its details.
-#               Options are saved in ~/.config/mihomo-server/env.
-#   info        Show your slot, management URL, proxy port and TUN state
-#   token       Print your management token
-#   status      systemctl --user status mihomo-server
-#   logs        Follow your service log
-#   restart     Restart your instance
-#   disable     Stop and disable your instance (data kept)
-#   purge --yes Disable, then delete your data, settings and slot claim
-#
-# The administrator installs the bundle once with `install.sh --system`.
-# Each slot N owns ports 20000+10N (management), +1 (mixed proxy), +2 (DNS).
-set -eu
+#!/usr/bin/env bash
+# Control your instance of the shared installation.
+set -euo pipefail
+umask 077
 
 UNIT=mihomo-server
-SLOT_DIR="${MIHOMO_SERVER_SLOT_DIR:-/var/lib/mihomo-server/slots}"
-SYSTEM_ROOT="${MIHOMO_SERVER_SYSTEM_ROOT:-/opt/mihomo-server}"
-DATA_DIR="$HOME/.local/share/mihomo-server"
-ENV_FILE="$HOME/.config/mihomo-server/env"
-PORT_BASE=20000
-SLOTS=64
-
-die() {
-    echo "error: $*" >&2
-    exit 1
-}
+SLOT_DIR=/var/lib/mihomo-server/slots
 
 usage() {
-    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
-    exit "${1:-0}"
+    cat <<'HELP'
+Usage: mihomo-server-user [COMMAND]
+  enable      Enable, start and verify your instance (init is an alias)
+  info        Show addresses, paths and TUN state (default command)
+  token       Print your management token
+  status      Show systemd status
+  logs        Follow service logs
+  restart     Restart and verify your instance
+  disable     Stop and disable your instance, keeping data
+  purge --yes Delete your instance data, configuration and slot claim
+
+Edit the displayed env file to configure remote access, then restart.
+HELP
+}
+die() { echo "error: $*" >&2; exit 1; }
+
+manager_config_home() {
+    # Run inside the manager's environment, which may differ from this terminal.
+    # shellcheck disable=SC2016
+    systemd-run --user --pipe --wait --collect --quiet /bin/sh -c '
+        case "${XDG_CONFIG_HOME:-}" in
+            /*) printf "%s\n" "$XDG_CONFIG_HOME" ;;
+            *) printf "%s/.config\n" "$HOME" ;;
+        esac'
+}
+paths() {
+    local manager_home saved
+    manager_home=$(manager_config_home 2>/dev/null) || manager_home="$HOME/.config"
+    DROPIN="$manager_home/systemd/user/$UNIT.service.d/10-mihomo-paths.conf"
+    CONFIG_HOME="$HOME/.config"
+    DATA_HOME="$HOME/.local/share"
+    if [ -f "$DROPIN" ]; then
+        saved=$(sed -n 's/^# config-home=//p' "$DROPIN")
+        [ -z "$saved" ] || CONFIG_HOME=$saved
+        saved=$(sed -n 's/^# data-home=//p' "$DROPIN")
+        [ -z "$saved" ] || DATA_HOME=$saved
+    fi
+    # Unset variables reuse saved paths; empty/relative values use XDG defaults.
+    if [ "${XDG_CONFIG_HOME+x}" ]; then
+        case "$XDG_CONFIG_HOME" in /*) CONFIG_HOME=$XDG_CONFIG_HOME ;; *) CONFIG_HOME="$HOME/.config" ;; esac
+    fi
+    if [ "${XDG_DATA_HOME+x}" ]; then
+        case "$XDG_DATA_HOME" in /*) DATA_HOME=$XDG_DATA_HOME ;; *) DATA_HOME="$HOME/.local/share" ;; esac
+    fi
+    ENV_FILE="$CONFIG_HOME/mihomo-server/env"
+    DATA_DIR="$DATA_HOME/mihomo-server"
 }
 
-[ "$(id -u)" -ne 0 ] || die "run this as the user who owns the instance, not root"
+# Quote a systemd assignment/path, including literal percent specifiers.
+unit_quote() {
+    local value=$1
+    [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || die 'paths must not contain newlines'
+    value=${value//\\/\\\\}; value=${value//\"/\\\"}; value=${value//%/%%}
+    printf '"%s"' "$value"
+}
+save_paths() {
+    local temporary
+    mkdir -p "$(dirname "$ENV_FILE")" "$(dirname "$DROPIN")"
+    if [ ! -e "$ENV_FILE" ]; then
+        (set -o noclobber; cat > "$ENV_FILE" <<'CONFIG'
+# Optional settings; changes take effect after mihomo-server-user restart.
+# MIHOMO_SERVER_LISTEN=0.0.0.0:9090
+# MIHOMO_SERVER_PUBLIC_ORIGIN=http://server.example:9090
+# MIHOMO_SERVER_ARGS=""
+CONFIG
+        )
+    fi
+    temporary=$(mktemp "$(dirname "$DROPIN")/.paths-XXXXXX")
+    {
+        printf '# Managed by mihomo-server-user; user settings belong in the env file.\n'
+        printf '# config-home=%s\n# data-home=%s\n[Service]\n' "$CONFIG_HOME" "$DATA_HOME"
+        printf 'Environment='; unit_quote "XDG_CONFIG_HOME=$CONFIG_HOME"; printf ' '
+        unit_quote "XDG_DATA_HOME=$DATA_HOME"; printf '\nEnvironmentFile=\nEnvironmentFile=-'
+        unit_quote "$ENV_FILE"; printf '\n'
+    } > "$temporary"
+    mv -f "$temporary" "$DROPIN"
+}
 
 slot() {
-    n=0
-    while [ "$n" -lt "$SLOTS" ]; do
+    local n
+    for ((n=0; n<64; n++)); do
         if [ -f "$SLOT_DIR/$n" ] && [ "$(stat -c %u "$SLOT_DIR/$n")" = "$(id -u)" ]; then
-            echo "$n"
-            return 0
+            echo "$n"; return 0
         fi
-        n=$((n + 1))
     done
     return 1
 }
+management_port() { if [ "$1" = 0 ]; then echo 9090; else echo $((20000 + 10 * $1)); fi; }
+mixed_port() { if [ "$1" = 0 ]; then echo 7890; else echo $((20001 + 10 * $1)); fi; }
 
-# The service logs its slot and TUN state once per start.
-service_line() {
-    journalctl --user -u "$UNIT" -o cat -n 200 2>/dev/null | grep '^multi-user slot ' | tail -n 1
+current_log() {
+    local invocation
+    invocation=$(systemctl --user show "$UNIT" -p InvocationID --value)
+    [ -n "$invocation" ] || return 0
+    journalctl --user "_SYSTEMD_INVOCATION_ID=$invocation" -o cat --no-pager -n 200 2>/dev/null
 }
-
-listen_addr() {
-    # An explicit --listen in the env file wins over the slot default.
-    if [ -f "$ENV_FILE" ]; then
-        addr="$(sed -n 's/.*--listen[ =]\([^ "]*\).*/\1/p' "$ENV_FILE" | head -n 1)"
-        [ -z "$addr" ] || { echo "$addr"; return; }
-    fi
-    echo "127.0.0.1:$((PORT_BASE + 10 * $1))"
+process_value() {
+    local pid=$1 key=$2
+    [ -r "/proc/$pid/environ" ] || return 0
+    tr '\0' '\n' < "/proc/$pid/environ" | sed -n "s/^$key=//p"
 }
-
-info() {
-    state="$(systemctl --user is-active "$UNIT" 2>/dev/null || true)"
-    if ! n="$(slot)"; then
-        echo "service:   $state (no slot claimed yet; run: mihomo-server-user init)"
-        return 0
+process_argument() {
+    local pid=$1 key=$2
+    [ -r "/proc/$pid/cmdline" ] || return 0
+    tr '\0' '\n' < "/proc/$pid/cmdline" | awk -v key="$key" '
+        next_value {print; exit}
+        $0 == key {next_value=1}
+        index($0, key "=") == 1 {print substr($0, length(key)+2); exit}'
+}
+endpoint() {
+    local pid origin
+    pid=$(systemctl --user show "$UNIT" -p MainPID --value)
+    [ "${pid:-0}" != 0 ] || return 1
+    LISTEN=$(process_argument "$pid" --listen)
+    if [ -z "$LISTEN" ]; then
+        local n
+        n=$(slot) || return 1
+        LISTEN="127.0.0.1:$(management_port "$n")"
     fi
-    line="$(service_line)"
-    case "$line" in
-        *"(available)"*) tun="available" ;;
-        *"not in the TUN group"*)
-            tun="unavailable (not in group mihomo-tun)"
-            if id -nG | tr ' ' '\n' | grep -qx mihomo-tun; then
-                tun="$tun; you were added recently: ask the administrator to run
-             'systemctl restart user@$(id -u).service', or log out of every session"
-            fi
-            ;;
-        *)
-            # No service log line (not started, or no user journal): check the file.
-            if [ -r "$SYSTEM_ROOT/current/resources/core/verge-mihomo-tun" ]; then
-                tun="available to your login groups"
-            else
-                tun="unavailable (not in group mihomo-tun)"
-            fi
-            ;;
+    origin=$(process_argument "$pid" --public-origin)
+    AUTHORITY=${origin#*://}; AUTHORITY=${AUTHORITY%/}
+    [ -n "$AUTHORITY" ] || AUTHORITY=$LISTEN
+    TOKEN_FILE="$(process_argument "$pid" --data-dir)/management-token"
+    [ "$TOKEN_FILE" != /management-token ] || TOKEN_FILE="$DATA_DIR/management-token"
+    case "$LISTEN" in
+        0.0.0.0:*) API_URL="http://127.0.0.1:${LISTEN##*:}" ;;
+        '[::]:'*) API_URL="http://[::1]:${LISTEN##*:}" ;;
+        *) API_URL="http://$LISTEN" ;;
     esac
-    cat <<EOF
-service:   $state
-slot:      $n
-manage:    http://$(listen_addr "$n")
-token:     $DATA_DIR/management-token
-proxy:     HTTP/SOCKS 127.0.0.1:$((PORT_BASE + 10 * n + 1)) (unless changed in Settings)
-tun:       $tun   (device ms$(id -u))
-data:      $DATA_DIR
-EOF
 }
-
-# Started: token and slot exist (possibly from an earlier run) and the
-# management port is listening again.
-ready() {
-    [ -s "$DATA_DIR/management-token" ] || return 1
-    n="$(slot)" || return 1
-    command -v ss >/dev/null 2>&1 || return 0
-    addr="$(listen_addr "$n")"
-    ss -Hltn "sport = :${addr##*:}" 2>/dev/null | grep -q .
-}
-
-init() {
-    args=""
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --listen | --public-origin)
-                [ $# -ge 2 ] || die "$1 requires a value"
-                args="$args $1 $2"
-                shift 2
-                ;;
-            --extra-args)
-                [ $# -ge 2 ] || die "$1 requires a value"
-                args="$args $2"
-                shift 2
-                ;;
-            *) die "unknown init option: $1" ;;
-        esac
-    done
-    # Not `systemctl cat`: with output discarded it can exit 141 (SIGPIPE).
-    [ "$(systemctl --user show -p LoadState --value "$UNIT" 2>/dev/null)" = loaded ] \
-        || die "no system-wide $UNIT unit found; ask the administrator to run install.sh --system"
-    if [ -n "$args" ]; then
-        mkdir -p "$(dirname "$ENV_FILE")"
-        printf 'MIHOMO_SERVER_ARGS="%s"\n' "${args# }" >"$ENV_FILE"
+request() {
+    local path=$1 token
+    token=$(cat "$TOKEN_FILE")
+    if command -v curl >/dev/null 2>&1; then
+        curl --noproxy '*' -fsS --max-time 2 -H "Host: $AUTHORITY" \
+            -H "Authorization: Bearer $token" "$API_URL$path"
+    else
+        wget -q -O - -e use_proxy=no --timeout=2 --tries=1 \
+            --header="Host: $AUTHORITY" --header="Authorization: Bearer $token" "$API_URL$path"
     fi
-    systemctl --user daemon-reload
-    systemctl --user enable "$UNIT" >/dev/null 2>&1
-    systemctl --user restart "$UNIT"
-    tries=0
-    until ready; do
-        tries=$((tries + 1))
-        if [ "$tries" -gt 60 ] || ! systemctl --user is-active --quiet "$UNIT"; then
-            journalctl --user -u "$UNIT" -o cat -n 20 >&2 || true
-            die "$UNIT did not start; see the log above"
-        fi
+}
+ready() {
+    systemctl --user is-active --quiet "$UNIT" || return 1
+    endpoint || return 1
+    [ -s "$TOKEN_FILE" ] || return 1
+    request /api/status 2>/dev/null | grep -Eq '"phase"[[:space:]]*:[[:space:]]*"running"'
+}
+wait_ready() {
+    local tries
+    for ((tries=0; tries<60; tries++)); do
+        if ready; then return 0; fi
+        if ! systemctl --user is-active --quiet "$UNIT"; then break; fi
         sleep 0.5
     done
+    journalctl --user -u "$UNIT" -o cat -n 20 --no-pager >&2 || true
+    die "$UNIT failed to reach a running core and authenticated API; check configuration and port conflicts"
+}
+info() {
+    local state n tun line proxy
+    state=$(systemctl --user is-active "$UNIT" 2>/dev/null || true)
+    if ! n=$(slot); then
+        echo "service:   $state (run: mihomo-server-user enable)"
+        echo "config:    $ENV_FILE"
+        return
+    fi
+    LISTEN="127.0.0.1:$(management_port "$n")"
+    TOKEN_FILE="$DATA_DIR/management-token"
+    endpoint || true
+    line=$(current_log | grep '^multi-user slot ' | tail -n 1 || true)
+    case "$line" in *'(available)'*) tun=available ;; *) tun='unavailable (administrator must authorize group mihomo-tun)' ;; esac
+    proxy=$(mixed_port "$n")
+    if [ "$state" = active ] && [ -s "$TOKEN_FILE" ]; then
+        local actual
+        actual=$(request /api/config 2>/dev/null | sed -n 's/.*"mixed-port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p') || true
+        [ -z "$actual" ] || proxy=$actual
+    fi
+    cat <<DETAILS
+service:   $state
+slot:      $n
+manage:    ${API_URL:-http://$LISTEN}
+token:     $TOKEN_FILE
+proxy:     HTTP/SOCKS 127.0.0.1:$proxy (settings can override)
+tun:       $tun (device ms$(id -u))
+config:    $ENV_FILE
+data:      ${TOKEN_FILE%/management-token}
+DETAILS
+}
+enable() {
+    [ $# = 0 ] || die 'enable takes no options; edit your env file instead'
+    manager_config_home >/dev/null || die 'cannot connect to your systemd user manager'
+    save_paths
+    systemctl --user daemon-reload
+    [ "$(systemctl --user show -p LoadState --value "$UNIT")" = loaded ] || die 'shared installation is missing'
+    systemctl --user enable "$UNIT" >/dev/null
+    systemctl --user restart "$UNIT"
+    wait_ready
     info
-    if command -v loginctl >/dev/null 2>&1 \
-        && [ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)" = "no" ]; then
-        echo "note:      to keep running after logout: loginctl enable-linger"
-    fi
 }
-
 purge() {
-    [ "${1:-}" = "--yes" ] || die "purge deletes $DATA_DIR; rerun as: mihomo-server-user purge --yes"
-    systemctl --user disable --now "$UNIT" >/dev/null 2>&1 || true
-    if n="$(slot)"; then
-        rm -f "$SLOT_DIR/$n"
-    fi
-    rm -rf "$DATA_DIR"
-    rm -f "$ENV_FILE"
-    rmdir "$(dirname "$ENV_FILE")" 2>/dev/null || true
-    echo "Removed your instance data and slot claim"
+    if [ "${1:-}" != --yes ] || [ $# != 1 ]; then die 'purge deletes your data; use purge --yes'; fi
+    endpoint || true
+    local owned_data=${TOKEN_FILE:-$DATA_DIR/management-token}
+    owned_data=${owned_data%/management-token}
+    [[ "$owned_data" = /* && "$owned_data" != / && "$owned_data" != "$HOME" ]] || die 'unsafe data directory'
+    systemctl --user disable --now "$UNIT"
+    local n
+    if n=$(slot); then rm -f "$SLOT_DIR/$n"; fi
+    rm -rf -- "$owned_data"
+    rm -f -- "$ENV_FILE" "$DROPIN"
+    systemctl --user daemon-reload
+    echo 'Removed your instance data, configuration and slot claim'
 }
 
-[ $# -gt 0 ] || usage 1
-command="$1"
-shift
+command=${1:-info}
+[ $# = 0 ] || shift
+case "$command" in -h | --help | help) usage; exit 0 ;; esac
+[ "$(id -u)" != 0 ] || die 'run as the user who owns the instance, not root'
+paths
 case "$command" in
-    init) init "$@" ;;
+    enable | init) enable "$@" ;;
     info) info ;;
-    token) cat "$DATA_DIR/management-token" ;;
+    token) endpoint || true; cat "${TOKEN_FILE:-$DATA_DIR/management-token}" ;;
     status) exec systemctl --user status "$UNIT" ;;
     logs) exec journalctl --user -u "$UNIT" -f ;;
-    restart) systemctl --user restart "$UNIT" && info ;;
-    disable) systemctl --user disable --now "$UNIT" && echo "Disabled; data kept in $DATA_DIR" ;;
+    restart) systemctl --user restart "$UNIT"; wait_ready; info ;;
+    disable) systemctl --user disable --now "$UNIT"; echo 'Disabled; data kept' ;;
     purge) purge "$@" ;;
-    -h | --help | help) usage 0 ;;
     *) die "unknown command: $command (see --help)" ;;
 esac

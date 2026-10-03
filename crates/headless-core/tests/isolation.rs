@@ -31,9 +31,21 @@ tun:
 
 #[test]
 fn slot_values_are_unique_and_within_host_limits() -> Result<()> {
+    assert_eq!(Isolation::new(1000, 0)?.management_port(), 9090);
+    assert_eq!(Isolation::new(1000, 0)?.mixed_port(), 7890);
+    assert_eq!(Isolation::new(1000, 0)?.dns_listen(), "127.0.0.1:1053");
+    assert_eq!(Isolation::new(1000, 1)?.management_port(), 20010);
+    let mut ports = std::collections::HashSet::new();
     let mut seen = std::collections::HashSet::new();
     for slot in 0..SLOTS {
         let isolation = Isolation::new(4_294_967_294, slot)?;
+        for port in [
+            isolation.management_port(),
+            isolation.mixed_port(),
+            isolation.dns_listen().rsplit(':').next().unwrap().parse()?,
+        ] {
+            assert!(ports.insert(port), "duplicate port {port}");
+        }
         assert!(isolation.tun_device().len() <= 15);
         assert!(isolation.rule_index() + 31 < 32766);
         assert!(seen.insert((
@@ -127,8 +139,8 @@ fn settings_page_listeners_are_kept() -> Result<()> {
 #[test]
 fn configs_without_tun_or_dns_only_get_a_private_mixed_port() -> Result<()> {
     let (config, changed) =
-        Isolation::new(1000, 0)?.apply(mapping("mode: rule\nmixed-port: 7890")?, &RuntimeSettings::default());
-    assert_eq!(config["mixed-port"].as_u64(), Some(20001));
+        Isolation::new(1000, 0)?.apply(mapping("mode: rule\nmixed-port: 7891")?, &RuntimeSettings::default());
+    assert_eq!(config["mixed-port"].as_u64(), Some(7890));
     assert!(!config.contains_key("dns") && !config.contains_key("tun"));
     assert_eq!(changed, ["mixed-port"]);
     Ok(())

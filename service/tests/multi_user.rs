@@ -98,7 +98,14 @@ fn isolation() -> Result<Isolation> {
     let uid = unsafe { libc::geteuid() };
     for slot in (0..SLOTS).rev() {
         let isolation = Isolation::new(uid, slot)?;
-        if (0..3).all(|offset| free(isolation.management_port() + offset)) {
+        if [
+            isolation.management_port(),
+            isolation.mixed_port(),
+            isolation.dns_listen().rsplit(':').next().unwrap().parse()?,
+        ]
+        .into_iter()
+        .all(free)
+        {
             return Ok(isolation);
         }
     }
