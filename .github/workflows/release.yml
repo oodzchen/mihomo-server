@@ -98,7 +98,7 @@ jobs:
     permissions:
       contents: write # required to create the GitHub Release
     steps:
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v7
         with:
           name: release-assets
           path: dist
