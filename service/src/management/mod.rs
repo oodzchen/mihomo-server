@@ -17,6 +17,15 @@ use serde_json::Value;
 pub enum ManagementCommand {
     Status {},
     ServiceVersion {},
+    /// This program: version, release, systemd unit and update unit state.
+    ServiceInfo {},
+    /// Latest published mihomo-server release tag.
+    ServiceRelease {},
+    /// Stop or restart this service (not the core) after answering.
+    StopService {},
+    RestartService {},
+    /// Start the shared installation's update unit.
+    UpgradeService {},
     CoreRelease {
         version: Option<String>,
     },
@@ -331,6 +340,27 @@ impl Management {
             }
             ManagementCommand::Status {} => serde_json::to_value(self.manager.status())?,
             ManagementCommand::ServiceVersion {} => serde_json::to_value(env!("CARGO_PKG_VERSION"))?,
+            // systemctl runs off the async workers.
+            ManagementCommand::ServiceInfo {} => {
+                serde_json::to_value(tokio::task::spawn_blocking(crate::service_control::info).await?)?
+            }
+            ManagementCommand::ServiceRelease {} => serde_json::to_value(self.manager.latest_service_release().await?)?,
+            ManagementCommand::StopService {} => {
+                tokio::task::spawn_blocking(|| crate::service_control::schedule(crate::service_control::Action::Stop))
+                    .await??;
+                serde_json::json!({ "action": "stop" })
+            }
+            ManagementCommand::RestartService {} => {
+                tokio::task::spawn_blocking(|| {
+                    crate::service_control::schedule(crate::service_control::Action::Restart)
+                })
+                .await??;
+                serde_json::json!({ "action": "restart" })
+            }
+            ManagementCommand::UpgradeService {} => {
+                tokio::task::spawn_blocking(crate::service_control::upgrade).await??;
+                serde_json::json!({ "unit": crate::service_control::UPDATE_UNIT })
+            }
             ManagementCommand::Logs {} => serde_json::to_value(self.manager.logs())?,
             ManagementCommand::Profiles {} => serde_json::to_value(self.manager.profiles())?,
             ManagementCommand::Settings {} => serde_json::to_value(self.manager.settings().await?)?,

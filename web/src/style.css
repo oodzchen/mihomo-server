@@ -1419,3 +1419,9 @@ dd {
 .tun-setting-row select { width: 240px; max-width: 55%; margin: 0 0 0 auto; }
 .tun-setting .hint { margin: 4px 0 0; font-size: 12px; }
 @media (max-width: 600px) { .tun-setting-row select { width: 160px; } }
+
+/* Multi-paragraph help: one block per child span. */
+.help-popup > span { display: block; }
+.help-popup > span + span { margin-top: 6px; }
+/* Fixed height, so new output never moves the page. */
+.service-log { height: 140px; margin: 12px 0 0; padding: 10px 12px; overflow: auto; border-radius: 6px; background: #18181b; color: #e4e4e7; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }

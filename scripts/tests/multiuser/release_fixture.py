@@ -9,7 +9,7 @@ ROOT = Path('/work/releases')
 ROOT.mkdir(exist_ok=True)
 (ROOT / 'latest-tag').write_text('vfixture1')
 script = Path('/work/install.sh').read_text().replace('local REPO="__REPO_SLUG__"', 'local REPO="test/repo"')
-for tag in ['vfixture1', 'vfixture2']:
+for tag in ['vfixture1', 'vfixture2', 'vfixture3']:
     name = f'mihomo-server-{tag}-x86_64-unknown-linux-gnu'
     destination = ROOT / 'test/repo/releases/download' / tag
     destination.mkdir(parents=True, exist_ok=True)

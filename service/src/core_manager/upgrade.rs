@@ -190,6 +190,22 @@ impl CoreManager {
         .await
     }
 
+    /// Latest mihomo-server release, read through the same routes as core releases.
+    pub async fn latest_service_release(&self) -> Result<String> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        let mut failures = Vec::new();
+        for route in self.core_download_routes().await {
+            match crate::cli::system::latest_release_via(&route).await {
+                Ok(tag) => return Ok(tag),
+                Err(error) => failures.push(format!("{} route: {error:#}", route.name())),
+            }
+        }
+        bail!(
+            "cannot query the latest mihomo-server release ({})",
+            failures.join("; ")
+        )
+    }
+
     pub(super) async fn core_download_routes(&self) -> Vec<crate::core_release::Route> {
         let mut routes = Vec::new();
         if self.status().phase == CorePhase::Running

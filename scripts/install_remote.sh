@@ -206,6 +206,55 @@ RULE
     fi
 }
 
+# Web upgrades: a root oneshot unit that takes no input and installs the latest
+# release of the built-in repository; polkit lets TUN-group members start only
+# that unit, without a password. Its output is the world-readable update.log.
+update_unit() {
+    local unit=/etc/systemd/system/mihomo-server-update.service
+    local rule=/etc/polkit-1/rules.d/50-mihomo-server-update.rules
+    if [ "$1" = remove ]; then
+        rm -f "$unit" "$rule"
+        systemctl daemon-reload || true
+        return
+    fi
+    mkdir -p "${unit%/*}"
+    cat > "$unit.new" <<'UNIT'
+# Managed by mihomo-server; see update_unit in its installer.
+[Unit]
+Description=Upgrade mihomo-server to the latest release
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/mihomo-server/current/bin/mihomo-server update
+StandardOutput=truncate:/var/lib/mihomo-server/update.log
+StandardError=inherit
+PrivateTmp=yes
+TimeoutStartSec=20min
+UNIT
+    chmod 644 "$unit.new"
+    mv -f "$unit.new" "$unit"
+    systemctl daemon-reload
+    # polkit 0.105 local authority files cannot name a unit: no Web upgrades there.
+    if [ -d "${rule%/*}" ]; then
+        cat > "$rule.new" <<'RULE'
+// Managed by mihomo-server; see update_unit in its installer.
+polkit.addRule(function (action, subject) {
+    if (action.id === "org.freedesktop.systemd1.manage-units"
+        && action.lookup("unit") === "mihomo-server-update.service"
+        && action.lookup("verb") === "start"
+        && subject.isInGroup("mihomo-tun")) {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});
+RULE
+        chmod 644 "$rule.new"
+        mv -f "$rule.new" "$rule"
+    fi
+}
+
 install_shared() {
     local bundle=$1 tag=$2 caller=$3 config_home=$4 data_home=$5 tool
     local root=/opt/mihomo-server releases=/opt/mihomo-server/releases
@@ -247,6 +296,7 @@ install_shared() {
     chown root:mihomo-tun /var/lib/mihomo-server/tun.lock
     chmod 0640 /var/lib/mihomo-server/tun.lock
     polkit_tun_dns install
+    update_unit install
     ln -sfn "releases/$(basename "$release")" "$root/.current.new"
     mv -T "$root/.current.new" "$root/current"
     mkdir -p /etc/systemd/user /usr/local/bin
@@ -268,6 +318,7 @@ install_shared() {
     done
     if command -v restorecon >/dev/null; then
         restorecon -R "$root" "$registry" /etc/systemd/user/mihomo-server.service /usr/local/bin/mihomo-server-user \
+            /etc/systemd/system/mihomo-server-update.service \
             /usr/local/bin/mihomo-server /usr/local/share/man/man1/mihomo-server.1 \
             /usr/local/share/bash-completion/completions/mihomo-server /usr/local/share/zsh/site-functions/_mihomo-server \
             /etc/polkit-1/rules.d /etc/polkit-1/localauthority 2>/dev/null || true
@@ -368,6 +419,7 @@ uninstall_shared() {
     fi
     rm -rf /var/lib/mihomo-server
     polkit_tun_dns remove
+    update_unit remove
     if getent group mihomo-tun >/dev/null; then groupdel mihomo-tun; fi
     if [ "$purge" = 1 ]; then
         echo 'Uninstalled mihomo-server and deleted all instance data.'
@@ -383,7 +435,7 @@ root_action() {
     else
         # Explicit script functions only, with values passed as argv, never code.
         local definitions
-        definitions=$(declare -f die verify_bundle each_user_manager activate_user polkit_tun_dns install_shared purge_user uninstall_shared)
+        definitions=$(declare -f die verify_bundle each_user_manager activate_user polkit_tun_dns update_unit install_shared purge_user uninstall_shared)
         if [ "${MIHOMO_INSTALL_ELEVATE:-}" = pkexec ]; then
             # Graphical clients have no terminal for sudo; polkit asks instead.
             pkexec "$(command -v bash)" -euo pipefail -c "$definitions"$'\n'"$action \"\$@\"" bash "$@"

@@ -2,7 +2,7 @@
 //!
 //! The same executable is the service (`mihomo-server serve`, or the legacy
 //! form starting with a service option); see [`route`].
-mod system;
+pub(crate) mod system;
 mod view;
 
 use anyhow::{Context as _, Result, bail};

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, command, type Perform, type Connection } from "./api";
 import { phaseLabel, t, type Language } from "./i18n";
 import type { CoreStatus } from "./types";
+import { HelpTip } from "./help-tip";
 
 type Release = { version: string; bytes: number; target: string };
 type Installation = { version: string; stage_id: string };
@@ -184,7 +185,14 @@ export function CoreUpgradePage({
 
       <section className="panel" aria-label={t(language, "coreUpgradeTitle", { label })}>
       <div className="panel-title">
-        <h2>{t(language, "coreUpgradeTitle", { label })}</h2>
+        <h2 className="setting-heading">
+          {t(language, "coreUpgradeTitle", { label })}
+          <HelpTip label={t(language, "coreUpgradeTitle", { label })}>
+            <span>{t(language, "coreUpgradeDesc", { label })}</span>
+            {channel === "alpha" && <span>{t(language, "coreUpgradeAlphaNotice")}</span>}
+            <span>{t(language, "coreUpgradeHint")}</span>
+          </HelpTip>
+        </h2>
         <button
           type="button"
           disabled={busy || working || connection !== "connected"}
@@ -209,12 +217,6 @@ export function CoreUpgradePage({
           <option value="alpha">{t(language, "coreUpgradeChannelAlpha")}</option>
         </select>
       </label>
-      <p className="muted">
-        {t(language, "coreUpgradeDesc", { label })}
-      </p>
-      {channel === "alpha" && (
-        <p className="info">{t(language, "coreUpgradeAlphaNotice")}</p>
-      )}
       {connection !== "connected" ? (
         <p className="info">{t(language, "coreUpgradeDisconnected")}</p>
       ) : error ? (
@@ -228,7 +230,16 @@ export function CoreUpgradePage({
         <dl className="proxy-details">
           <div>
             <dt>{t(language, "coreUpgradeInstalledVersion")}</dt>
-            <dd>{version === "unknown" ? t(language, "coreUpgradeUnknownRepair") : version}</dd>
+            <dd>
+              {version === "unknown" ? (
+                <>
+                  <span>{t(language, "coreUpgradeUnknownRepair")}</span>
+                  <HelpTip label={t(language, "coreUpgradeUnknownRepair")}>
+                    {t(language, "coreUpgradeUnknownHint", { label })}
+                  </HelpTip>
+                </>
+              ) : version}
+            </dd>
           </div>
           <div>
             <dt>{t(language, "coreUpgradeLatestChannel", { label })}</dt>
@@ -245,11 +256,6 @@ export function CoreUpgradePage({
             </dd>
           </div>
         </dl>
-      )}
-      {version === "unknown" && (
-        <p className="info">
-          {t(language, "coreUpgradeUnknownHint", { label })}
-        </p>
       )}
       <div className="actions">
         <button type="button" disabled={disabled} onClick={() => void run()}>
@@ -276,9 +282,6 @@ export function CoreUpgradePage({
           {t(language, "coreUpgradeMismatchWarning")}
         </p>
       )}
-      <p className="hint">
-        {t(language, "coreUpgradeHint")}
-      </p>
     </section>
     </>
   );

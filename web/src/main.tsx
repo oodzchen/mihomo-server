@@ -10,6 +10,7 @@ import {
 import { ApiError, command, subscribe, type Connection, type Perform } from "./api";
 import { SettingsPage, type SettingsPageHandle } from "./settings";
 import { CoreUpgradePage } from "./core-upgrade";
+import { ServicePage } from "./service";
 import { RulesPage } from "./rules";
 import { LanguagePicker } from "./language-picker";
 import { connectionLabel, phaseLabel, resolveLanguage, savedLanguage, saveLanguage, t, type Language, type MessageKey } from "./i18n";
@@ -32,6 +33,7 @@ const pages: [string, MessageKey][] = [
   ["/logs", "logs"],
   ["/settings", "settings"],
   ["/core", "core"],
+  ["/service", "service"],
 ];
 
 const TOKEN_KEY = "mihomo.token";
@@ -520,6 +522,14 @@ function Manager({
             perform={perform}
             logout={logout}
             activeProfileName={active?.name}
+          />
+        ) : route === "/service" ? (
+          <ServicePage
+            token={token}
+            language={language}
+            connection={connection}
+            busy={busy}
+            logout={logout}
           />
         ) : route === "/settings" ? (
           <SettingsPage

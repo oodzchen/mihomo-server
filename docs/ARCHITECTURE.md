@@ -129,13 +129,30 @@ directory; a wildcard listener also requires an explicit public origin.
 
 The management command allowlist covers:
 
-- service/core lifecycle, state, logs and core upgrades;
+- service/core lifecycle, state, logs, core upgrades and program upgrades;
 - local and remote profiles, raw YAML, metadata and scheduled refresh;
 - global and profile merge/sequence/script enhancements;
 - typed settings, DNS/TUN policy and generated/live readback;
 - proxies, persistent selections, rules, providers and delay tests;
 - Geo/provider inventory, validation and controlled updates;
 - backup export, inspection, restore and private retained archives.
+
+The Web UI controls the core (Core page) and the service itself (Service page)
+separately. The service reads its own systemd unit from its cgroup, accepting it
+only when that unit's main process is this one or an ancestor (an
+`INVOCATION_ID` inherited from a terminal does not count). Stop and restart are
+queued with `systemctl --no-block` after the response is sent, so systemd records
+the intent. A service started directly can only be stopped, through the same
+graceful path as SIGTERM. Upgrades never run as the user: `upgrade_service`
+starts the installer's root oneshot unit `mihomo-server-update.service`, which
+takes no input and runs `mihomo-server update`, so it installs only the latest
+release of the built-in repository, checksum-verified by the installer. Polkit
+lets `mihomo-tun` members start that unit without a password. The installer
+then restarts every running instance, so the page reconnects to the new
+release. The page polls `service_info` for the unit's state and the tail of its
+world-readable `/var/lib/mihomo-server/update.log`. The latest tag is read
+through the same managed/system/direct routes as core releases, but the unit
+itself downloads directly as root.
 
 The `mihomo-server` command is a second client of the same authenticated command
 API, with no private path into the service. It locates the invoking user's
@@ -236,7 +253,9 @@ Linux TUN is an explicitly privileged, system-wide capability:
   affects all accounts;
 - installer-managed capabilities and polkit rules allow eligible services to
   create their own TUN interface and configure systemd-resolved without an
-  interactive prompt.
+  interactive prompt;
+- the same group may start the root update unit, which upgrades the shared
+  program for every account to the latest official release.
 
 If a saved instance starts while another user holds the system TUN, its saved TUN
 state is yielded and the instance starts without TUN. Ordinary mixed proxy

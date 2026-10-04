@@ -16,6 +16,7 @@ pub mod resources;
 pub mod script;
 mod secure_fs;
 mod selections;
+pub mod service_control;
 mod settings_readback;
 pub mod shutdown;
 #[cfg(target_os = "linux")]

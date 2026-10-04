@@ -61,6 +61,10 @@ pub fn exec_helper(arguments: &[OsString]) -> Result<i32> {
 }
 
 fn http_client(redirects: bool) -> Result<reqwest::Client> {
+    Ok(client_builder(redirects)?.build()?)
+}
+
+fn client_builder(redirects: bool) -> Result<reqwest::ClientBuilder> {
     let builder = reqwest::Client::builder()
         .tls_backend_rustls()
         .min_tls_version(reqwest::tls::Version::TLS_1_2)
@@ -72,12 +76,22 @@ fn http_client(redirects: bool) -> Result<reqwest::Client> {
         } else {
             reqwest::redirect::Policy::none()
         });
-    Ok(crate::remote::tls::configure(builder, crate::remote::tls::RootMode::Static, false)?.build()?)
+    crate::remote::tls::configure(builder, crate::remote::tls::RootMode::Static, false)
 }
 
 /// Latest release tag, read from GitHub's `releases/latest` redirect (no API quota).
 pub async fn latest_release() -> Result<String> {
-    let response = http_client(false)?
+    latest_release_from(&http_client(false)?).await
+}
+
+/// [`latest_release`] through a download route (the Web check uses the managed proxy).
+pub(crate) async fn latest_release_via(route: &crate::core_release::Route) -> Result<String> {
+    let client = route.configure(client_builder(false)?)?.build()?;
+    route.run(latest_release_from(&client)).await
+}
+
+async fn latest_release_from(client: &reqwest::Client) -> Result<String> {
+    let response = client
         .get(format!("https://github.com/{REPOSITORY}/releases/latest"))
         .send()
         .await

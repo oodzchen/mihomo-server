@@ -64,6 +64,14 @@ async function loginSettings(page: import("@playwright/test").Page) {
   await page.goto(`${base}/settings#token=${encodeURIComponent(token)}`);
   await openSettingsForEditing(page);
 }
+// Long explanations live in hover help, not in the page flow.
+async function expectHelp(page: import("@playwright/test").Page, label: string, text: string) {
+  await expect(page.getByText(text, { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: label, exact: true }).hover();
+  await expect(page.getByRole("tooltip")).toContainText(text);
+  await page.mouse.move(0, 0);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+}
 
 async function start() {
   const fixtureEnv = { ...process.env, MIHOMO_SERVER_DATA_DIR: directory };
@@ -1592,7 +1600,8 @@ test("core upgrade page controls and channels translate across language changes"
   await expect(page.getByRole("heading", { name: "稳定版内核升级" })).toBeVisible();
   await expect(page.getByRole("button", { name: "刷新安装信息" })).toBeVisible();
   await expect(page.getByLabel("升级通道")).toBeVisible();
-  await expect(page.getByText("检查并安装 Mihomo 最新稳定版。升级时会短暂中断代理连接；失败时恢复上一份内核，停止的内核仍保持停止。")).toBeVisible();
+  await expectHelp(page, "稳定版内核升级", "检查并安装 Mihomo 最新稳定版。升级时会短暂中断代理连接；失败时恢复上一份内核，停止的内核仍保持停止。");
+  await expectHelp(page, "稳定版内核升级", "默认跳过相同版本；强制重新安装会重新验证并替换内核。");
   await expect(page.getByText("已验证安装 v1.18.0")).toBeVisible();
   await expect(page.getByRole("button", { name: "检查稳定版更新" })).toBeVisible();
   await expect(page.getByRole("button", { name: "升级至最新稳定版" })).toBeVisible();
@@ -1602,7 +1611,7 @@ test("core upgrade page controls and channels translate across language changes"
   await expect(page.getByRole("heading", { name: "Stable core upgrade" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh install info" })).toBeVisible();
   await expect(page.getByLabel("Upgrade channel")).toBeVisible();
-  await expect(page.getByText("Check and install the latest Stable Mihomo core. Proxy connections will briefly pause during upgrades; previous core is restored on failure, stopped cores remain stopped.")).toBeVisible();
+  await expectHelp(page, "Stable core upgrade", "Check and install the latest Stable Mihomo core. Proxy connections will briefly pause during upgrades; previous core is restored on failure, stopped cores remain stopped.");
   await expect(page.getByText("Verified install v1.18.0")).toBeVisible();
   await expect(page.getByRole("button", { name: "Check Stable update" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Upgrade to latest Stable" })).toBeVisible();
@@ -1610,16 +1619,16 @@ test("core upgrade page controls and channels translate across language changes"
 
   await page.getByLabel("Upgrade channel").selectOption("alpha");
   await expect(page.getByRole("heading", { name: "Alpha core upgrade" })).toBeVisible();
-  await expect(page.getByText("Alpha is a pre-release channel. Switch back to Stable channel anytime.")).toBeVisible();
-  await expect(page.getByText("Check and install the latest Alpha Mihomo core. Proxy connections will briefly pause during upgrades; previous core is restored on failure, stopped cores remain stopped.")).toBeVisible();
+  await expectHelp(page, "Alpha core upgrade", "Alpha is a pre-release channel. Switch back to Stable channel anytime.");
+  await expectHelp(page, "Alpha core upgrade", "Check and install the latest Alpha Mihomo core. Proxy connections will briefly pause during upgrades; previous core is restored on failure, stopped cores remain stopped.");
   await expect(page.getByRole("button", { name: "Check Alpha update" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Upgrade to latest Alpha" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Force reinstall Alpha" })).toBeVisible();
 
   await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
   await expect(page.getByRole("heading", { name: "Alpha内核升级" })).toBeVisible();
-  await expect(page.getByText("Alpha 是预发布版本。可选择稳定版通道切回最新稳定版。")).toBeVisible();
-  await expect(page.getByText("检查并安装 Mihomo 最新Alpha。升级时会短暂中断代理连接；失败时恢复上一份内核，停止的内核仍保持停止。")).toBeVisible();
+  await expectHelp(page, "Alpha内核升级", "Alpha 是预发布版本。可选择稳定版通道切回最新稳定版。");
+  await expectHelp(page, "Alpha内核升级", "检查并安装 Mihomo 最新Alpha。升级时会短暂中断代理连接；失败时恢复上一份内核，停止的内核仍保持停止。");
   await expect(page.getByRole("button", { name: "检查Alpha更新" })).toBeVisible();
   await expect(page.getByRole("button", { name: "升级至最新Alpha" })).toBeVisible();
   await expect(page.getByRole("button", { name: "强制重新安装Alpha" })).toBeVisible();
@@ -5023,4 +5032,121 @@ test("settings uses the compact layout and shows browser-safe version informatio
   } finally {
     await desktop.close();
   }
+});
+
+test("service page controls the foreground service and keeps long help in tooltips", async ({ page }) => {
+  await page.route("**/api/commands", async route => {
+    if (route.request().postDataJSON()?.command === "service_release") await route.fulfill({ json: "v9.9.9" });
+    else await route.continue();
+  });
+  await page.goto(`${base}/service#token=${encodeURIComponent(token)}`);
+  const navigation = page.getByRole("navigation", { name: "主导航" });
+  expect((await navigation.getByRole("link").allTextContents()).slice(-2)).toEqual(["内核", "服务"]);
+  await expect(navigation.getByRole("link", { name: "服务", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { level: 1, name: "服务" })).toBeVisible();
+
+  const control = page.getByRole("region", { name: "服务控制" });
+  await expect(control.locator("div").filter({ hasText: "服务版本" }).locator("dd")).toHaveText(await settingsApi("service_version"));
+  await expect(control.getByText("直接启动", { exact: true })).toBeVisible();
+  await expect(control.getByRole("button", { name: "重启服务" })).toBeDisabled();
+  await expect(control.getByRole("button", { name: "停止服务" })).toBeEnabled();
+  await expectHelp(page, "服务控制", "mihomo-server 是托管 Mihomo 内核并提供本管理页面的后台服务。");
+  await expectHelp(page, "直接启动", "服务不是由 systemd 启动的，只能停止，请在启动它的地方重新启动。");
+
+  const upgrade = page.getByRole("region", { name: "服务升级" });
+  await expect(upgrade.getByText("非共享安装", { exact: true })).toBeVisible();
+  await expect(upgrade.getByText("不可用", { exact: true })).toBeVisible();
+  await expect(upgrade.getByLabel("升级输出")).toHaveText("需要共享安装才能在此升级。");
+  await expect(upgrade.getByRole("button", { name: "升级至最新版" })).toBeDisabled();
+  await expectHelp(page, "服务升级", "升级由系统更新单元以管理员权限完成");
+  await expectHelp(page, "不可用", "请在终端运行 mihomo-server update 升级一次。");
+  await upgrade.getByRole("button", { name: "检查更新" }).click();
+  await expect(upgrade.locator("div").filter({ hasText: "最新版本" }).locator("dd")).toHaveText("v9.9.9");
+
+  // A dismissed confirmation stops nothing; reloading keeps the page.
+  page.once("dialog", dialog => dialog.dismiss());
+  await control.getByRole("button", { name: "停止服务" }).click();
+  await page.reload();
+  await expect(control.getByRole("button", { name: "停止服务" })).toBeEnabled();
+  expect((await settingsApi("service_info")).unit).toBeNull();
+
+  for (const [command, message] of [["restart_service", "started directly"], ["upgrade_service", "shared installation"]]) {
+    const response = await fetch(`${base}/api/commands`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ command }),
+    });
+    expect(response.ok).toBe(false);
+    expect(JSON.stringify(await response.json())).toContain(message);
+  }
+  await page.unroute("**/api/commands");
+});
+
+test("service restart and upgrade report progress without moving the page", async ({ page }) => {
+  const sockets: import("@playwright/test").WebSocketRoute[] = [];
+  await page.routeWebSocket("**/api/events", socket => {
+    sockets.push(socket);
+    socket.onMessage(message => {
+      if (JSON.parse(String(message)).type === "authenticate") {
+        socket.send(JSON.stringify({ type: "ready" }));
+        socket.send(JSON.stringify({ type: "status", data: { phase: "running", generation: 0, selection_pending: [] } }));
+      }
+    });
+  });
+  const disconnect = () => sockets.splice(0).forEach(socket => void socket.close());
+  let info = { version: "0.2.0", release: "v0.2.0", unit: "mihomo-server.service", upgrade: { available: true, state: "inactive", result: "success", log: [] as string[] } };
+  let failNext = false;
+  await page.route("**/api/commands", async route => {
+    const command = route.request().postDataJSON()?.command;
+    if (command === "service_info") await route.fulfill({ json: info });
+    else if (command === "service_release") await route.fulfill({ json: "v0.3.0" });
+    else if (command === "restart_service") {
+      await route.fulfill({ json: { action: "restart" } });
+      setTimeout(disconnect, 100);
+    } else if (command === "upgrade_service") {
+      info = { ...info, upgrade: { ...info.upgrade, state: "activating", log: ["==> downloading mihomo-server-v0.3.0"] } };
+      if (failNext) setTimeout(() => { info = { ...info, upgrade: { ...info.upgrade, state: "failed", result: "exit-code", log: ["error: checksum mismatch"] } }; }, 2500);
+      await route.fulfill({ json: { unit: "mihomo-server-update.service" } });
+    } else await route.continue();
+  });
+  await page.goto(`${base}/service#token=${encodeURIComponent(token)}`);
+  const control = page.getByRole("region", { name: "服务控制" });
+  const upgrade = page.getByRole("region", { name: "服务升级" });
+  const output = upgrade.getByLabel("升级输出");
+  await expect(control.getByText("mihomo-server.service", { exact: true })).toBeVisible();
+  await expect(output).toHaveText("暂无升级输出");
+
+  page.once("dialog", dialog => dialog.accept());
+  await control.getByRole("button", { name: "重启服务" }).click();
+  await expect(page.locator(".toast").filter({ hasText: "服务已重启" })).toBeVisible();
+
+  await upgrade.getByRole("button", { name: "检查更新" }).click();
+  await expect(upgrade.locator("div").filter({ hasText: "最新版本" }).locator("dd")).toHaveText("v0.3.0");
+  const actions = await upgrade.locator(".actions").boundingBox();
+  page.once("dialog", dialog => dialog.accept());
+  await upgrade.getByRole("button", { name: "升级至最新版" }).click();
+  await expect(upgrade.getByText("升级中…", { exact: true })).toBeVisible();
+  await expect(output).toContainText("downloading mihomo-server-v0.3.0");
+  info = { ...info, upgrade: { ...info.upgrade, log: Array.from({ length: 40 }, (_, index) => `line ${index}`) } };
+  await expect(output).toContainText("line 39");
+  expect(await upgrade.locator(".actions").boundingBox()).toEqual(actions);
+  expect(await output.evaluate(element => element.scrollTop + element.clientHeight >= element.scrollHeight - 1)).toBe(true);
+
+  // The installer restarts the service, which comes back upgraded.
+  info = { ...info, version: "0.3.0", release: "v0.3.0", upgrade: { ...info.upgrade, state: "inactive", log: [...info.upgrade.log, "System install complete"] } };
+  disconnect();
+  await expect(page.locator(".toast").filter({ hasText: "已升级至 v0.3.0" })).toBeVisible();
+  await expect(upgrade.getByRole("button", { name: "已是最新版本 v0.3.0" })).toBeDisabled();
+  await expect(control.locator("div").filter({ hasText: "服务版本" }).locator("dd")).toHaveText("0.3.0");
+
+  // A failed run is reported with its output.
+  info = { ...info, version: "0.2.0", release: "v0.2.0" };
+  failNext = true;
+  await page.reload();
+  await upgrade.getByRole("button", { name: "检查更新" }).click();
+  page.once("dialog", dialog => dialog.accept());
+  await upgrade.getByRole("button", { name: "升级至最新版" }).click();
+  await expect(page.locator(".toast").filter({ hasText: "升级失败，详见升级输出" })).toBeVisible();
+  await expect(upgrade.getByText("上次升级失败", { exact: true })).toBeVisible();
+  await expect(output).toHaveText("error: checksum mismatch");
+  await page.unroute("**/api/commands");
 });

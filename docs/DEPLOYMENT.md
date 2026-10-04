@@ -343,6 +343,15 @@ other members' links (a local-authority `.pkla` group grant on polkit 0.105).
 Group members can give any program these network capabilities through the
 launcher; authorize only trusted users.
 
+Members can also upgrade from the Web UI's Service page. The installer adds the
+root oneshot unit `/etc/systemd/system/mihomo-server-update.service` (runs
+`mihomo-server update`, output in `/var/lib/mihomo-server/update.log`) and
+`/etc/polkit-1/rules.d/50-mihomo-server-update.rules`, which lets `mihomo-tun`
+members start only that unit without a password. It installs the latest
+official release for everyone and restarts every running instance; it downloads
+directly as root, not through anyone's proxy. polkit 0.105 cannot limit a grant
+to one unit, so there the Web upgrade is refused; use `mihomo-server update`.
+
 Re-running the installer upgrades the caller and other running instances. Other
 stopped instances stay stopped. Known legacy user units are backed up, original
 data and arguments are preserved, and the old program directory is retained.
@@ -354,8 +363,8 @@ curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/in
 
 Uninstall stops every instance and removes the program, unit, helper, the
 `/usr/local` command/manual/completion links pointing into `/opt/mihomo-server`, enablement,
-slot registry, `mihomo-tun` group, the polkit TUN DNS rule and the lingering the
-installer enabled. User
+slot registry, `mihomo-tun` group, the polkit TUN DNS rule, the update unit and
+its polkit rule, and the lingering the installer enabled. User
 data, env files and the helper's path drop-in are kept for a reinstall. `--purge`
 also deletes, as each owner, every instance's data and configuration (resolved
 from the saved XDG paths and env file), legacy unit backups and a migrated

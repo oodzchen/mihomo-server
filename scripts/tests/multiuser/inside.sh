@@ -589,6 +589,52 @@ phase_upgrade() {
     check "carol traffic uses alice's TUN after upgrade" uses_tun carol alice
 }
 
+# USER's service_info field (a Python expression over `info`) is true.
+service_info_is() {
+    api "$1" service_info | python3 -c 'import json,sys; info=json.load(sys.stdin); sys.exit(not eval(sys.argv[1]))' "$2"
+}
+upgrade_refused() { ! api "$1" upgrade_service >/tmp/refused-upgrade.log 2>&1; }
+update_unit_succeeded() {
+    [ "$(systemctl show mihomo-server-update.service -p ActiveState --value)" = inactive ] \
+        && [ "$(systemctl show mihomo-server-update.service -p Result --value)" = success ]
+}
+current_is() { [ "$(readlink /opt/mihomo-server/current)" = "$1" ]; }
+instance_active() { [ "$(systemctl --user -M "$1@" is-active mihomo-server.service)" = active ]; }
+phase_web_upgrade() {
+    echo "== Web service upgrade and restart"
+    check "update unit installed" test -f /etc/systemd/system/mihomo-server-update.service
+    check "polkit update rule installed" test -f /etc/polkit-1/rules.d/50-mihomo-server-update.rules
+    check "alice's instance reports its systemd unit" service_info_is alice 'info["unit"] == "mihomo-server.service"'
+    check "alice's instance offers the Web upgrade" service_info_is alice \
+        'info["upgrade"]["available"] and info["release"] == "vfixture2"'
+    check "carol (not in the TUN group) cannot start the update unit" upgrade_refused carol
+    # The test release server, for the unit only.
+    mkdir -p /etc/systemd/system/mihomo-server-update.service.d
+    printf '[Service]\nEnvironment=MIHOMO_INSTALL_BASE_URL=http://127.0.0.1:18080\nEnvironment=MIHOMO_SERVER_INSTALLER=%s\n' \
+        http://127.0.0.1:18080/test/repo/releases/latest/download/install.sh \
+        >/etc/systemd/system/mihomo-server-update.service.d/test.conf
+    systemctl daemon-reload
+    local old_a old_c
+    old_a="$(pgrep -u alice -x mihomo-server)"
+    old_c="$(pgrep -u carol -x mihomo-server)"
+    echo vfixture3 >/work/releases/latest-tag
+    api alice upgrade_service >/tmp/web-upgrade.log 2>&1 || { cat /tmp/web-upgrade.log; fatal 'alice Web upgrade request failed'; }
+    check "Web upgrade switched current to the latest release" wait_for 180 current_is releases/vfixture3
+    check "update unit finished successfully" wait_for 60 update_unit_succeeded
+    check "Web upgrade restarted alice" wait_for 60 restarted alice "$old_a"
+    check "Web upgrade restarted carol" wait_for 60 restarted carol "$old_c"
+    check "alice reads the new release and the update output" wait_for 60 service_info_is alice \
+        'info["release"] == "vfixture3" and any("System install complete" in line for line in info["upgrade"]["log"])'
+    check "update output is world-readable" test "$(stat -c '%a %U' /var/lib/mihomo-server/update.log)" = '644 root'
+    rm -rf /etc/systemd/system/mihomo-server-update.service.d
+    systemctl daemon-reload
+    check "alice TUN back after Web upgrade" wait_for 60 link_up "$(dev alice)"
+    old_c="$(pgrep -u carol -x mihomo-server)"
+    api carol restart_service >/dev/null || fatal 'carol Web restart request failed'
+    check "Web restart restarted carol's service" wait_for 60 restarted carol "$old_c"
+    check "carol's unit is active after the Web restart" wait_for 60 instance_active carol
+}
+
 # USER's saved TUN switch is explicitly off.
 tun_saved_off() {
     api "$1" settings | python3 -c 'import json,sys; sys.exit(json.load(sys.stdin)["runtime"]["tun"]["enable"] is not False)'
@@ -641,6 +687,8 @@ phase_cleanup() {
     check "TUN group, slot registry and launcher removed" bash -c \
         "! getent group mihomo-tun >/dev/null && [ ! -e /var/lib/mihomo-server ]"
     check "polkit TUN DNS rule removed" test ! -e /etc/polkit-1/rules.d/50-mihomo-server-tun.rules
+    check "update unit and its polkit rule removed" bash -c \
+        "[ ! -e /etc/systemd/system/mihomo-server-update.service ] && [ ! -e /etc/polkit-1/rules.d/50-mihomo-server-update.rules ]"
     check "installer-enabled lingering undone" test "$(loginctl show-user alice -p Linger --value 2>/dev/null || echo no)" = no
     check "no enablement links left" bash -c "! compgen -G '/home/*/.config/systemd/user/default.target.wants/mihomo-server.service' >/dev/null"
 
@@ -672,6 +720,7 @@ case "${1:-before-reboot}" in
         phase_crash
         phase_core_upgrade
         phase_upgrade
+        phase_web_upgrade
         declare -p PASS FAIL A_RULES ALICE_TOKEN_HASH >/work/checkpoint
         chmod 600 /work/checkpoint
         ;;
