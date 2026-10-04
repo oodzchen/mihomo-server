@@ -53,6 +53,37 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
+## Increment: CI listener/public-origin assertion repair
+
+The multi-user end-to-end test previously looked for Bob's internal listener
+port in the helper's `manage:` line. With a configured public origin, that line
+correctly prints `https://bob.example/#token=…`, whose URL has no internal port.
+The obsolete assertion falsely reported a precedence failure.
+
+The check now verifies the actual wildcard listener at `0.0.0.0:21919` through
+`ss`, and separately verifies that the browser URL uses the named public origin
+and automatic-login fragment. Both named settings must win over their conflicting
+legacy arguments; no launcher, helper or service behavior is changed.
+
+The same run also exposed a vacuous Web-upgrade version check: a new `bash -c`
+could not call the parent shell's `api` function, leaving an empty grep pattern
+that still passed. The API version is now read in the parent shell and compared
+as JSON against the installation receipt's `version` field, so a missing response
+or a version mismatch fails verification.
+
+Failure diagnostics now include each user's instance journal, beyond the user
+manager and final system journal, so startup errors remain available after
+reboot/cleanup.
+
+Verification: ShellCheck and all 30 Python packaging/installer tests passed.
+The final independent-network systemd container run passed **115 checks**, with
+actual listener/public-origin verification, exact upgrade receipt comparison,
+concurrent TUN/HTTPS traffic, crash recovery, upgrade, reboot, uninstall and purge.
+One preceding local run had two Bob upgrade/TUN recovery failures; the final run
+did not reproduce them. This remains an observed intermittent runtime limitation,
+not evidence of a listener-precedence defect; per-instance diagnostics were added
+to preserve evidence if it recurs. Production data and host routing were untouched.
+
 ## Increment: directly accessible TUN switch
 
 **Implemented.** Overview's TUN card now has a visible switch, and Settings
@@ -231,7 +262,8 @@ out of scope; sockets stay under `<data-dir>/run`.
    UID with the packager's 0700 root (readable by alice only when the host UID was
    1000). run.sh now makes `/work` root-owned and the bundle world-readable.
 
-**Latest completed task:** Direct TUN switches on Overview and at the top of Settings, with immediate application, verified state and preserved settings (see the increment above).
+**Latest completed task:** Repair the multi-user CI assertions to verify the actual listener independently of the public-origin management URL (see the increment above).
+**Previous completed task:** Direct TUN switches on Overview and at the top of Settings, with immediate application, verified state and preserved settings.
 **Previous completed task:** Compact Web management — live mode/TUN overview, grouped settings/help, stacked top-center toasts and centered content.
 **Previous completed task:** Installer management links carry a token and log in automatically (see the increment below).
 **Previous completed task:** Zero-argument shared installation, step 4 — per-user Web/installer core upgrades with the TUN capability launcher, complete uninstall and `--purge`.

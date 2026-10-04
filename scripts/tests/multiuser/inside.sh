@@ -247,7 +247,11 @@ CONFIG
         || { cat /tmp/init-carol.log; fatal 'carol init alias'; }
     as bob mihomo-server-user restart >/tmp/bob-restart.log 2>&1 || { cat /tmp/bob-restart.log; fatal 'bob restart'; }
     check "saved XDG paths survive a terminal without XDG variables" grep -q '/home/bob/config space%/mihomo-server/env' /tmp/bob-restart.log
-    check "named listener wins over legacy arguments" grep -q 'manage:.*21919' /tmp/bob-restart.log
+    # manage: is the public browser URL when an origin is configured; the
+    # actual bind address must be checked independently of that URL.
+    check "named listener wins over legacy arguments" bash -c "ss -ltn | grep -q '0.0.0.0:$(port bob) '"
+    check "named public origin wins over legacy arguments" grep -Eq \
+        '^manage:[[:space:]]+https://bob\.example/#token=[[:xdigit:]]{64}$' /tmp/bob-restart.log
     check "carol invalid XDG falls back" test -s /home/carol/.config/mihomo-server/env
     check "bob TUN available without restarting manager" grep -q 'tun:.*available ' /tmp/init-bob.log
     check "carol TUN unavailable" grep -q 'tun:.*unavailable' /tmp/init-carol.log
@@ -416,8 +420,11 @@ phase_core_upgrade() {
     api alice upgrade_clash_core '{"force":true}' >/tmp/core-upgrade.log 2>&1 \
         || { cat /tmp/core-upgrade.log; fatal 'alice Web core upgrade failed'; }
     check "Web upgrade installed a receipt" test -f /home/alice/.local/share/mihomo-server/core/.core-installation.json
-    check "alice reports the Web-installed version" bash -c \
-        "grep -q \"\$(api alice installed_core_version | tr -d '\"')\" /home/alice/.local/share/mihomo-server/core/.core-installation.json"
+    local installed_version
+    installed_version=$(api alice installed_core_version) || fatal 'read Web-installed version'
+    check "alice reports the Web-installed version" python3 -c \
+        'import json,sys; sys.exit(json.load(open(sys.argv[1]))["version"] != json.loads(sys.argv[2]))' \
+        /home/alice/.local/share/mihomo-server/core/.core-installation.json "$installed_version"
     check "alice core after Web upgrade is still her managed core" wait_for 60 bash -c \
         "[ \"\$(readlink /proc/\$(pgrep -u alice -x verge-mihomo | head -n 1)/exe)\" = /home/alice/.local/share/mihomo-server/core/verge-mihomo ]"
     check "alice core keeps TUN capabilities after Web upgrade" has_net_admin alice

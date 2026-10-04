@@ -55,6 +55,10 @@ diagnose() {
         uid="$("$engine" exec "$name" id -u "$user")" || continue
         "$engine" exec "$name" systemctl status "user@$uid.service" "user-runtime-dir@$uid.service" \
             --no-pager -l || true
+        # User-manager status and the final system journal can omit the actual
+        # instance error, especially after reboot/cleanup. Include its history.
+        "$engine" exec "$name" journalctl "_UID=$uid" "_SYSTEMD_USER_UNIT=mihomo-server.service" \
+            --no-pager -n 80 || true
     done
     "$engine" exec "$name" journalctl -b --no-pager -n 200 || true
 }
