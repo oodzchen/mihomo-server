@@ -29,6 +29,20 @@ fetch() {
         die 'need curl or wget'
     fi
 }
+# Latest tag from the releases/latest redirect; the REST API is limited to 60
+# anonymous requests per hour per IP, which shared proxy exits exhaust.
+latest_tag() {
+    local location
+    if command -v curl >/dev/null 2>&1; then
+        location=$(curl -fsS --retry 3 -o /dev/null -w '%{redirect_url}' "$1") || return 1
+    elif command -v wget >/dev/null 2>&1; then
+        # wget and wget2 report the unfollowed redirect differently and exit non-zero.
+        location=$(wget -S --max-redirect=0 -O /dev/null "$1" 2>&1 || true)
+    else
+        die 'need curl or wget'
+    fi
+    sed -n "s#.*/releases/tag/\([^/[:space:]'\"]*\).*#\1#p" <<< "$location" | head -n 1
+}
 fetch_progress() {
     if command -v curl >/dev/null 2>&1 && [ -t 2 ]; then
         curl -fL --retry 3 --progress-bar -o "$2" "$1"
@@ -411,10 +425,7 @@ main() {
         command -v tar >/dev/null || die 'missing tar'
         if ! command -v sha256sum >/dev/null && ! command -v shasum >/dev/null; then die 'need sha256sum or shasum'; fi
         if [ -z "$tag" ]; then
-            local api="https://api.github.com/repos/$REPO/releases/latest" release_json
-            [ "$base" = https://github.com ] || api="$base/$REPO/releases/latest"
-            release_json=$(fetch "$api" /dev/stdout) || die 'cannot query latest release'
-            tag=$(sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' <<< "$release_json" | head -n 1)
+            tag=$(latest_tag "$base/$REPO/releases/latest") || die 'cannot query latest release'
         fi
         case "$tag" in '' | . | .. | */* | .*) die 'invalid release tag' ;; esac
         name="mihomo-server-$tag-x86_64-unknown-linux-gnu"

@@ -2,7 +2,6 @@
 """Serve rendered installer and checksummed releases for the real download path."""
 import hashlib
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-import json
 from pathlib import Path
 import tarfile
 
@@ -26,8 +25,12 @@ class Releases(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == '/test/repo/releases/latest':
-            body = json.dumps({'tag_name':(ROOT / 'latest-tag').read_text().strip()}).encode()
-        elif self.path == '/test/repo/releases/latest/download/install.sh':
+            self.send_response(302)
+            self.send_header('Location', '/test/repo/releases/tag/' + (ROOT / 'latest-tag').read_text().strip())
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        if self.path == '/test/repo/releases/latest/download/install.sh':
             body = script.encode()
         else:
             return super().do_GET()

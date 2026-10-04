@@ -1,9 +1,11 @@
 """Installer interface, integrity and sudo transport tests; no system writes."""
 import hashlib
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import os
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -107,6 +109,27 @@ class Installer(unittest.TestCase):
         result = subprocess.run(["bash"], input=source, env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
+
+    def test_latest_tag_reads_redirect_without_api(self):
+        class Redirect(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(302 if self.path == "/o/r/releases/latest" else 404)
+                self.send_header("Location", "/o/r/releases/tag/v1.2.3")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Redirect)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        base = f"http://127.0.0.1:{server.server_port}"
+        result = self.run_shell('source "$1"; latest_tag "$BASE/o/r/releases/latest"', BASE=base)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "v1.2.3")
+        result = self.run_shell('source "$1"; latest_tag "$BASE/missing/releases/latest"', BASE=base)
+        self.assertNotEqual(result.returncode, 0)
 
 
 class UserManagementLinks(unittest.TestCase):
