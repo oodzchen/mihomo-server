@@ -30,6 +30,9 @@ libc = "0.2.189"
 [target.'cfg(target_os = "linux")'.dependencies]
 # Already used by the single-instance plugin; sends failure notifications.
 zbus = "5.9"
+# Selects tray-icon's D-Bus StatusNotifierItem backend for Tauri's tray: unlike
+# libappindicator it reports left clicks (Activate) and shows tooltips.
+tray-icon = { version = "0.25", default-features = false, features = ["ksni"] }
 
 [profile.release]
 codegen-units = 1

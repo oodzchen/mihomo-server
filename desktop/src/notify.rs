@@ -1,5 +1,5 @@
 //! Desktop notifications (freedesktop D-Bus) for failures: the tray menu stays
-//! short and Linux trays show no tooltip, so errors would otherwise be unseen.
+//! short and a tooltip is only seen on hover, so errors could go unnoticed.
 use std::collections::HashMap;
 use zbus::zvariant::Value;
 

@@ -166,9 +166,12 @@ the service supervises. The tray manages the first two and proxy settings
 through the API; it never starts or stops the core and never presents the
 core's version or phase as the service's. The service version shown is read
 from the running service binary (`/proc/<MainPID>/exe --version`), since the
-API's `status` reports the core. Failures are sent as desktop notifications
-(freedesktop D-Bus) because Linux trays have no tooltip and the menu header
-stays limited to the client version and the service state.
+API's `status` reports the core. The tray uses tray-icon's StatusNotifierItem
+(`ksni`) backend instead of Tauri's default libappindicator, which reports no
+clicks and shows no tooltip: a left click opens the management window (or the
+status page), the menu is on right click, and its header is a single line of
+service state. Details go to the tooltip, and failures are also sent as desktop
+notifications (freedesktop D-Bus).
 
 Browser operations use independent readback after mutations. Realtime feeds can
 disconnect and resubscribe without becoming configuration authority. Browser

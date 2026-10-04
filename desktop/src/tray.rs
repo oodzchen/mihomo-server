@@ -4,13 +4,14 @@
 use crate::{
     controller,
     model::{Action, Entry, Icon, MenuModel},
+    window,
 };
 use std::sync::Mutex;
 use tauri::{
     AppHandle, Manager as _, Wry,
     image::Image,
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
-    tray::{TrayIcon, TrayIconBuilder},
+    tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
 };
 
 enum Handle {
@@ -165,9 +166,22 @@ pub fn create(app: &AppHandle, model: MenuModel) -> tauri::Result<()> {
     let (menu, handles) = build(app, &model)?;
     let tray = TrayIconBuilder::with_id("main")
         .icon(icon(model.icon))
+        // The StatusNotifierItem title heads the tooltip; the model fills its body.
+        .title("Mihomo Server")
         .tooltip(&model.tooltip)
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        // Left click opens the management window; the menu is on right click.
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                window::open_preferred(tray.app_handle());
+            }
+        })
         .on_menu_event(|app, event| on_menu_event(app, event.id().as_ref()))
         .build(app)?;
     let actions = model.actions();

@@ -102,7 +102,7 @@ impl Controller {
     }
 
     pub fn model(&self) -> MenuModel {
-        model::derive(&self.snapshot(), self.language.strings(), crate::VERSION)
+        model::derive(&self.snapshot(), self.language.strings())
     }
 }
 

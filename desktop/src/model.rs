@@ -374,8 +374,8 @@ fn mode_label<'a>(mode: &str, strings: &'a Strings) -> &'a str {
 
 /// The service's state in a few words: what a running task is doing, else
 /// what systemd and the management API report. Never the core's state.
-fn service_status(snapshot: &Snapshot, strings: &Strings) -> String {
-    let state = match (snapshot.task, &snapshot.service) {
+fn service_status<'a>(snapshot: &Snapshot, strings: &'a Strings) -> &'a str {
+    match (snapshot.task, &snapshot.service) {
         (Task::Installing, _) => strings.service_installing,
         (Task::Starting, _) => strings.service_starting,
         (Task::Stopping, _) => strings.service_stopping,
@@ -385,22 +385,13 @@ fn service_status(snapshot: &Snapshot, strings: &Strings) -> String {
         (_, Service::Inactive) => strings.service_stopped,
         (_, Service::Unreachable(_)) => strings.service_unreachable,
         (_, Service::Running(_)) => strings.service_running,
-    };
-    match &snapshot.service {
-        Service::Running(live) if snapshot.task == Task::Idle || snapshot.task == Task::Command => {
-            match &live.service_version {
-                Some(version) => format!("{} {} · {state}", strings.service, label(version)),
-                None => format!("{} · {state}", strings.service),
-            }
-        }
-        _ => format!("{} · {state}", strings.service),
     }
 }
 
 /// Details that would widen the menu go to the tooltip (where the platform
 /// shows one); failures are also sent as notifications.
 fn tooltip(snapshot: &Snapshot, status: &str, strings: &Strings) -> String {
-    let mut lines = vec![format!("Mihomo Server · {status}")];
+    let mut lines = vec![status.to_owned()];
     if let Service::Unreachable(reason) = &snapshot.service {
         lines.push(reason.clone());
     }
@@ -413,13 +404,10 @@ fn tooltip(snapshot: &Snapshot, status: &str, strings: &Strings) -> String {
     lines.join("\n")
 }
 
-pub fn derive(snapshot: &Snapshot, strings: &Strings, desktop_version: &str) -> MenuModel {
+pub fn derive(snapshot: &Snapshot, strings: &Strings) -> MenuModel {
     let status = service_status(snapshot, strings);
-    let mut entries = vec![
-        info(strings.desktop.replace("{version}", desktop_version)),
-        info(status.clone()),
-        Entry::Separator,
-    ];
+    // One compact line; no separator below it, which would add more height.
+    let mut entries = vec![info(status)];
     let mut icon = Icon::Offline;
     if let Service::Running(live) = &snapshot.service {
         if live.phase() == "running" {
@@ -458,7 +446,7 @@ pub fn derive(snapshot: &Snapshot, strings: &Strings, desktop_version: &str) -> 
     MenuModel {
         entries,
         icon,
-        tooltip: tooltip(snapshot, &status, strings),
+        tooltip: tooltip(snapshot, status, strings),
     }
 }
 
@@ -470,10 +458,6 @@ mod tests {
 
     fn strings() -> &'static Strings {
         Language::En.strings()
-    }
-
-    fn derive(snapshot: &Snapshot, strings: &Strings) -> MenuModel {
-        super::derive(snapshot, strings, "0.1.0")
     }
 
     fn live(phase: &str, access: Value) -> Live {
@@ -680,17 +664,15 @@ mod tests {
     }
 
     #[test]
-    fn the_header_shows_versions_and_service_state_only() {
-        let header = |model: &MenuModel| -> Vec<String> {
-            model.entries[..2]
-                .iter()
-                .map(|entry| match entry {
-                    Entry::Item {
-                        label, enabled: false, ..
-                    } => label.clone(),
-                    other => panic!("not an info line: {other:?}"),
-                })
-                .collect()
+    fn the_header_is_one_line_of_service_state() {
+        let header = |model: &MenuModel| match &model.entries[..2] {
+            [
+                Entry::Item {
+                    label, enabled: false, ..
+                },
+                Entry::Submenu { .. } | Entry::Item { .. },
+            ] => label.clone(),
+            other => panic!("not a single info line: {other:?}"),
         };
         let mut failed = snapshot(Service::Running(Box::new(live(
             "failed",
@@ -699,16 +681,16 @@ mod tests {
         failed.last_error = Some("a long reason that must not widen the menu".into());
         let model = derive(&failed, strings());
         // The core failed, but the service is running: no core state here.
-        assert_eq!(header(&model), ["Desktop client v0.1.0", "Service v0.1.9 · running"]);
+        assert_eq!(header(&model), "Service running");
         assert!(model.tooltip.contains("a long reason"));
         assert_eq!(model.icon, Icon::Offline);
 
         let mut installing = snapshot(Service::NotInstalled);
         installing.task = Task::Installing;
-        assert_eq!(header(&derive(&installing, strings()))[1], "Service · installing…");
+        assert_eq!(header(&derive(&installing, strings())), "Installing service…");
         let model = derive(&snapshot(Service::Unreachable("refused".into())), strings());
-        assert_eq!(header(&model)[1], "Service · unreachable");
-        assert_eq!(model.tooltip, "Mihomo Server · Service · unreachable\nrefused");
+        assert_eq!(header(&model), "Service unreachable");
+        assert_eq!(model.tooltip, "Service unreachable\nrefused");
     }
 
     #[test]
