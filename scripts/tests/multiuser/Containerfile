@@ -6,9 +6,13 @@
 # pam_unix account step (user@.service, systemctl --user -M user@) fails with
 # 224/PAM. Owner-readable shadow files need no capability.
 FROM fedora:44
-RUN dnf -y install systemd libcap iproute procps-ng curl shadow-utils util-linux \
-        python3 findutils sudo && dnf clean all \
-    && systemctl mask systemd-resolved.service getty@tty1.service \
+# systemd-resolved and polkit, as on desktops: Mihomo's TUN calls resolvectl,
+# which polkit must refuse silently. glibc lookups stay off nss-resolve, so the
+# fake-IP checks still see each user's own resolver.
+RUN dnf -y install systemd systemd-resolved polkit libcap iproute procps-ng curl shadow-utils \
+        util-linux python3 findutils sudo && dnf clean all \
+    && sed -i -E 's/ resolve( \[[^]]*\])?//' /etc/nsswitch.conf \
+    && systemctl mask getty@tty1.service \
     && useradd -m alice && useradd -m bob && useradd -m carol && useradd -m dave && useradd -m eve && useradd -m frank \
     && chmod 0400 /etc/shadow /etc/gshadow \
     && printf "alice ALL=(ALL) NOPASSWD: ALL\n" > /etc/sudoers.d/mihomo-test-alice \

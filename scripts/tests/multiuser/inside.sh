@@ -151,6 +151,15 @@ core_exe() { readlink "/proc/$(core_pid "$1")/exe"; }
 # The user's own managed core runs with ambient CAP_NET_ADMIN only via the TUN launcher.
 has_net_admin() { local amb; amb=$(awk '/^CapAmb:/ {print $2}' "/proc/$(core_pid "$1")/status"); (( 16#$amb & 0x1000 )); }
 lacks_net_admin() { ! has_net_admin "$1"; }
+# polkit answer for the core's resolvectl call on LINK: 1 = refused, 2 = would
+# prompt for authentication (pkcheck exit codes; no agent is ever started).
+resolved_answer() {
+    pkcheck --action-id org.freedesktop.resolve1.set-domains --process "$(core_pid "$1")" \
+        --detail interface "$2" >/dev/null 2>&1
+    echo $?
+}
+# Mihomo's resolvectl calls must not make systemd-resolved route lookups to a per-user TUN.
+resolver_ignores_tun() { ! resolvectl domain "$1" | grep -q '~\.' && [ -z "$(resolvectl dns "$1" | cut -d: -f2 | tr -d ' ')" ]; }
 core_hash() { sha256sum "$(data_dir "$1")/core/verge-mihomo" | cut -d' ' -f1; }
 # wait_for TRIES COMMAND...: retry every half second.
 wait_for() {
@@ -399,6 +408,10 @@ tun_assert() {
     check_unless_stub "bob DNS answers from bob's fake-IP range" fake_ip_in bob
     check "carol DNS is not hijacked into a slot" not_fake_ip carol
     check "alice and bob fetch in parallel" parallel
+    check "polkit refuses TUN link DNS without prompting" test "$(resolved_answer alice "$(dev alice)")" = 1
+    check "polkit keeps prompting for other links" test "$(resolved_answer alice eth0)" = 2
+    check "shared resolver ignores alice's TUN" resolver_ignores_tun "$(dev alice)"
+    check "shared resolver ignores bob's TUN" resolver_ignores_tun "$(dev bob)"
 }
 
 phase_crash() {
@@ -483,6 +496,7 @@ phase_cleanup() {
     check "users' data kept" bash -c "[ -s /home/alice/.local/share/mihomo-server/management-token ] && [ -s '/home/bob/private data%/mihomo-server/management-token' ]"
     check "TUN group, slot registry and launcher removed" bash -c \
         "! getent group mihomo-tun >/dev/null && [ ! -e /var/lib/mihomo-server ]"
+    check "polkit TUN DNS rule removed" test ! -e /etc/polkit-1/rules.d/50-mihomo-server-tun.rules
     check "installer-enabled lingering undone" test "$(loginctl show-user alice -p Linger --value 2>/dev/null || echo no)" = no
     check "no enablement links left" bash -c "! compgen -G '/home/*/.config/systemd/user/default.target.wants/mihomo-server.service' >/dev/null"
 

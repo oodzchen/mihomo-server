@@ -268,6 +268,14 @@ cores are kept. Multi-user isolation still replaces subscription
 listeners, retains explicit settings-page values, scopes TUN to `ms<uid>` and
 `include-uid: [uid]`, assigns independent routing and fake-IP blocks and disables
 host-wide auto-redirect. Shared-resolver traffic uses the existing domain sniffer.
+Mihomo's TUN also runs `resolvectl` to make systemd-resolved send every lookup
+to its link; because a member's TUN carries only that member's traffic, other
+accounts would receive unroutable fake IPs, and on desktops each call raised a
+polkit password prompt. The installer therefore adds
+`/etc/polkit-1/rules.d/50-mihomo-server-tun.rules`, which refuses these
+resolve1 link actions for `mihomo-tun` members on `ms<uid>` links without
+prompting (a local-authority `.pkla` file on polkit 0.105); enabling TUN is
+silent and other links keep the default policy.
 Group members can give any program these network capabilities through the
 launcher; authorize only trusted users.
 
@@ -281,7 +289,8 @@ curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/in
 ```
 
 Uninstall stops every instance and removes the program, unit, helper, enablement,
-slot registry, `mihomo-tun` group and the lingering the installer enabled. User
+slot registry, `mihomo-tun` group, the polkit TUN DNS rule and the lingering the
+installer enabled. User
 data, env files and the helper's path drop-in are kept for a reinstall. `--purge`
 also deletes, as each owner, every instance's data and configuration (resolved
 from the saved XDG paths and env file), legacy unit backups and a migrated

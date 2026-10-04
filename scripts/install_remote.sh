@@ -144,6 +144,43 @@ activate_user() {
     die 'user instance activation failed; shared files remain installed'
 }
 
+# Mihomo's TUN runs resolvectl to make systemd-resolved send every lookup to its
+# link. A mihomo-server TUN carries only its owner's traffic (include-uid), so
+# other accounts and system services would get unroutable fake IPs, and each
+# call raises a desktop authentication prompt. Refuse them for TUN-group members
+# without prompting; root (sudo resolvectl) is unaffected.
+polkit_tun_dns() {
+    local rule=/etc/polkit-1/rules.d/50-mihomo-server-tun.rules
+    local pkla=/etc/polkit-1/localauthority/50-local.d/50-mihomo-server-tun.pkla
+    local actions='org.freedesktop.resolve1.set-dns-servers org.freedesktop.resolve1.set-domains org.freedesktop.resolve1.set-default-route org.freedesktop.resolve1.revert'
+    if [ "$1" = remove ]; then
+        rm -f "$rule" "$pkla"
+        return
+    fi
+    if [ -d "${rule%/*}" ]; then
+        cat > "$rule.new" <<RULE
+// Managed by mihomo-server; see polkit_tun_dns in its installer.
+polkit.addRule(function (action, subject) {
+    if ("$actions".split(" ").indexOf(action.id) < 0 || !subject.isInGroup("mihomo-tun")) {
+        return polkit.Result.NOT_HANDLED;
+    }
+    // systemd 256+ names the link; older versions refuse any link for the group.
+    var link = action.lookup("interface");
+    return !link || /^ms[0-9]+\$/.test(link) ? polkit.Result.NO : polkit.Result.NOT_HANDLED;
+});
+RULE
+        chmod 644 "$rule.new"
+        mv -f "$rule.new" "$rule"
+        rm -f "$pkla"
+    # polkit 0.105 (e.g. Ubuntu 22.04) reads only local authority files.
+    elif [ -d "${pkla%/*}" ]; then
+        printf '[mihomo-server TUN DNS]\nIdentity=unix-group:mihomo-tun\nAction=%s\nResultAny=no\nResultInactive=no\nResultActive=no\n' \
+            "${actions// /;}" > "$pkla.new"
+        chmod 644 "$pkla.new"
+        mv -f "$pkla.new" "$pkla"
+    fi
+}
+
 install_shared() {
     local bundle=$1 tag=$2 caller=$3 config_home=$4 data_home=$5 tool
     local root=/opt/mihomo-server releases=/opt/mihomo-server/releases
@@ -175,6 +212,7 @@ install_shared() {
     chown root:mihomo-tun "$stage/bin/mihomo-tun-exec"
     chmod 0750 "$stage/bin/mihomo-tun-exec"
     setcap 'cap_net_admin,cap_net_bind_service,cap_net_raw+ep' "$stage/bin/mihomo-tun-exec"
+    polkit_tun_dns install
     mv -T "$stage" "$release"
     mkdir -p "$registry"
     chown root:root "$registry"
@@ -185,7 +223,8 @@ install_shared() {
     install -m 644 "$release/mihomo-server.service" /etc/systemd/user/mihomo-server.service
     ln -sfn "$root/current/mihomo-server-user" /usr/local/bin/mihomo-server-user
     if command -v restorecon >/dev/null; then
-        restorecon -R "$root" "$registry" /etc/systemd/user/mihomo-server.service /usr/local/bin/mihomo-server-user || true
+        restorecon -R "$root" "$registry" /etc/systemd/user/mihomo-server.service /usr/local/bin/mihomo-server-user \
+            /etc/polkit-1/rules.d /etc/polkit-1/localauthority 2>/dev/null || true
     fi
     each_user_manager daemon-reload
     if [ -n "$caller" ]; then
@@ -278,6 +317,7 @@ uninstall_shared() {
         done
     fi
     rm -rf /var/lib/mihomo-server
+    polkit_tun_dns remove
     if getent group mihomo-tun >/dev/null; then groupdel mihomo-tun; fi
     if [ "$purge" = 1 ]; then
         echo 'Uninstalled mihomo-server and deleted all instance data.'
@@ -294,7 +334,7 @@ root_action() {
         command -v sudo >/dev/null || die 'sudo is required; alternatively run the installer as root'
         # Explicit script functions only, with values passed as argv, never code.
         local definitions
-        definitions=$(declare -f die verify_bundle each_user_manager activate_user install_shared purge_user uninstall_shared)
+        definitions=$(declare -f die verify_bundle each_user_manager activate_user polkit_tun_dns install_shared purge_user uninstall_shared)
         sudo -- bash -euo pipefail -c "$definitions"$'\n'"$action \"\$@\"" bash "$@"
     fi
 }

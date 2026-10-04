@@ -87,6 +87,40 @@ checks confirm placement and no horizontal overflow. The isolated real-node
 test passed all three mode readbacks and subsequent proxied HTTPS 204 traffic
 without modifying production data.
 
+## Increment: silent TUN enable (polkit refusal of TUN link DNS)
+
+Symptom: enabling TUN from the Web raised several desktop polkit password
+prompts, and the "TUN verified" toast appeared while they were still open.
+Cause: Mihomo's TUN stack (MetaCubeX/sing-tun `setSearchDomainForSystemdResolved`)
+runs `resolvectl domain <dev> ~.`, `default-route <dev> true` and `dns <dev> …`
+in a background goroutine after the device is up, and `resolvectl revert` on
+close. The core runs as the user with only ambient CAP_NET_ADMIN, so
+systemd-resolved asks polkit (`auth_admin_keep`) for each call; polkit 127 shows
+them on the user's graphical agent. They are asynchronous, so the service's TUN
+verification (device up, core readback) correctly passed before they finished.
+
+Granting them would be wrong: a container run with an allow rule showed
+systemd-resolved then answering every account (root, carol) from alice's fake-IP
+range via `ms<uid>`, and those addresses time out outside alice's
+`include-uid` routing. The installer (`polkit_tun_dns`) therefore installs
+`/etc/polkit-1/rules.d/50-mihomo-server-tun.rules`, which returns `NO` for
+resolve1 `set-dns-servers`, `set-domains`, `set-default-route` and `revert`
+when the subject is in `mihomo-tun` and the link is `ms<digits>` (systemd ≥256
+passes `interface`; older versions pass no link and are refused for the group).
+Other links keep the default policy; root is unaffected. Without JS rules
+(polkit 0.105) an equivalent `.pkla` deny is written. Uninstall removes both.
+No prompt remains, so the existing toast now follows a fully applied toggle;
+shared-resolver lookups keep using the domain sniffer, as designed.
+
+The multi-user container now runs systemd-resolved and polkit (glibc lookups
+stay off nss-resolve) and checks: pkcheck for the core on its TUN link is
+refused (exit 1), still challenges on `eth0` (exit 2), neither user's TUN gets
+`~.`/DNS in resolved, and uninstall removes the rule.
+
+Verification: ShellCheck and 13 installer unit tests passed; multi-user e2e with
+the real profile from `./data`: **120 passed, 0 failed**. The rule takes effect
+only after re-running the installer on a host.
+
 ## Increment: CI listener/public-origin assertion repair
 
 The multi-user end-to-end test previously looked for Bob's internal listener
