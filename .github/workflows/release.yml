@@ -1,7 +1,8 @@
 name: release
 
 # Build, package and publish an installable bundle on v* tags only.
-# The full test suite (ci.yml) must pass before anything is built or published.
+# The bundle builds alongside the full test suite (ci.yml); nothing is
+# published until both have passed.
 
 on:
   push:
@@ -16,14 +17,11 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   build-release:
-    needs: test
     name: Build and package release
     # Pinned: ubuntu-latest migrates to Ubuntu 26.04 from 2026-10-19. Release
     # binaries must keep linking against the 24.04 glibc so the bundle stays
     # runnable on older distros (Debian 12, Ubuntu 22.04, etc.).
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write # required to create the GitHub Release
     env:
       TARGET: x86_64-unknown-linux-gnu
     steps:
@@ -81,12 +79,34 @@ jobs:
             scripts/install_remote.sh > dist/install.sh
           chmod +x dist/install.sh
 
+      - name: Upload release assets
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-assets
+          path: |
+            dist/mihomo-server-${{ github.ref_name }}-${{ env.TARGET }}.tar.gz
+            dist/mihomo-server-${{ github.ref_name }}-${{ env.TARGET }}.tar.gz.sha256
+            dist/install.sh
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  publish:
+    needs: [test, build-release]
+    name: Publish GitHub Release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # required to create the GitHub Release
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: release-assets
+          path: dist
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
-            "dist/mihomo-server-$GITHUB_REF_NAME-$TARGET.tar.gz" \
-            "dist/mihomo-server-$GITHUB_REF_NAME-$TARGET.tar.gz.sha256" \
-            dist/install.sh
+          (cd dist && sha256sum -c ./*.sha256)
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*

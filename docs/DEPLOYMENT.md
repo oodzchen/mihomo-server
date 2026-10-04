@@ -195,7 +195,7 @@ every Geo database format. Select suitable assets for the configuration's Geo mo
 
 ## Shared Linux installation
 
-Releases are produced by `.github/workflows/release.yml` on `v*` tags after CI.
+Releases are produced by `.github/workflows/release.yml` on `v*` tags; the bundle builds alongside CI and is published once CI passes.
 They contain a pinned tarball, its SHA-256 checksum and a rendered `install.sh`.
 The embedded core pin is recorded in `deploy/core-pin.json`.
 
