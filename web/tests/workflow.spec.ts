@@ -42,11 +42,14 @@ async function settingsApi(command: string, fields: Record<string, unknown> = {}
   return response.json();
 }
 async function applySettings(page: import("@playwright/test").Page) {
-  const form = page.getByRole("form", { name: "运行设置表单" });
-  // Enter applies the current editor draft without an explicit save button.
-  const focused = form.locator("input:focus, select:focus, textarea:focus");
-  if (!(await focused.count())) await form.locator("input").first().focus();
-  await page.keyboard.press("Enter");
+  const save = page.getByRole("button", { name: "保存服务设置", exact: true });
+  // Let the settings page publish its derived dirty state to the shared header.
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  if (await save.isDisabled()) return;
+  await save.click();
+  await expect.poll(async () =>
+    (await save.isDisabled()) || (await page.getByRole("region", { name: "服务设置编辑器" }).getByRole("alert").count()) > 0,
+  ).toBeTruthy();
   await expect(page.locator(".settings-reload button")).toBeEnabled();
   await expect(page.locator(".toast-loading")).toHaveCount(0);
 }
@@ -55,9 +58,7 @@ async function editSetting(page: import("@playwright/test").Page, name: string, 
   await expect(page.locator(".settings-reload button")).toBeEnabled();
   await control.focus();
   if (select) await control.selectOption(value); else await control.fill(value);
-  await control.press("Enter");
-  await expect(page.locator(".settings-reload button")).toBeEnabled();
-  await expect(page.locator(".toast-loading")).toHaveCount(0);
+  await applySettings(page);
 }
 async function loginSettings(page: import("@playwright/test").Page) {
   await page.goto(`${base}/settings#token=${encodeURIComponent(token)}`);
@@ -1030,7 +1031,7 @@ test("online Geo update preserves inspection across running-core restart and ret
   await page.unroute("**/api/commands"); await page.getByRole("button", { name: "退出登录" }).click();
 });
 
-test("connection settings auto-apply explicit values and preserve other settings", async ({ page }) => {
+test("connection settings save explicit values and preserve other settings", async ({ page }) => {
   const original = await settingsApi("settings");
   try {
     await loginSettings(page);
@@ -1061,23 +1062,22 @@ test("connection settings auto-apply explicit values and preserve other settings
       ["管理核心下载 User-Agent", "核心下载 User-Agent", "global-ua", "browser-agent/1"],
     ]) {
       const checkbox = page.getByRole("checkbox", { name: managed, exact: true });
-      await checkbox.check(); await checkbox.press("Enter");
+      await checkbox.check(); await applySettings(page);
       await editSetting(page, name, value);
       expect((await settingsApi("settings")).runtime[key]).toBe(value);
-      await checkbox.uncheck(); await checkbox.press("Enter");
-      await expect(page.locator(".settings-reload button")).toBeEnabled();
+      await checkbox.uncheck(); await applySettings(page);
       expect((await settingsApi("settings")).runtime[key]).toBeUndefined();
     }
   } finally { await settingsApi("set_settings", { runtime: original.runtime }); }
 });
 
-test("hosts editor auto-applies maps, explicit empty values and multiline input", async ({ page }) => {
+test("hosts editor saves maps, explicit empty values and multiline input", async ({ page }) => {
   const original = await settingsApi("settings");
   const custom = { "*.example.test": "192.0.2.1", "multi.example.test": ["192.0.2.2", "2001:db8::1"], "alias.example.test": "multi.example.test" };
   try {
     await loginSettings(page);
     const owned = page.getByRole("checkbox", { name: "管理 hosts 映射", exact: true });
-    await owned.check(); await owned.press("Enter");
+    await owned.check(); await applySettings(page);
     const before = await settingsApi("settings");
     const hosts = page.getByRole("textbox", { name: "hosts JSON 映射", exact: true });
     for (const invalid of ['[]', '{"a.test":123}', '{"a.test":[]}', '{"a.test":["alias.test"]}', '{"*.test":"a.test"}', '{"a.test":"192.0.2.1","A.TEST":"192.0.2.2"}']) {
@@ -1089,7 +1089,8 @@ test("hosts editor auto-applies maps, explicit empty values and multiline input"
     await hosts.press("Shift+Enter");
     expect(await settingsApi("settings")).toEqual(before);
     await hosts.press("Enter");
-    await expect(page.locator(".settings-reload button")).toBeEnabled();
+    expect(await settingsApi("settings")).toEqual(before);
+    await applySettings(page);
     expect((await settingsApi("settings")).runtime.hosts).toEqual(custom);
     await editSetting(page, "DNS 设置来源", "true", true);
     await editSetting(page, "DNS 使用 hosts", "false", true);
@@ -1103,14 +1104,14 @@ test("hosts editor auto-applies maps, explicit empty values and multiline input"
     await expect(hosts).toHaveValue('{}');
     expect((await settingsApi("settings")).runtime.hosts).toEqual(custom);
     await page.unroute("**/api/commands");
-    await hosts.press("Enter"); await expect(page.locator(".settings-reload button")).toBeEnabled();
+    await applySettings(page);
     expect((await settingsApi("settings")).runtime.hosts).toEqual({});
-    await owned.uncheck(); await owned.press("Enter"); await expect(page.locator(".settings-reload button")).toBeEnabled();
+    await owned.uncheck(); await applySettings(page);
     expect((await settingsApi("settings")).runtime.hosts).toBeUndefined();
   } finally { await page.unroute("**/api/commands"); await settingsApi("set_settings", { runtime: original.runtime }); }
 });
 
-test("Geo settings auto-apply inherited URL leaves and validate before submission", async ({ page }) => {
+test("Geo settings save inherited URL leaves and validate before submission", async ({ page }) => {
   const original = await settingsApi("settings");
   try {
     await loginSettings(page);
@@ -1121,7 +1122,7 @@ test("Geo settings auto-apply inherited URL leaves and validate before submissio
     expect(await settingsApi("settings")).toEqual(before);
     await editSetting(page, "Geo 更新间隔（小时）", "48");
     const owned = page.getByRole("checkbox", { name: "管理 Geo 下载地址", exact: true });
-    await owned.check(); await owned.press("Enter"); await expect(page.locator(".settings-reload button")).toBeEnabled();
+    await owned.check(); await applySettings(page);
     const inherited = await settingsApi("settings");
     await editSetting(page, "MMDB 下载地址", "file:///etc/passwd");
     await expect(page.getByRole("region", { name: "服务设置编辑器" }).getByRole("alert")).toContainText("HTTP(S)");
@@ -1132,7 +1133,7 @@ test("Geo settings auto-apply inherited URL leaves and validate before submissio
     expect(runtime["geo-update-interval"]).toBe(48);
     await editSetting(page, "MMDB 下载地址", "");
     expect((await settingsApi("settings")).runtime["geox-url"]).toEqual({});
-    await owned.uncheck(); await owned.press("Enter"); await expect(page.locator(".settings-reload button")).toBeEnabled();
+    await owned.uncheck(); await applySettings(page);
     expect((await settingsApi("settings")).runtime["geox-url"]).toBeUndefined();
   } finally { await settingsApi("set_settings", { runtime: original.runtime }); }
 });
@@ -2802,17 +2803,22 @@ test("online settings commands apply to the browser runtime and retain stopped s
   await page.getByRole("button", { name: "退出登录" }).click();
 });
 
-test("settings auto-apply on blur or Enter, serialize edits and reconcile uncertain saves", async ({ page }) => {
+test("settings save explicitly, preserve edits made during a save and reconcile uncertain saves", async ({ page }) => {
   const original = await settingsApi("settings");
   await settingsApi("stop");
   await settingsApi("set_settings", { runtime: {} });
   try {
     await loginSettings(page);
-    for (const name of ["保存服务设置", "全部改为继承", "核对已保存设置"]) await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+    const save = page.getByRole("button", { name: "保存服务设置", exact: true });
+    await expect(save).toBeDisabled();
+    for (const name of ["全部改为继承", "核对已保存设置"]) await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
     const mode = page.getByRole("combobox", { name: "代理模式", exact: true });
     await mode.focus(); await mode.selectOption("global");
     expect((await settingsApi("settings")).runtime).toEqual({});
-    await mode.blur(); await expect(page.locator(".settings-reload button")).toBeEnabled();
+    await mode.blur();
+    await expect(save).toBeEnabled();
+    expect((await settingsApi("settings")).runtime).toEqual({});
+    await applySettings(page);
     expect((await settingsApi("settings")).runtime).toEqual({ mode: "global" });
     let writes = 0, release!: () => void;
     const held = new Promise<void>(resolve => { release = resolve; });
@@ -2820,19 +2826,19 @@ test("settings auto-apply on blur or Enter, serialize edits and reconcile uncert
       if (route.request().postDataJSON().command === "set_settings") { writes++; if (writes === 1) await held; }
       await route.continue();
     });
-    await mode.focus(); await mode.selectOption("direct"); await mode.press("Enter");
+    await mode.focus(); await mode.selectOption("direct"); await save.click();
     await expect.poll(() => writes).toBe(1);
     const ipv6 = page.getByRole("combobox", { name: "IPv6", exact: true });
-    await ipv6.focus(); await ipv6.selectOption("false"); await ipv6.press("Enter");
+    await ipv6.focus(); await ipv6.selectOption("false");
     const port = page.getByRole("textbox", { name: "混合端口", exact: true });
     await port.fill("0"); // This input is still focused when the earlier response returns.
     release();
-    await expect(page.locator(".settings-reload button")).toBeEnabled();
+    await expect(save).toBeEnabled();
     await expect(ipv6).toHaveValue("false"); await expect(port).toHaveValue("0");
-    expect((await settingsApi("settings")).runtime).toEqual({ mode: "direct", ipv6: false });
-    await port.press("Enter"); await port.blur();
-    await expect(page.locator(".settings-reload button")).toBeEnabled();
-    expect(writes).toBe(3); // Enter followed by blur must not duplicate the write.
+    expect((await settingsApi("settings")).runtime).toEqual({ mode: "direct" });
+    await applySettings(page);
+    expect((await settingsApi("settings")).runtime).toEqual({ mode: "direct", ipv6: false, "mixed-port": 0 });
+    expect(writes).toBe(2);
     await page.unroute("**/api/commands");
     const saved = await settingsApi("settings");
     await editSetting(page, "混合端口", "70000");
@@ -2867,6 +2873,52 @@ test("settings auto-apply on blur or Enter, serialize edits and reconcile uncert
     await stop(); await start();
     expect((await settingsApi("settings")).runtime.mode).toBeUndefined();
   } finally { await page.unroute("**/api/commands"); await settingsApi("set_settings", { runtime: original.runtime }); }
+});
+
+test("main header stays sticky and settings navigation asks to save or discard", async ({ page }) => {
+  const original = await settingsApi("settings");
+  const initialMode = original.runtime.mode == null ? "" : String(original.runtime.mode);
+  const alternateMode = initialMode === "global" ? "direct" : "global";
+  try {
+    await page.goto(`${base}/#token=${encodeURIComponent(token)}`);
+    await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "设置", exact: true }).click();
+    await openSettingsForEditing(page);
+    const header = page.locator(".page-header");
+    await expect(header).toHaveCSS("position", "sticky");
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    await expect.poll(async () => Math.round((await header.boundingBox())!.y)).toBe(0);
+    await page.evaluate(() => window.scrollTo(0, 0));
+
+    const save = page.getByRole("button", { name: "保存服务设置", exact: true });
+    await expect(save).toBeDisabled();
+    await page.getByRole("combobox", { name: "代理模式", exact: true }).selectOption(alternateMode);
+    await expect(save).toBeEnabled();
+    await expect(page.getByText("有待应用的修改", { exact: true })).toHaveCount(0);
+    expect((await settingsApi("settings")).runtime.mode ?? "").toBe(initialMode);
+
+    await page.goBack();
+    const dialog = page.getByRole("dialog", { name: "有未保存的设置" });
+    await expect(dialog).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/settings");
+    await dialog.getByRole("button", { name: "继续编辑", exact: true }).click();
+    await expect(page.getByRole("combobox", { name: "代理模式", exact: true })).toHaveValue(alternateMode);
+
+    await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "概览", exact: true }).click();
+    await dialog.getByRole("button", { name: "撤销改动", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+    expect((await settingsApi("settings")).runtime.mode ?? "").toBe(initialMode);
+
+    await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "设置", exact: true }).click();
+    await openSettingsForEditing(page);
+    await page.getByRole("combobox", { name: "代理模式", exact: true }).selectOption(alternateMode);
+    await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "概览", exact: true }).click();
+    await page.getByRole("dialog", { name: "有未保存的设置" }).getByRole("button", { name: "保存并离开", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+    expect((await settingsApi("settings")).runtime.mode).toBe(alternateMode);
+  } finally {
+    await settingsApi("set_settings", { runtime: original.runtime });
+  }
 });
 
 test("nested network settings persist and scalar edits preserve them", async ({
@@ -2922,7 +2974,7 @@ test("nested network settings persist and scalar edits preserve them", async ({
   ).toHaveValue("");
   await expect(
     page.getByRole("button", { name: "保存服务设置", exact: true }),
-  ).toHaveCount(0);
+  ).toBeDisabled();
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
 });
 
@@ -2998,7 +3050,7 @@ test("provider DNS confirmation protects selection and expires on service restar
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
 });
 
-test("network editor auto-applies nested edits while preserving supported fields", async ({ page }) => {
+test("network editor saves nested edits while preserving supported fields", async ({ page }) => {
   await settingsApi("stop");
   const runtime = {
     mode: "direct",
@@ -3467,7 +3519,8 @@ test("proxy connection information follows actual ports, settings saves and stop
   await expect(portHint).toContainText(`当前端口：${first}`);
   expect((await api("settings")).runtime).toEqual({});
   await input.blur();
-  await expect(page.locator(".settings-reload button")).toBeEnabled();
+  expect((await api("settings")).runtime).toEqual({});
+  await applySettings(page);
   await expect(input).toHaveValue(String(second));
   await portHelp.hover();
   await expect(portHint).toHaveText(`当前端口：${second} · 服务设置`);
@@ -4540,7 +4593,7 @@ test("settings help, stacked dismissible toasts and centered responsive content"
   await expect(help).toBeVisible();
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await help.hover();
-  await expect(page.getByRole("tooltip")).toContainText("失去焦点或按 Enter 自动应用");
+  await expect(page.getByRole("tooltip")).toContainText("页面标题栏右侧的保存按钮");
   await page.mouse.move(0, 0);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await help.focus();
@@ -4782,16 +4835,18 @@ test("overview TUN switch and compact settings row preserve advanced settings an
   await expect(tun).toBeInViewport();
   const mode = page.getByRole("combobox", { name: "代理模式", exact: true });
   await mode.focus(); await mode.selectOption("global");
-  await expect(tun).toBeDisabled();
-  await expect(page.getByText("请先应用或修正尚未生效的设置，再更改 TUN。")).toBeVisible();
-  await mode.selectOption("direct"); await mode.press("Enter");
+  await expect(tun).toBeEnabled();
+  await expect(page.getByRole("button", { name: "保存服务设置", exact: true })).toBeEnabled();
+  await expect(page.getByText("请先应用或修正尚未生效的设置，再更改 TUN。")).toHaveCount(0);
+  await mode.selectOption("direct");
+  await expect(page.getByRole("button", { name: "保存服务设置", exact: true })).toBeDisabled();
   await expect(tun).toBeEnabled();
   await tun.focus(); await tun.selectOption("true");
   expect(await api("settings")).toEqual(before);
-  await tun.press("Enter"); await tun.blur();
+  await applySettings(page);
   await expect(tun).toBeEnabled();
   expect(await api("settings")).toEqual({ ...before, runtime: { ...runtime, tun: { ...runtime.tun, enable: true } } });
-  await expect(page.getByRole("button", { name: "保存服务设置", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "保存服务设置", exact: true })).toBeDisabled();
   await expect(page.getByText("有待应用的修改", { exact: true })).toHaveCount(0);
   const row = page.locator(".tun-setting-row");
   const bounds = await row.boundingBox();
@@ -4805,7 +4860,7 @@ test("overview TUN switch and compact settings row preserve advanced settings an
   await page.screenshot({ path: "test-results/tun-switch-settings-mobile.png", fullPage: true });
   await expect(tun).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await tun.focus(); await tun.selectOption("false"); await tun.blur();
+  await tun.focus(); await tun.selectOption("false"); await applySettings(page);
   await expect(tun).toBeEnabled();
   expect(await api("settings")).toEqual(before);
 });

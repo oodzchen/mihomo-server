@@ -1,7 +1,6 @@
 import { HelpTip } from "./help-tip";
-import { TunControl } from "./tun-control";
 import { useToast } from "./toast";
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ApiError, command, type Perform, type Connection } from "./api";
 import type { CoreStatus } from "./types";
 import {
@@ -181,16 +180,12 @@ function matches(draft: Draft, saved: Settings): boolean {
 const explain = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
-export function SettingsPage({
-  token,
-  language = "zh",
-  changeLanguage,
-  status,
-  connection,
-  busy,
-  perform,
-  logout,
-}: {
+export type SettingsPageHandle = {
+  save: () => Promise<boolean>;
+  discard: () => void;
+};
+
+type SettingsPageProps = {
   token: string;
   language?: Language;
   changeLanguage?: (value: string) => void;
@@ -199,7 +194,20 @@ export function SettingsPage({
   busy: boolean;
   perform: Perform;
   logout: (reason?: string) => void;
-}) {
+  onEditorStateChange: (dirty: boolean, busy: boolean) => void;
+};
+
+export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(function SettingsPage({
+  token,
+  language = "zh",
+  changeLanguage,
+  status,
+  connection,
+  busy,
+  perform,
+  logout,
+  onEditorStateChange,
+}, ref) {
   const access = useProxyAccess({ token, status, connection, logout });
   const [saved, setSaved] = useState<Settings>();
   const [draft, setDraft] = useState<Draft>({});
@@ -210,7 +218,7 @@ export function SettingsPage({
   const [confirmation, setConfirmation] = useState<"reload">();
   const alive = useRef(true),
     requests = useRef(new Set<AbortController>());
-  const saving = useRef(false), pending = useRef<Draft | undefined>(undefined);
+  const saving = useRef(false);
   const draftRef = useRef(draft), savedRef = useRef(saved), uncertainRef = useRef(uncertain);
   draftRef.current = draft; savedRef.current = saved; uncertainRef.current = uncertain;
   const disabled = busy || working;
@@ -219,6 +227,13 @@ export function SettingsPage({
   function change(key: string, value: string) {
     draftRef.current = { ...draftRef.current, [key]: value };
     setDraft(draftRef.current);
+    setError(""); setConfirmation(undefined);
+  }
+  function changeTun(value: string) {
+    const next: Draft = { ...draftRef.current, "tun.enable": value };
+    if (value !== "" && next.tun !== "true") next.tun = "true";
+    draftRef.current = next;
+    setDraft(next);
     setError(""); setConfirmation(undefined);
   }
   const dirty = saved ? !matches(draft, saved) : false;
@@ -287,18 +302,16 @@ export function SettingsPage({
     };
   }, [token]);
 
-  async function save(submitted = { ...draftRef.current }) {
-    if (!savedRef.current || (busy && !saving.current) || (working && !saving.current)) return;
+  async function save(submitted = { ...draftRef.current }): Promise<boolean> {
+    if (!savedRef.current || busy || working || saving.current) return false;
     let requested: Runtime;
     try {
       requested = runtime(submitted);
     } catch (error) {
-      pending.current = undefined;
       setError(explain(error));
-      return;
+      return false;
     }
-    if (saving.current) { pending.current = submitted; return; }
-    if (!uncertainRef.current && same(requested, savedRef.current.runtime)) return;
+    if (!uncertainRef.current && same(requested, savedRef.current.runtime)) return true;
     saving.current = true;
     setWorking(true);
     setError(""); setConfirmation(undefined);
@@ -307,19 +320,19 @@ export function SettingsPage({
       // A failed readback is reconciled automatically before another write.
       if (uncertainRef.current) {
         const next = await read();
-        if (!alive.current) return;
+        if (!alive.current) return false;
         savedRef.current = next; setSaved(next);
         uncertainRef.current = false; setUncertain(false);
       }
       if (same(requested, savedRef.current.runtime)) {
         toast.finish("已核对：服务已保存当前草稿。", "info");
-        return;
+        return true;
       }
       uncertainRef.current = true; setUncertain(true);
       const result = await perform<Settings>("set_settings", { runtime: requested }, { notify: false, toast, reconcile: true });
-      if (!alive.current) return;
+      if (!alive.current) return false;
       const next = await read();
-      if (!alive.current) return;
+      if (!alive.current) return false;
       savedRef.current = next; setSaved(next);
       uncertainRef.current = false; setUncertain(false);
       if (same(requested, next.runtime)) {
@@ -334,46 +347,63 @@ export function SettingsPage({
         toast.finish(result
           ? "保存结果已核对，服务设置与提交内容一致。"
           : "请求报告错误，但服务已保存此草稿，已核对，无需重复提交。", result ? "success" : "info");
+        return true;
       } else {
         const message = "服务当前设置与提交内容不同，草稿已保留。请检查错误或重新读取设置。";
         setError(message); toast.finish(message, "error");
+        return false;
       }
     } catch (error) {
       if (alive.current) {
-        const message = `保存结果尚未核对：${explain(error)}。草稿已保留，修正后失去焦点或按 Enter 将自动核对并重试。`;
+        const message = `保存结果尚未核对：${explain(error)}。草稿已保留，请修正后再次保存。`;
         setError(message); toast.finish(explain(error), "error");
       }
+      return false;
     } finally {
       if (!alive.current) toast.dismiss();
       saving.current = false;
-      if (alive.current) {
-        setWorking(false);
-        if (pending.current) {
-          const next = pending.current;
-          pending.current = undefined;
-          // Continue with the latest committed edit; preserve still-focused input.
-          queueMicrotask(() => { if (alive.current) { void save(next); } });
-        }
-      }
+      if (alive.current) setWorking(false);
     }
   }
+
+  function discard() {
+    if (!savedRef.current) return;
+    draftRef.current = toDraft(savedRef.current);
+    setDraft(draftRef.current);
+    uncertainRef.current = false;
+    setUncertain(false);
+    setError("");
+    setConfirmation(undefined);
+  }
+
+  useImperativeHandle(ref, () => ({ save, discard }));
+  useEffect(() => {
+    onEditorStateChange(dirty || uncertain, disabled);
+  }, [dirty, uncertain, disabled, onEditorStateChange]);
+  useEffect(() => () => onEditorStateChange(false, true), [onEditorStateChange]);
 
   return (
     <div className="settings-layout">
       <section className="panel" aria-label="服务设置编辑器">
-        <TunControl compact token={token} language={language} status={status} connection={connection} access={access} busy={disabled}
-          perform={perform} logout={logout} blocked={!saved || dirty || uncertain} onChanged={reload} />
+        <section className="tun-control tun-setting" aria-label={language === "en" ? "TUN mode" : "TUN 模式"}>
+          <div className="tun-setting-row">
+            <label htmlFor="setting-tun-mode">{language === "en" ? "TUN mode" : "TUN 模式"}</label>
+            <select
+              id="setting-tun-mode"
+              aria-label={language === "en" ? "TUN mode" : "TUN 模式"}
+              disabled={!saved || fieldsDisabled}
+              value={draft.tun === "true" ? draft["tun.enable"] ?? "" : ""}
+              onChange={event => changeTun(event.target.value)}
+            >
+              <option value="">{language === "en" ? "Inherit" : language === "zhtw" ? "繼承" : "继承"}</option>
+              <option value="true">{language === "en" ? "Enabled" : language === "zhtw" ? "已開啟" : "已开启"}</option>
+              <option value="false">{language === "en" ? "Disabled" : language === "zhtw" ? "已關閉" : "已关闭"}</option>
+            </select>
+          </div>
+          <p className="hint">{language === "en" ? "Changes are applied with the Save button in the page header." : language === "zhtw" ? "變更會隨頁面標題列的儲存按鈕一併套用。" : "改动会随页面标题栏的保存按钮一并应用。"}</p>
+        </section>
         <div className="panel-title">
-          <h2 className="setting-heading">服务运行设置<HelpTip label="运行设置帮助">留空或选择继承时使用订阅 / 配置值，端口 0 表示禁用。保存前会校验配置，已停止的内核保持停止。编辑后失去焦点或按 Enter 自动应用；多行文本用 Shift+Enter 换行。未通过校验的修改会保留在本页。保存会替换全部运行设置，当前订阅会重新生成并校验。未选择订阅时更新独立运行配置，移除设置会保留其当前值，之后可在配置页修改。保存结果不确定时，下次应用前自动核对服务设置。服务地址、管理认证和启动参数不在此编辑器中。</HelpTip></h2>
-          <span>
-            {uncertain
-              ? "服务设置待核对"
-              : dirty
-                ? "有待应用的修改"
-                : saved
-                  ? "已读取服务设置"
-                  : "尚未读取设置"}
-          </span>
+          <h2 className="setting-heading">服务运行设置<HelpTip label="运行设置帮助">留空或选择继承时使用订阅 / 配置值，端口 0 表示禁用。修改后请使用页面标题栏右侧的保存按钮；多行文本可直接换行。未通过校验的修改会保留在本页。保存会替换全部运行设置，当前订阅会重新生成并校验。未选择订阅时更新独立运行配置，移除设置会保留其当前值，之后可在配置页修改。保存结果不确定时，再次保存前会自动核对服务设置。服务地址、管理认证和启动参数不在此编辑器中。</HelpTip></h2>
         </div>
         {!status.config_revision && (
           <p className="info">
@@ -381,27 +411,12 @@ export function SettingsPage({
           </p>
         )}
         {error && (
-          <p className="alert" role="alert">
+          <p className="alert settings-floating-error" role="alert">
             {error}
           </p>
         )}
-        {working && (
-          <p className="muted" role="status">
-            正在读取或核对设置…
-          </p>
-        )}
         {saved && (
-          <form aria-label="运行设置表单" onSubmit={event => { event.preventDefault(); void save(); }}
-            onBlur={event => {
-              if (event.target.matches("input, select, textarea")) void save();
-            }}
-            onKeyDown={event => {
-              if (event.key === "Enter" && !event.nativeEvent.isComposing &&
-                event.target instanceof HTMLElement && event.target.matches("input, select, textarea") &&
-                !(event.shiftKey && event.target.matches("textarea"))) {
-                event.preventDefault(); void save();
-              }
-            }}>
+          <form aria-label="运行设置表单" onSubmit={event => event.preventDefault()}>
             <fieldset className="network-fields basic-settings"><legend>常用设置 <HelpTip>透明代理端口仅支持 Linux，服务会校验平台支持。</HelpTip></legend><div className="settings-fields">
               {fields.map((field) => (
                 <label key={field.key} htmlFor={`setting-${field.key}`}>
@@ -548,4 +563,4 @@ export function SettingsPage({
       </div>
     </div>
   );
-}
+});

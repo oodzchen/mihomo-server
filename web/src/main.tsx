@@ -8,7 +8,7 @@ import {
   type MouseEvent,
 } from "react";
 import { ApiError, command, subscribe, type Connection, type Perform } from "./api";
-import { SettingsPage } from "./settings";
+import { SettingsPage, type SettingsPageHandle } from "./settings";
 import { CoreUpgradePage } from "./core-upgrade";
 import { RulesPage } from "./rules";
 import { LanguagePicker } from "./language-picker";
@@ -35,6 +35,10 @@ const pages: [string, MessageKey][] = [
 ];
 
 const TOKEN_KEY = "mihomo.token";
+
+type PendingNavigation =
+  | { kind: "route"; path: string; method: "push" | "replace" }
+  | { kind: "logout" };
 
 function savedToken() {
   try { return window.sessionStorage.getItem(TOKEN_KEY) || ""; }
@@ -209,10 +213,17 @@ function Manager({
   const [route, setRoute] = useState(location.pathname),
     [connection, setConnection] = useState<Connection>("connecting");
   const [busy, setBusy] = useState(false);
+  const [settingsEditor, setSettingsEditor] = useState({ dirty: false, busy: true });
+  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation>();
+  const [leaving, setLeaving] = useState(false);
   const setNotice = useToast();
   const alive = useRef(true),
     pending = useRef(new Set<AbortController>()),
     locked = useRef(false);
+  const settingsPage = useRef<SettingsPageHandle>(null);
+  const routeRef = useRef(route), settingsDirtyRef = useRef(settingsEditor.dirty);
+  routeRef.current = route;
+  settingsDirtyRef.current = settingsEditor.dirty;
   const languageRef = useRef(language);
   languageRef.current = language;
   const request = useCallback(
@@ -251,7 +262,15 @@ function Manager({
         if (value === "unauthorized") logout(t(languageRef.current, "expiredToken"));
       },
     );
-    const popstate = () => setRoute(location.pathname);
+    const popstate = () => {
+      const path = location.pathname;
+      if (routeRef.current === "/settings" && settingsDirtyRef.current && path !== routeRef.current) {
+        history.pushState(null, "", routeRef.current);
+        setPendingNavigation({ kind: "route", path, method: "replace" });
+        return;
+      }
+      setRoute(path);
+    };
     window.addEventListener("popstate", popstate);
     return () => {
       alive.current = false;
@@ -260,6 +279,15 @@ function Manager({
       window.removeEventListener("popstate", popstate);
     };
   }, [token, logout]);
+  useEffect(() => {
+    if (!settingsEditor.dirty) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [settingsEditor.dirty]);
   const perform: Perform = async <T,>(
     name: string,
     fields: Record<string, unknown> = {},
@@ -305,9 +333,50 @@ function Manager({
     )
       return;
     event.preventDefault();
+    if (route === "/settings" && settingsEditor.dirty && path !== route) {
+      setPendingNavigation({ kind: "route", path, method: "push" });
+      return;
+    }
     history.pushState(null, "", path);
     setRoute(path);
     setNotice("");
+  }
+  const updateSettingsEditor = useCallback((dirty: boolean, editorBusy: boolean) => {
+    setSettingsEditor(previous => previous.dirty === dirty && previous.busy === editorBusy
+      ? previous
+      : { dirty, busy: editorBusy });
+  }, []);
+  function finishNavigation(target: PendingNavigation) {
+    setPendingNavigation(undefined);
+    setNotice("");
+    if (target.kind === "logout") {
+      logout();
+      return;
+    }
+    if (target.method === "replace") history.replaceState(null, "", target.path);
+    else history.pushState(null, "", target.path);
+    setRoute(target.path);
+  }
+  async function saveAndLeave() {
+    if (!pendingNavigation || !settingsPage.current) return;
+    setLeaving(true);
+    const target = pendingNavigation;
+    const saved = await settingsPage.current.save();
+    setLeaving(false);
+    if (saved) finishNavigation(target);
+    else setPendingNavigation(undefined);
+  }
+  function discardAndLeave() {
+    if (!pendingNavigation) return;
+    settingsPage.current?.discard();
+    finishNavigation(pendingNavigation);
+  }
+  function requestLogout() {
+    if (route === "/settings" && settingsEditor.dirty) {
+      setPendingNavigation({ kind: "logout" });
+      return;
+    }
+    logout();
   }
   const active = profiles.items?.find(
     (item) => item.uid === status.active_profile,
@@ -355,14 +424,24 @@ function Manager({
               </span>
             </div>
           </div>
-          <button className="quiet" onClick={() => logout()}>
+          <button className="quiet" onClick={requestLogout}>
             {t(language, "logout")}
           </button>
         </div>
       </aside>
       <div className="workspace">
-        <header>
+        <header className="page-header">
           <h1>{title}</h1>
+          {route === "/settings" && (
+            <button
+              type="button"
+              className="primary"
+              disabled={!settingsEditor.dirty || settingsEditor.busy}
+              onClick={() => { void settingsPage.current?.save(); }}
+            >
+              {t(language, "saveSettings")}
+            </button>
+          )}
         </header>
         <div className="feedback" aria-live="polite">
           {status.error && (
@@ -423,6 +502,7 @@ function Manager({
           />
         ) : route === "/settings" ? (
           <SettingsPage
+            ref={settingsPage}
             token={token}
             language={language}
             changeLanguage={changeLanguage}
@@ -431,6 +511,7 @@ function Manager({
             busy={busy}
             perform={perform}
             logout={logout}
+            onEditorStateChange={updateSettingsEditor}
           />
         ) : (
           <Overview
@@ -445,6 +526,29 @@ function Manager({
             navigate={navigate}
             logs={logs}
           />
+        )}
+        {pendingNavigation && (
+          <div className="modal-backdrop">
+            <section className="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="unsaved-settings-title">
+              <div className="modal-header">
+                <h2 id="unsaved-settings-title">{t(language, "unsavedSettingsTitle")}</h2>
+              </div>
+              <div className="modal-body">
+                <p>{t(language, "unsavedSettingsMessage")}</p>
+                <div className="form-actions">
+                  <button type="button" className="primary" disabled={leaving || settingsEditor.busy} onClick={() => { void saveAndLeave(); }}>
+                    {t(language, "saveAndLeave")}
+                  </button>
+                  <button type="button" disabled={leaving} onClick={discardAndLeave}>
+                    {t(language, "discardChanges")}
+                  </button>
+                  <button type="button" disabled={leaving} onClick={() => setPendingNavigation(undefined)}>
+                    {t(language, "continueEditing")}
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
         )}
         {route !== "/settings" && (
           <div style={{ position: "fixed", opacity: 0, pointerEvents: "none", width: 20, height: 20, overflow: "hidden" }}>
