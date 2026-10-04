@@ -11,6 +11,7 @@ description = "Single service entry point for headless Mihomo management"
 clash-verge-i18n.workspace = true
 clash-verge-signal.workspace = true
 headless-core.workspace = true
+management-client.workspace = true
 mihomo-client.workspace = true
 anyhow.workspace = true
 parking_lot.workspace = true

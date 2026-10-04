@@ -2,13 +2,12 @@
 //!
 //! The same executable is the service (`mihomo-server serve`, or the legacy
 //! form starting with a service option); see [`route`].
-mod api;
 mod system;
 mod view;
 
 use anyhow::{Context as _, Result, bail};
-use api::{Api, Endpoint};
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
+use management_client::{self as api, Api, current_mode, view::tun_state};
 use serde_json::{Map, Value, json};
 use std::{
     ffi::OsString,
@@ -345,16 +344,10 @@ impl Context {
     }
 
     fn connect(&self) -> Result<Api> {
-        if let Some(api) = &self.api {
-            let token = self.token_file.clone().unwrap_or_else(api::default_token_file);
-            return Api::connect(Endpoint::explicit(api, token)?);
+        if self.api.is_none() {
+            refuse_root()?;
         }
-        refuse_root()?;
-        let mut endpoint = api::discover_running(&api::service_state()?)?;
-        if let Some(token) = &self.token_file {
-            endpoint.token_file = token.clone();
-        }
-        Api::connect(endpoint)
+        Api::connect(api::locate(self.api.as_deref(), self.token_file.clone())?)
     }
 
     fn print_json(&self, value: &Value) -> Result<()> {
@@ -479,38 +472,26 @@ fn now() -> u64 {
         .unwrap_or(0)
 }
 
-fn current_mode(access: &Value) -> String {
-    access
-        .pointer("/reported/mode")
-        .or_else(|| access.pointer("/configured/mode"))
-        .and_then(Value::as_str)
-        .unwrap_or("rule")
-        .to_lowercase()
-}
-
 fn tun_summary(access: &Value, user: &Value) -> String {
-    let enabled = access.get("tun_enabled").and_then(Value::as_bool).unwrap_or(false);
-    let holder = access.get("tun_holder").filter(|holder| !holder.is_null());
-    let device = user.get("tun_device").and_then(Value::as_str);
-    if let Some(holder) = holder
-        && holder.get("self").and_then(Value::as_bool) != Some(true)
-    {
-        let name = holder.get("name").and_then(Value::as_str).unwrap_or("another user");
-        return format!("off (the system-wide TUN is held by {name})");
+    let tun = tun_state(access, user);
+    if let Some(holder) = tun.held_by {
+        return format!("off (the system-wide TUN is held by {holder})");
     }
-    if enabled {
-        let system = user.get("tun_system").and_then(Value::as_bool) == Some(true);
+    if tun.enabled {
         return format!(
             "on{}{}",
-            device.map(|device| format!(" (device {device}")).unwrap_or_default(),
-            match (device.is_some(), system) {
+            tun.device
+                .as_deref()
+                .map(|device| format!(" (device {device}"))
+                .unwrap_or_default(),
+            match (tun.device.is_some(), tun.system) {
                 (true, true) => ", system-wide)",
                 (true, false) => ")",
                 _ => "",
             }
         );
     }
-    if user.get("tun_capable").and_then(Value::as_bool) == Some(false) {
+    if tun.capable == Some(false) {
         return "off (unavailable: ask the administrator to add you to group mihomo-tun)".into();
     }
     "off".into()

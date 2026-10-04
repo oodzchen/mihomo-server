@@ -5,10 +5,13 @@ members = [
     "crates/clash-verge-limiter",
     "crates/clash-verge-signal",
     "crates/headless-core",
+    "crates/management-client",
     "crates/mihomo-client",
     "service",
 ]
 default-members = ["service"]
+# Tauri desktop client: its own workspace, built only where webkit2gtk exists.
+exclude = ["desktop"]
 resolver = "2"
 
 [workspace.package]
@@ -24,6 +27,7 @@ clash-verge-i18n = { path = "crates/clash-verge-i18n" }
 clash-verge-limiter = { path = "crates/clash-verge-limiter" }
 clash-verge-signal = { path = "crates/clash-verge-signal" }
 headless-core = { path = "crates/headless-core" }
+management-client = { path = "crates/management-client" }
 mihomo-client = { path = "crates/mihomo-client" }
 anyhow = "1.0.104"
 parking_lot = { version = "0.12.5", features = ["hardware-lock-elision"] }

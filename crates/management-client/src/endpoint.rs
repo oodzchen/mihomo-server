@@ -1,11 +1,9 @@
-//! Find this user's running instance and call its authenticated command API.
+//! Find a running instance: its address, accepted Host and token file.
 use anyhow::{Context as _, Result, bail};
-use serde_json::{Map, Value};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
     process::Command,
-    time::Duration,
 };
 use url::Url;
 
@@ -215,67 +213,17 @@ pub fn default_token_file() -> PathBuf {
     data_home.join("mihomo-server/management-token")
 }
 
-pub struct Api {
-    client: reqwest::Client,
-    pub endpoint: Endpoint,
-    token: String,
-}
-
-impl Api {
-    pub fn connect(endpoint: Endpoint) -> Result<Self> {
-        let token = std::fs::read_to_string(&endpoint.token_file)
-            .with_context(|| format!("cannot read management token {}", endpoint.token_file.display()))?
-            .trim()
-            .to_owned();
-        anyhow::ensure!(!token.is_empty(), "management token file is empty");
-        let client = reqwest::Client::builder()
-            .no_proxy()
-            .connect_timeout(Duration::from_secs(5))
-            .build()?;
-        Ok(Self {
-            client,
-            endpoint,
-            token,
-        })
+/// The instance a client manages: an explicit API address, else this user's
+/// systemd instance. `token_file` overrides where the token is read.
+pub fn locate(api: Option<&str>, token_file: Option<PathBuf>) -> Result<Endpoint> {
+    if let Some(api) = api {
+        return Endpoint::explicit(api, token_file.unwrap_or_else(default_token_file));
     }
-
-    /// Run one management command; slow operations (delay tests, downloads,
-    /// core upgrades) are bounded by the service itself.
-    pub async fn command(&self, name: &str, fields: Value) -> Result<Value> {
-        let mut body = match fields {
-            Value::Object(map) => map,
-            Value::Null => Map::new(),
-            _ => bail!("command fields must be an object"),
-        };
-        body.insert("command".into(), Value::String(name.into()));
-        let response = self
-            .client
-            .post(format!("{}/api/commands", self.endpoint.base))
-            .header(reqwest::header::HOST, &self.endpoint.host)
-            .bearer_auth(&self.token)
-            .header(reqwest::header::ACCEPT_LANGUAGE, "en")
-            .timeout(Duration::from_secs(900))
-            .json(&body)
-            .send()
-            .await
-            .with_context(|| {
-                format!(
-                    "cannot reach the management API at {}; is the service running? (mihomo-server start)",
-                    self.endpoint.base
-                )
-            })?;
-        let status = response.status();
-        let value: Value = response.json().await.unwrap_or(Value::Null);
-        if status.is_success() {
-            return Ok(value);
-        }
-        let message = value
-            .pointer("/error/message")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .unwrap_or_else(|| status.to_string());
-        bail!("{message}")
+    let mut endpoint = discover_running(&service_state()?)?;
+    if let Some(token) = token_file {
+        endpoint.token_file = token;
     }
+    Ok(endpoint)
 }
 
 #[cfg(test)]
