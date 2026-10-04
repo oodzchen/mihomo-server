@@ -79,6 +79,9 @@ fi
 "$engine" cp "$here/api.py" "$name:/usr/local/bin/msapi"
 [ -z "$profile" ] || "$engine" cp "$profile" "$name:/work/profile.yaml"
 "$engine" exec "$name" chmod 755 /usr/local/bin/msapi /work/inside.sh
+# docker cp keeps the host owner (CI: uid 1001 = bob, locally often 1000 = alice)
+# and the packager's private 0700 bundle root. Make /work independent of both.
+"$engine" exec "$name" sh -c 'chown -R root:root /work && chmod -R a+rX /work/bundle'
 
 "$engine" exec "$name" /work/inside.sh before-reboot || {
     diagnose

@@ -150,6 +150,10 @@ out of scope; sockets stay under `<data-dir>/run`.
    legacy data while leaving an unmigrated custom unit); 435 workspace Rust tests
    passed, 0 failed, 92 ignored; live multi-user, deployment and core-activation
    tests passed; 26 Python tests, fmt, clippy and ShellCheck passed.
+   CI follow-up: ShellCheck 0.9.0 (Ubuntu 24.04) flagged SC2015 in uninstall;
+   the e2e reinstall read `/work/bundle`, which `docker cp` left owned by the host
+   UID with the packager's 0700 root (readable by alice only when the host UID was
+   1000). run.sh now makes `/work` root-owned and the bundle world-readable.
 
 **Latest completed task:** Zero-argument shared installation, step 4 — per-user Web/installer core upgrades with the TUN capability launcher, complete uninstall and `--purge`.
 **Previous completed task:** Zero-argument shared installation, step 3 of 3 — isolated download/systemd/migration/real-node/reboot acceptance (95 checks), deployment docs and acceptance fixes.

@@ -256,7 +256,7 @@ uninstall_shared() {
     command -v systemctl >/dev/null || die 'missing systemctl'
     each_user_manager disable --now mihomo-server.service || true
     while IFS=: read -r user _ uid _ _ home _; do
-        [ "$uid" != 0 ] && [ -d "$home" ] || continue
+        if [ "$uid" = 0 ] || [ ! -d "$home" ]; then continue; fi
         # Enablement, also for stopped managers. The helper's path drop-in is
         # user configuration: kept for a reinstall unless purging.
         link="$home/.config/systemd/user/default.target.wants/mihomo-server.service"
