@@ -116,8 +116,8 @@ fn subscription_listeners_and_tun_move_into_the_user_slot() -> Result<()> {
 }
 
 #[test]
-fn system_tun_owner_captures_every_uid() -> Result<()> {
-    let owner = Isolation::new(1001, 3)?.with_tun_owner(Some(1001));
+fn system_tun_captures_every_uid() -> Result<()> {
+    let owner = Isolation::new(1001, 3)?.with_system_tun(true);
     assert_eq!(owner.tun_scope(), TunScope::System);
     let (config, changed) = owner.apply(mapping(SUBSCRIPTION)?, &RuntimeSettings::default());
     let tun = &config["tun"];
@@ -132,17 +132,16 @@ fn system_tun_owner_captures_every_uid() -> Result<()> {
     assert_eq!(again, config);
     assert!(changed.is_empty(), "{changed:?}");
 
-    // An explicit include-uid is removed too; other users stay scoped to themselves.
+    // An explicit include-uid is removed too; without the lock TUNs stay per user.
     let (config, _) = owner.apply(
         mapping("tun: {enable: true, include-uid: [5]}")?,
         &RuntimeSettings::default(),
     );
     assert!(config["tun"].get("include-uid").is_none());
-    let member = Isolation::new(1002, 4)?.with_tun_owner(Some(1001));
-    assert_eq!(member.tun_scope(), TunScope::Reserved(1001));
-    let (config, _) = member.apply(mapping(SUBSCRIPTION)?, &RuntimeSettings::default());
+    let own = Isolation::new(1002, 4)?.with_system_tun(false);
+    assert_eq!(own.tun_scope(), TunScope::Own);
+    let (config, _) = own.apply(mapping(SUBSCRIPTION)?, &RuntimeSettings::default());
     assert_eq!(config["tun"]["include-uid"][0].as_u64(), Some(1002));
-    assert_eq!(Isolation::new(1002, 4)?.with_tun_owner(None).tun_scope(), TunScope::Own);
     Ok(())
 }
 

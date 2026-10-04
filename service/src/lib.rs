@@ -19,6 +19,8 @@ mod settings_readback;
 pub mod shutdown;
 #[cfg(target_os = "linux")]
 pub mod tun_exec;
+#[cfg(target_os = "linux")]
+pub mod tun_lock;
 mod validation;
 
 pub use clash_verge_i18n as i18n;

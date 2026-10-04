@@ -87,7 +87,63 @@ checks confirm placement and no horizontal overflow. The isolated real-node
 test passed all three mode readbacks and subsequent proxied HTTPS 204 traffic
 without modifying production data.
 
-## Increment: installer-owned system-wide TUN with silent resolver takeover
+## Increment: first-come exclusive system-wide TUN
+
+Replaces the fixed installer owner below, at the user's request: any TUN-group
+member may run the host's one system-wide TUN, first come first served; nobody
+else can end it except root.
+
+- **Lock.** The installer creates `/var/lib/mihomo-server/tun.lock`
+  (root:mihomo-tun 0640; no `tun-owner` file any more). `tun_lock::TunLock`
+  (beside the slot registry) takes `flock(LOCK_EX|LOCK_NB)` on a read-only
+  descriptor; only group members can open it, so others cannot squat. The
+  kernel releases it when the holder's service exits, so a crash never blocks
+  the host. `holder()` maps the lock's `/proc/locks` entry (dev:inode → PID) to
+  the process owner, readable by every user; `describe` names the account.
+- **Scope.** With the lock present, `Isolation::with_system_tun(true)` gives
+  every TUN `TunScope::System` (no `include-uid`); without it (manual
+  `--multi-user` layouts, fixed `--slot`) TUNs stay per user.
+- **Lifecycle.** `tun_preflight` acquires the lock whenever a config enables TUN
+  (after the group check) and fails with "the system-wide TUN is in use by
+  NAME (uid N)". The actor keeps an `AtomicBool tun_live`, set when
+  `verify_proxy_ports` confirms the TUN and cleared when it confirms a config
+  without TUN or the phase becomes Stopped/Failed/Shutdown; `release_idle_tun`
+  runs at those points and at every actor loop turn, so a failed or reverted
+  enable never keeps the lock. Crash recovery (Recovering) keeps it.
+  `yield_system_tun` runs before a start: if the committed config enables TUN
+  but another user holds the lock (boot, restart), it persists TUN off in this
+  user's settings, logs why and restages, so the instance starts without TUN
+  instead of failing.
+- **Visibility.** `proxy_access` and `multi_user` add `tun_holder {uid, name,
+  self}`. The Web TUN switch is disabled with "NAME is using the system-wide
+  TUN…" while someone else holds it; the multi-user panel shows the same.
+  Startup log and helper report `available, system-wide`.
+- **polkit.** The JS rule now allows the four resolve1 link actions for any
+  `mihomo-tun` member on its own `ms<uid>` link (UID via `polkit.spawn
+  /usr/bin/id -u`), refuses other `ms*` links, allows unnamed links (systemd
+  <256) for members, and leaves everything else to the default policy. polkit
+  0.105 gets a group grant `.pkla`.
+- The installer's activation check is back to `tun: available`.
+
+E2E: alice enables first; bob and carol are refused (holder named), bob's Web
+view names alice; polkit answers 0 for each member's own link and 1 for
+another member's; the crash keeps alice's hold. A handover phase (after
+reboot): alice turns TUN off and the lock frees; bob enables with his own
+subscription, root traffic and resolved move to bob's TUN, alice is refused
+naming bob; root stops bob's service, which ends his TUN; alice enables again;
+bob restarting while alice holds it starts without TUN and his saved switch is
+off; his traffic then uses alice's TUN.
+
+Verification: 439 Rust tests passed (0 failed, 92 ignored, including the new
+`tun_lock` unit test), clippy/fmt/tsc clean, ShellCheck and 13 installer tests
+passed, Web Playwright 59 passed / 5 skipped. Multi-user e2e with the real
+`./data` profile: **141 passed, 0 failed**, no skips. Two earlier runs stopped
+at profile import with "Mihomo validation timeout" (the 5 s validation of the
+real subscription, before any TUN step; one overlapped a Playwright run); the
+same step passed in the other runs, so it is recorded as an existing
+network/load sensitivity, not a regression. Hosts need the installer re-run.
+
+## Increment: installer-owned system-wide TUN with silent resolver takeover (superseded above)
 
 Supersedes the refusal-only policy below at the user's request: TUN must take
 over system DNS (fake-IP, anti-pollution) like clash-verge-rev, silently. That

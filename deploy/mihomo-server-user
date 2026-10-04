@@ -199,7 +199,6 @@ info() {
     detail=${line##* (}; detail=${detail%)}
     case "$detail" in
         available*) tun=${detail//,/} ;;
-        'unavailable: system-wide'*) tun="unavailable (${detail#unavailable: })" ;;
         *) tun='unavailable (administrator must authorize group mihomo-tun)' ;;
     esac
     proxy=$(mixed_port "$n")

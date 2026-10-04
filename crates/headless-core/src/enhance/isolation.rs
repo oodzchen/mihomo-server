@@ -4,8 +4,8 @@
 //! device, policy-routing indexes and fake-IP ranges, so several Mihomo
 //! instances on one host never collide; `include-uid` limits each TUN to its
 //! owner's traffic, with sniffing enabled for the plain-IP connections a shared
-//! system resolver produces. The installing user may instead own a system-wide
-//! TUN (see [`TunScope`]). Runs after finalization, so it wins over
+//! system resolver produces. An installed host instead has one system-wide TUN
+//! at a time (see [`TunScope`]). Runs after finalization, so it wins over
 //! subscriptions, scripts and manual enhancements.
 use std::net::Ipv4Addr;
 
@@ -39,12 +39,10 @@ const LISTENERS: [&str; 5] = ["mixed-port", "port", "socks-port", "redir-port", 
 pub enum TunScope {
     /// Only this user's traffic (`include-uid`); the shared resolver is left alone.
     Own,
-    /// The whole host, like a single-user client: this user installed the
-    /// shared installation, and Mihomo also points systemd-resolved at the TUN,
-    /// so every account's fake IPs must be routed through it.
+    /// The whole host, like a single-user client. Mihomo also points
+    /// systemd-resolved at the TUN, so every account's fake IPs must be routed
+    /// through it; the service lets only one user hold such a TUN at a time.
     System,
-    /// Another user (this UID) owns the system-wide TUN; this user has none.
-    Reserved(u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,13 +62,9 @@ impl Isolation {
         })
     }
 
-    /// The scope implied by the installation's system TUN owner, if any.
-    pub fn with_tun_owner(mut self, owner: Option<u32>) -> Self {
-        self.tun = match owner {
-            None => TunScope::Own,
-            Some(owner) if owner == self.uid => TunScope::System,
-            Some(owner) => TunScope::Reserved(owner),
-        };
+    /// Installed hosts (with the system TUN lock) give each TUN the whole host.
+    pub fn with_system_tun(mut self, system: bool) -> Self {
+        self.tun = if system { TunScope::System } else { TunScope::Own };
         self
     }
 

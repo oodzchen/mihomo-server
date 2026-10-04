@@ -188,20 +188,16 @@ impl Actor {
             .and_then(|tun| tun.get("enable"))
             .and_then(serde_yaml_ng::Value::as_bool)
             == Some(true);
-        if let Some(headless_core::enhance::isolation::TunScope::Reserved(owner)) =
-            self.options.isolation.map(|isolation| isolation.tun_scope())
-        {
-            ensure!(
-                !enabled,
-                "TUN is not available to this user: the installing user (uid {owner}) runs the \
-                 system-wide TUN, and a host can have only one"
-            );
-        }
         ensure!(
             !enabled || self.options.tun_capable != Some(false),
             "TUN is not available to this user: ask the administrator to add this user to the \
              TUN group (mihomo-tun)"
         );
+        // The first user to enable the host's one system-wide TUN keeps it until off.
+        #[cfg(target_os = "linux")]
+        if enabled && let Some(lock) = &self.options.tun_lock {
+            lock.acquire()?;
+        }
         Ok(())
     }
 
@@ -227,7 +223,15 @@ impl Actor {
             crate::proxy_access::verify_ports(&config, &core)?;
             match crate::native_tun::verify(&config, &core) {
                 Err(_) if tun_expected && Instant::now() < deadline => {}
-                Ok(()) if tun_expected => return self.await_system_dns(&core.tun.device, deadline).await,
+                Ok(()) if tun_expected => {
+                    self.tun_live.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return self.await_system_dns(&core.tun.device, deadline).await;
+                }
+                Ok(()) => {
+                    self.tun_live.store(false, std::sync::atomic::Ordering::Relaxed);
+                    self.release_idle_tun();
+                    return Ok(());
+                }
                 result => return result,
             }
             if let Some(process) = self.process.as_mut() {
@@ -281,6 +285,32 @@ impl Actor {
         Ok(())
     }
 
+    /// Starting with TUN while another user holds the host's system TUN (e.g. at
+    /// boot): turn this user's TUN setting off and start without it, rather than
+    /// fail. The user may enable it again once the holder turns theirs off.
+    fn yield_system_tun(&mut self) -> Result<bool> {
+        #[cfg(target_os = "linux")]
+        if let Some(lock) = &self.options.tun_lock
+            && self.options.tun_capable == Some(true)
+            && self.store.read_current().is_ok_and(|config| {
+                config
+                    .get("tun")
+                    .and_then(|tun| tun.get("enable"))
+                    .and_then(serde_yaml_ng::Value::as_bool)
+                    == Some(true)
+            })
+            && let Err(error) = lock.acquire()
+        {
+            let mut settings = self.settings.clone();
+            settings.runtime.tun.get_or_insert_with(Default::default).enable = Some(false);
+            self.settings_store.replace(settings)?;
+            self.settings = self.settings_store.snapshot();
+            self.logs.append("manager", format!("TUN turned off: {error:#}"));
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     pub(super) async fn start_core(&mut self) -> Result<()> {
         if self.options.managed_core() && self.process.is_none() {
             crate::core_upgrade::recover(self.options.binary.parent().context("managed core directory missing")?)?;
@@ -290,16 +320,18 @@ impl Actor {
         let previous = self.store.state();
         let bootstrap = previous.current.is_none() && previous.pending.is_none();
         let source = self.options.config.clone();
+        let yielded = self.yield_system_tun()?;
         // Multi-user mode: a runtime committed before isolation (or for another
         // slot) is re-staged so the core never starts with conflicting listeners.
-        let restage = match &self.options.isolation {
-            // An unreadable runtime fails below with the ordinary start error.
-            Some(isolation) if previous.current.is_some() && previous.pending.is_none() => self
-                .store
-                .read_current()
-                .is_ok_and(|current| isolation.apply(current.clone(), &self.settings.runtime).0 != current),
-            _ => false,
-        };
+        let restage = yielded
+            || match &self.options.isolation {
+                // An unreadable runtime fails below with the ordinary start error.
+                Some(isolation) if previous.current.is_some() && previous.pending.is_none() => self
+                    .store
+                    .read_current()
+                    .is_ok_and(|current| isolation.apply(current.clone(), &self.settings.runtime).0 != current),
+                _ => false,
+            };
         let result = async {
             if bootstrap {
                 let config = read_config(&source).await?;

@@ -145,21 +145,18 @@ activate_user() {
 }
 
 # Mihomo's TUN runs resolvectl to make systemd-resolved send every lookup to its
-# link, which needs polkit for a non-root core. The installing user owns the
-# system-wide TUN (it captures every account, so their fake IPs work) and may do
-# this silently. Any other TUN-group member's TUN carries only its own traffic,
-# so pointing the shared resolver at it would break other accounts: refuse it,
-# also without a prompt. Root (sudo resolvectl) is unaffected.
+# link, which needs polkit for a non-root core. A TUN here is system-wide (it
+# carries every account, so their fake IPs work) and the service lets one
+# TUN-group member hold it at a time (tun.lock), so polkit silently allows each
+# member's own ms<uid> link and refuses other members' links. Root is unaffected.
 polkit_tun_dns() {
     local rule=/etc/polkit-1/rules.d/50-mihomo-server-tun.rules
     local pkla=/etc/polkit-1/localauthority/50-local.d/50-mihomo-server-tun.pkla
     local actions='org.freedesktop.resolve1.set-dns-servers org.freedesktop.resolve1.set-domains org.freedesktop.resolve1.set-default-route org.freedesktop.resolve1.revert'
-    local owner=${2:-} owner_uid=${3:-}
     if [ "$1" = remove ]; then
         rm -f "$rule" "$pkla"
         return
     fi
-    [[ "$owner" =~ ^[A-Za-z0-9._-]*$ ]] || die "unsupported user name for polkit: $owner"
     if [ -d "${rule%/*}" ]; then
         cat > "$rule.new" <<RULE
 // Managed by mihomo-server; see polkit_tun_dns in its installer.
@@ -169,26 +166,27 @@ polkit.addRule(function (action, subject) {
     }
     // systemd 256+ names the link; older versions name none.
     var link = action.lookup("interface");
-    if ("$owner" !== "" && subject.user === "$owner" && (!link || link === "ms$owner_uid")) {
+    if (!link) {
         return polkit.Result.YES;
     }
-    return !link || /^ms[0-9]+\$/.test(link) ? polkit.Result.NO : polkit.Result.NOT_HANDLED;
+    if (!/^ms[0-9]+\$/.test(link)) {
+        return polkit.Result.NOT_HANDLED;
+    }
+    try {
+        var uid = polkit.spawn(["/usr/bin/id", "-u", subject.user]).trim();
+    } catch (error) {
+        return polkit.Result.NO;
+    }
+    return link === "ms" + uid ? polkit.Result.YES : polkit.Result.NO;
 });
 RULE
         chmod 644 "$rule.new"
         mv -f "$rule.new" "$rule"
         rm -f "$pkla"
-    # polkit 0.105 (e.g. Ubuntu 22.04) reads only local authority files; the
-    # later, more specific section wins for the owner.
+    # polkit 0.105 (e.g. Ubuntu 22.04) reads only local authority files.
     elif [ -d "${pkla%/*}" ]; then
-        {
-            printf '[mihomo-server TUN DNS]\nIdentity=unix-group:mihomo-tun\nAction=%s\n' "${actions// /;}"
-            printf 'ResultAny=no\nResultInactive=no\nResultActive=no\n'
-            if [ -n "$owner" ]; then
-                printf '\n[mihomo-server system TUN DNS]\nIdentity=unix-user:%s\nAction=%s\n' "$owner" "${actions// /;}"
-                printf 'ResultAny=yes\nResultInactive=yes\nResultActive=yes\n'
-            fi
-        } > "$pkla.new"
+        printf '[mihomo-server TUN DNS]\nIdentity=unix-group:mihomo-tun\nAction=%s\nResultAny=yes\nResultInactive=yes\nResultActive=yes\n' \
+            "${actions// /;}" > "$pkla.new"
         chmod 644 "$pkla.new"
         mv -f "$pkla.new" "$pkla"
     fi
@@ -229,19 +227,12 @@ install_shared() {
     mkdir -p "$registry"
     chown root:root "$registry"
     chmod 1777 "$registry"
-    # The first installing user keeps the system-wide TUN across upgrades.
-    local owner_file=/var/lib/mihomo-server/tun-owner owner_uid='' owner=''
-    if [ -f "$owner_file" ]; then
-        owner_uid=$(tr -cd '0-9' < "$owner_file")
-        [ -z "$owner_uid" ] || owner=$(getent passwd "$owner_uid" | cut -d: -f1)
-    fi
-    if [ -z "$owner" ] && [ -n "$caller" ]; then
-        owner=$caller owner_uid=$uid
-        printf '%s\n' "$uid" > "$owner_file.new"
-        chmod 644 "$owner_file.new"
-        mv -f "$owner_file.new" "$owner_file"
-    fi
-    polkit_tun_dns install "$owner" "$owner_uid"
+    # One system-wide TUN at a time: its holder's service keeps an flock on this
+    # file, which only TUN-group members can open.
+    [ -f /var/lib/mihomo-server/tun.lock ] || : > /var/lib/mihomo-server/tun.lock
+    chown root:mihomo-tun /var/lib/mihomo-server/tun.lock
+    chmod 0640 /var/lib/mihomo-server/tun.lock
+    polkit_tun_dns install
     ln -sfn "releases/$(basename "$release")" "$root/.current.new"
     mv -T "$root/.current.new" "$root/current"
     mkdir -p /etc/systemd/user /usr/local/bin
@@ -268,11 +259,7 @@ install_shared() {
             bash -euo pipefail -c "$(declare -f die activate_user); activate_user \"\$@\"" \
             bash "$home" "$config_home" /usr/local/bin/mihomo-server-user) || die 'installation did not produce a usable user instance'
         printf '%s\n' "$output"
-        if [ "$owner" = "$caller" ]; then
-            grep -q '^tun: *available system-wide ' <<< "$output" || die 'TUN authorization did not take effect'
-        else
-            echo "Note: $owner runs the system-wide TUN; $caller uses the proxy ports."
-        fi
+        grep -q '^tun: *available ' <<< "$output" || die 'TUN authorization did not take effect'
     fi
     # Upgrade all other running instances. Caller has already been verified.
     if [ -n "$previous" ]; then

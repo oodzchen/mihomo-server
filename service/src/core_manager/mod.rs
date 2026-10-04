@@ -198,6 +198,9 @@ pub struct CoreOptions {
     pub(crate) tun_capable: Option<bool>,
     /// The installation's capability launcher the core is started through.
     pub(crate) tun_exec: Option<PathBuf>,
+    /// The host's one system-wide TUN, held while this core runs with TUN.
+    #[cfg(target_os = "linux")]
+    pub tun_lock: Option<Arc<crate::tun_lock::TunLock>>,
 }
 
 impl CoreOptions {
@@ -213,6 +216,8 @@ impl CoreOptions {
             isolation: None,
             tun_capable: None,
             tun_exec: None,
+            #[cfg(target_os = "linux")]
+            tun_lock: None,
         }
     }
 
@@ -265,14 +270,7 @@ impl CoreOptions {
             if self.isolation.is_some() {
                 #[cfg(target_os = "linux")]
                 {
-                    // Only the system TUN owner may create a TUN once one exists.
-                    let reserved = self.isolation.is_some_and(|isolation| {
-                        matches!(
-                            isolation.tun_scope(),
-                            headless_core::enhance::isolation::TunScope::Reserved(_)
-                        )
-                    });
-                    self.tun_exec = crate::tun_exec::available().filter(|_| !reserved);
+                    self.tun_exec = crate::tun_exec::available();
                     self.tun_capable = Some(self.tun_exec.is_some());
                 }
                 #[cfg(not(target_os = "linux"))]
@@ -330,8 +328,8 @@ pub struct MultiUser {
     pub tun_device: String,
     /// The core runs through the capability launcher (the user is in the TUN group).
     pub tun_capable: bool,
-    /// The installing user, whose TUN captures the whole host and its resolver.
-    pub tun_owner: Option<u32>,
+    /// A TUN here captures the whole host and its resolver, one user at a time.
+    pub tun_system: bool,
 }
 
 #[derive(Clone)]
@@ -349,11 +347,22 @@ pub struct CoreManager {
     logs: Logs,
     client: Arc<Mihomo>,
     profiles: watch::Receiver<IProfiles>,
+    #[cfg(target_os = "linux")]
+    tun_lock: Option<Arc<crate::tun_lock::TunLock>>,
 }
 
 impl CoreManager {
     pub fn multi_user(&self) -> Option<&MultiUser> {
         self.multi_user.as_ref()
+    }
+
+    /// Who holds this host's system-wide TUN (UID and display name), if anyone.
+    pub fn tun_holder(&self) -> Option<(u32, String)> {
+        #[cfg(target_os = "linux")]
+        if let Some(uid) = self.tun_lock.as_ref().and_then(|lock| lock.holder()) {
+            return Some((uid, crate::tun_lock::describe(uid)));
+        }
+        None
     }
 
     /// Send one command to the actor and await its reply.
@@ -379,11 +388,7 @@ impl CoreManager {
             dns_listen: isolation.dns_listen(),
             tun_device: isolation.tun_device(),
             tun_capable: options.tun_capable == Some(true),
-            tun_owner: match isolation.tun_scope() {
-                headless_core::enhance::isolation::TunScope::Own => None,
-                headless_core::enhance::isolation::TunScope::System => Some(isolation.uid()),
-                headless_core::enhance::isolation::TunScope::Reserved(owner) => Some(owner),
-            },
+            tun_system: isolation.tun_scope() == headless_core::enhance::isolation::TunScope::System,
         });
         let core_downloads = if options.managed_core() {
             Some(Arc::new(crate::core_release::CoreDownloads::new(
@@ -434,6 +439,8 @@ impl CoreManager {
             tail: Arc::new(Mutex::new(VecDeque::new())),
             events,
         };
+        #[cfg(target_os = "linux")]
+        let tun_lock = options.tun_lock.clone();
         let mut actor = Actor {
             dns_confirmations: HashMap::new(),
             settings_store,
@@ -452,6 +459,7 @@ impl CoreManager {
             process: None,
             retry_at: None,
             restoration: None,
+            tun_live: std::sync::atomic::AtomicBool::new(false),
         };
         tokio::spawn(async move {
             let result = actor.run().await.map_err(|error| format!("{error:#}"));
@@ -474,6 +482,8 @@ impl CoreManager {
             logs,
             client,
             profiles,
+            #[cfg(target_os = "linux")]
+            tun_lock,
         };
         let access = scheduler::Access::new(&manager);
         tokio::spawn(async move {
@@ -615,6 +625,8 @@ struct Actor {
     process: Option<ManagedProcess>,
     retry_at: Option<Instant>,
     restoration: Option<Restoration>,
+    /// The running core's TUN is verified up; the system TUN lock is kept only then.
+    tun_live: std::sync::atomic::AtomicBool,
 }
 
 async fn closing(receiver: &mut watch::Receiver<bool>) {
@@ -641,6 +653,10 @@ fn drain<R: AsyncRead + Unpin + Send + 'static>(reader: R, logs: Logs, stream: &
 
 impl Actor {
     fn publish(&self, phase: CorePhase, error: Option<String>) {
+        if matches!(phase, CorePhase::Stopped | CorePhase::Failed | CorePhase::Shutdown) {
+            self.tun_live.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.release_idle_tun();
+        }
         self.status.send_modify(|state| {
             state.phase = phase;
             state.error = error;
@@ -670,9 +686,21 @@ impl Actor {
         }
     }
 
+    /// Give up the system TUN unless this core's TUN is verified up, so a failed
+    /// or reverted enable never blocks other users.
+    fn release_idle_tun(&self) {
+        #[cfg(target_os = "linux")]
+        if !self.tun_live.load(std::sync::atomic::Ordering::Relaxed)
+            && let Some(lock) = &self.options.tun_lock
+        {
+            lock.release();
+        }
+    }
+
     async fn run_loop(&mut self) -> Result<()> {
         let mut monitor = tokio::time::interval(Duration::from_millis(100));
         loop {
+            self.release_idle_tun();
             let retry = self
                 .retry_at
                 .unwrap_or_else(|| Instant::now() + Duration::from_secs(86400));

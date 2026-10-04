@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { command, type Connection } from "./api";
 import { t, type Language } from "./i18n";
+import type { TunHolder } from "./proxy-access";
 
 type MultiUser = {
   uid: number;
@@ -9,7 +10,8 @@ type MultiUser = {
   dns_listen: string;
   tun_device: string;
   tun_capable: boolean;
-  tun_owner: number | null;
+  tun_system: boolean;
+  tun_holder: TunHolder | null;
 };
 
 // Shown only when the service runs from a shared multi-user installation.
@@ -47,11 +49,11 @@ export function MultiUserPanel({ token, language, connection }: {
           <dt>{t(language, "multiUserTun")}</dt>
           <dd>
             <span className={`badge ${value.tun_capable ? "good" : ""}`}>
-              {value.tun_capable
-                ? t(language, value.tun_owner === null ? "multiUserTunAvailable" : "multiUserTunSystem")
-                : value.tun_owner !== null && value.tun_owner !== value.uid
-                  ? t(language, "multiUserTunReserved", { uid: String(value.tun_owner) })
-                  : t(language, "multiUserTunUnavailable")}
+              {!value.tun_capable
+                ? t(language, "multiUserTunUnavailable")
+                : value.tun_holder && !value.tun_holder.self
+                  ? t(language, "multiUserTunHeld", { name: value.tun_holder.name })
+                  : t(language, value.tun_system ? "multiUserTunSystem" : "multiUserTunAvailable")}
             </span>
           </dd>
         </div>

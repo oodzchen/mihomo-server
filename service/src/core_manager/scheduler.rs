@@ -148,6 +148,8 @@ pub(super) struct Access {
     logs: Logs,
     client: Arc<Mihomo>,
     profiles: watch::Receiver<IProfiles>,
+    #[cfg(target_os = "linux")]
+    tun_lock: Option<Arc<crate::tun_lock::TunLock>>,
 }
 impl Access {
     pub(super) fn new(manager: &CoreManager) -> Self {
@@ -165,6 +167,8 @@ impl Access {
             logs: manager.logs.clone(),
             client: Arc::clone(&manager.client),
             profiles: manager.profiles.clone(),
+            #[cfg(target_os = "linux")]
+            tun_lock: manager.tun_lock.clone(),
         }
     }
     fn upgrade(&self) -> Option<CoreManager> {
@@ -182,6 +186,8 @@ impl Access {
             logs: self.logs.clone(),
             client: Arc::clone(&self.client),
             profiles: self.profiles.clone(),
+            #[cfg(target_os = "linux")]
+            tun_lock: self.tun_lock.clone(),
         })
     }
 }

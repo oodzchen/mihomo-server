@@ -88,5 +88,18 @@ pub(crate) async fn inspect(manager: &CoreManager) -> Result<Value> {
         "dns_enabled": config.get("dns").and_then(|value| value.get("enable")).and_then(|value| value.as_bool()).unwrap_or(false),
         "tun_enabled": config.get("tun").and_then(|value| value.get("enable")).and_then(|value| value.as_bool()).unwrap_or(false),
         "authentication_required": core.as_ref().map(|core| core.authentication.as_ref().is_some_and(|values| !values.is_empty())),
+        "tun_holder": tun_holder(manager),
     }))
+}
+
+/// Who holds the host's one system-wide TUN, if this installation has one.
+pub(crate) fn tun_holder(manager: &CoreManager) -> Value {
+    match manager.tun_holder() {
+        Some((uid, name)) => json!({
+            "uid": uid,
+            "name": name,
+            "self": manager.multi_user().is_some_and(|user| user.uid == uid),
+        }),
+        None => Value::Null,
+    }
 }

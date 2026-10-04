@@ -16,16 +16,19 @@ export function TunControl({ token, language, status, connection, access, busy, 
     help: "Capture traffic through a virtual network adapter. This switch saves and applies immediately; advanced TUN options are preserved.",
     stopped: "Saved setting; takes effect when the core starts.", blocked: "Save or discard your settings draft before using this switch.",
     failed: "TUN state could not be confirmed. Check the error and retry.", verified: "TUN state verified", expired: "Authentication expired. Please sign in again.",
+    held: "{name} is using the system-wide TUN, so your traffic follows their rules. You can enable TUN after they turn it off.",
   } : language === "zhtw" ? {
     title: "TUN 模式", on: "已開啟", off: "已關閉", unknown: "未確認", working: "正在套用…",
     help: "透過虛擬網卡接管流量。點擊開關立即儲存並套用，保留其他 TUN 進階參數。",
     stopped: "目前為已儲存設定，內核啟動後生效。", blocked: "請先儲存或捨棄設定草稿，再操作此開關。",
     failed: "TUN 狀態尚未確認，請查看錯誤後重試。", verified: "TUN 狀態已核對", expired: "認證失效，請重新登入。",
+    held: "整機 TUN 正由 {name} 使用，你的流量目前按其規則處理；對方關閉後你才能開啟。",
   } : {
     title: "TUN 模式", on: "已开启", off: "已关闭", unknown: "未确认", working: "正在应用…",
     help: "通过虚拟网卡接管流量。点击开关立即保存并应用，保留其他 TUN 高级参数。",
     stopped: "当前为已保存设置，内核启动后生效。", blocked: "请先保存或丢弃设置草稿，再操作此开关。",
     failed: "TUN 状态尚未确认，请查看错误后重试。", verified: "TUN 状态已核对", expired: "认证失效，请重新登录。",
+    held: "整机 TUN 正由 {name} 使用，你的流量目前按其规则处理；对方关闭后你才能开启。",
   };
   const notify = useToast();
   const [working, setWorking] = useState(false), [error, setError] = useState("");
@@ -39,7 +42,10 @@ export function TunControl({ token, language, status, connection, access, busy, 
   const current = connection !== "connected" || !access.value?.has_config ? undefined
     : running && access.value.running ? access.value.reported?.tun_enabled
     : inactive && !access.value.running ? access.value.tun_enabled : undefined;
-  const disabled = busy || working || blocked || current === undefined;
+  // Another account holds the host's one system-wide TUN; only it (or root) can end it.
+  const holder = access.value?.tun_holder;
+  const heldElsewhere = !!holder && !holder.self && current !== true;
+  const disabled = busy || working || blocked || heldElsewhere || current === undefined;
 
   async function toggle() {
     if (disabled || locked.current || current === undefined) return;
@@ -83,6 +89,7 @@ export function TunControl({ token, language, status, connection, access, busy, 
     </div>
     {inactive && current !== undefined && <p className="hint">{current ? text.on : text.off} · {text.stopped}</p>}
     {blocked && <p className="hint">{text.blocked}</p>}
+    {heldElsewhere && <p className="hint" role="note">{text.held.replace("{name}", holder.name)}</p>}
     {error && <p className="alert" role="alert">{error}</p>}
   </section>;
 }

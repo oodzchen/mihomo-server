@@ -19,7 +19,10 @@ export type Access = {
   dns_enabled: boolean;
   tun_enabled: boolean;
   authentication_required: boolean | null;
+  /** The host's one system-wide TUN and who holds it (multi-user installations). */
+  tun_holder?: TunHolder | null;
 };
+export type TunHolder = { uid: number; name: string; self: boolean };
 const labels: Record<string, string> = {
   "mixed-port": "混合（HTTP / SOCKS）",
   port: "HTTP",

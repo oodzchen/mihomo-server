@@ -297,7 +297,13 @@ impl Management {
                 serde_json::to_value(self.manager.activate_core_upgrade(id).await?)?
             }
             ManagementCommand::CoreInstallation {} => serde_json::to_value(self.manager.core_installation().await?)?,
-            ManagementCommand::MultiUser {} => serde_json::to_value(self.manager.multi_user())?,
+            ManagementCommand::MultiUser {} => {
+                let mut value = serde_json::to_value(self.manager.multi_user())?;
+                if let Some(user) = value.as_object_mut() {
+                    user.insert("tun_holder".into(), crate::proxy_access::tun_holder(&self.manager));
+                }
+                value
+            }
             ManagementCommand::InstalledCoreVersion {} => {
                 serde_json::to_value(self.manager.installed_core_version().await?)?
             }

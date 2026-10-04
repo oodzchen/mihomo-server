@@ -268,18 +268,21 @@ cores are kept. Multi-user isolation still replaces subscription
 listeners, retains explicit settings-page values, scopes TUN to `ms<uid>` and
 `include-uid: [uid]`, assigns independent routing and fake-IP blocks and disables
 host-wide auto-redirect. Shared-resolver traffic uses the existing domain sniffer.
-The installing user owns the **system-wide TUN** (recorded in
-`/var/lib/mihomo-server/tun-owner`; the first installer keeps it across
-upgrades). Like a single-user client, that TUN has no `include-uid`: it carries
-every account's traffic, and Mihomo's `resolvectl` calls point systemd-resolved
-at it, so every account's lookups get fake IPs that are routed through it. The
-installer adds `/etc/polkit-1/rules.d/50-mihomo-server-tun.rules`, which allows
-those resolve1 link actions for the owner's `ms<uid>` without a prompt and
-silently refuses them for other TUN-group members (a local-authority `.pkla` file
-on polkit 0.105). A host has one system TUN, so other users cannot enable TUN
-while an owner exists; they keep their own proxy ports, whose traffic then also
-passes through the owner's TUN. An installation run as root without a calling
-user has no owner and keeps per-user TUNs scoped to their own traffic.
+TUN here is **system-wide**, like a single-user client: it has no
+`include-uid`, carries every account's traffic, and Mihomo's `resolvectl` calls
+point systemd-resolved at it, so every account's lookups get fake IPs that are
+routed through it. A host has one such TUN at a time: the first TUN-group member
+to enable TUN holds an `flock` on `/var/lib/mihomo-server/tun.lock`
+(root:mihomo-tun 0640) until they turn it off or their service stops (the kernel
+releases it, so a crashed holder never blocks the host). Other members see the
+holder in the Web UI with their TUN switch disabled; their traffic follows the
+holder's rules and their own proxy ports keep working. Nobody else can turn the
+holder's TUN off; root can, e.g. `systemctl --user -M alice@ stop mihomo-server`.
+An instance that starts with TUN saved while someone else holds it turns its TUN
+setting off and starts without it. The installer adds
+`/etc/polkit-1/rules.d/50-mihomo-server-tun.rules`, which allows those resolve1
+link actions for each member's own `ms<uid>` link without a prompt and refuses
+other members' links (a local-authority `.pkla` group grant on polkit 0.105).
 Group members can give any program these network capabilities through the
 launcher; authorize only trusted users.
 

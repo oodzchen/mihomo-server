@@ -29,8 +29,9 @@ fn main() -> Result<()> {
         .block_on(run())
 }
 
+/// This user's slot, and the installation's system TUN lock when it has one.
 #[cfg(target_os = "linux")]
-fn isolation(arguments: &ArgMatches) -> Result<Isolation> {
+fn isolation(arguments: &ArgMatches) -> Result<(Isolation, Option<mihomo_server::tun_lock::TunLock>)> {
     // SAFETY: geteuid has no preconditions and cannot fail.
     let uid = unsafe { libc::geteuid() };
     let slot = match arguments.get_one::<u16>("slot") {
@@ -41,15 +42,15 @@ fn isolation(arguments: &ArgMatches) -> Result<Isolation> {
                 .cloned()
                 .unwrap_or_else(|| mihomo_server::multi_user::DEFAULT_SLOT_REGISTRY.into());
             let slot = mihomo_server::multi_user::claim_slot(&registry, uid)?;
-            let owner = mihomo_server::multi_user::tun_owner(&registry, uid)?;
-            return Ok(Isolation::new(uid, slot)?.with_tun_owner(owner));
+            let lock = mihomo_server::tun_lock::TunLock::beside(&registry);
+            return Ok((Isolation::new(uid, slot)?.with_system_tun(lock.is_some()), lock));
         }
     };
-    Isolation::new(uid, slot)
+    Ok((Isolation::new(uid, slot)?, None))
 }
 
 #[cfg(not(target_os = "linux"))]
-fn isolation(_: &ArgMatches) -> Result<Isolation> {
+fn isolation(_: &ArgMatches) -> Result<(Isolation, Option<std::convert::Infallible>)> {
     anyhow::bail!("multi-user mode requires Linux")
 }
 
@@ -201,16 +202,23 @@ async fn run() -> Result<()> {
         .get_one::<PathBuf>("web-dir")
         .cloned()
         .or_else(|| resources.as_ref().map(Resources::web_dir));
-    let isolation = if arguments.get_flag("multi-user") {
-        Some(isolation(&arguments)?)
+    let (isolation, tun_lock) = if arguments.get_flag("multi-user") {
+        let (isolation, lock) = isolation(&arguments)?;
+        (Some(isolation), lock)
     } else {
-        None
+        (None, None)
     };
     let mut signals = ShutdownSignals::register()?;
     let mut options = CoreOptions::new(binary, data_dir.clone(), config);
     options.resources = resources;
     options.core_dir = arguments.get_one::<PathBuf>("core-dir").cloned();
     options.isolation = isolation;
+    #[cfg(target_os = "linux")]
+    {
+        options.tun_lock = tun_lock.map(std::sync::Arc::new);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = tun_lock;
     let manager = CoreManager::spawn(options)?;
     let mut listen = *arguments
         .get_one::<SocketAddr>("listen")
@@ -226,13 +234,10 @@ async fn run() -> Result<()> {
             user.uid,
             user.mixed_port,
             user.tun_device,
-            match (user.tun_capable, user.tun_owner) {
-                (true, Some(_)) => "available, system-wide".to_owned(),
-                (true, None) => "available".to_owned(),
-                (false, Some(owner)) if owner != user.uid => {
-                    format!("unavailable: system-wide TUN belongs to uid {owner}")
-                }
-                (false, _) => "unavailable: not in the TUN group".to_owned(),
+            match (user.tun_capable, user.tun_system) {
+                (true, true) => "available, system-wide",
+                (true, false) => "available",
+                (false, _) => "unavailable: not in the TUN group",
             }
         );
     }

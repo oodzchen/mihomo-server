@@ -2,8 +2,8 @@
 # Multi-user end-to-end checks, run as root inside the test container by run.sh.
 #
 # /work holds: install.sh, bundle/ (extracted release bundle) and an optional
-# profile.yaml (real subscription). Users: alice (installer: system-wide TUN),
-# bob (TUN group), carol (not). A root-only reinstall covers per-user TUNs.
+# profile.yaml (real subscription). Users: alice (installer) + bob (TUN group),
+# carol (not). The host has one system-wide TUN, held by whoever enables it first.
 set -uo pipefail
 
 PASS=0
@@ -159,8 +159,13 @@ resolved_answer() {
         --detail interface "$2" >/dev/null 2>&1
     echo $?
 }
-# Mihomo's resolvectl calls must not make systemd-resolved route lookups to a per-user TUN.
-resolver_ignores_tun() { ! resolvectl domain "$1" | grep -q '~\.' && [ -z "$(resolvectl dns "$1" | cut -d: -f2 | tr -d ' ')" ]; }
+# holder_is USER NAME: USER's Web view names NAME as the system TUN holder ('' = nobody).
+holder_is() {
+    api "$1" proxy_access | python3 -c '
+import json, sys
+holder, want = json.load(sys.stdin).get("tun_holder"), sys.argv[1]
+sys.exit(not (holder is None if not want else holder is not None and holder["name"].startswith(want + " ")))' "$2"
+}
 # The system-wide TUN owns the shared resolver: all domains, default route and its DNS.
 resolver_uses_tun() {
     resolvectl domain "$1" | grep -q '~\.' && resolvectl default-route "$1" | grep -q 'yes$' \
@@ -239,10 +244,9 @@ phase_install() {
     check "only installing user authorized" bash -c 'id -nG alice | grep -qw mihomo-tun && ! id -nG bob | grep -qw mihomo-tun && ! id -nG carol | grep -qw mihomo-tun'
     check "alice automatically claimed slot 0" test "$(slot_of alice)" = 0
     check "alice startup reports TUN available" grep -q 'tun:.*available ' /tmp/install.log
-    check "installer made alice the system TUN owner" bash -c \
-        "grep -q 'tun:.*available system-wide' /tmp/install.log && [ \"\$(cat /var/lib/mihomo-server/tun-owner)\" = $(id -u alice) ]"
-    check "tun-owner file is root 0644" test "$(stat -c '%a %U' /var/lib/mihomo-server/tun-owner)" = '644 root'
-    check "polkit rule names alice as owner" grep -q "subject.user === \"alice\"" /etc/polkit-1/rules.d/50-mihomo-server-tun.rules
+    check "alice startup reports a system-wide TUN" grep -q 'tun:.*available system-wide' /tmp/install.log
+    check "system TUN lock is root:mihomo-tun 0640" test "$(stat -c '%a %U:%G' /var/lib/mihomo-server/tun.lock)" = '640 root:mihomo-tun'
+    check "polkit TUN DNS rule installed" test -f /etc/polkit-1/rules.d/50-mihomo-server-tun.rules
     check "no other instances automatically started" bash -c '! pgrep -u bob -x mihomo-server && ! pgrep -u carol -x mihomo-server'
     check "user config template private" test "$(stat -c '%a %U' /home/alice/.config/mihomo-server/env)" = '600 alice'
     check "global unit copied verbatim" cmp /work/bundle/mihomo-server.service /etc/systemd/user/mihomo-server.service
@@ -280,7 +284,7 @@ CONFIG
     check "named public origin wins over legacy arguments" grep -Eq \
         '^manage:[[:space:]]+https://bob\.example/#token=[[:xdigit:]]{64}$' /tmp/bob-restart.log
     check "carol invalid XDG falls back" test -s /home/carol/.config/mihomo-server/env
-    check "bob told alice owns the system-wide TUN" grep -q "tun:.*unavailable (system-wide TUN belongs to uid $(id -u alice))" /tmp/init-bob.log
+    check "bob TUN available without restarting manager" grep -q 'tun:.*available ' /tmp/init-bob.log
     check "carol TUN unavailable" grep -q 'tun:.*unavailable' /tmp/init-carol.log
     check "three distinct slots" test "$(find /var/lib/mihomo-server/slots -type f | wc -l)" = 3
     for user in alice bob carol; do
@@ -388,13 +392,14 @@ phase_port_conflict() {
 
 tun_enable() {
     # ---------------------------------------------------------------- concurrent TUN
-    echo "== system-wide TUN for alice (installer)"
+    echo "== system-wide TUN: alice enables it first"
     for user in alice bob carol; do
         profile_import "$user" || fatal "$user profile import failed"
     done
     api alice set_settings "$TUN_ON" >/dev/null || fatal "alice TUN enable failed"
-    check "bob TUN enable is rejected while alice owns TUN" tun_rejected bob 'system-wide TUN'
-    check "carol TUN enable is rejected" tun_rejected carol 'system-wide TUN\|TUN group'
+    check "bob TUN enable is rejected while alice holds it" tun_rejected bob 'in use by alice'
+    check "carol TUN enable is rejected" tun_rejected carol 'TUN group'
+    check "bob's Web view names alice as TUN holder" holder_is bob alice
     check "carol core still running after rejection" bash -c "pgrep -u carol -x verge-mihomo >/dev/null"
 }
 
@@ -417,7 +422,8 @@ tun_assert() {
     check "alice and bob fetch in parallel" parallel
     # Mihomo's resolvectl calls, allowed silently by polkit for the owner only.
     check "polkit allows alice's TUN link DNS without prompting" test "$(resolved_answer alice "$(dev alice)")" = 0
-    check "polkit refuses other TUN links without prompting" test "$(resolved_answer bob "$(dev bob)")" = 1
+    check "polkit allows bob his own TUN link" test "$(resolved_answer bob "$(dev bob)")" = 0
+    check "polkit refuses bob alice's TUN link" test "$(resolved_answer bob "$(dev alice)")" = 1
     check "polkit keeps prompting for other links" test "$(resolved_answer alice eth0)" = 2
     check "systemd-resolved routes every lookup to alice's TUN" resolver_uses_tun "$(dev alice)"
     check "root reaches resolved's fake IPs through alice's TUN" system_lookup_works root
@@ -436,6 +442,7 @@ phase_crash() {
     check "alice traffic still uses alice's TUN" uses_tun alice alice
     check "resolved points at alice's TUN again after crash" wait_for 20 resolver_uses_tun "$(dev alice)"
     check "carol unaffected by alice's crash" system_lookup_works carol
+    check "alice keeps the system TUN through crash recovery" tun_rejected bob 'in use by alice'
 }
 
 phase_core_upgrade() {
@@ -481,39 +488,37 @@ phase_upgrade() {
     check "carol core running after pin upgrade" wait_for 40 bash -c "pgrep -u carol -x verge-mihomo >/dev/null"
     check "installer upgrade kept alice's Web-installed core" test "$(core_hash alice)" = "$ALICE_CORE"
     check "alice TUN back after upgrade" wait_for 60 link_up "$(dev alice)"
-    check "upgrade keeps alice as system TUN owner" test "$(cat /var/lib/mihomo-server/tun-owner)" = "$(id -u alice)"
+    check "alice holds the system TUN after upgrade" holder_is alice alice
     sleep 2
     check "alice rules not duplicated after upgrade" test "$(slot_rules "$(slot_of alice)")" = "$A_RULES"
     check "alice traffic uses alice's TUN after upgrade" uses_tun alice alice
     check "carol traffic uses alice's TUN after upgrade" uses_tun carol alice
 }
 
-# A root-only installation has no owner: each TUN carries only its user's traffic
-# and polkit silently keeps every TUN away from the shared resolver.
-phase_isolated() {
-    echo "== root-only install: concurrent per-user TUN"
-    env MIHOMO_INSTALL_BUNDLE=/work/bundle bash /work/install.sh >/tmp/root-install.log 2>&1 \
-        || { cat /tmp/root-install.log; fatal 'root-only install failed'; }
-    check "root-only install has no TUN owner" test ! -e /var/lib/mihomo-server/tun-owner
-    usermod -aG mihomo-tun alice
-    usermod -aG mihomo-tun bob
-    as alice mihomo-server-user enable >/tmp/iso-alice.log 2>&1 || { cat /tmp/iso-alice.log; fatal 'alice enable'; }
-    as bob mihomo-server-user enable >/tmp/iso-bob.log 2>&1 || { cat /tmp/iso-bob.log; fatal 'bob enable'; }
-    check "per-user TUN available to alice and bob" bash -c \
-        "grep -q 'tun:.*available (device' /tmp/iso-alice.log && grep -q 'tun:.*available (device' /tmp/iso-bob.log"
-    for user in alice bob; do
-        api "$user" set_settings "$TUN_ON" >/dev/null || fatal "$user per-user TUN enable failed"
-    done
-    check "alice TUN up" wait_for 60 link_up "$(dev alice)"
+# USER's saved TUN switch is explicitly off.
+tun_saved_off() {
+    api "$1" settings | python3 -c 'import json,sys; sys.exit(json.load(sys.stdin)["runtime"]["tun"]["enable"] is not False)'
+}
+# The holder keeps the TUN until it turns it off; only root can end it for them.
+phase_handover() {
+    echo "== system TUN handover between users"
+    api alice set_tun_enabled '{"enabled":false}' >/dev/null || fatal 'alice TUN off'
+    check "alice's TUN released when she turns it off" holder_is bob ''
+    api bob set_tun_enabled '{"enabled":true}' >/dev/null || fatal 'bob TUN on with his own subscription'
     check "bob TUN up" wait_for 60 link_up "$(dev bob)"
-    check "alice traffic uses only alice's TUN" uses_tun alice alice
-    check "bob traffic uses only bob's TUN" uses_tun bob bob
-    check "root traffic uses no TUN" uses_tun root none
-    check "polkit refuses per-user TUN link DNS without prompting" test "$(resolved_answer alice "$(dev alice)")" = 1
-    check "shared resolver ignores alice's TUN" resolver_ignores_tun "$(dev alice)"
-    check "shared resolver ignores bob's TUN" resolver_ignores_tun "$(dev bob)"
-    bash /work/install.sh --uninstall >/tmp/uninstall2.log 2>&1 || { cat /tmp/uninstall2.log; fatal "second uninstall failed"; }
-    check "per-user TUN devices removed" wait_for 40 bash -c "! ip -o link | grep -q ': ms[0-9]'"
+    check "root traffic uses bob's TUN" uses_tun root bob
+    check "systemd-resolved now routes every lookup to bob's TUN" wait_for 20 resolver_uses_tun "$(dev bob)"
+    check "root reaches resolved's fake IPs through bob's TUN" system_lookup_works root
+    check "alice TUN enable is rejected while bob holds it" tun_rejected alice 'in use by bob'
+    check "alice's Web view names bob as TUN holder" holder_is alice bob
+    systemctl --user -M bob@ stop mihomo-server.service
+    check "root stopping bob ends his TUN" wait_for 40 bash -c "! ip link show $(dev bob) >/dev/null 2>&1"
+    api alice set_tun_enabled '{"enabled":true}' >/dev/null || fatal 'alice TUN on after bob stopped'
+    check "alice TUN up again" wait_for 60 link_up "$(dev alice)"
+    as bob mihomo-server-user restart >/tmp/bob-yield.log 2>&1 || { cat /tmp/bob-yield.log; fatal 'bob restart while alice holds TUN'; }
+    check "bob starts without TUN while alice holds it" bash -c "! ip link show $(dev bob) >/dev/null 2>&1"
+    check "bob's saved TUN setting was turned off" tun_saved_off bob
+    check "bob traffic uses alice's TUN again" uses_tun bob alice
 }
 
 phase_cleanup() {
@@ -540,8 +545,6 @@ phase_cleanup() {
     check "polkit TUN DNS rule removed" test ! -e /etc/polkit-1/rules.d/50-mihomo-server-tun.rules
     check "installer-enabled lingering undone" test "$(loginctl show-user alice -p Linger --value 2>/dev/null || echo no)" = no
     check "no enablement links left" bash -c "! compgen -G '/home/*/.config/systemd/user/default.target.wants/mihomo-server.service' >/dev/null"
-
-    phase_isolated
 
     echo "== reinstall from the kept data, then purge everything"
     as alice env MIHOMO_INSTALL_BUNDLE=/work/bundle bash /work/install.sh >/tmp/reinstall.log 2>&1 \
@@ -588,6 +591,7 @@ case "${1:-before-reboot}" in
         check "alice TUN works after reboot" uses_tun alice alice
         check "bob traffic uses alice's TUN after reboot" uses_tun bob alice
         check "resolved points at alice's TUN after reboot" wait_for 20 resolver_uses_tun "$(dev alice)"
+        phase_handover
         phase_cleanup
         echo "multi-user e2e: $PASS passed, $FAIL failed"
         [ "$FAIL" -eq 0 ]
