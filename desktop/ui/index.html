@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mihomo Server</title>
+  <link rel="stylesheet" href="setup.css">
+  <script src="setup.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Mihomo Server</h1>
+      <span id="app-version" class="muted"></span>
+    </header>
+    <section class="card" aria-live="polite">
+      <div class="state">
+        <span id="dot" class="dot"></span>
+        <strong id="title"></strong>
+      </div>
+      <p id="detail" class="detail"></p>
+      <p id="error" class="error" role="alert"></p>
+      <div class="actions">
+        <button id="primary" type="button"></button>
+      </div>
+    </section>
+    <section class="log-panel">
+      <h2 id="log-title"></h2>
+      <pre id="log" tabindex="0"></pre>
+    </section>
+  </main>
+</body>
+</html>

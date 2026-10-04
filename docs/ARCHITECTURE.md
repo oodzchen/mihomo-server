@@ -45,9 +45,11 @@ core problems can be repaired through the same interface.
 | --- | --- |
 | `crates/headless-core` | Tauri-independent domain logic: profile/catalog schema, settings authority, enhancement generation, runtime revisions, resource paths, backup models and recovery plans. |
 | `crates/mihomo-client` | Typed Mihomo control API over Unix socket or explicit loopback HTTP, including realtime streams. |
+| `crates/management-client` | Client side of the management API shared by the command line and the desktop client: locating this user's instance from systemd, authenticated commands with typed errors, and pure readings of proxy groups, subscriptions, mode and TUN. |
 | `crates/clash-verge-*` | Small reusable upstream components: drafts, admission limiting, locale resources and Unix signal handling. |
 | `service` | Axum management surface, authentication, durable stores, core actor, downloads, resource/core updates, backup/restore, multi-user isolation and shutdown. The same executable is the `mihomo-server` command-line client (`service/src/cli`): `serve` (or a leading service option) runs the service, any other command is a client. |
 | `web` | React browser client. It talks only to the Rust service and keeps browser language/session presentation state local. |
+| `desktop` | Optional Tauri 2 desktop client (separate Cargo workspace, own lockfile): a window showing the service's own Web UI, a tray menu for mode/TUN/node/subscription/core control, and detection, installation and start of the local instance. Never required by the service. |
 | `deploy` and `scripts` | Pinned bundle creation, installation, systemd integration, per-user helper and lifecycle checks. |
 
 `headless-core` must remain independent of Axum, React, systemd and process
@@ -143,6 +145,20 @@ reads the token the service wrote. Service lifecycle is delegated to the release
 `mihomo-server-user` helper and program updates/uninstall to the installer, so
 systemd and root actions keep a single implementation.
 
+The desktop client is a third client of the same API and is installed and
+versioned independently of the service. It manages only the invoking user's local
+instance, found the same way as by the command line, and re-reads the token file
+on every connection instead of storing it. Its tray polls `status` and
+`proxy_access`, and re-reads proxies, subscriptions and multi-user facts only when
+they change or once a minute. It does not use the WebSocket feeds, which carry
+every core log line. The management window loads the service origin directly and
+logs in through the URL fragment, so the browser policy (same origin, no CORS)
+is unchanged. That window holds no Tauri capability. Only the bundled status page
+may call the app's commands (detect, install, start, open), which the capability
+ACL enforces per window and origin. Installation runs the published installer,
+whose root step uses polkit (`MIHOMO_INSTALL_ELEVATE=pkexec`) instead of a
+terminal sudo prompt.
+
 Browser operations use independent readback after mutations. Realtime feeds can
 disconnect and resubscribe without becoming configuration authority. Browser
 language and login presentation state do not modify service-global settings.
@@ -221,11 +237,13 @@ upgraded cores; uninstall and purge remain distinct operations.
 | Stable/Alpha core management and transactional backup/restore | Implemented and verified |
 | Multi-user isolation and first-come system-wide TUN | Implemented and verified |
 | Simplified/traditional Chinese and English browser UI; service locale catalog | Implemented |
-| aarch64/musl bundles, deb/RPM and containers | Deferred |
+| Linux x86_64 desktop client (local instance; deb/RPM/AppImage) | Implemented |
+| Desktop client management of remote instances | Deferred |
+| aarch64/musl bundles, server deb/RPM and containers | Deferred |
 | Windows service/Named Pipe and native macOS deployment validation | Deferred |
 | SOCKS/PAC subscription download routes and full connection dashboard | Deferred |
 | Backup automation, WebDAV and backup UI | Deferred |
-| Media-unlock and unrelated desktop features | Deferred |
+| Media-unlock and other desktop features beyond the client above | Deferred |
 
 The original design rationale is retained in [../headless.md](../headless.md), but
 that document may describe planned or historical boundaries. This file is the

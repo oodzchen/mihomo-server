@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Mihomo Server
+Name[zh_CN]=Mihomo Server
+Comment=Manage the local mihomo-server proxy service
+Comment[zh_CN]=管理本机 mihomo-server 代理服务
+Comment[zh_TW]=管理本機 mihomo-server 代理服務
+Exec={{exec}}
+Icon={{icon}}
+Terminal=false
+Categories={{categories}}
+StartupWMClass=mihomo-server-desktop

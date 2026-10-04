@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "setup",
+  "description": "The bundled local service page; the management page gets no capability.",
+  "windows": ["setup"],
+  "permissions": ["allow-local-state", "allow-install-service", "allow-start-service", "allow-open-dashboard"]
+}

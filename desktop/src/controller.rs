@@ -1,0 +1,404 @@
+//! Client state shared by the tray, the windows and the status page: the
+//! connection to the local instance, the polled snapshot and running tasks.
+use crate::{
+    autostart,
+    i18n::Language,
+    local::{self, Detected, Log},
+    model::{self, Action, Live, MenuModel, Service, Snapshot},
+    tray, window,
+};
+use anyhow::{Context as _, Result};
+use management_client::{Api, Endpoint};
+use serde_json::{Value, json};
+use std::{
+    sync::{Arc, Mutex, MutexGuard},
+    time::{Duration, Instant},
+};
+use tauri::{AppHandle, Manager as _};
+use tokio::sync::Notify;
+
+const READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// Delay tests, downloads and restarts are bounded by the service itself.
+const ACTION_TIMEOUT: Duration = Duration::from_secs(180);
+/// Proxies and subscriptions change without a status change (URLTest picks,
+/// selections made in the dashboard), so they are also re-read on this period.
+const FULL_REFRESH: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Task {
+    Idle,
+    Installing,
+    Starting,
+    Command,
+}
+
+/// Never implements Debug: it holds the management token.
+pub struct Connection {
+    pub api: Api,
+    pub endpoint: Endpoint,
+    pub token: String,
+}
+
+struct Inner {
+    service: Service,
+    /// Whether the detected-but-stopped unit is enabled at boot.
+    enabled: bool,
+    connection: Option<Arc<Connection>>,
+    task: Task,
+    last_error: Option<String>,
+    force_full: bool,
+    open_dashboard_when_running: bool,
+}
+
+pub struct Controller {
+    pub language: Language,
+    inner: Mutex<Inner>,
+    wake: Notify,
+    pub log: Log,
+}
+
+impl Controller {
+    pub fn new(language: Language) -> Self {
+        Self {
+            language,
+            inner: Mutex::new(Inner {
+                service: Service::Detecting,
+                enabled: false,
+                connection: None,
+                task: Task::Idle,
+                last_error: None,
+                force_full: true,
+                open_dashboard_when_running: false,
+            }),
+            wake: Notify::new(),
+            log: Log::default(),
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub fn snapshot(&self) -> Snapshot {
+        let inner = self.lock();
+        Snapshot {
+            service: inner.service.clone(),
+            working: inner.task != Task::Idle,
+            last_error: inner.last_error.clone(),
+            autostart: autostart::enabled(),
+        }
+    }
+
+    pub fn connection(&self) -> Option<Arc<Connection>> {
+        self.lock().connection.clone()
+    }
+
+    pub fn task(&self) -> Task {
+        self.lock().task
+    }
+
+    /// Refresh now instead of at the next period.
+    pub fn wake(&self) {
+        self.wake.notify_one();
+    }
+
+    fn set_service(&self, service: Service) {
+        self.lock().service = service;
+    }
+
+    fn drop_connection(&self) {
+        self.lock().connection = None;
+    }
+
+    pub fn model(&self) -> MenuModel {
+        model::derive(&self.snapshot(), self.language.strings())
+    }
+}
+
+fn controller(app: &AppHandle) -> Arc<Controller> {
+    app.state::<Arc<Controller>>().inner().clone()
+}
+
+/// Recompute the menu; the tray applies only what changed.
+pub fn publish(app: &AppHandle) {
+    tray::apply(app, controller(app).model());
+}
+
+fn short(error: &anyhow::Error) -> String {
+    format!("{error:#}")
+}
+
+async fn timed<T>(future: impl Future<Output = Result<T>>) -> Result<T> {
+    tokio::time::timeout(READ_TIMEOUT, future)
+        .await
+        .context("the management API did not answer in time")?
+}
+
+/// What the poller keeps between rounds to decide what to re-read.
+#[derive(Default)]
+struct Poll {
+    fingerprint: String,
+    endpoint: Option<Endpoint>,
+    full_at: Option<Instant>,
+    user: Value,
+    proxies: Value,
+    profiles: Value,
+    failures: u32,
+}
+
+impl Poll {
+    async fn connect(&self, controller: &Controller) -> Result<Option<Arc<Connection>>> {
+        let detected = tokio::task::spawn_blocking(local::detect).await??;
+        let endpoint = match detected {
+            Detected::Running(endpoint) => endpoint,
+            Detected::Inactive { enabled } => {
+                let mut inner = controller.lock();
+                inner.service = Service::Inactive;
+                inner.enabled = enabled;
+                return Ok(None);
+            }
+            Detected::NotInstalled => {
+                controller.set_service(Service::NotInstalled);
+                return Ok(None);
+            }
+        };
+        let token = local::read_token(&endpoint)?;
+        let api = Api::with_token(endpoint.clone(), token.clone())?
+            .with_timeout(ACTION_TIMEOUT)
+            .with_language(controller.language.code());
+        let connection = Arc::new(Connection { api, endpoint, token });
+        controller.lock().connection = Some(connection.clone());
+        Ok(Some(connection))
+    }
+
+    async fn read(&mut self, connection: &Connection, force: bool) -> Result<Live> {
+        let api = &connection.api;
+        let (status, access) = tokio::try_join!(
+            timed(api.command("status", json!({}))),
+            timed(api.command("proxy_access", json!({})))
+        )?;
+        let fingerprint = format!("{status}{access}");
+        let stale = force
+            || fingerprint != self.fingerprint
+            || self.endpoint.as_ref() != Some(&connection.endpoint)
+            || self.full_at.is_none_or(|at| at.elapsed() >= FULL_REFRESH);
+        if stale {
+            // A stopped core has no proxies; that is a state, not a failure.
+            let (proxies, profiles, user) = tokio::join!(
+                timed(api.command("proxies", json!({}))),
+                timed(api.command("profiles", json!({}))),
+                timed(api.command("multi_user", json!({})))
+            );
+            self.proxies = proxies.unwrap_or(Value::Null);
+            self.profiles = profiles?;
+            self.user = user.unwrap_or(Value::Null);
+            self.fingerprint = fingerprint;
+            self.endpoint = Some(connection.endpoint.clone());
+            self.full_at = Some(Instant::now());
+        }
+        Ok(Live {
+            address: connection.endpoint.management_url.clone(),
+            status,
+            access,
+            user: self.user.clone(),
+            proxies: self.proxies.clone(),
+            profiles: self.profiles.clone(),
+        })
+    }
+
+    fn backoff(&mut self) -> Duration {
+        self.failures = (self.failures + 1).min(5);
+        Duration::from_secs(2u64.pow(self.failures).min(30))
+    }
+
+    /// One round; returns how long to wait before the next one.
+    async fn refresh(&mut self, controller: &Controller) -> Duration {
+        let force = std::mem::take(&mut controller.lock().force_full);
+        let busy = controller.task() != Task::Idle;
+        let mut failure = None;
+        // A failed read reconnects once: the service may have restarted on
+        // another port, stopped, or rotated its token.
+        for _ in 0..2 {
+            let connection = match controller.connection() {
+                Some(connection) => connection,
+                None => match self.connect(controller).await {
+                    Ok(Some(connection)) => connection,
+                    Ok(None) => {
+                        self.failures = 0;
+                        return Duration::from_secs(if busy { 2 } else { 5 });
+                    }
+                    Err(error) => {
+                        failure = Some(error);
+                        break;
+                    }
+                },
+            };
+            match self.read(&connection, force || failure.is_some()).await {
+                Ok(live) => {
+                    let transitional = !matches!(
+                        live.status.get("phase").and_then(Value::as_str),
+                        Some("running" | "stopped" | "failed")
+                    );
+                    controller.set_service(Service::Running(Box::new(live)));
+                    self.failures = 0;
+                    return Duration::from_secs(if transitional || busy { 1 } else { 5 });
+                }
+                Err(error) => {
+                    controller.drop_connection();
+                    failure = Some(error);
+                }
+            }
+        }
+        let reason = failure.map_or_else(|| "unknown error".into(), |error| short(&error));
+        controller.set_service(Service::Unreachable(reason));
+        self.backoff()
+    }
+}
+
+/// Poll the local instance for the life of the app.
+pub async fn run(app: AppHandle, open_window: bool) {
+    let controller = controller(&app);
+    let mut poll = Poll::default();
+    let mut first = open_window;
+    loop {
+        let delay = poll.refresh(&controller).await;
+        publish(&app);
+        let running = matches!(controller.lock().service, Service::Running(_));
+        let open_dashboard = running && std::mem::take(&mut controller.lock().open_dashboard_when_running);
+        if open_dashboard {
+            window::open_dashboard(&app);
+        } else if std::mem::take(&mut first) {
+            window::open_preferred(&app);
+        }
+        tokio::select! {
+            () = tokio::time::sleep(delay) => {}
+            () = controller.wake.notified() => {}
+        }
+    }
+}
+
+fn command(action: &Action) -> Option<(&'static str, Value)> {
+    Some(match action {
+        Action::Mode(mode) => ("set_proxy_mode", json!({"mode": mode})),
+        Action::Tun(enabled) => ("set_tun_enabled", json!({"enabled": enabled})),
+        Action::Select { group, node } => ("select_node", json!({"group": group, "node": node})),
+        Action::Unfix { group } => ("unfix_node", json!({"group": group})),
+        Action::TestGroup { group } => ("delay_group", json!({"group": group})),
+        Action::Profile { uid } => ("select_profile", json!({"uid": uid})),
+        Action::Core(op) => (op.command(), json!({})),
+        _ => return None,
+    })
+}
+
+/// Start one background task; refuses (returns false) while another runs.
+pub fn start_task(app: &AppHandle, task: Task, action: Option<Action>) -> bool {
+    let controller = controller(app);
+    {
+        let mut inner = controller.lock();
+        if inner.task != Task::Idle {
+            return false;
+        }
+        inner.task = task;
+        inner.last_error = None;
+    }
+    if task != Task::Command {
+        controller.log.clear();
+    }
+    publish(app);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let controller = self::controller(&app);
+        let result = match task {
+            Task::Installing => local::install(&controller.log).await,
+            Task::Starting => {
+                let enabled = controller.lock().enabled;
+                local::start_service(enabled, &controller.log).await
+            }
+            Task::Command => run_command(&controller, action).await,
+            Task::Idle => Ok(()),
+        };
+        {
+            let mut inner = controller.lock();
+            inner.task = Task::Idle;
+            inner.force_full = true;
+            if task != Task::Command {
+                // Installation and service start change the endpoint and token.
+                inner.connection = None;
+                inner.open_dashboard_when_running = result.is_ok();
+            }
+            if let Err(error) = &result {
+                inner.last_error = Some(short(error));
+            }
+        }
+        if let Err(error) = &result
+            && task != Task::Command
+        {
+            controller.log.push(format!("error: {}", short(error)));
+        }
+        publish(&app);
+        controller.wake();
+    });
+    true
+}
+
+async fn run_command(controller: &Controller, action: Option<Action>) -> Result<()> {
+    let (name, fields) = action.as_ref().and_then(command).context("not a service command")?;
+    let connection = controller.connection().context("mihomo-server is not connected")?;
+    connection.api.command(name, fields).await.map(drop)
+}
+
+/// Run a tray action.
+pub fn dispatch(app: &AppHandle, action: Action) {
+    match action {
+        Action::Quit => app.exit(0),
+        Action::OpenDashboard => window::open_dashboard(app),
+        Action::OpenServicePage => window::open_service_page(app),
+        Action::Autostart(enabled) => {
+            if let Err(error) = autostart::set(enabled) {
+                controller(app).lock().last_error = Some(short(&error));
+            }
+            publish(app);
+        }
+        Action::StartService => {
+            start_task(app, Task::Starting, None);
+        }
+        action => {
+            start_task(app, Task::Command, Some(action));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::CoreOp;
+
+    #[test]
+    fn tray_actions_map_to_management_commands() {
+        assert_eq!(
+            command(&Action::Mode("global")),
+            Some(("set_proxy_mode", json!({"mode": "global"})))
+        );
+        assert_eq!(
+            command(&Action::Select {
+                group: "Proxies".into(),
+                node: "A".into()
+            }),
+            Some(("select_node", json!({"group": "Proxies", "node": "A"})))
+        );
+        assert_eq!(
+            command(&Action::Tun(true)),
+            Some(("set_tun_enabled", json!({"enabled": true})))
+        );
+        assert_eq!(command(&Action::Core(CoreOp::Restart)), Some(("restart", json!({}))));
+        assert_eq!(command(&Action::Quit), None);
+    }
+
+    #[test]
+    fn failures_back_off_to_thirty_seconds() {
+        let mut poll = Poll::default();
+        let delays: Vec<u64> = (0..7).map(|_| poll.backoff().as_secs()).collect();
+        assert_eq!(delays, [2, 4, 8, 16, 30, 30, 30]);
+    }
+}

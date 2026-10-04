@@ -86,6 +86,22 @@ sudo loginctl enable-linger 用户名
 
 授权后重启该实例即可使用 TUN，无需重新登录。`mihomo-tun` 成员可以让任意程序获得整机网络管理能力，并接管整机流量，只授权给可信用户。
 
+### 桌面客户端（可选）
+
+有图形桌面时，可以安装轻量的桌面客户端 `mihomo-server-desktop`（Tauri 2，Release 中提供 `.deb`、`.rpm` 和 AppImage）。它独立于服务安装，不装也不影响使用：
+
+- 自动发现本机当前用户的 mihomo-server 实例，在窗口中打开管理页面并自动登录；
+- 托盘菜单可直接切换代理模式、开关 TUN、为各代理组选择节点和测速、切换订阅，以及启动/停止/重启内核；
+- 本机未安装时提供「安装」按钮：下载官方安装脚本并安装最新版本，管理员授权通过系统的 polkit 对话框完成；已安装但未运行时可一键启动服务；
+- 关闭窗口后驻留托盘，托盘菜单中可设置登录时启动（以 `--hidden` 只启动托盘）。
+
+```sh
+sudo dnf install ./mihomo-server-desktop-vX.Y.Z-x86_64.rpm     # Fedora/RHEL
+sudo apt install ./mihomo-server-desktop-vX.Y.Z-x86_64.deb     # Debian/Ubuntu
+```
+
+安装包在 Ubuntu 24.04 上构建，需要 glibc 2.39 及以上，并依赖 WebKitGTK 4.1、libayatana-appindicator 和 polkit。GNOME 需要安装 AppIndicator 扩展才能显示托盘图标；KDE 等桌面原生支持。Fedora 上建议使用 RPM，AppImage 需要 FUSE 2（`fuse-libs`）。
+
 ## 远程访问与服务管理
 
 编辑 `mihomo-server info` 显示的 `env` 文件，例如：

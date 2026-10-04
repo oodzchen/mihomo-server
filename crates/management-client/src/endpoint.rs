@@ -111,6 +111,8 @@ pub fn from_arguments(arguments: &[String], cwd: &Path, slot: impl FnOnce() -> O
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServiceState {
+    /// `loaded` once the unit file is installed; `not-found` before.
+    pub load: String,
     pub active: String,
     pub sub: String,
     pub enabled: String,
@@ -130,6 +132,7 @@ pub fn parse_show(output: &str) -> ServiceState {
             continue;
         };
         match key {
+            "LoadState" => state.load = value.to_owned(),
             "ActiveState" => state.active = value.to_owned(),
             "SubState" => state.sub = value.to_owned(),
             "UnitFileState" => state.enabled = value.to_owned(),
@@ -147,7 +150,7 @@ pub fn service_state() -> Result<ServiceState> {
             "--user",
             "show",
             UNIT,
-            "--property=ActiveState,SubState,UnitFileState,MainPID",
+            "--property=LoadState,ActiveState,SubState,UnitFileState,MainPID",
         ])
         .output()
         .context("cannot run systemctl; use --api for a service outside systemd")?;
@@ -282,8 +285,10 @@ mod tests {
             ("http://127.0.0.1:20050", "127.0.0.1:20050")
         );
         assert!(Endpoint::explicit("ftp://x", "t".into()).is_err());
-        let state = parse_show("ActiveState=active\nSubState=running\nUnitFileState=enabled\nMainPID=42\n");
+        let state =
+            parse_show("LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\nMainPID=42\n");
         assert!(state.running());
+        assert_eq!(state.load, "loaded");
         assert_eq!(state.enabled, "enabled");
         assert!(!parse_show("ActiveState=inactive\nMainPID=0").running());
     }

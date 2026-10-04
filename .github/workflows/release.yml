@@ -91,8 +91,63 @@ jobs:
           compression-level: 0
           retention-days: 1
 
+  build-desktop:
+    name: Build desktop packages
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-desktop
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          save-cache: "false"
+          cache-key: desktop-release
+          workspaces: desktop -> target
+
+      - name: Install tauri-cli
+        # Same minor as the tauri crate in desktop/Cargo.lock.
+        run: cargo install tauri-cli --version 2.12.1 --locked
+
+      - name: Build deb, rpm and AppImage
+        env:
+          # Where the client downloads the installer from.
+          MIHOMO_SERVER_REPOSITORY: ${{ github.repository }}
+          # linuxdeploy is itself an AppImage; runners have no FUSE.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cd desktop
+          MIHOMO_DESKTOP_VERSION="$version" cargo tauri build --bundles deb,rpm,appimage \
+            --config "{\"version\":\"$version\"}"
+
+      - name: Smoke test and collect packages
+        run: |
+          bundle=desktop/target/release/bundle
+          desktop/target/release/mihomo-server-desktop --version
+          deb=$(ls "$bundle"/deb/*.deb); rpm=$(ls "$bundle"/rpm/*.rpm); image=$(ls "$bundle"/appimage/*.AppImage)
+          dpkg-deb -I "$deb" >/dev/null
+          (cd "$(mktemp -d)" && "$OLDPWD/$image" --appimage-extract >/dev/null && test -x squashfs-root/usr/bin/mihomo-server-desktop)
+          base="mihomo-server-desktop-$GITHUB_REF_NAME-x86_64"
+          mkdir -p dist
+          cp "$deb" "dist/$base.deb"
+          cp "$rpm" "dist/$base.rpm"
+          cp "$image" "dist/$base.AppImage"
+          cd dist
+          for file in "$base".*; do sha256sum "$file" > "$file.sha256"; done
+          sha256sum -c ./*.sha256
+
+      - name: Upload desktop packages
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-assets
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   publish:
-    needs: [test, build-release]
+    needs: [test, build-release, build-desktop]
     name: Publish GitHub Release
     runs-on: ubuntu-24.04
     permissions:
@@ -100,7 +155,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v7
         with:
-          name: release-assets
+          pattern: "*-assets"
+          merge-multiple: true
           path: dist
 
       - name: Create GitHub Release

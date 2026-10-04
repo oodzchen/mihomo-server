@@ -1,0 +1,97 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f5f6f8;
+  --card: #ffffff;
+  --text: #1d2129;
+  --muted: #6b7280;
+  --border: #e3e5e8;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+  --ok: #16a34a;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --log-bg: #0f172a;
+  --log-text: #e2e8f0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171c;
+    --card: #1e2128;
+    --text: #e6e8eb;
+    --muted: #9aa1ab;
+    --border: #2d313a;
+    --accent: #3b82f6;
+    --log-bg: #0b0e14;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans", "Noto Sans CJK SC", sans-serif;
+}
+main {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 16px;
+  height: 100%;
+  padding: 20px;
+}
+header { display: flex; align-items: baseline; gap: 10px; }
+h1 { margin: 0; font-size: 20px; }
+h2 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.muted { color: var(--muted); font-size: 12px; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+.state { display: flex; align-items: center; gap: 10px; font-size: 16px; min-height: 24px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.ok { background: var(--ok); }
+.dot.warn { background: var(--warn); }
+.dot.bad { background: var(--bad); }
+/* Fixed slots: state changes never move the elements below them. */
+.detail {
+  margin: 8px 0 0;
+  min-height: 3em;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.error {
+  margin: 4px 0 0;
+  height: 3em;
+  overflow: hidden;
+  color: var(--bad);
+  overflow-wrap: anywhere;
+}
+.actions { margin-top: 8px; display: flex; gap: 8px; }
+button {
+  min-width: 140px;
+  height: 34px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.55; cursor: default; }
+.log-panel { display: flex; flex-direction: column; min-height: 0; }
+pre {
+  flex: 1;
+  min-height: 120px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--log-bg);
+  color: var(--log-text);
+  font: 12px/1.45 ui-monospace, "JetBrains Mono", "Noto Sans Mono", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

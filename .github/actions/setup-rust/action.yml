@@ -7,6 +7,9 @@ inputs:
   cache-key:
     description: Extra rust-cache key to keep job caches separate.
     default: ""
+  workspaces:
+    description: rust-cache workspaces ("<dir> -> <target dir>").
+    default: ". -> target"
 runs:
   using: composite
   steps:
@@ -23,3 +26,4 @@ runs:
       with:
         save-if: ${{ inputs.save-cache }}
         key: ${{ inputs.cache-key }}
+        workspaces: ${{ inputs.workspaces }}

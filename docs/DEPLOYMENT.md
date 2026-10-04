@@ -217,6 +217,10 @@ SHA-256 (`sha256sum` or `shasum`), curl or wget, getent, groupadd, usermod,
 runuser, sg and libcap's setcap/getcap; non-root invocation also requires sudo.
 Runtime does not require Python or Node.
 
+Graphical callers without a terminal (the desktop client) set
+`MIHOMO_INSTALL_ELEVATE=pkexec`: the same root step then runs through `pkexec`,
+and polkit's own dialog asks for authorization. The default remains sudo.
+
 Layout:
 
 - `/opt/mihomo-server/releases/<tag>` and atomic `current` link: root-owned,
@@ -359,6 +363,26 @@ from the saved XDG paths and env file), legacy unit backups and a migrated
 and `--purge`.
 For manual local deployment, verify the downloaded tarball and use the foreground
 launcher described above; local-bundle installer overrides are internal to tests.
+
+## Desktop client
+
+`desktop/` is a separate Cargo workspace because it links WebKitGTK, which the
+service never needs. It builds on Linux with the WebKitGTK 4.1, ayatana
+appindicator and librsvg development packages, for example:
+
+```sh
+sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev   # Debian/Ubuntu
+sudo dnf install webkit2gtk4.1-devel libayatana-appindicator-gtk3-devel librsvg2-devel libxdo-devel  # Fedora
+cargo test --manifest-path desktop/Cargo.toml --locked
+cargo install tauri-cli --version 2.12.1 --locked
+(cd desktop && cargo tauri build --bundles deb,rpm,appimage)
+```
+
+Release tags also publish `mihomo-server-desktop-<tag>-x86_64.{deb,rpm,AppImage}`
+with SHA-256 files. `MIHOMO_SERVER_API` and `MIHOMO_SERVER_TOKEN_FILE` point
+a development build at a foreground service, as for the command line.
+`MIHOMO_SERVER_INSTALLER` replaces the published installer with a local path or
+URL.
 
 ## Validation
 
