@@ -9,6 +9,7 @@ type MultiUser = {
   dns_listen: string;
   tun_device: string;
   tun_capable: boolean;
+  tun_owner: number | null;
 };
 
 // Shown only when the service runs from a shared multi-user installation.
@@ -46,7 +47,11 @@ export function MultiUserPanel({ token, language, connection }: {
           <dt>{t(language, "multiUserTun")}</dt>
           <dd>
             <span className={`badge ${value.tun_capable ? "good" : ""}`}>
-              {t(language, value.tun_capable ? "multiUserTunAvailable" : "multiUserTunUnavailable")}
+              {value.tun_capable
+                ? t(language, value.tun_owner === null ? "multiUserTunAvailable" : "multiUserTunSystem")
+                : value.tun_owner !== null && value.tun_owner !== value.uid
+                  ? t(language, "multiUserTunReserved", { uid: String(value.tun_owner) })
+                  : t(language, "multiUserTunUnavailable")}
             </span>
           </dd>
         </div>

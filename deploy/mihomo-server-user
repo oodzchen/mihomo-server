@@ -176,7 +176,7 @@ wait_ready() {
     die "$UNIT failed to reach a running core and authenticated API; check configuration and port conflicts"
 }
 info() {
-    local state n tun line proxy manage token
+    local state n tun line detail proxy manage token
     state=$(systemctl --user is-active "$UNIT" 2>/dev/null || true)
     if ! n=$(slot); then
         echo "service:   $state (run: mihomo-server-user enable)"
@@ -195,7 +195,13 @@ info() {
         fi
     fi
     line=$(current_log | grep '^multi-user slot ' | tail -n 1 || true)
-    case "$line" in *'(available)'*) tun=available ;; *) tun='unavailable (administrator must authorize group mihomo-tun)' ;; esac
+    # The startup line ends with "(available)", "(available, system-wide)" or "(unavailable: why)".
+    detail=${line##* (}; detail=${detail%)}
+    case "$detail" in
+        available*) tun=${detail//,/} ;;
+        'unavailable: system-wide'*) tun="unavailable (${detail#unavailable: })" ;;
+        *) tun='unavailable (administrator must authorize group mihomo-tun)' ;;
+    esac
     proxy=$(mixed_port "$n")
     if [ "$state" = active ] && [ -s "$TOKEN_FILE" ]; then
         local actual

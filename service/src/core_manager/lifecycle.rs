@@ -188,6 +188,15 @@ impl Actor {
             .and_then(|tun| tun.get("enable"))
             .and_then(serde_yaml_ng::Value::as_bool)
             == Some(true);
+        if let Some(headless_core::enhance::isolation::TunScope::Reserved(owner)) =
+            self.options.isolation.map(|isolation| isolation.tun_scope())
+        {
+            ensure!(
+                !enabled,
+                "TUN is not available to this user: the installing user (uid {owner}) runs the \
+                 system-wide TUN, and a host can have only one"
+            );
+        }
         ensure!(
             !enabled || self.options.tun_capable != Some(false),
             "TUN is not available to this user: ask the administrator to add this user to the \
@@ -218,6 +227,7 @@ impl Actor {
             crate::proxy_access::verify_ports(&config, &core)?;
             match crate::native_tun::verify(&config, &core) {
                 Err(_) if tun_expected && Instant::now() < deadline => {}
+                Ok(()) if tun_expected => return self.await_system_dns(&core.tun.device, deadline).await,
                 result => return result,
             }
             if let Some(process) = self.process.as_mut() {
@@ -232,6 +242,43 @@ impl Actor {
                 _ = sleep(Duration::from_millis(250)) => {}
             }
         }
+    }
+
+    /// A system-wide TUN is complete only once Mihomo's background `resolvectl`
+    /// calls have pointed systemd-resolved at it; report the toggle after that.
+    /// Hosts without systemd-resolved have nothing to wait for. A resolver that
+    /// never accepts the link (no polkit rule) keeps the TUN and logs why.
+    async fn await_system_dns(&mut self, device: &str, deadline: Instant) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        if self.options.isolation.map(|isolation| isolation.tun_scope())
+            == Some(headless_core::enhance::isolation::TunScope::System)
+        {
+            let deadline = deadline.max(Instant::now() + Duration::from_secs(5));
+            loop {
+                match crate::native_tun::resolved_link_dns(device).await {
+                    None | Some(true) => return Ok(()),
+                    Some(false) if Instant::now() >= deadline => {
+                        self.logs.append(
+                            "manager",
+                            format!(
+                                "systemd-resolved did not accept DNS for {device}; system lookups bypass \
+                                 the TUN until the installer's polkit rule is present"
+                            ),
+                        );
+                        return Ok(());
+                    }
+                    Some(false) => {}
+                }
+                tokio::select! {
+                    biased;
+                    _ = closing(&mut self.shutdown) => bail!("TUN verification cancelled during shutdown"),
+                    _ = sleep(Duration::from_millis(100)) => {}
+                }
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = (device, deadline);
+        Ok(())
     }
 
     pub(super) async fn start_core(&mut self) -> Result<()> {

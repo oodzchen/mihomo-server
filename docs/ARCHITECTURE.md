@@ -87,7 +87,59 @@ checks confirm placement and no horizontal overflow. The isolated real-node
 test passed all three mode readbacks and subsequent proxied HTTPS 204 traffic
 without modifying production data.
 
-## Increment: silent TUN enable (polkit refusal of TUN link DNS)
+## Increment: installer-owned system-wide TUN with silent resolver takeover
+
+Supersedes the refusal-only policy below at the user's request: TUN must take
+over system DNS (fake-IP, anti-pollution) like clash-verge-rev, silently. That
+client asks once because its root service runs a root core; here the core runs
+as the user, so the installer's sudo is the one authorization and polkit grants
+the rest. Granting alone is not enough: a TUN limited by `include-uid` would hand
+other accounts fake IPs they cannot route (shown in a container run). So:
+
+- **Owner.** `install_shared` records the calling user's UID in
+  `/var/lib/mihomo-server/tun-owner` (root 0644). The first owner is kept
+  across upgrades and replaced only if that account no longer exists. A
+  root-only install (no caller) writes none.
+- **Scope.** `Isolation::with_tun_owner` yields `TunScope::{Own, System,
+  Reserved(uid)}`; `multi_user::tun_owner` reads the file beside the slot
+  registry with the registry's trust rules (fixed `--slot` runs ignore it). For
+  `System` the overlay removes `include-uid`/`include-uid-range` (user
+  `exclude-uid` stays), so the owner's TUN captures every UID while device,
+  routing indexes and fake-IP block still follow the slot. `Reserved` users get
+  no launcher, `tun_capable: false`, and a preflight error naming the owner;
+  their proxy ports keep working (through the owner's TUN). `MultiUser` exposes
+  `tun_owner`; the startup line and `mihomo-server-user info` say
+  `available, system-wide` / `unavailable: system-wide TUN belongs to uid N`,
+  and the Web multi-user panel shows the same.
+- **polkit.** `polkit_tun_dns install OWNER UID` writes a JS rule returning
+  `YES` for the four resolve1 link actions when the subject is the owner and the
+  link is `ms<uid>` (or unnamed, systemd <256), `NO` for other `mihomo-tun`
+  members on `ms*` links, and otherwise `NOT_HANDLED`. polkit 0.105 gets a
+  `.pkla` with a group deny followed by an owner allow (verified with
+  `pkla-check-authorization`: owner yes, member no, others default).
+- **Toggle completion.** `verify_proxy_ports` now calls `await_system_dns` for a
+  `System` TUN: it polls `resolvectl dns <dev>` (100 ms, at least 5 s) until
+  systemd-resolved lists the TUN's DNS, so the Web toast follows the background
+  `resolvectl` calls. No resolved: nothing to wait for; never accepted: the TUN
+  stays up and the manager log explains the missing polkit rule.
+- The installer's post-activation check requires `available system-wide` only
+  when the caller is the owner; other installing admins get a note.
+
+E2E (system TUN by default): bob/carol TUN refused with the owner named; all of
+alice, bob, carol and root route through `ms<alice>`; resolved has `~.`,
+default route and DNS on it; root and carol connect to resolved's fake IPs;
+polkit answers 0/1/2 for owner link/other TUN link/`eth0`; resolver takeover
+returns after crash and reboot, survives upgrade, and resolved answers real IPs
+once alice stops. A new root-only reinstall phase keeps coverage of concurrent
+per-user TUNs (each user's traffic only in their TUN, both refused from the
+resolver).
+
+Verification: 439 Rust tests passed (0 failed, 92 ignored), clippy/fmt/tsc
+clean, ShellCheck and 13 installer tests passed; multi-user e2e with the real
+`./data` profile: **137 passed, 0 failed**, no skips. Hosts need the installer
+re-run for the owner file and rule.
+
+## Increment: silent TUN enable (polkit refusal of TUN link DNS; superseded above)
 
 Symptom: enabling TUN from the Web raised several desktop polkit password
 prompts, and the "TUN verified" toast appeared while they were still open.

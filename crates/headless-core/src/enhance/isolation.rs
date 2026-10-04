@@ -4,7 +4,8 @@
 //! device, policy-routing indexes and fake-IP ranges, so several Mihomo
 //! instances on one host never collide; `include-uid` limits each TUN to its
 //! owner's traffic, with sniffing enabled for the plain-IP connections a shared
-//! system resolver produces. Runs after finalization, so it wins over
+//! system resolver produces. The installing user may instead own a system-wide
+//! TUN (see [`TunScope`]). Runs after finalization, so it wins over
 //! subscriptions, scripts and manual enhancements.
 use std::net::Ipv4Addr;
 
@@ -33,16 +34,48 @@ const FAKE_IP_PREFIX: u8 = 22;
 /// Listener fields a user may still choose explicitly on the settings page.
 const LISTENERS: [&str; 5] = ["mixed-port", "port", "socks-port", "redir-port", "tproxy-port"];
 
+/// Whose traffic a user's TUN captures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TunScope {
+    /// Only this user's traffic (`include-uid`); the shared resolver is left alone.
+    Own,
+    /// The whole host, like a single-user client: this user installed the
+    /// shared installation, and Mihomo also points systemd-resolved at the TUN,
+    /// so every account's fake IPs must be routed through it.
+    System,
+    /// Another user (this UID) owns the system-wide TUN; this user has none.
+    Reserved(u32),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Isolation {
     uid: u32,
     slot: u16,
+    tun: TunScope,
 }
 
 impl Isolation {
     pub fn new(uid: u32, slot: u16) -> Result<Self> {
         ensure!(slot < SLOTS, "multi-user slot must be below {SLOTS}");
-        Ok(Self { uid, slot })
+        Ok(Self {
+            uid,
+            slot,
+            tun: TunScope::Own,
+        })
+    }
+
+    /// The scope implied by the installation's system TUN owner, if any.
+    pub fn with_tun_owner(mut self, owner: Option<u32>) -> Self {
+        self.tun = match owner {
+            None => TunScope::Own,
+            Some(owner) if owner == self.uid => TunScope::System,
+            Some(owner) => TunScope::Reserved(owner),
+        };
+        self
+    }
+
+    pub fn tun_scope(&self) -> TunScope {
+        self.tun
     }
 
     pub fn uid(&self) -> u32 {
@@ -161,8 +194,14 @@ impl Isolation {
         if has_tun {
             let mut tun = section(&mut config, "tun");
             set(&mut tun, "device", self.tun_device().into(), &mut changed, "tun.device");
-            let uid = Value::Sequence(vec![u64::from(self.uid).into()]);
-            set(&mut tun, "include-uid", uid, &mut changed, "tun.include-uid");
+            if self.tun == TunScope::System {
+                if tun.remove("include-uid").is_some() {
+                    changed.push("tun.include-uid".into());
+                }
+            } else {
+                let uid = Value::Sequence(vec![u64::from(self.uid).into()]);
+                set(&mut tun, "include-uid", uid, &mut changed, "tun.include-uid");
+            }
             if tun.remove("include-uid-range").is_some() {
                 changed.push("tun.include-uid-range".into());
             }

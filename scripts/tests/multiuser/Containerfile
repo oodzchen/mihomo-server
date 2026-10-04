@@ -7,8 +7,8 @@
 # 224/PAM. Owner-readable shadow files need no capability.
 FROM fedora:44
 # systemd-resolved and polkit, as on desktops: Mihomo's TUN calls resolvectl,
-# which polkit must refuse silently. glibc lookups stay off nss-resolve, so the
-# fake-IP checks still see each user's own resolver.
+# which polkit must allow silently for the system TUN owner only. glibc lookups
+# stay off nss-resolve, so the fake-IP checks still see each user's resolver.
 RUN dnf -y install systemd systemd-resolved polkit libcap iproute procps-ng curl shadow-utils \
         util-linux python3 findutils sudo && dnf clean all \
     && sed -i -E 's/ resolve( \[[^]]*\])?//' /etc/nsswitch.conf \

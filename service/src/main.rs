@@ -40,7 +40,9 @@ fn isolation(arguments: &ArgMatches) -> Result<Isolation> {
                 .get_one::<PathBuf>("slot-registry")
                 .cloned()
                 .unwrap_or_else(|| mihomo_server::multi_user::DEFAULT_SLOT_REGISTRY.into());
-            mihomo_server::multi_user::claim_slot(&registry, uid)?
+            let slot = mihomo_server::multi_user::claim_slot(&registry, uid)?;
+            let owner = mihomo_server::multi_user::tun_owner(&registry, uid)?;
+            return Ok(Isolation::new(uid, slot)?.with_tun_owner(owner));
         }
     };
     Isolation::new(uid, slot)
@@ -224,10 +226,13 @@ async fn run() -> Result<()> {
             user.uid,
             user.mixed_port,
             user.tun_device,
-            if user.tun_capable {
-                "available"
-            } else {
-                "unavailable: not in the TUN group"
+            match (user.tun_capable, user.tun_owner) {
+                (true, Some(_)) => "available, system-wide".to_owned(),
+                (true, None) => "available".to_owned(),
+                (false, Some(owner)) if owner != user.uid => {
+                    format!("unavailable: system-wide TUN belongs to uid {owner}")
+                }
+                (false, _) => "unavailable: not in the TUN group".to_owned(),
             }
         );
     }

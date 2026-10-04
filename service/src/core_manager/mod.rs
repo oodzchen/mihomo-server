@@ -265,7 +265,14 @@ impl CoreOptions {
             if self.isolation.is_some() {
                 #[cfg(target_os = "linux")]
                 {
-                    self.tun_exec = crate::tun_exec::available();
+                    // Only the system TUN owner may create a TUN once one exists.
+                    let reserved = self.isolation.is_some_and(|isolation| {
+                        matches!(
+                            isolation.tun_scope(),
+                            headless_core::enhance::isolation::TunScope::Reserved(_)
+                        )
+                    });
+                    self.tun_exec = crate::tun_exec::available().filter(|_| !reserved);
                     self.tun_capable = Some(self.tun_exec.is_some());
                 }
                 #[cfg(not(target_os = "linux"))]
@@ -323,6 +330,8 @@ pub struct MultiUser {
     pub tun_device: String,
     /// The core runs through the capability launcher (the user is in the TUN group).
     pub tun_capable: bool,
+    /// The installing user, whose TUN captures the whole host and its resolver.
+    pub tun_owner: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -370,6 +379,11 @@ impl CoreManager {
             dns_listen: isolation.dns_listen(),
             tun_device: isolation.tun_device(),
             tun_capable: options.tun_capable == Some(true),
+            tun_owner: match isolation.tun_scope() {
+                headless_core::enhance::isolation::TunScope::Own => None,
+                headless_core::enhance::isolation::TunScope::System => Some(isolation.uid()),
+                headless_core::enhance::isolation::TunScope::Reserved(owner) => Some(owner),
+            },
         });
         let core_downloads = if options.managed_core() {
             Some(Arc::new(crate::core_release::CoreDownloads::new(

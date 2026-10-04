@@ -126,6 +126,27 @@ pub(crate) fn verify_linux_interface_and_routes(device: &str, auto_route: bool) 
     Ok(())
 }
 
+/// Whether systemd-resolved has DNS servers for LINK; `None` when resolvectl or
+/// the resolver is unavailable (Mihomo then configures nothing either).
+#[cfg(target_os = "linux")]
+pub(crate) async fn resolved_link_dns(device: &str) -> Option<bool> {
+    let mut command = tokio::process::Command::new("resolvectl");
+    command.args(["dns", device]).kill_on_drop(true);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(3), command.output())
+        .await
+        .ok()?
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    // "Link 6 (ms1000): 198.19.0.2" lists the servers after the colon.
+    let text = String::from_utf8_lossy(&output.stdout);
+    Some(
+        text.rsplit_once("):")
+            .is_some_and(|(_, servers)| !servers.trim().is_empty()),
+    )
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn has_net_admin_capability() -> bool {
     if crate::secure_fs::euid() == 0 {

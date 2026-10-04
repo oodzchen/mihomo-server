@@ -1,7 +1,7 @@
 use anyhow::Result;
 use headless_core::{
     config::settings::{DnsSettings, RuntimeSettings},
-    enhance::isolation::{Isolation, SLOTS},
+    enhance::isolation::{Isolation, SLOTS, TunScope},
 };
 use serde_yaml_ng::Mapping;
 
@@ -112,6 +112,37 @@ fn subscription_listeners_and_tun_move_into_the_user_slot() -> Result<()> {
     let (again, changed) = isolation.apply(config.clone(), &RuntimeSettings::default());
     assert_eq!(again, config);
     assert!(changed.is_empty(), "{changed:?}");
+    Ok(())
+}
+
+#[test]
+fn system_tun_owner_captures_every_uid() -> Result<()> {
+    let owner = Isolation::new(1001, 3)?.with_tun_owner(Some(1001));
+    assert_eq!(owner.tun_scope(), TunScope::System);
+    let (config, changed) = owner.apply(mapping(SUBSCRIPTION)?, &RuntimeSettings::default());
+    let tun = &config["tun"];
+    assert!(tun.get("include-uid").is_none() && tun.get("include-uid-range").is_none());
+    assert_eq!(tun["exclude-uid"][0].as_u64(), Some(7));
+    // Device, routing indexes and fake-IP block still follow the slot.
+    assert_eq!(tun["device"].as_str(), Some("ms1001"));
+    assert_eq!(tun["iproute2-table-index"].as_u64(), Some(10003));
+    assert_eq!(config["dns"]["fake-ip-range"].as_str(), Some("198.19.12.1/22"));
+    assert!(changed.iter().any(|item| item == "tun.include-uid-range"));
+    let (again, changed) = owner.apply(config.clone(), &RuntimeSettings::default());
+    assert_eq!(again, config);
+    assert!(changed.is_empty(), "{changed:?}");
+
+    // An explicit include-uid is removed too; other users stay scoped to themselves.
+    let (config, _) = owner.apply(
+        mapping("tun: {enable: true, include-uid: [5]}")?,
+        &RuntimeSettings::default(),
+    );
+    assert!(config["tun"].get("include-uid").is_none());
+    let member = Isolation::new(1002, 4)?.with_tun_owner(Some(1001));
+    assert_eq!(member.tun_scope(), TunScope::Reserved(1001));
+    let (config, _) = member.apply(mapping(SUBSCRIPTION)?, &RuntimeSettings::default());
+    assert_eq!(config["tun"]["include-uid"][0].as_u64(), Some(1002));
+    assert_eq!(Isolation::new(1002, 4)?.with_tun_owner(None).tun_scope(), TunScope::Own);
     Ok(())
 }
 

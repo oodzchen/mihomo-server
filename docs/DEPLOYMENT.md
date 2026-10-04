@@ -268,14 +268,18 @@ cores are kept. Multi-user isolation still replaces subscription
 listeners, retains explicit settings-page values, scopes TUN to `ms<uid>` and
 `include-uid: [uid]`, assigns independent routing and fake-IP blocks and disables
 host-wide auto-redirect. Shared-resolver traffic uses the existing domain sniffer.
-Mihomo's TUN also runs `resolvectl` to make systemd-resolved send every lookup
-to its link; because a member's TUN carries only that member's traffic, other
-accounts would receive unroutable fake IPs, and on desktops each call raised a
-polkit password prompt. The installer therefore adds
-`/etc/polkit-1/rules.d/50-mihomo-server-tun.rules`, which refuses these
-resolve1 link actions for `mihomo-tun` members on `ms<uid>` links without
-prompting (a local-authority `.pkla` file on polkit 0.105); enabling TUN is
-silent and other links keep the default policy.
+The installing user owns the **system-wide TUN** (recorded in
+`/var/lib/mihomo-server/tun-owner`; the first installer keeps it across
+upgrades). Like a single-user client, that TUN has no `include-uid`: it carries
+every account's traffic, and Mihomo's `resolvectl` calls point systemd-resolved
+at it, so every account's lookups get fake IPs that are routed through it. The
+installer adds `/etc/polkit-1/rules.d/50-mihomo-server-tun.rules`, which allows
+those resolve1 link actions for the owner's `ms<uid>` without a prompt and
+silently refuses them for other TUN-group members (a local-authority `.pkla` file
+on polkit 0.105). A host has one system TUN, so other users cannot enable TUN
+while an owner exists; they keep their own proxy ports, whose traffic then also
+passes through the owner's TUN. An installation run as root without a calling
+user has no owner and keeps per-user TUNs scoped to their own traffic.
 Group members can give any program these network capabilities through the
 launcher; authorize only trusted users.
 
