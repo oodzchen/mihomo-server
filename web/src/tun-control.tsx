@@ -52,8 +52,9 @@ export function TunControl({ token, language, status, connection, access, busy, 
     locked.current = true;
     setWorking(true); setError("");
     const enabled = !current;
+    const toast = notify.loading(text.working);
     try {
-      const result = await perform("set_tun_enabled", { enabled }, { notify: false });
+      const result = await perform("set_tun_enabled", { enabled }, { notify: false, toast, reconcile: true });
       if (!alive.current) return;
       // Re-read the settings editor too, so a later full save cannot undo this toggle.
       await onChanged?.();
@@ -67,12 +68,17 @@ export function TunControl({ token, language, status, connection, access, busy, 
       if (!alive.current) return;
       if (saved.runtime.tun?.enable !== enabled || observed.tun_enabled !== enabled ||
         observed.running && observed.reported?.tun_enabled !== enabled) throw new Error(text.failed);
-      notify(`${text.verified}：${enabled ? text.on : text.off}`, result === undefined ? "info" : "success");
+      toast.finish(`${text.verified}：${enabled ? text.on : text.off}`, result === undefined ? "info" : "success");
     } catch (cause) {
       if (!alive.current) return;
       if (cause instanceof ApiError && cause.status === 401) logout(text.expired);
-      else setError(cause instanceof Error ? cause.message : String(cause));
+      else {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setError(message);
+        toast.finish(message, "error");
+      }
     } finally {
+      if (!alive.current) toast.dismiss();
       locked.current = false;
       if (alive.current) { setWorking(false); access.refresh(); }
     }

@@ -1,4 +1,4 @@
-import { ToastMessage } from "./toast";
+import { ToastMessage, useToast, type ToastOperation } from "./toast";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, command, type Perform } from "./api";
 import { t, type Language, type MessageKey } from "./i18n";
@@ -54,6 +54,8 @@ export function RawEditor({
   logout: (reason?: string) => void;
   onClose: () => void;
 }) {
+  const notify = useToast();
+  const [noticeToast, setNoticeToast] = useState<ToastOperation>();
   const [base, setBase] = useState<Content>(),
     [saved, setSaved] = useState<Content>();
   const [yaml, setYaml] = useState("");
@@ -98,6 +100,7 @@ export function RawEditor({
     setUncertain(true);
     setError(null);
     setNotice(null);
+    setNoticeToast(undefined);
     setConfirmation(undefined);
     try {
       const next = await read();
@@ -127,6 +130,7 @@ export function RawEditor({
     setUncertain(true);
     setError(null);
     setNotice(null);
+    setNoticeToast(undefined);
     setConfirmation(undefined);
     try {
       const next = await read();
@@ -158,13 +162,16 @@ export function RawEditor({
     setUncertain(true);
     setError(null);
     setNotice(null);
+    setNoticeToast(undefined);
     setConfirmation(undefined);
+    const toast = notify.loading(t(language, "working"));
+    setNoticeToast(toast);
     const result = await perform<unknown>("set_profile_raw", {
       uid: item.uid,
       revision: base.revision,
       yaml: requested,
-    }, { notify: false });
-    if (!alive.current) return;
+    }, { notify: false, toast, reconcile: true });
+    if (!alive.current) { toast.dismiss(); return; }
     try {
       const next = await read();
       if (!alive.current) return;
@@ -176,9 +183,13 @@ export function RawEditor({
       } else
         setNotice({ key: "rawSavedDifferent" });
     } catch (error) {
-      if (alive.current)
-        setError(failure("rawSaveUnverified", error));
+      if (alive.current) {
+        const message = failure("rawSaveUnverified", error);
+        setError(message);
+        toast.finish(renderMessage(language, message), "error");
+      }
     } finally {
+      if (!alive.current) toast.dismiss();
       if (alive.current) setWorking(false);
     }
   }
@@ -220,7 +231,7 @@ export function RawEditor({
             </p>
           )}
           {notice && (
-            <ToastMessage message={renderMessage(language, notice)} />
+            <ToastMessage operation={noticeToast} kind={notice.key === "rawSaved" ? "success" : notice.key === "rawSavedDifferent" ? "error" : "info"} message={renderMessage(language, notice)} />
           )}
           {conflict && (
             <p className="alert" role="alert">
@@ -243,6 +254,7 @@ export function RawEditor({
                     setYaml(event.target.value);
                     setError(null);
                     setNotice(null);
+                    setNoticeToast(undefined);
                     setConfirmation(undefined);
                   }}
                 />

@@ -1,4 +1,5 @@
 import { savedLanguage, t } from "./i18n";
+import type { ToastOperation } from "./toast";
 import type { EventMessage } from "./types";
 
 /** WebSocket session state; also the i18n key used to display it. */
@@ -9,10 +10,11 @@ export type Connection =
   | "unauthorized"
   | "badData";
 
+/** A supplied toast owns the specific result; reconcile defers errors until caller readback. */
 export type Perform = <T>(
   name: string,
   fields?: Record<string, unknown>,
-  options?: { notify?: boolean },
+  options?: { notify?: boolean; toast?: ToastOperation; reconcile?: boolean },
 ) => Promise<T | undefined>;
 
 export class ApiError extends Error {

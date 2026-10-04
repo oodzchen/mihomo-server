@@ -2465,7 +2465,7 @@ test("script editor validates failures, preserves raw content and restores after
     await page
       .getByRole("button", { name: "保存脚本增强", exact: true })
       .click();
-    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(page.locator(".toast").last().getByRole("alert")).toBeVisible();
     await expect(
       page.getByRole("button", { name: "保存脚本增强", exact: true }),
     ).toBeEnabled();
@@ -3075,7 +3075,7 @@ test("settings editor preserves inheritance, failed drafts and uncertain saves w
   const before = await api("status");
   await select("代理模式").selectOption("rule");
   await save.click();
-  await expect(page.getByRole("alert").first()).toContainText(
+  await expect(page.locator(".toast").last().getByRole("alert")).toContainText(
     "Mihomo rejected",
   );
   await expect(
@@ -3103,7 +3103,7 @@ test("settings editor preserves inheritance, failed drafts and uncertain saves w
     .getByRole("button", { name: "核对已保存设置", exact: true })
     .click();
   await expect(
-    page.getByText("已核对：服务已保存当前草稿。", { exact: true }),
+    page.getByText("已核对：服务已保存当前草稿。", { exact: true }).last(),
   ).toBeVisible();
   await expect(save).toBeDisabled();
   // An error response after actual publication must be reconciled, never assumed rollback.
@@ -3128,7 +3128,7 @@ test("settings editor preserves inheritance, failed drafts and uncertain saves w
       exact: true,
     }),
   ).toBeVisible();
-  await expect(page.getByRole("alert").first()).toContainText(
+  await expect(page.locator(".toast").last().getByRole("alert")).toContainText(
     "fixture commit response lost",
   );
   await expect(select("IPv6")).toHaveValue("true");
@@ -3142,7 +3142,7 @@ test("settings editor preserves inheritance, failed drafts and uncertain saves w
     .getByRole("button", { name: "核对已保存设置", exact: true })
     .click();
   await expect(
-    page.getByText("已核对：服务已保存当前草稿。", { exact: true }),
+    page.getByText("已核对：服务已保存当前草稿。", { exact: true }).last(),
   ).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
@@ -3220,7 +3220,7 @@ test("settings editor preserves inheritance, failed drafts and uncertain saves w
   await page.route("**/api/commands", unknown);
   await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
   await page.getByRole("button", { name: "确认重新读取", exact: true }).click();
-  await expect(page.getByRole("alert").last()).toContainText(
+  await expect(page.getByRole("region", { name: "服务设置编辑器", exact: true }).getByRole("alert")).toContainText(
     "暂不支持的设置 future-setting",
   );
   await expect(save).toBeDisabled();
@@ -3480,20 +3480,20 @@ test("network editor preserves all supported fields and explicitly confirms chan
   await input("TUN MTU").fill("0");
   await expect(enable).toBeDisabled();
   await save.click();
-  await expect(page.getByRole("alert").last()).toContainText(
+  await expect(page.getByRole("region", { name: "服务设置编辑器", exact: true }).getByRole("alert")).toContainText(
     "TUN MTU 必须是 1–65535",
   );
   expect((await api("settings")).runtime).toEqual(runtime);
   await input("TUN MTU").fill("1400");
   await input("DNS 后备解析服务器").fill("[1]");
   await save.click();
-  await expect(page.getByRole("alert").last()).toContainText(
+  await expect(page.getByRole("region", { name: "服务设置编辑器", exact: true }).getByRole("alert")).toContainText(
     "必须是 JSON 字符串列表",
   );
   await input("DNS 后备解析服务器").fill("[]");
   await input("DNS 域名解析策略").fill('{"bad.test":[]}');
   await save.click();
-  await expect(page.getByRole("alert").last()).toContainText("必须是有效的 JSON 对象");
+  await expect(page.getByRole("region", { name: "服务设置编辑器", exact: true }).getByRole("alert")).toContainText("必须是有效的 JSON 对象");
   expect((await api("settings")).runtime).toEqual(runtime);
   await input("DNS 域名解析策略").fill('{"owned.test":["1.1.1.1"]}');
   await select("DNS 启用").selectOption("true");
@@ -3570,7 +3570,7 @@ test("network editor preserves all supported fields and explicitly confirms chan
   await page
     .getByRole("button", { name: "核对已保存设置", exact: true })
     .click();
-  await expect(page.getByRole("alert").last()).toContainText(
+  await expect(page.getByRole("region", { name: "服务设置编辑器", exact: true }).getByRole("alert")).toContainText(
     "暂不支持的设置 tun.future-option",
   );
   await expect(input("TUN MTU")).toHaveValue("1300");
@@ -5148,7 +5148,7 @@ test("settings help, stacked dismissible toasts and centered responsive content"
   await expect(page.locator(".toast")).toHaveCount(0, { timeout: 10000 });
 });
 
-test("core upgrade success appears once in a toast and failures stay inline", async ({ page }) => {
+test("core upgrade reuses its operation toast for success and failure", async ({ page }) => {
   let fail = false;
   await page.route("**/api/commands", async route => {
     const { command } = route.request().postDataJSON();
@@ -5170,8 +5170,83 @@ test("core upgrade success appears once in a toast and failures stay inline", as
   await expect(upgrade).toBeEnabled();
   await upgrade.click();
   await expect(page.getByRole("alert").filter({ hasText: "fixture upgrade failure" })).toBeVisible();
-  await expect(page.locator(".toast")).toHaveCount(0);
+  await expect(page.locator(".toast-error")).toHaveCount(1);
+  await expect(page.locator(".toast-error")).toContainText("fixture upgrade failure");
 });
+
+for (const outcome of ["success", "error"] as const) {
+  test(`operation toast stays visible without shifting content and becomes ${outcome}`, async ({ page }) => {
+    const initial = await fetch(`${base}/api/commands`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "edit_config", yaml: "mode: direct\nmixed-port: 0\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']" }),
+    });
+    expect(initial.ok).toBe(true);
+    await page.goto(`${base}/config#token=${encodeURIComponent(token)}`);
+    const input = page.getByRole("textbox", { name: "运行配置 YAML", exact: true });
+    await expect(input).toBeEnabled();
+    await input.fill("mode: direct\nmixed-port: 0\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']");
+    const panel = page.locator(".workspace > .panel");
+    const before = await panel.boundingBox();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let releaseReadback!: () => void;
+    const readbackGate = new Promise<void>(resolve => { releaseReadback = resolve; });
+    let submitted = false, readingBack = false;
+    await page.route("**/api/commands", async route => {
+      const { command } = route.request().postDataJSON();
+      if (command === "edit_config") {
+        submitted = true;
+        await gate;
+        if (outcome === "error") return route.fulfill({ status: 503, json: { error: { message: "fixture save failure" } } });
+      } else if (submitted && command === "status") {
+        readingBack = true;
+        await readbackGate;
+      }
+      await route.continue();
+    });
+    await page.clock.install({ time: new Date("2026-10-04T00:00:00Z") });
+    await page.clock.pauseAt(new Date("2026-10-04T00:00:01Z"));
+    try {
+      await page.getByRole("button", { name: "校验并应用", exact: true }).click();
+      const toast = page.locator(".toast");
+      await expect(toast).toHaveCount(1);
+      await expect(toast).toHaveClass("toast toast-loading");
+      const id = await toast.getAttribute("data-toast-id");
+      const loadingColor = await toast.evaluate(node => getComputedStyle(node).backgroundColor);
+      await expect(toast.locator(".toast-spinner")).toBeVisible();
+      expect(await toast.locator(".toast-spinner").evaluate(node => getComputedStyle(node).animationName)).toBe("toast-spin");
+      await expect(toast.locator(".toast-close")).toHaveCount(0);
+      expect((await panel.boundingBox())!.y).toBe(before!.y);
+      await expect(page.locator(".feedback")).not.toContainText("正在处理");
+      await page.clock.runFor(9000);
+      await expect(toast).toHaveClass("toast toast-loading");
+      release();
+      if (outcome === "success") {
+        await expect.poll(() => readingBack).toBe(true);
+        await page.clock.runFor(9000);
+        await expect(toast).toHaveClass("toast toast-loading");
+      }
+      releaseReadback();
+      await expect(toast).toHaveClass(`toast toast-${outcome}`);
+      await expect(toast).toHaveAttribute("data-toast-id", id!);
+      await expect(toast).toContainText(outcome === "success" ? "此配置已通过校验并提交。" : "fixture save failure");
+      await expect(toast.locator(".toast-spinner")).toHaveCount(0);
+      expect(await toast.evaluate(node => getComputedStyle(node).backgroundColor)).not.toBe(loadingColor);
+      expect((await panel.boundingBox())!.y).toBe(before!.y);
+      await expect(toast.locator(".toast-close")).toBeVisible();
+      await page.setViewportSize({ width: 390, height: 844 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+      await page.screenshot({ path: `test-results/operation-toast-${outcome}-mobile.png`, fullPage: true });
+      await page.clock.runFor(7999);
+      await expect(toast).toHaveCount(1);
+      await page.clock.runFor(1);
+      await expect(toast).toHaveCount(0);
+    } finally {
+      release();
+      releaseReadback();
+    }
+  });
+}
 
 test("repeated configuration saves produce separate success toasts", async ({ page }) => {
   await page.goto(`${base}/config#token=${encodeURIComponent(token)}`);

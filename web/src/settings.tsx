@@ -305,7 +305,6 @@ export function SettingsPage({
   async function save(event: FormEvent) {
     event.preventDefault();
     setError("");
-    setNotice("");
     setConfirmation(undefined);
     let requested: Runtime;
     try {
@@ -316,10 +315,12 @@ export function SettingsPage({
     }
     setWorking(true);
     setUncertain(true);
+    const toast = notify.loading(t(language, "working"));
+    const setNotice = (message: string, kind: "success" | "info" | "error" = "info") => toast.finish(message, kind);
     const result = await perform<Settings>("set_settings", {
       runtime: requested,
-    }, { notify: false });
-    if (!alive.current) return;
+    }, { notify: false, toast, reconcile: true });
+    if (!alive.current) { toast.dismiss(); return; }
     try {
       const next = await read();
       if (!alive.current) return;
@@ -331,17 +332,21 @@ export function SettingsPage({
           result
             ? "保存结果已核对，服务设置与提交内容一致。"
             : "请求报告错误，但服务已保存此草稿，已核对，无需重复提交。",
+          result ? "success" : "info",
         );
       } else
         setNotice(
           "服务当前设置与提交内容不同，草稿已保留。请检查错误或重新读取设置。",
+          "error",
         );
     } catch (error) {
-      if (alive.current)
-        setError(
-          `保存结果尚未核对：${explain(error)}。草稿已保留，请先核对已保存设置。`,
-        );
+      if (alive.current) {
+        const message = `保存结果尚未核对：${explain(error)}。草稿已保留，请先核对已保存设置。`;
+        setError(message);
+        toast.finish(explain(error), "error");
+      }
     } finally {
+      if (!alive.current) toast.dismiss();
       if (alive.current) setWorking(false);
     }
   }

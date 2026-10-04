@@ -208,8 +208,7 @@ function Manager({
     [logs, setLogs] = useState<CoreLog[]>([]);
   const [route, setRoute] = useState(location.pathname),
     [connection, setConnection] = useState<Connection>("connecting");
-  const [busy, setBusy] = useState(false),
-    [failure, setFailure] = useState("");
+  const [busy, setBusy] = useState(false);
   const setNotice = useToast();
   const alive = useRef(true),
     pending = useRef(new Set<AbortController>()),
@@ -264,13 +263,12 @@ function Manager({
   const perform: Perform = async <T,>(
     name: string,
     fields: Record<string, unknown> = {},
-    options: { notify?: boolean } = {},
+    options: Parameters<Perform>[2] = {},
   ) => {
-    if (locked.current) return;
+    if (locked.current) { options.toast?.dismiss(); return; }
     locked.current = true;
     setBusy(true);
-    setFailure("");
-    setNotice("");
+    const toast = options.toast ?? setNotice.loading(t(language, "working"));
     try {
       const result = await request<T>(name, fields);
       const [current, catalog] = await Promise.all([
@@ -280,19 +278,21 @@ function Manager({
       if (alive.current) {
         setStatus(current);
         setProfiles(catalog);
-        if (options.notify !== false) setNotice(t(language, "completed"));
+        if (options.notify !== false || !options.toast) toast.finish(t(language, "completed"));
       }
       return result;
     } catch (error) {
       if (alive.current) {
         if (error instanceof ApiError && error.status === 401)
           logout(t(language, "expiredToken"));
-        else setFailure(describe(error));
+        else if (options.reconcile) toast.recordError(describe(error));
+        else toast.finish(describe(error), "error");
       }
       return undefined;
     } finally {
       locked.current = false;
       if (alive.current) setBusy(false);
+      else toast.dismiss();
     }
   };
   function navigate(event: MouseEvent, path: string) {
@@ -307,7 +307,6 @@ function Manager({
     event.preventDefault();
     history.pushState(null, "", path);
     setRoute(path);
-    setFailure("");
     setNotice("");
   }
   const active = profiles.items?.find(
@@ -366,12 +365,6 @@ function Manager({
           <h1>{title}</h1>
         </header>
         <div className="feedback" aria-live="polite">
-          {busy && <p className="info">{t(language, "working")}</p>}
-          {failure && (
-            <p className="alert" role="alert">
-              {failure}
-            </p>
-          )}
           {status.error && (
             <p className="alert">
               {status.phase === "failed" ? t(language, "coreError") : t(language, "operationError")}：

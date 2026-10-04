@@ -53,6 +53,40 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
+## Increment: operation loading and results share one toast
+
+**Implemented.** Web management operations immediately show a fixed top-center
+loading toast with a CSS spinner. The temporary busy paragraph has been removed
+from the workspace feedback area, and core upgrades no longer insert another
+inline working paragraph. Loading notifications do not expire or expose a close
+control; completion updates the same notification ID to a green success or red
+error result, then starts its eight-second expiry and enables manual dismissal.
+
+- `ToastProvider` exposes `loading()` operation handles with `finish()`,
+  `dismiss()` and deferred `recordError()` support. Timers begin only for result
+  notifications. Dismissed/expired IDs cannot be revived by a late result, and
+  logout disposes active notifications and timers. Screen readers receive status
+  announcements or error alerts; narrow screens retain bounded, wrapping toasts.
+- Shared `Perform` commands use the operation toast through the request and
+  status/catalog refresh. Configuration saves, core upgrades and rule-provider
+  updates replace the loading text with their existing specific result, rather
+  than appending a generic success toast. Batch provider updates share one toast.
+- Settings, raw subscription edits, provider DNS, TUN and proxy mode pass their
+  operation handle and `reconcile: true` to `Perform`: the spinner remains until
+  independent state readback completes. A failed request is recorded and shown
+  in the same final toast, preserving its cause even when readback confirms the
+  write succeeded. Existing informational reconciliation receipts and persistent
+  control-level validation/readback guidance remain available.
+
+Verification: production TypeScript/Vite build and the full real-Mihomo browser
+suite passed **61 tests with 5 existing conditional skips**. Regressions cover
+slow commands and status refreshes lasting beyond eight seconds, stable content
+position, the same toast ID across success/failure, spinner removal, result
+colors, result expiry and mobile bounds. Mobile screenshots confirm green/red
+notifications and unchanged content placement. The isolated real-data smoke check
+loaded **62 nodes**, verified browser login/refresh/logout and returned proxied
+HTTPS **204** using a temporary copy of `./data`.
+
 ## Increment: interactive overview proxy-mode buttons
 
 **Implemented.** Overview's Direct / Rule / Global indicator is now a native

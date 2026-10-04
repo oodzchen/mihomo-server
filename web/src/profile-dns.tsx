@@ -2,6 +2,7 @@ import { HelpTip } from "./help-tip";
 import { useToast } from "./toast";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, command, type Perform, type Connection } from "./api";
+import { savedLanguage, t } from "./i18n";
 import type { CoreStatus } from "./types";
 
 type State = {
@@ -113,13 +114,14 @@ export function ProfileDnsPanel({
     setUncertain(true);
     setChallenge(undefined);
     setError("");
-    setNotice("");
+    const toast = notify.loading(t(savedLanguage(), "working"));
+    const setNotice = (message: string, kind: "success" | "info" | "error" = "info") => toast.finish(message, kind);
     const result = await perform<unknown>("set_profile_dns", {
       uid,
       enabled,
       ...(confirmation ? { confirmation } : {}),
-    }, { notify: false });
-    if (!alive.current) return;
+    }, { notify: false, toast, reconcile: true });
+    if (!alive.current) { toast.dismiss(); return; }
     // Independent readback also reconciles errors after a logical commit.
     const id = ++serial.current;
     try {
@@ -157,6 +159,7 @@ export function ProfileDnsPanel({
             next.enabled === enabled
               ? "订阅 DNS 覆盖设置已核对。"
               : "服务状态已变化，请核对当前订阅和实际配置。",
+            next.enabled === enabled ? "success" : "error",
           );
         } else throw new Error("服务返回的 DNS 保存结果无效。");
       }
@@ -164,9 +167,12 @@ export function ProfileDnsPanel({
       if (alive.current && id === serial.current) {
         setUncertain(true);
         setChallenge(undefined);
-        setError(`保存结果尚未核对：${explain(error)}。请先核对 DNS 状态。`);
+        const message = `保存结果尚未核对：${explain(error)}。请先核对 DNS 状态。`;
+        setError(message);
+        toast.finish(message, "error");
       }
     } finally {
+      if (!alive.current || id !== serial.current) toast.dismiss();
       if (alive.current) setWorking(false);
     }
   }

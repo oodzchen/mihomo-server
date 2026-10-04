@@ -1,4 +1,4 @@
-import { ToastMessage } from "./toast";
+import { useToast } from "./toast";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, command, type Perform, type Connection } from "./api";
 import { phaseLabel, t, type Language } from "./i18n";
@@ -27,6 +27,7 @@ export function CoreUpgradePage({
   logout: (reason?: string) => void;
   activeProfileName?: string;
 }) {
+  const notify = useToast();
   const [channel, setChannel] = useState<"stable" | "alpha">("stable");
   const label = channel === "alpha" ? "Alpha" : t(language, "channelStable");
   const [version, setVersion] = useState<string>();
@@ -103,8 +104,17 @@ export function CoreUpgradePage({
         const value = await perform<Release>(channel === "alpha" ? "alpha_core_release" : "core_release");
         if (alive.current && value) setLatest(value);
       } else {
-        const value = await perform<Report>(channel === "alpha" ? "upgrade_alpha_core" : "upgrade_clash_core", { force }, { notify: false });
-        if (alive.current && value) setReport(value);
+        const toast = notify.loading(t(language, "coreUpgradeWorking"));
+        const value = await perform<Report>(channel === "alpha" ? "upgrade_alpha_core" : "upgrade_clash_core", { force }, { notify: false, toast });
+        if (alive.current && value) {
+          setReport(value);
+          toast.finish(value.upgraded
+            ? value.from === "unknown"
+              ? t(language, "coreUpgradeReportRepaired", { version: value.to })
+              : t(language, "coreUpgradeReportUpgraded", { from: value.from, to: value.to })
+            : t(language, "coreUpgradeReportAlreadyLatest", { label, version: value.to }));
+        }
+        if (!alive.current) toast.dismiss();
         if (alive.current) setRefresh((value) => value + 1);
       }
     } finally {
@@ -261,18 +271,6 @@ export function CoreUpgradePage({
           {t(language, "coreUpgradeReinstall", { label })}
         </button>
       </div>
-      {working && (
-        <p className="info" role="status">
-          {t(language, "coreUpgradeWorking")}
-        </p>
-      )}
-      {report && (
-        <ToastMessage kind="success" message={report.upgraded
-            ? report.from === "unknown"
-              ? t(language, "coreUpgradeReportRepaired", { version: report.to })
-              : t(language, "coreUpgradeReportUpgraded", { from: report.from, to: report.to })
-            : t(language, "coreUpgradeReportAlreadyLatest", { label, version: report.to })} />
-      )}
       {report && version && version !== report.to && (
         <p className="alert" role="alert">
           {t(language, "coreUpgradeMismatchWarning")}

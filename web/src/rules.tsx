@@ -1,4 +1,4 @@
-import { ToastMessage } from "./toast";
+import { ToastMessage, useToast, type ToastOperation } from "./toast";
 import { useEffect, useMemo, useState } from "react";
 import { command, type Perform } from "./api";
 import { t, type Language, type MessageKey } from "./i18n";
@@ -17,6 +17,8 @@ export function RulesPage({
   busy: boolean;
   perform: Perform;
 }) {
+  const notify = useToast();
+  const [noticeToast, setNoticeToast] = useState<ToastOperation>();
   const [rules, setRules] = useState<Rule[]>([]);
   const [providers, setProviders] = useState<Record<string, RuleProvider>>({});
   const [query, setQuery] = useState("");
@@ -74,13 +76,18 @@ export function RulesPage({
     setUpdating((prev) => ({ ...prev, [name]: true }));
     setError("");
     setNotice(null);
+    const toast = notify.loading(t(language, "working"));
+    setNoticeToast(toast);
     try {
-      const result = await perform("update_rule_provider", { name }, { notify: false });
+      const result = await perform("update_rule_provider", { name }, { notify: false, toast });
       if (result === undefined) return;
+      toast.finish(t(language, "ruleProviderUpdated").replace("{name}", name));
       setNotice({ key: "ruleProviderUpdated", name });
       setRevision((v) => v + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      toast.finish(message, "error");
     } finally {
       setUpdating((prev) => ({ ...prev, [name]: false }));
     }
@@ -91,12 +98,15 @@ export function RulesPage({
     if (!names.length) return;
     setError("");
     setNotice(null);
+    const toast = notify.loading(t(language, "working"));
+    setNoticeToast(toast);
     for (const name of names) {
       setUpdating((prev) => ({ ...prev, [name]: true }));
       try {
-        const result = await perform("update_rule_provider", { name }, { notify: false });
+        const result = await perform("update_rule_provider", { name }, { notify: false, toast });
         if (result === undefined) return;
       } catch (err) {
+        toast.finish(err instanceof Error ? err.message : String(err), "error");
         setError({
           key: "ruleProviderUpdateFailed",
           name,
@@ -106,6 +116,7 @@ export function RulesPage({
         setUpdating((prev) => ({ ...prev, [name]: false }));
       }
     }
+    toast.finish(t(language, "ruleProvidersUpdatedAll"));
     setNotice({ key: "ruleProvidersUpdatedAll" });
     setRevision((v) => v + 1);
   }
@@ -149,7 +160,7 @@ export function RulesPage({
         </p>
       )}
       {notice && (
-        <ToastMessage kind="success" message={t(language, notice.key).replace("{name}", notice.name || "")} />
+        <ToastMessage operation={noticeToast} kind="success" message={t(language, notice.key).replace("{name}", notice.name || "")} />
       )}
 
       {providerList.length > 0 && (

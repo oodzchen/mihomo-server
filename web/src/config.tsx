@@ -43,11 +43,12 @@ export function ConfigPage({
   }, [token]);
   async function apply(event: FormEvent) {
     event.preventDefault();
-    const result = await perform<CoreStatus>("edit_config", { yaml }, { notify: false });
+    const toast = notify.loading(t(language, "working"));
+    const result = await perform<CoreStatus>("edit_config", { yaml }, { notify: false, toast });
     if (result) {
       setDirty(false);
       setMessage(null);
-      notify(t(language, "configApplied"));
+      toast.finish(t(language, "configApplied"));
     }
   }
   return (

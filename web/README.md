@@ -32,8 +32,10 @@ Rebuild assets after editing the frontend and refresh the browser.
   Stopped cores stay stopped; unsaved settings drafts block immediate toggling.
 - Compact settings rows with expandable advanced sections, question-mark help
   (hover/focus/touch), and collapsed core/resource/saved-state diagnostics.
-- Shared top-center toast stack with individual close controls and eight-second
-  expiry; successful operations remain visible when navigating between pages.
+- Shared top-center toast stack: operations immediately show a persistent CSS
+  spinner, then the same toast becomes green on success or red on failure.
+  Result toasts have individual close controls and expire after eight seconds;
+  notifications remain visible when navigating between pages.
 - Local YAML file/content import, saved-profile selection and current profile.
 - Direct remote URL download/import with optional name and reported usage display.
   Import preserves the current profile; downloaded content is activated separately.

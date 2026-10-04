@@ -46,8 +46,9 @@ export function ProxyModeControl({ token, language, status, connection, access, 
   async function choose(mode: Mode) {
     if (disabled || locked.current || mode === current) return;
     locked.current = true; setWorking(true); setError("");
+    const toast = notify.loading(text.working);
     try {
-      const result = await perform("set_proxy_mode", { mode }, { notify: false });
+      const result = await perform("set_proxy_mode", { mode }, { notify: false, toast, reconcile: true });
       if (!alive.current) return;
       const controller = new AbortController(); request.current = controller;
       const [saved, observed] = await Promise.all([
@@ -57,12 +58,17 @@ export function ProxyModeControl({ token, language, status, connection, access, 
       if (!alive.current) return;
       if (saved.runtime.mode !== mode || validMode(observed.configured.mode) !== mode ||
         observed.running && validMode(observed.reported?.mode) !== mode) throw new Error(text.failed);
-      notify(`${text.verified}：${text[mode]}`, result === undefined ? "info" : "success");
+      toast.finish(`${text.verified}：${text[mode]}`, result === undefined ? "info" : "success");
     } catch (cause) {
       if (!alive.current) return;
       if (cause instanceof ApiError && cause.status === 401) logout(text.expired);
-      else setError(cause instanceof Error ? cause.message : String(cause));
+      else {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setError(message);
+        toast.finish(message, "error");
+      }
     } finally {
+      if (!alive.current) toast.dismiss();
       locked.current = false;
       if (alive.current) { setWorking(false); access.refresh(); }
     }
