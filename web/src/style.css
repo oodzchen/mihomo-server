@@ -1399,3 +1399,11 @@ footer {
 .tun-switch:focus-visible { outline: 2px solid #10b981; outline-offset: 3px; }
 .tun-control .alert { margin: 10px 0 0; }
 .settings-layout > .tun-control { margin-bottom: 0; }
+
+/* Settings use the same compact label/control row for the top-level TUN mode. */
+.tun-setting { padding-bottom: 14px; margin-bottom: 16px; border-bottom: 1px solid #e4e4e7; }
+.tun-setting-row { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.tun-setting-row label { margin: 0; font-weight: 400; }
+.tun-setting-row select { width: 240px; max-width: 55%; margin: 0 0 0 auto; }
+.tun-setting .hint { margin: 4px 0 0; font-size: 12px; }
+@media (max-width: 600px) { .tun-setting-row select { width: 160px; } }

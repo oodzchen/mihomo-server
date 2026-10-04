@@ -53,6 +53,42 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
+## Increment: compact TUN row and automatic settings application
+
+**Implemented.** Settings now places TUN inside the editor as a compact
+label/control row, with no decorative icon or help icon. Its select uses the
+same width and alignment as other settings on desktop and mobile. The Overview
+TUN switch keeps its existing immediate interaction.
+
+- Runtime inputs, selects and ownership checkboxes apply when they lose focus
+  or receive Enter. Multiline editors use Shift+Enter for a newline; IME
+  composition does not submit. The Settings language picker and compact TUN
+  select follow the same commit triggers. The three manual buttons (save service
+  settings, make all fields inherited, and verify saved settings) are removed.
+  Individual empty/inherited values still release their setting normally.
+- The form validates complete runtime snapshots and serializes writes through
+  the existing `set_settings` transaction. Editing remains possible during its
+  own request; subsequent committed edits are coalesced into the latest queued
+  snapshot. Readback normalizes only fields unchanged since submission, so
+  responses cannot overwrite newer focused input. Enter followed by blur and
+  unchanged settings do not produce duplicate writes.
+- Independent readback still reconciles replies lost after publication and
+  preserves rejected drafts. After a readback failure, the next commit reads
+  service settings before writing again. Initial read errors or unknown schema
+  fields never expose an empty replacement form. A stopped core stays stopped.
+  The reload action retains confirmation for unapplied/uncertain changes.
+- TUN continues to use `set_tun_enabled`, preserving advanced options and
+  checking saved/generated/core state. Unapplied runtime edits, unconfirmed
+  state and another user's system-wide TUN hold still block this control.
+  Subscription DNS conflict confirmation remains an explicit service action.
+
+Verification: TypeScript/Vite production build; full real-Mihomo Playwright
+suite (**63 passed, 5 existing conditional skips**), covering commit triggers, queued edits, validation, inherited values, failed/lost replies,
+read failures, language persistence, and responsive layout; the opt-in
+`resource_inventory_live` integration with private copies of `./data` nodes and
+Geo data, including real proxied HTTPS 204 before/after restart. Source node and
+Geo fingerprints remain unchanged. No backend API or deployment change.
+
 ## Increment: operation loading and results share one toast
 
 **Implemented.** Web management operations immediately show a fixed top-center
@@ -296,8 +332,8 @@ to preserve evidence if it recurs. Production data and host routing were untouch
 
 ## Increment: directly accessible TUN switch
 
-**Implemented.** Overview's TUN card now has a visible switch, and Settings
-places the same control above the editor, independent of the collapsed advanced
+**Implemented.** Overview's TUN card has a visible switch. Settings now uses the
+compact label/select row described above, independent of the collapsed advanced
 TUN fields. The interaction follows the local Clash Verge Rev
 `proxy-control-switches.tsx` reference.
 
@@ -306,18 +342,20 @@ TUN fields. The interaction follows the local Clash Verge Rev
   advanced TUN values are preserved without a browser read/replace race. The
   existing settings validation, persistence, apply and rollback transaction is
   reused; a stopped core remains stopped.
-- `TunControl` saves/applies immediately, then checks both persisted settings and
+- `TunControl` applies immediately on Overview and on blur/Enter in Settings,
+  then checks both persisted settings and
   generated configuration; a running core must also report the requested TUN
   state before the verified toast appears. Running state comes from core readback;
   stopped/failed state explicitly describes a saved setting that takes effect on
   start, so a failed core can be repaired through the same switch.
   Duplicate clicks, lifecycle transitions, disconnected or unconfirmed state are
   disabled. Failures retain the observed state and display an error.
-- Settings drafts block the immediate switch until saved or discarded. Switching
+- Unapplied Settings edits block the TUN control until applied or corrected. Changing TUN
   reloads the editor's saved snapshot and draft, preventing a later full settings
   save from undoing the toggle. Both pages share their existing proxy-access
-  refresh; no additional polling loop is introduced. Keyboard activation,
-  accessible switch state, question-mark help and mobile placement are supported.
+  refresh; no additional polling loop is introduced. Overview retains its
+  accessible switch and help; Settings provides the compact accessible select.
+  Both support keyboard use and mobile placement.
 
 Verification: production TypeScript/Vite build and Rust formatting passed;
 management API tests passed **24 tests with 1 existing opt-in test ignored**.
@@ -473,6 +511,7 @@ out of scope; sockets stay under `<data-dir>/run`.
    1000). run.sh now makes `/work` root-owned and the bundle world-readable.
 
 **Latest completed task:** Directly clickable proxy-mode button group on Overview, with atomic settings preservation and verified core state (see the increment above).
+**Previous completed task:** Compact Settings TUN row and automatic application on blur/Enter (see the increment above).
 **Previous completed task:** Repair the multi-user CI assertions to verify the actual listener independently of the public-origin management URL.
 **Previous completed task:** Direct TUN switches on Overview and at the top of Settings, with immediate application, verified state and preserved settings.
 **Previous completed task:** Compact Web management — live mode/TUN overview, grouped settings/help, stacked top-center toasts and centered content.

@@ -33,6 +33,37 @@ async function openSettingsForEditing(page: import("@playwright/test").Page) {
   await page.locator(".settings-group").evaluateAll(nodes => nodes.forEach(node => (node as HTMLDetailsElement).open = true));
 }
 
+async function settingsApi(command: string, fields: Record<string, unknown> = {}) {
+  const response = await fetch(`${base}/api/commands`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ command, ...fields }),
+  });
+  expect(response.ok).toBe(true);
+  return response.json();
+}
+async function applySettings(page: import("@playwright/test").Page) {
+  const form = page.getByRole("form", { name: "运行设置表单" });
+  // Enter applies the current editor draft without an explicit save button.
+  const focused = form.locator("input:focus, select:focus, textarea:focus");
+  if (!(await focused.count())) await form.locator("input").first().focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".settings-reload button")).toBeEnabled();
+  await expect(page.locator(".toast-loading")).toHaveCount(0);
+}
+async function editSetting(page: import("@playwright/test").Page, name: string, value: string, select = false) {
+  const control = page.getByRole(select ? "combobox" : "textbox", { name, exact: true });
+  await expect(page.locator(".settings-reload button")).toBeEnabled();
+  await control.focus();
+  if (select) await control.selectOption(value); else await control.fill(value);
+  await control.press("Enter");
+  await expect(page.locator(".settings-reload button")).toBeEnabled();
+  await expect(page.locator(".toast-loading")).toHaveCount(0);
+}
+async function loginSettings(page: import("@playwright/test").Page) {
+  await page.goto(`${base}/settings#token=${encodeURIComponent(token)}`);
+  await openSettingsForEditing(page);
+}
+
 async function start() {
   const fixtureEnv = { ...process.env, MIHOMO_SERVER_DATA_DIR: directory };
   for (const name of [
@@ -999,285 +1030,111 @@ test("online Geo update preserves inspection across running-core restart and ret
   await page.unroute("**/api/commands"); await page.getByRole("button", { name: "退出登录" }).click();
 });
 
-test("connection settings save explicit false, preserve failed drafts and retry actual readback", async ({ page }) => {
-  const api = async (command: string, fields: Record<string, unknown> = {}) => {
-    const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });
-    expect(response.ok).toBe(true); return response.json();
-  };
-  const original = await api("settings");
-  await page.goto(`${base}/settings`);
-  await page.getByLabel("管理令牌").fill(token);
-  await page.getByRole("button", { name: "连接服务" }).click();
-  await openSettingsForEditing(page);
-  const form = page.getByRole("region", { name: "服务设置编辑器", exact: true });
-  await page.locator(".settings-details").filter({ has: page.locator("summary", { hasText: /内核实际设置|资源与数据库/ }) }).evaluateAll(nodes => nodes.forEach(node => (node as HTMLDetailsElement).open = true));
-  const panel = page.getByRole("region", { name: "连接设置读回", exact: true });
-  const tcp = page.getByRole("combobox", { name: "TCP 并发连接", exact: true });
-  const mode = page.getByRole("combobox", { name: "进程匹配模式", exact: true });
-  const interval = page.getByRole("textbox", { name: "TCP 保活间隔（秒）", exact: true });
-  const idle = page.getByRole("textbox", { name: "TCP 保活空闲时间（秒）", exact: true });
-  const disable = page.getByRole("combobox", { name: "禁用 TCP 保活", exact: true });
-  const managedInterface = page.getByRole("checkbox", { name: "管理出口网卡", exact: true });
-  const interfaceName = page.getByRole("textbox", { name: "出口网卡名称", exact: true });
-  const managedAgent = page.getByRole("checkbox", { name: "管理核心下载 User-Agent", exact: true });
-  const agent = page.getByRole("textbox", { name: "核心下载 User-Agent", exact: true });
-  const etag = page.getByRole("combobox", { name: "核心下载 ETag", exact: true });
-  const agentRow = panel.locator("li").filter({ has: page.getByText("global-ua", { exact: true }) });
-  const mark = page.getByRole("textbox", { name: "Linux 路由标记", exact: true });
-  const interfaceRow = panel.locator("li").filter({ has: page.getByText("interface-name", { exact: true }) });
-  const row = panel.locator("li").filter({ has: page.getByText("tcp-concurrent", { exact: true }) });
+test("connection settings auto-apply explicit values and preserve other settings", async ({ page }) => {
+  const original = await settingsApi("settings");
   try {
-    await expect(panel).toContainText("尚无已提交配置");
-    await expect(managedInterface).not.toBeChecked(); await expect(interfaceName).toBeDisabled();
+    await loginSettings(page);
+    for (const [name, value, key] of [
+      ["TCP 并发连接", "false", "tcp-concurrent"], ["进程匹配模式", "off", "find-process-mode"],
+      ["禁用 TCP 保活", "false", "disable-keep-alive"], ["IPv6", "false", "ipv6"],
+      ["核心下载 ETag", "false", "etag-support"],
+    ]) {
+      await editSetting(page, name, value, true);
+      expect((await settingsApi("settings")).runtime[key]).toBe(value === "false" ? false : value);
+    }
+    for (const [name, value, key] of [
+      ["TCP 保活间隔（秒）", "0", "keep-alive-interval"], ["TCP 保活空闲时间（秒）", "-1", "keep-alive-idle"],
+      ["Linux 路由标记", "4294967295", "routing-mark"],
+    ]) {
+      await editSetting(page, name, value);
+      expect((await settingsApi("settings")).runtime[key]).toBe(Number(value));
+    }
+    const before = await settingsApi("settings");
     for (const invalid of ["2147483648", "-2147483649", "1.5", "abc"]) {
-      await interval.fill(invalid);
-      await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
-      await expect(form.getByRole("alert")).toContainText("必须是 -2147483648–2147483647");
-      expect(await api("settings")).toEqual(original);
+      await editSetting(page, "TCP 保活间隔（秒）", invalid);
+      await expect(page.getByRole("region", { name: "服务设置编辑器" }).getByRole("alert")).toContainText("必须是 -2147483648–2147483647");
+      expect(await settingsApi("settings")).toEqual(before);
     }
-    await interval.fill("0"); await idle.fill("-1"); await disable.selectOption("false");
-    await tcp.selectOption("false"); await mode.selectOption("off");
-    await page.getByRole("combobox", { name: "IPv6", exact: true }).selectOption("false");
-    await managedInterface.check();
-    for (const invalid of [".", "eth:0", "eth 0", "abcdefghijklmnop", "网卡接口名字"]) {
-      await interfaceName.fill(invalid);
-      await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
-      await expect(form.getByRole("alert")).toContainText("出口网卡名称必须为空或最多 15 个 UTF-8 字节");
-      expect(await api("settings")).toEqual(original);
+    await editSetting(page, "TCP 保活间隔（秒）", "0");
+    for (const [managed, name, key, value] of [
+      ["管理出口网卡", "出口网卡名称", "interface-name", "lo"],
+      ["管理核心下载 User-Agent", "核心下载 User-Agent", "global-ua", "browser-agent/1"],
+    ]) {
+      const checkbox = page.getByRole("checkbox", { name: managed, exact: true });
+      await checkbox.check(); await checkbox.press("Enter");
+      await editSetting(page, name, value);
+      expect((await settingsApi("settings")).runtime[key]).toBe(value);
+      await checkbox.uncheck(); await checkbox.press("Enter");
+      await expect(page.locator(".settings-reload button")).toBeEnabled();
+      expect((await settingsApi("settings")).runtime[key]).toBeUndefined();
     }
-    await interfaceName.fill("");
-    for (const invalid of ["-1", "4294967296", "1.5", "0xff", "abc"]) {
-      await mark.fill(invalid);
-      await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
-      await expect(form.getByRole("alert")).toContainText("0–4294967295");
-      expect(await api("settings")).toEqual(original);
-    }
-    await mark.fill("0");
-    await expect(managedAgent).not.toBeChecked(); await expect(agent).toBeDisabled();
-    await managedAgent.check();
-    for (const invalid of ["非 ASCII", "x".repeat(1025)]) {
-      await agent.fill(invalid);
-      await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
-      await expect(form.getByRole("alert")).toContainText("最多 1024 个可打印 ASCII 字符");
-      expect(await api("settings")).toEqual(original);
-    }
-    await agent.fill(""); await etag.selectOption("false");
-    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
-    await expect(page.locator(".toast").filter({ hasText: "保存结果已核对" }).last()).toBeVisible();
-    expect((await api("settings")).runtime).toEqual({ ...original.runtime, ipv6: false, "tcp-concurrent": false, "find-process-mode": "off", "keep-alive-interval": 0, "keep-alive-idle": -1, "disable-keep-alive": false, "interface-name": "", "routing-mark": 0, "global-ua": "", "etag-support": false });
-    await expect(row).toContainText("服务设置：false");
-    await expect(interfaceRow).toContainText('服务设置：""');
-    await expect(agentRow).toContainText('服务设置：""');
-    await expect(page.getByLabel("已保存核心下载设置", { exact: true })).toContainText('"etag-support": false');
-    await expect(page.getByLabel("已保存出口设置", { exact: true })).toContainText('"interface-name": ""');
-    await expect(panel).toContainText("内核未运行，实际值未确认");
-    await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
-    await expect(tcp).toHaveValue("false"); await expect(mode).toHaveValue("off");
-    await expect(interval).toHaveValue("0"); await expect(idle).toHaveValue("-1"); await expect(disable).toHaveValue("false");
-    await expect(managedInterface).toBeChecked(); await expect(interfaceName).toHaveValue(""); await expect(mark).toHaveValue("0");
-    await expect(managedAgent).toBeChecked(); await expect(agent).toHaveValue(""); await expect(etag).toHaveValue("false");
-    await page.route("**/api/commands", async route => {
-      if (route.request().postDataJSON().command === "set_settings") await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture settings failure" } }) });
-      else await route.continue();
-    });
-    await interfaceName.fill("lo"); await mark.fill("123");
-    await agent.fill("browser-agent/1"); await etag.selectOption("true");
-    await interval.fill("20"); await idle.fill("40"); await disable.selectOption("true");
-    await tcp.selectOption("true"); await mode.selectOption("always");
-    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
-    await expect(page.locator(".toast").filter({ hasText: "草稿已保留" }).last()).toBeVisible();
-    await expect(tcp).toHaveValue("true"); await expect(mode).toHaveValue("always");
-    await expect(interval).toHaveValue("20"); await expect(idle).toHaveValue("40"); await expect(disable).toHaveValue("true");
-    await expect(interfaceName).toHaveValue("lo"); await expect(mark).toHaveValue("123");
-    await expect(agent).toHaveValue("browser-agent/1"); await expect(etag).toHaveValue("true");
-    expect((await api("settings")).runtime["global-ua"]).toBe("");
-    expect((await api("settings")).runtime["etag-support"]).toBe(false);
-    expect((await api("settings")).runtime["interface-name"]).toBe("");
-    expect((await api("settings")).runtime["routing-mark"]).toBe(0);
-    expect((await api("settings")).runtime["keep-alive-interval"]).toBe(0);
-    expect((await api("settings")).runtime["tcp-concurrent"]).toBe(false);
-    await page.unroute("**/api/commands");
-    let fail = true;
-    await page.route("**/api/commands", async route => {
-      if (route.request().postDataJSON().command === "connection_settings") {
-        if (fail) await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture connection read failure" } }) });
-        else await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ running: true, config_revision: "fixture.yaml", error: null, fields: [{ key: "tcp-concurrent", setting: false, configured: false, actual: true, mismatch: true }, { key: "find-process-mode", setting: "off", configured: "off", actual: "always", mismatch: true }, { key: "interface-name", setting: "", configured: "", actual: "lo", mismatch: true }, { key: "routing-mark", setting: 0, configured: 0, actual: 123, mismatch: true }] }) });
-      } else await route.continue();
-    });
-    await panel.getByRole("button", { name: "刷新连接设置读回", exact: true }).click();
-    await expect(panel.getByRole("alert")).toContainText("fixture connection read failure");
-    await expect(row).toHaveCount(0);
-    fail = false;
-    await panel.getByRole("button", { name: "刷新连接设置读回", exact: true }).click();
-    await expect(row).toContainText("配置值与内核实际值不一致");
-    await expect(interfaceRow).toContainText("配置值与内核实际值不一致");
-    await page.unroute("**/api/commands");
-    await panel.getByRole("button", { name: "刷新连接设置读回", exact: true }).click();
-    await expect(panel).toContainText("内核未运行，实际值未确认");
-    await expect(panel).not.toContainText("配置值与内核实际值不一致");
-    await mark.fill("4294967295");
-    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
-    await expect(page.locator(".toast").filter({ hasText: "保存结果已核对" }).last()).toBeVisible();
-    expect((await api("settings")).runtime["interface-name"]).toBe("lo");
-    expect((await api("settings")).runtime["routing-mark"]).toBe(4294967295);
-    await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
-    await expect(managedInterface).toBeChecked(); await expect(interfaceName).toHaveValue("lo"); await expect(mark).toHaveValue("4294967295");
-    expect((await api("settings")).runtime["global-ua"]).toBe("browser-agent/1");
-    expect((await api("settings")).runtime["etag-support"]).toBe(true);
-    await expect(agent).toHaveValue("browser-agent/1"); await expect(etag).toHaveValue("true");
-    await managedAgent.uncheck(); await etag.selectOption(""); await expect(agent).toBeDisabled();
-    await managedInterface.uncheck(); await mark.fill("");
-    await expect(interfaceName).toBeDisabled();
-    await interval.fill(""); await idle.fill(""); await disable.selectOption("");
-    await tcp.selectOption(""); await mode.selectOption("");
-    await page.getByRole("combobox", { name: "IPv6", exact: true }).selectOption("");
-    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
-    await expect(page.locator(".toast").filter({ hasText: "保存结果已核对" }).last()).toBeVisible();
-    expect((await api("settings")).runtime).toEqual(original.runtime);
-    await page.getByRole("button", { name: "退出登录", exact: true }).click();
-  } finally { await page.unroute("**/api/commands"); await api("set_settings", { runtime: original.runtime }); }
+  } finally { await settingsApi("set_settings", { runtime: original.runtime }); }
 });
 
-test("hosts editor preserves map shapes, explicit empty and false switches with failed drafts", async ({ page }) => {
-  const api = async (command: string, fields: Record<string, unknown> = {}) => {
-    const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });
-    expect(response.ok).toBe(true); return response.json();
-  };
-  const original = await api("settings");
-  await page.goto(`${base}/settings`);
-  await page.getByLabel("管理令牌").fill(token);
-  await page.getByRole("button", { name: "连接服务" }).click();
-  await openSettingsForEditing(page);
-  const form = page.getByRole("region", { name: "服务设置编辑器", exact: true });
-  const owned = page.getByRole("checkbox", { name: "管理 hosts 映射", exact: true });
-  const hosts = page.getByRole("textbox", { name: "hosts JSON 映射", exact: true });
-  const save = page.getByRole("button", { name: "保存服务设置", exact: true });
+test("hosts editor auto-applies maps, explicit empty values and multiline input", async ({ page }) => {
+  const original = await settingsApi("settings");
   const custom = { "*.example.test": "192.0.2.1", "multi.example.test": ["192.0.2.2", "2001:db8::1"], "alias.example.test": "multi.example.test" };
   try {
-    await expect(owned).not.toBeChecked(); await expect(hosts).toBeDisabled();
-    await owned.check();
+    await loginSettings(page);
+    const owned = page.getByRole("checkbox", { name: "管理 hosts 映射", exact: true });
+    await owned.check(); await owned.press("Enter");
+    const before = await settingsApi("settings");
+    const hosts = page.getByRole("textbox", { name: "hosts JSON 映射", exact: true });
     for (const invalid of ['[]', '{"a.test":123}', '{"a.test":[]}', '{"a.test":["alias.test"]}', '{"*.test":"a.test"}', '{"a.test":"192.0.2.1","A.TEST":"192.0.2.2"}']) {
-      await hosts.fill(invalid); await save.click();
-      await expect(form.getByRole("alert")).toContainText("hosts");
-      expect(await api("settings")).toEqual(original);
+      await editSetting(page, "hosts JSON 映射", invalid);
+      await expect(page.getByRole("region", { name: "服务设置编辑器" }).getByRole("alert")).toContainText("hosts");
+      expect(await settingsApi("settings")).toEqual(before);
     }
-    await hosts.fill(JSON.stringify(custom));
-    await page.getByRole("combobox", { name: "DNS 设置来源", exact: true }).selectOption("true");
-    await page.getByRole("combobox", { name: "DNS 使用 hosts", exact: true }).selectOption("false");
-    await page.getByRole("combobox", { name: "DNS 使用系统 hosts", exact: true }).selectOption("false");
-    await save.click(); await expect(page.locator(".toast").filter({ hasText: "保存结果已核对" }).last()).toBeVisible();
-    expect((await api("settings")).runtime).toEqual({ ...original.runtime, hosts: custom, dns: { "use-hosts": false, "use-system-hosts": false } });
-    await expect(page.getByLabel("已保存 hosts 映射", { exact: true })).toContainText('"alias.example.test": "multi.example.test"');
-    await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
-    await expect(owned).toBeChecked(); expect(JSON.parse(await hosts.inputValue())).toEqual(custom);
-    await expect(page.getByRole("combobox", { name: "DNS 使用系统 hosts", exact: true })).toHaveValue("false");
-    await hosts.fill(JSON.stringify(Object.fromEntries(Object.entries(custom).reverse())));
-    await expect(save).toBeDisabled();
+    await hosts.fill(JSON.stringify(custom, null, 2));
+    await hosts.press("Shift+Enter");
+    expect(await settingsApi("settings")).toEqual(before);
+    await hosts.press("Enter");
+    await expect(page.locator(".settings-reload button")).toBeEnabled();
+    expect((await settingsApi("settings")).runtime.hosts).toEqual(custom);
+    await editSetting(page, "DNS 设置来源", "true", true);
+    await editSetting(page, "DNS 使用 hosts", "false", true);
+    await editSetting(page, "DNS 使用系统 hosts", "false", true);
+    expect((await settingsApi("settings")).runtime.dns).toEqual({ "use-hosts": false, "use-system-hosts": false });
     await page.route("**/api/commands", async route => {
-      if (route.request().postDataJSON().command === "set_settings") await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture hosts failure" } }) });
+      if (route.request().postDataJSON().command === "set_settings") await route.fulfill({ status: 503, json: { error: { message: "fixture hosts failure" } } });
       else await route.continue();
     });
-    await hosts.fill('{}'); await save.click(); await expect(page.locator(".toast").filter({ hasText: "草稿已保留" }).last()).toBeVisible();
-    await expect(hosts).toHaveValue('{}'); expect((await api("settings")).runtime.hosts).toEqual(custom);
+    await editSetting(page, "hosts JSON 映射", '{}');
+    await expect(hosts).toHaveValue('{}');
+    expect((await settingsApi("settings")).runtime.hosts).toEqual(custom);
     await page.unroute("**/api/commands");
-    await save.click(); await expect(page.locator(".toast").filter({ hasText: "保存结果已核对" }).last()).toBeVisible();
-    expect((await api("settings")).runtime.hosts).toEqual({});
-    await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
-    await expect(owned).toBeChecked(); await expect(hosts).toHaveValue('{}');
-    await page.getByRole("combobox", { name: "DNS 设置来源", exact: true }).selectOption("");
-    await save.click(); await expect(page.locator(".toast").filter({ hasText: "保存结果已核对" }).last()).toBeVisible();
-    expect((await api("settings")).runtime).toEqual({ ...original.runtime, hosts: {} });
-    await expect(page.getByRole("region", { name: "订阅 DNS 覆盖", exact: true })).not.toContainText("启用覆盖前");
-    await owned.uncheck(); await expect(hosts).toBeDisabled();
-    await save.click(); await expect(page.locator(".toast").filter({ hasText: "保存结果已核对" }).last()).toBeVisible();
-    expect((await api("settings")).runtime).toEqual(original.runtime);
-    await expect(page.getByRole("region", { name: "订阅 DNS 覆盖", exact: true })).toContainText("DNS 配置段或 hosts 映射");
-    await page.getByRole("button", { name: "退出登录", exact: true }).click();
-  } finally { await page.unroute("**/api/commands"); await api("set_settings", { runtime: original.runtime }); }
+    await hosts.press("Enter"); await expect(page.locator(".settings-reload button")).toBeEnabled();
+    expect((await settingsApi("settings")).runtime.hosts).toEqual({});
+    await owned.uncheck(); await owned.press("Enter"); await expect(page.locator(".settings-reload button")).toBeEnabled();
+    expect((await settingsApi("settings")).runtime.hosts).toBeUndefined();
+  } finally { await page.unroute("**/api/commands"); await settingsApi("set_settings", { runtime: original.runtime }); }
 });
 
-test("Geo settings editor saves inherited URL leaves and reads core values with retry", async ({ page }) => {
-  const api = async (command: string, fields: Record<string, unknown> = {}) => {
-    const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });
-    expect(response.ok).toBe(true);
-    return response.json();
-  };
-  const original = await api("settings");
-  await page.goto(`${base}/settings`);
-  await page.getByLabel("管理令牌").fill(token);
-  await page.getByRole("button", { name: "连接服务" }).click();
-  await openSettingsForEditing(page);
-  const form = page.getByRole("region", { name: "服务设置编辑器", exact: true });
-  await page.locator(".settings-details").filter({ has: page.locator("summary", { hasText: /内核实际设置|资源与数据库/ }) }).evaluateAll(nodes => nodes.forEach(node => (node as HTMLDetailsElement).open = true));
-  const readback = page.getByRole("region", { name: "Geo 设置读回", exact: true });
+test("Geo settings auto-apply inherited URL leaves and validate before submission", async ({ page }) => {
+  const original = await settingsApi("settings");
   try {
-    await page.getByRole("combobox", { name: "Geo 数据模式", exact: true }).selectOption("false");
-    await page.getByRole("combobox", { name: "Geo 加载器", exact: true }).selectOption("standard");
-    await page.getByRole("combobox", { name: "GeoSite 匹配器", exact: true }).selectOption("mph");
-    await page.getByRole("combobox", { name: "Geo 自动更新", exact: true }).selectOption("false");
-    await page.getByRole("textbox", { name: "Geo 更新间隔（小时）", exact: true }).fill("0");
-    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
-    await expect(form.getByRole("alert")).toContainText("1–8760");
-    expect(await api("settings")).toEqual(original);
-    await page.getByRole("textbox", { name: "Geo 更新间隔（小时）", exact: true }).fill("48");
-    await page.getByRole("checkbox", { name: "管理 Geo 下载地址", exact: true }).check();
-    await page.getByRole("textbox", { name: "MMDB 下载地址", exact: true }).fill("file:///etc/passwd");
-    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
-    await expect(form.getByRole("alert")).toContainText("HTTP(S)");
-    expect(await api("settings")).toEqual(original);
-    await page.getByRole("textbox", { name: "MMDB 下载地址", exact: true }).fill("http://127.0.0.1:1/browser-mmdb");
-    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
-    await expect(page.locator(".toast").filter({ hasText: "保存结果已核对" }).last()).toBeVisible();
-    const saved = await api("settings");
-    expect(saved.runtime["geodata-mode"]).toBe(false);
-    expect(saved.runtime["geo-auto-update"]).toBe(false);
-    expect(saved.runtime["geodata-loader"]).toBe("standard");
-    expect(saved.runtime["geosite-matcher"]).toBe("mph");
-    const matcher = readback.locator("li").filter({ has: page.getByText("geosite-matcher", { exact: true }) });
-    await expect(matcher).toContainText("服务设置：mph");
-    await expect(matcher).toContainText("内核实际值：未确认");
-    expect(saved.runtime["geo-update-interval"]).toBe(48);
-    expect(saved.runtime["geox-url"]).toEqual({ mmdb: "http://127.0.0.1:1/browser-mmdb" });
-    const mmdb = readback.locator("li").filter({ has: page.getByText("geox-url.mmdb", { exact: true }) });
-    await expect(mmdb).toContainText("服务设置：http://127.0.0.1:1/browser-mmdb");
-    await expect(readback).toContainText("内核未运行，实际值未确认");
-    await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
-    await expect(page.getByRole("textbox", { name: "MMDB 下载地址", exact: true })).toHaveValue("http://127.0.0.1:1/browser-mmdb");
-    await expect(page.getByRole("combobox", { name: "GeoSite 匹配器", exact: true })).toHaveValue("mph");
-    let fail = true;
-    await page.route("**/api/commands", async route => {
-      if (route.request().postDataJSON().command === "geo_settings") {
-        if (fail) await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "fixture Geo read failed" } }) });
-        else await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ config_revision: "fixture.yaml", running: true, error: null, fields: [{ key: "geox-url.mmdb", setting: "http://127.0.0.1:1/browser-mmdb", configured: "http://127.0.0.1:1/browser-mmdb", actual: "http://127.0.0.1:1/old", mismatch: true }, { key: "geosite-matcher", setting: "mph", configured: "mph", actual: "succinct", mismatch: true }] }) });
-      } else await route.continue();
-    });
-    await readback.getByRole("button", { name: "刷新 Geo 设置读回" }).click();
-    await expect(readback.getByRole("alert")).toContainText("fixture Geo read failed");
-    await expect(mmdb).toHaveCount(0);
-    await expect(matcher).toHaveCount(0);
-    fail = false;
-    await readback.getByRole("button", { name: "刷新 Geo 设置读回" }).click();
-    await expect(matcher).toContainText("配置值与内核实际值不一致");
-    await expect(matcher).toContainText("内核实际值：succinct");
-    await expect(mmdb).toContainText("内核实际值：http://127.0.0.1:1/old");
-    await page.unroute("**/api/commands");
-    await readback.getByRole("button", { name: "刷新 Geo 设置读回" }).click();
-    await expect(readback).toContainText("内核未运行，实际值未确认");
-    await expect(readback).not.toContainText("配置值与内核实际值不一致");
-    await page.getByRole("combobox", { name: "Geo 数据模式", exact: true }).selectOption("");
-    await page.getByRole("combobox", { name: "Geo 自动更新", exact: true }).selectOption("");
-    await page.getByRole("combobox", { name: "Geo 加载器", exact: true }).selectOption("");
-    await page.getByRole("combobox", { name: "GeoSite 匹配器", exact: true }).selectOption("");
-    await page.getByRole("textbox", { name: "Geo 更新间隔（小时）", exact: true }).fill("");
-    await page.getByRole("checkbox", { name: "管理 Geo 下载地址", exact: true }).uncheck();
-    await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
-    await expect(page.locator(".toast").filter({ hasText: "保存结果已核对" }).last()).toBeVisible();
-    expect((await api("settings")).runtime).toEqual(original.runtime);
-    await page.getByRole("button", { name: "退出登录", exact: true }).click();
-  } finally {
-    await page.unroute("**/api/commands");
-    await api("set_settings", { runtime: original.runtime });
-  }
+    await loginSettings(page);
+    for (const [name, value] of [["Geo 数据模式", "false"], ["Geo 加载器", "standard"], ["GeoSite 匹配器", "mph"], ["Geo 自动更新", "false"]]) await editSetting(page, name, value, true);
+    const before = await settingsApi("settings");
+    await editSetting(page, "Geo 更新间隔（小时）", "0");
+    await expect(page.getByRole("region", { name: "服务设置编辑器" }).getByRole("alert")).toContainText("1–8760");
+    expect(await settingsApi("settings")).toEqual(before);
+    await editSetting(page, "Geo 更新间隔（小时）", "48");
+    const owned = page.getByRole("checkbox", { name: "管理 Geo 下载地址", exact: true });
+    await owned.check(); await owned.press("Enter"); await expect(page.locator(".settings-reload button")).toBeEnabled();
+    const inherited = await settingsApi("settings");
+    await editSetting(page, "MMDB 下载地址", "file:///etc/passwd");
+    await expect(page.getByRole("region", { name: "服务设置编辑器" }).getByRole("alert")).toContainText("HTTP(S)");
+    expect(await settingsApi("settings")).toEqual(inherited);
+    await editSetting(page, "MMDB 下载地址", "http://127.0.0.1:1/browser-mmdb");
+    const runtime = (await settingsApi("settings")).runtime;
+    expect(runtime["geox-url"]).toEqual({ mmdb: "http://127.0.0.1:1/browser-mmdb" });
+    expect(runtime["geo-update-interval"]).toBe(48);
+    await editSetting(page, "MMDB 下载地址", "");
+    expect((await settingsApi("settings")).runtime["geox-url"]).toEqual({});
+    await owned.uncheck(); await owned.press("Enter"); await expect(page.locator(".settings-reload button")).toBeEnabled();
+    expect((await settingsApi("settings")).runtime["geox-url"]).toBeUndefined();
+  } finally { await settingsApi("set_settings", { runtime: original.runtime }); }
 });
 
 test("browser repairs failed startup, saves selection/config, restores after service restart and logs out", async ({
@@ -1314,14 +1171,13 @@ test("browser repairs failed startup, saves selection/config, restores after ser
   await page
     .getByRole("combobox", { name: "代理模式", exact: true })
     .selectOption("global");
-  await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+  await applySettings(page);
   await expect(
     page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
   ).toBeVisible();
   await expect(page.locator(".sidebar-status")).toContainText("启动失败");
-  await page.getByRole("button", { name: "全部改为继承", exact: true }).click();
-  await page.getByRole("button", { name: "确认改为继承", exact: true }).click();
-  await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+  await page.getByRole("combobox", { name: "代理模式", exact: true }).selectOption("");
+  await applySettings(page);
   await expect(
     page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
   ).toBeVisible();
@@ -1845,6 +1701,7 @@ test("resources panel, geo seed and online actions translate across language cha
   await expect(panel.getByRole("checkbox", { name: "显式忽略下载来源证书错误" })).toBeVisible();
 
   await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await page.getByRole("combobox", { name: "界面语言" }).press("Enter");
   const enPanel = page.getByRole("region", { name: "Runtime resource inventory" });
   await expect(enPanel.getByRole("heading", { name: "Geo / Provider resources" })).toBeVisible();
   await expect(enPanel.getByRole("button", { name: "Refresh resource list" })).toBeVisible();
@@ -1858,6 +1715,7 @@ test("resources panel, geo seed and online actions translate across language cha
   await expect(enPanel.getByRole("checkbox", { name: "Explicitly ignore download source certificate errors" })).toBeVisible();
 
   await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
+  await page.getByRole("combobox", { name: "Interface language" }).press("Enter");
   await expect(page.getByRole("region", { name: "运行资源清单" })).toBeVisible();
 });
 
@@ -2944,303 +2802,71 @@ test("online settings commands apply to the browser runtime and retain stopped s
   await page.getByRole("button", { name: "退出登录" }).click();
 });
 
-test("settings editor preserves inheritance, failed drafts and uncertain saves with confirmed reads", async ({
-  page,
-}) => {
-  test.setTimeout(90000);
-  const api = async (command: string, fields: Record<string, unknown> = {}) => {
-    const response = await fetch(`${base}/api/commands`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ command, ...fields }),
+test("settings auto-apply on blur or Enter, serialize edits and reconcile uncertain saves", async ({ page }) => {
+  const original = await settingsApi("settings");
+  await settingsApi("stop");
+  await settingsApi("set_settings", { runtime: {} });
+  try {
+    await loginSettings(page);
+    for (const name of ["保存服务设置", "全部改为继承", "核对已保存设置"]) await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+    const mode = page.getByRole("combobox", { name: "代理模式", exact: true });
+    await mode.focus(); await mode.selectOption("global");
+    expect((await settingsApi("settings")).runtime).toEqual({});
+    await mode.blur(); await expect(page.locator(".settings-reload button")).toBeEnabled();
+    expect((await settingsApi("settings")).runtime).toEqual({ mode: "global" });
+    let writes = 0, release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    await page.route("**/api/commands", async route => {
+      if (route.request().postDataJSON().command === "set_settings") { writes++; if (writes === 1) await held; }
+      await route.continue();
     });
-    expect(response.ok).toBe(true);
-    return response.json();
-  };
-  const input = (name: string) =>
-    page.getByRole("textbox", { name, exact: true });
-  const select = (name: string) =>
-    page.getByRole("combobox", { name, exact: true });
-  const save = page.getByRole("button", { name: "保存服务设置", exact: true });
-  const summary = page.getByRole("region", {
-    name: "已保存服务设置",
-    exact: true,
-  });
-  const failRead = async (route: import("@playwright/test").Route) => {
-    if (route.request().postDataJSON()?.command === "settings")
-      await route.fulfill({
-        status: 503,
-        contentType: "application/json",
-        body: JSON.stringify({
-          error: { message: "fixture settings read failed" },
-        }),
-      });
-    else await route.continue();
-  };
-  await page.route("**/api/commands", failRead);
-  await page.goto(`${base}/settings`);
-  await page.getByLabel("管理令牌").fill(token);
-  await page.getByRole("button", { name: "连接服务", exact: true }).click();
-  await openSettingsForEditing(page);
-  await expect(page.getByRole("alert")).toContainText(
-    "fixture settings read failed",
-  );
-  await expect(page.getByRole("form", { name: "运行设置表单" })).toHaveCount(0);
-  await page.unroute("**/api/commands", failRead);
-  await page.getByRole("button", { name: "重试读取设置", exact: true }).click();
-  await expect(page.locator(".settings-group").first()).toBeAttached();
-  await page.locator(".settings-group").evaluateAll(nodes => nodes.forEach(node => (node as HTMLDetailsElement).open = true));
-  await page.locator("summary").filter({ hasText: /^已保存服务设置$/ }).click();
-  await expect(save).toBeDisabled();
-  await expect(select("代理模式")).toHaveValue("");
-  const uid = (await api("status")).active_profile;
-  const catalog = await api("profiles");
-  const baseItem = catalog.items.find(
-    (item: { uid: string }) => item.uid === uid,
-  );
-  const raw = await readFile(
-    join(directory, "profiles", baseItem.file),
-    "utf8",
-  );
-  for (const name of [
-    "混合端口",
-    "SOCKS 端口",
-    "HTTP 端口",
-    "重定向端口",
-    "透明代理端口",
-  ])
-    await input(name).fill("0");
-  await select("代理模式").selectOption("global");
-  for (const name of ["允许局域网访问", "IPv6", "统一延迟"])
-    await select(name).selectOption("false");
-  await select("日志等级").selectOption("warning");
-  await save.click();
-  await expect(
-    page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
-  ).toBeVisible();
-  const saved = await api("settings");
-  expect(saved.runtime).toEqual({
-    "mixed-port": 0,
-    "socks-port": 0,
-    port: 0,
-    "redir-port": 0,
-    "tproxy-port": 0,
-    mode: "global",
-    "allow-lan": false,
-    ipv6: false,
-    "unified-delay": false,
-    "log-level": "warning",
-  });
-  await expect(summary).toContainText("禁用");
-  expect((await api("config")).yaml).toMatch(/mode: global/);
-  expect(
-    await readFile(join(directory, "profiles", baseItem.file), "utf8"),
-  ).toBe(raw);
-  await page.screenshot({
-    path: "test-results/settings-editor-desktop.png",
-    fullPage: true,
-  });
-  let invalidSent = 0;
-  const inspect = async (route: import("@playwright/test").Route) => {
-    if (route.request().postDataJSON()?.command === "set_settings")
-      invalidSent++;
-    await route.continue();
-  };
-  await page.route("**/api/commands", inspect);
-  await input("混合端口").fill("70000");
-  await save.click();
-  await expect(page.getByRole("alert")).toContainText(
-    "混合端口必须是 0–65535 的整数",
-  );
-  expect(invalidSent).toBe(0);
-  await page.unroute("**/api/commands", inspect);
-  await input("混合端口").fill("0");
-  await select("代理模式").selectOption("direct");
-  await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
-  await expect(page.getByRole("group", { name: "设置替换确认" })).toBeVisible();
-  await page.getByRole("button", { name: "继续编辑设置", exact: true }).click();
-  await expect(select("代理模式")).toHaveValue("direct");
-  expect(await api("settings")).toEqual(saved);
-  await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
-  await page.getByRole("button", { name: "确认重新读取", exact: true }).click();
-  await expect(select("代理模式")).toHaveValue("global");
-  await api("set_profile_script", {
-    uid,
-    source:
-      "function main(c) { if(c.mode==='rule') c.rules=['INVALID,DIRECT']; return c; }",
-  });
-  const before = await api("status");
-  await select("代理模式").selectOption("rule");
-  await save.click();
-  await expect(page.locator(".toast").last().getByRole("alert")).toContainText(
-    "Mihomo rejected",
-  );
-  await expect(
-    page.getByText(
-      "服务当前设置与提交内容不同，草稿已保留。请检查错误或重新读取设置。",
-      { exact: true },
-    ),
-  ).toBeVisible();
-  await expect(select("代理模式")).toHaveValue("rule");
-  await expect(save).toBeEnabled();
-  expect(await api("settings")).toEqual(saved);
-  expect((await api("status")).config_revision).toBe(before.config_revision);
-  expect((await api("status")).pid).toBe(before.pid);
-  await api("clear_profile_script", { uid });
-  await select("代理模式").selectOption("global");
-  await select("统一延迟").selectOption("true");
-  await page.route("**/api/commands", failRead);
-  await save.click();
-  await expect(page.getByText(/保存结果尚未核对/)).toBeVisible();
-  await expect(save).toBeDisabled();
-  await expect(select("统一延迟")).toHaveValue("true");
-  expect((await api("settings")).runtime["unified-delay"]).toBe(true);
-  await page.unroute("**/api/commands", failRead);
-  await page
-    .getByRole("button", { name: "核对已保存设置", exact: true })
-    .click();
-  await expect(
-    page.getByText("已核对：服务已保存当前草稿。", { exact: true }).last(),
-  ).toBeVisible();
-  await expect(save).toBeDisabled();
-  // An error response after actual publication must be reconciled, never assumed rollback.
-  const lostReply = async (route: import("@playwright/test").Route) => {
-    if (route.request().postDataJSON()?.command === "set_settings") {
-      const response = await route.fetch();
-      expect(response.ok()).toBe(true);
-      await route.fulfill({
-        status: 500,
-        contentType: "application/json",
-        body: JSON.stringify({
-          error: { message: "fixture commit response lost" },
-        }),
-      });
-    } else await route.continue();
-  };
-  await page.route("**/api/commands", lostReply);
-  await select("IPv6").selectOption("true");
-  await save.click();
-  await expect(
-    page.getByText("请求报告错误，但服务已保存此草稿，已核对，无需重复提交。", {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await expect(page.locator(".toast").last().getByRole("alert")).toContainText(
-    "fixture commit response lost",
-  );
-  await expect(select("IPv6")).toHaveValue("true");
-  await expect(save).toBeDisabled();
-  await page.unroute("**/api/commands", lostReply);
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
-  await page.getByRole("button", { name: "停止内核", exact: true }).click();
-  await expect(page.locator(".sidebar-status")).toContainText("已停止");
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /设置/ }).click();
-  await page
-    .getByRole("button", { name: "核对已保存设置", exact: true })
-    .click();
-  await expect(
-    page.getByText("已核对：服务已保存当前草稿。", { exact: true }).last(),
-  ).toBeVisible();
-  await page.setViewportSize({ width: 390, height: 844 });
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-  await page.screenshot({
-    path: "test-results/settings-editor-mobile.png",
-    fullPage: true,
-  });
-  const beforeClear = await api("settings");
-  await page.getByRole("button", { name: "全部改为继承", exact: true }).click();
-  await page.getByRole("button", { name: "继续编辑设置", exact: true }).click();
-  expect(await api("settings")).toEqual(beforeClear);
-  await page.getByRole("button", { name: "全部改为继承", exact: true }).click();
-  await page.getByRole("button", { name: "确认改为继承", exact: true }).click();
-  await expect(select("代理模式")).toHaveValue("");
-  expect(await api("settings")).toEqual(beforeClear);
-  await save.click();
-  await expect(
-    page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
-  ).toBeVisible();
-  expect((await api("settings")).runtime).toEqual({});
-  expect((await api("status")).pid).toBeNull();
-  expect((await api("config")).yaml).toMatch(/mode: direct/);
-  // Standalone authority release retains the current runtime value, as documented.
-  await api("apply_config", { yaml: "mode: direct\n" });
-  await select("代理模式").selectOption("global");
-  await save.click();
-  await expect(
-    page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
-  ).toBeVisible();
-  await select("代理模式").selectOption("");
-  await save.click();
-  await expect(
-    page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
-  ).toBeVisible();
-  expect((await api("settings")).runtime).toEqual({});
-  expect((await api("config")).yaml).toMatch(/mode: global/);
-  await api("select_profile", { uid });
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
-  await page.getByRole("button", { name: "启动内核", exact: true }).click();
-  await expect(page.locator(".sidebar-status")).toContainText("运行中");
-  await stop();
-  await start();
-  await expect(page.getByText("已连接", { exact: true })).toBeVisible({
-    timeout: 15000,
-  });
-  await page
-    .getByRole("navigation", { name: "主导航" })
-    .getByRole("link", { name: /概览/ })
-    .click();
-  await page
-    .getByRole("navigation", { name: "主导航" })
-    .getByRole("link", { name: /设置/ })
-    .click();
-  await expect(select("代理模式")).toHaveValue("");
-  expect((await api("settings")).runtime).toEqual({});
-  // An unsupported response is never converted into an empty replacement form.
-  const unknown = async (route: import("@playwright/test").Route) => {
-    if (route.request().postDataJSON()?.command === "settings")
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          schema_version: 1,
-          runtime: { mode: "global", "future-setting": true },
-        }),
-      });
-    else await route.continue();
-  };
-  await select("代理模式").selectOption("global");
-  await expect(save).toBeEnabled();
-  await page.route("**/api/commands", unknown);
-  await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
-  await page.getByRole("button", { name: "确认重新读取", exact: true }).click();
-  await expect(page.getByRole("region", { name: "服务设置编辑器", exact: true }).getByRole("alert")).toContainText(
-    "暂不支持的设置 future-setting",
-  );
-  await expect(save).toBeDisabled();
-  expect((await api("settings")).runtime).toEqual({});
-  await page.unroute("**/api/commands", unknown);
-  await page
-    .getByRole("button", { name: "核对已保存设置", exact: true })
-    .click();
-  await expect(
-    page.getByText(
-      "已核对：服务当前设置与草稿不同，草稿已保留。请修正或重新读取后再保存。",
-      { exact: true },
-    ),
-  ).toBeVisible();
-  await expect(select("代理模式")).toHaveValue("global");
-  await expect(save).toBeEnabled();
-  await page.getByRole("button", { name: "重新读取设置", exact: true }).click();
-  await page.getByRole("button", { name: "确认重新读取", exact: true }).click();
-  await expect(select("代理模式")).toHaveValue("");
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+    await mode.focus(); await mode.selectOption("direct"); await mode.press("Enter");
+    await expect.poll(() => writes).toBe(1);
+    const ipv6 = page.getByRole("combobox", { name: "IPv6", exact: true });
+    await ipv6.focus(); await ipv6.selectOption("false"); await ipv6.press("Enter");
+    const port = page.getByRole("textbox", { name: "混合端口", exact: true });
+    await port.fill("0"); // This input is still focused when the earlier response returns.
+    release();
+    await expect(page.locator(".settings-reload button")).toBeEnabled();
+    await expect(ipv6).toHaveValue("false"); await expect(port).toHaveValue("0");
+    expect((await settingsApi("settings")).runtime).toEqual({ mode: "direct", ipv6: false });
+    await port.press("Enter"); await port.blur();
+    await expect(page.locator(".settings-reload button")).toBeEnabled();
+    expect(writes).toBe(3); // Enter followed by blur must not duplicate the write.
+    await page.unroute("**/api/commands");
+    const saved = await settingsApi("settings");
+    await editSetting(page, "混合端口", "70000");
+    await expect(page.getByRole("region", { name: "服务设置编辑器" }).getByRole("alert")).toContainText("0–65535");
+    expect(await settingsApi("settings")).toEqual(saved);
+    await editSetting(page, "混合端口", "0");
+    let failRead = true;
+    await page.route("**/api/commands", async route => {
+      if (failRead && route.request().postDataJSON().command === "settings") await route.fulfill({ status: 503, json: { error: { message: "fixture readback lost" } } });
+      else await route.continue();
+    });
+    await editSetting(page, "统一延迟", "true", true);
+    await expect(page.getByRole("region", { name: "服务设置编辑器" }).getByRole("alert")).toContainText("保存结果尚未核对");
+    expect((await settingsApi("settings")).runtime["unified-delay"]).toBe(true);
+    failRead = false;
+    await editSetting(page, "统一延迟", "false", true);
+    expect((await settingsApi("settings")).runtime["unified-delay"]).toBe(false);
+    await page.unroute("**/api/commands");
+    await page.route("**/api/commands", async route => {
+      if (route.request().postDataJSON().command === "set_settings") {
+        const response = await route.fetch(); expect(response.ok()).toBe(true);
+        await route.fulfill({ status: 500, json: { error: { message: "fixture reply lost" } } });
+      } else await route.continue();
+    });
+    await editSetting(page, "代理模式", "global", true);
+    await expect(page.locator(".toast").filter({ hasText: "无需重复提交" }).last()).toBeVisible();
+    expect((await settingsApi("settings")).runtime.mode).toBe("global");
+    await page.unroute("**/api/commands");
+    await editSetting(page, "代理模式", "", true);
+    expect((await settingsApi("settings")).runtime.mode).toBeUndefined();
+    expect((await settingsApi("status")).phase).toBe("stopped");
+    await stop(); await start();
+    expect((await settingsApi("settings")).runtime.mode).toBeUndefined();
+  } finally { await page.unroute("**/api/commands"); await settingsApi("set_settings", { runtime: original.runtime }); }
 });
 
 test("nested network settings persist and scalar edits preserve them", async ({
@@ -3281,7 +2907,7 @@ test("nested network settings persist and scalar edits preserve them", async ({
   await page
     .getByRole("combobox", { name: "代理模式", exact: true })
     .selectOption("direct");
-  await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+  await applySettings(page);
   await expect(
     page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
   ).toBeVisible();
@@ -3296,7 +2922,7 @@ test("nested network settings persist and scalar edits preserve them", async ({
   ).toHaveValue("");
   await expect(
     page.getByRole("button", { name: "保存服务设置", exact: true }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
 });
 
@@ -3372,48 +2998,8 @@ test("provider DNS confirmation protects selection and expires on service restar
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
 });
 
-test("network editor preserves all supported fields and explicitly confirms changing provider DNS", async ({
-  page,
-}) => {
-  test.setTimeout(90000);
-  const api = async (command: string, fields: Record<string, unknown> = {}) => {
-    const response = await fetch(`${base}/api/commands`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ command, ...fields }),
-    });
-    expect(response.ok).toBe(true);
-    return response.json();
-  };
-  const select = (name: string) =>
-    page.getByRole("combobox", { name, exact: true });
-  const input = (name: string) =>
-    page.getByRole("textbox", { name, exact: true });
-  const save = page.getByRole("button", { name: "保存服务设置", exact: true });
-  const panel = page.getByRole("region", {
-    name: "订阅 DNS 覆盖",
-    exact: true,
-  });
-  const enable = panel.getByRole("button", {
-    name: "启用订阅 DNS 覆盖",
-    exact: true,
-  });
-  const confirm = panel.getByRole("button", {
-    name: "确认覆盖当前订阅 DNS",
-    exact: true,
-  });
-  await api("stop");
-  subscriptionBody =
-    "proxies: []\nmode: direct\nmixed-port: 0\ndns: {enable: false, nameserver: [9.9.9.9], nameserver-policy: {example.org: 8.8.8.8}}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']";
-  const profile = await api("import_remote_profile", {
-    url: subscriptionUrl,
-    name: "Network editor provider",
-  });
-  const uid = profile.uid;
-  await api("select_profile", { uid });
+test("network editor auto-applies nested edits while preserving supported fields", async ({ page }) => {
+  await settingsApi("stop");
   const runtime = {
     mode: "direct",
     "mixed-port": 0,
@@ -3450,169 +3036,28 @@ test("network editor preserves all supported fields and explicitly confirms chan
       "dns-hijack": [],
     },
   };
-  await api("set_settings", { runtime });
-  await page.goto(`${base}/settings`);
-  await page.getByLabel("管理令牌").fill(token);
-  await page.getByRole("button", { name: "连接服务", exact: true }).click();
-  await openSettingsForEditing(page);
-  await expect(input("DNS 解析服务器")).toHaveValue('["1.1.1.1"]');
-  await expect(select("DNS Fake-IP 过滤模式")).toHaveValue("whitelist");
-  await expect(select("DNS 优先 HTTP/3")).toHaveValue("true");
-  await expect(select("DNS 遵循代理规则")).toHaveValue("true");
-  await expect(input("DNS 域名解析策略")).toHaveValue('{"owned.test":["1.1.1.1"]}');
-  await expect(input("DNS 后备过滤条件")).toHaveValue('{"geoip":false,"geoip-code":"CN"}');
-  await expect(input("DNS 监听地址")).toHaveValue("");
-  await expect(select("DNS 监听地址来源")).toHaveValue("true");
-  await expect(input("TUN DNS 劫持列表")).toHaveValue("[]");
-  await expect(save).toBeDisabled();
-  await expect(enable).toBeEnabled();
-  const before = (await api("status")).config_revision;
-  await enable.click();
-  await expect(confirm).toBeVisible();
-  expect((await api("status")).config_revision).toBe(before);
-  await panel.getByRole("button", { name: "取消 DNS 确认" }).click();
-  await expect(confirm).toHaveCount(0);
-  expect((await api("profile_dns", { uid })).enabled).toBe(false);
-  await enable.click();
-  await confirm.click();
-  await expect(panel.getByText("允许", { exact: true })).toBeVisible();
-  expect((await api("config")).yaml).toContain("1.1.1.1");
-  await input("TUN MTU").fill("0");
-  await expect(enable).toBeDisabled();
-  await save.click();
-  await expect(page.getByRole("region", { name: "服务设置编辑器", exact: true }).getByRole("alert")).toContainText(
-    "TUN MTU 必须是 1–65535",
-  );
-  expect((await api("settings")).runtime).toEqual(runtime);
-  await input("TUN MTU").fill("1400");
-  await input("DNS 后备解析服务器").fill("[1]");
-  await save.click();
-  await expect(page.getByRole("region", { name: "服务设置编辑器", exact: true }).getByRole("alert")).toContainText(
-    "必须是 JSON 字符串列表",
-  );
-  await input("DNS 后备解析服务器").fill("[]");
-  await input("DNS 域名解析策略").fill('{"bad.test":[]}');
-  await save.click();
-  await expect(page.getByRole("region", { name: "服务设置编辑器", exact: true }).getByRole("alert")).toContainText("必须是有效的 JSON 对象");
-  expect((await api("settings")).runtime).toEqual(runtime);
-  await input("DNS 域名解析策略").fill('{"owned.test":["1.1.1.1"]}');
-  await select("DNS 启用").selectOption("true");
-  await input("DNS 解析服务器").fill('["https://["]');
-  const prior = await api("status");
-  await save.click();
-  await expect(
-    page.getByText(
-      "服务当前设置与提交内容不同，草稿已保留。请检查错误或重新读取设置。",
-      { exact: true },
-    ),
-  ).toBeVisible();
-  await expect(input("DNS 解析服务器")).toHaveValue('["https://["]');
-  expect((await api("status")).config_revision).toBe(prior.config_revision);
-  expect((await api("settings")).runtime).toEqual(runtime);
-  await input("DNS 解析服务器").fill('["1.1.1.1"]');
-  await select("DNS 启用").selectOption("false");
-  await save.click();
-  await expect(
-    page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
-  ).toBeVisible();
-  expect((await api("settings")).runtime).toEqual({
-    ...runtime,
-    tun: { ...runtime.tun, mtu: 1400 },
-  });
-  expect((await api("settings")).profile_dns[uid].enabled).toBe(true);
-  expect((await api("status")).pid).toBeNull();
-  // A protected source refresh invalidates permission; it must never auto-confirm.
-  subscriptionBody = subscriptionBody.replace("8.8.8.8", "8.8.4.4");
-  await api("refresh_profile", { uid });
-  await expect(panel.getByText("未允许", { exact: true })).toBeVisible();
-  await expect(confirm).toHaveCount(0);
-  await enable.click();
-  await expect(confirm).toBeVisible();
-  const challenge = (await api("profile_dns", { uid })).source;
-  // A second refresh while the question is open cancels the old question.
-  subscriptionBody = subscriptionBody.replace("8.8.4.4", "8.8.8.8");
-  await api("refresh_profile", { uid });
-  await expect(confirm).toHaveCount(0);
-  expect((await api("profile_dns", { uid })).source).not.toBe(challenge);
-  expect((await api("profile_dns", { uid })).enabled).toBe(false);
-  await enable.click();
-  await confirm.click();
-  await expect(panel.getByText("允许", { exact: true })).toBeVisible();
-  await stop();
-  await start();
-  await expect(page.getByText("已连接", { exact: true })).toBeVisible({
-    timeout: 15000,
-  });
-  await expect(panel.getByText("未允许", { exact: true })).toBeVisible();
-  await panel.getByRole("button", { name: "DNS 会话确认帮助", exact: true }).hover();
-  await expect(page.getByRole("tooltip")).toContainText("已提交的运行配置可能仍保留原值");
-  expect((await api("config")).yaml).toContain("1.1.1.1");
-  await enable.click();
-  await expect(confirm).toBeVisible();
-  const other = await api("import_profile", {
-    name: "Other DNS provider",
-    yaml: subscriptionBody,
-  });
-  await api("select_profile", { uid: other.uid });
-  await expect(panel).toContainText(other.uid);
-  await expect(confirm).toHaveCount(0);
-  // Unknown nested fields fail closed while retaining a dirty network draft.
-  await input("TUN MTU").fill("1300");
-  const unsupported = async (route: import("@playwright/test").Route) => {
-    if (route.request().postDataJSON()?.command !== "settings")
-      return route.continue();
-    const response = await route.fetch();
-    const value = await response.json();
-    value.runtime.tun["future-option"] = true;
-    await route.fulfill({ response, json: value });
-  };
-  await page.route("**/api/commands", unsupported);
-  await page
-    .getByRole("button", { name: "核对已保存设置", exact: true })
-    .click();
-  await expect(page.getByRole("region", { name: "服务设置编辑器", exact: true }).getByRole("alert")).toContainText(
-    "暂不支持的设置 tun.future-option",
-  );
-  await expect(input("TUN MTU")).toHaveValue("1300");
-  await expect(save).toBeDisabled();
-  await page.unroute("**/api/commands", unsupported);
-  await page
-    .getByRole("button", { name: "核对已保存设置", exact: true })
-    .click();
-  await expect(save).toBeEnabled();
-  await input("TUN MTU").fill("1400");
-  await select("DNS 设置来源").selectOption("");
-  await save.click();
-  await expect(
-    page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
-  ).toBeVisible();
-  expect((await api("settings")).runtime).toEqual({
-    mode: "direct",
-    "mixed-port": 0,
-    tun: { ...runtime.tun, mtu: 1400 },
-  });
-  // Removing a section and restoring its local fields remains explicit.
-  await select("DNS 设置来源").selectOption("true");
-  await input("DNS 解析服务器").fill('["1.1.1.1"]');
-  await save.click();
-  await expect(
-    page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
-  ).toBeVisible();
-  await page.screenshot({
-    path: "test-results/network-settings-desktop.png",
-    fullPage: true,
-  });
-  await page.setViewportSize({ width: 390, height: 844 });
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-  await page.screenshot({
-    path: "test-results/network-settings-mobile.png",
-    fullPage: true,
-  });
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  const original = await settingsApi("settings");
+  try {
+    await settingsApi("set_settings", { runtime });
+    await loginSettings(page);
+    await editSetting(page, "TUN MTU", "1400");
+    expect((await settingsApi("settings")).runtime).toEqual({ ...runtime, tun: { ...runtime.tun, mtu: 1400 } });
+    const before = await settingsApi("settings");
+    await editSetting(page, "DNS 解析服务器", '[1]');
+    await expect(page.getByRole("region", { name: "服务设置编辑器" }).getByRole("alert")).toBeVisible();
+    expect(await settingsApi("settings")).toEqual(before);
+    await editSetting(page, "DNS 解析服务器", '["1.1.1.1"]');
+    await editSetting(page, "DNS 启用", "false", true);
+    expect((await settingsApi("settings")).runtime.dns.enable).toBe(false);
+    await editSetting(page, "DNS 设置来源", "", true);
+    expect((await settingsApi("settings")).runtime).toEqual({ mode: "direct", "mixed-port": 0, tun: { ...runtime.tun, mtu: 1400 } });
+    await editSetting(page, "DNS 设置来源", "true", true);
+    await editSetting(page, "DNS 解析服务器", '["1.1.1.1"]');
+    await page.screenshot({ path: "test-results/network-settings-desktop.png", fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: "test-results/network-settings-mobile.png", fullPage: true });
+  } finally { await settingsApi("set_settings", { runtime: original.runtime }); }
 });
 
 test("final cleanup applies on remote refresh and settings authority without changing source YAML", async ({
@@ -3630,7 +3075,6 @@ test("final cleanup applies on remote refresh and settings authority without cha
     expect(response.ok).toBe(true);
     return response.json();
   };
-  const save = page.getByRole("button", { name: "保存服务设置", exact: true });
   await api("stop");
   await api("set_settings", {
     runtime: { "mixed-port": 0, "allow-lan": true },
@@ -3658,7 +3102,7 @@ test("final cleanup applies on remote refresh and settings authority without cha
   await page
     .getByRole("combobox", { name: "允许局域网访问", exact: true })
     .selectOption("false");
-  await save.click();
+  await applySettings(page);
   await expect(
     page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
   ).toBeVisible();
@@ -3676,7 +3120,7 @@ test("final cleanup applies on remote refresh and settings authority without cha
   await page
     .getByRole("combobox", { name: "允许局域网访问", exact: true })
     .selectOption("true");
-  await save.click();
+  await applySettings(page);
   await expect(
     page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
   ).toBeVisible();
@@ -4021,12 +3465,10 @@ test("proxy connection information follows actual ports, settings saves and stop
   // A draft must not overwrite the displayed runtime or imply it is already live.
   await portHelp.hover();
   await expect(portHint).toContainText(`当前端口：${first}`);
-  await page.getByRole("button", { name: "刷新端口信息", exact: true }).click();
-  await portHelp.hover();
-  await expect(portHint).toContainText(`当前端口：${first}`);
-  await expect(input).toHaveValue(String(second));
   expect((await api("settings")).runtime).toEqual({});
-  await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+  await input.blur();
+  await expect(page.locator(".settings-reload button")).toBeEnabled();
+  await expect(input).toHaveValue(String(second));
   await portHelp.hover();
   await expect(portHint).toHaveText(`当前端口：${second} · 服务设置`);
   await page
@@ -5098,7 +4540,7 @@ test("settings help, stacked dismissible toasts and centered responsive content"
   await expect(help).toBeVisible();
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await help.hover();
-  await expect(page.getByRole("tooltip")).toContainText("离开本页会丢弃草稿");
+  await expect(page.getByRole("tooltip")).toContainText("失去焦点或按 Enter 自动应用");
   await page.mouse.move(0, 0);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await help.focus();
@@ -5112,12 +4554,12 @@ test("settings help, stacked dismissible toasts and centered responsive content"
   const settings = await page.locator(".settings-layout").boundingBox();
   const workspace = await page.locator(".workspace").boundingBox();
   expect(Math.abs(settings!.x + settings!.width / 2 - workspace!.x - workspace!.width / 2)).toBeLessThan(2);
-  const verify = page.getByRole("button", { name: "核对已保存设置", exact: true });
-  await expect(verify).toBeEnabled();
-  await verify.click();
+  const original = await settingsApi("settings");
+  const initialMode = original.runtime.mode == null ? "" : String(original.runtime.mode);
+  const alternateMode = initialMode === "global" ? "direct" : "global";
+  await editSetting(page, "代理模式", alternateMode, true);
   await expect(page.locator(".toast")).toHaveCount(1);
-  await expect(verify).toBeEnabled();
-  await verify.click();
+  await editSetting(page, "代理模式", initialMode, true);
   await expect(page.locator(".toast")).toHaveCount(2);
   const toast = await page.locator(".toast-stack").boundingBox();
   expect(Math.abs(toast!.x + toast!.width / 2 - 960)).toBeLessThan(2);
@@ -5130,7 +4572,7 @@ test("settings help, stacked dismissible toasts and centered responsive content"
   await page.getByRole("navigation").getByRole("link", { name: "设置", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "混合端口", exact: true })).toBeVisible();
   await page.getByRole("textbox", { name: "混合端口", exact: true }).fill("70000");
-  await page.getByRole("button", { name: "保存服务设置", exact: true }).click();
+  await applySettings(page);
   await expect(page.getByRole("alert").filter({ hasText: "0–65535" })).toBeVisible();
   await expect(page.locator(".toast")).toHaveCount(0);
   await page.getByRole("textbox", { name: "混合端口", exact: true }).fill("");
@@ -5141,11 +4583,12 @@ test("settings help, stacked dismissible toasts and centered responsive content"
   expect(tooltip!.x).toBeGreaterThanOrEqual(0);
   expect(tooltip!.x + tooltip!.width).toBeLessThanOrEqual(390);
   await help.press("Escape");
-  await verify.click();
+  await editSetting(page, "代理模式", alternateMode, true);
   await expect(page.locator(".toast")).toHaveCount(1);
   await page.screenshot({ path: "test-results/settings-compact-mobile.png", fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await expect(page.locator(".toast")).toHaveCount(0, { timeout: 10000 });
+  await settingsApi("set_settings", { runtime: original.runtime });
 });
 
 test("core upgrade reuses its operation toast for success and failure", async ({ page }) => {
@@ -5263,7 +4706,7 @@ test("repeated configuration saves produce separate success toasts", async ({ pa
   await expect(page.locator(".toast").last()).toContainText("此配置已通过校验并提交。");
 });
 
-test("visible TUN switches save immediately, preserve advanced settings and protect settings drafts", async ({ page }) => {
+test("overview TUN switch and compact settings row preserve advanced settings and auto-apply", async ({ page }) => {
   const api = async (command: string, fields: Record<string, unknown> = {}) => {
     const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });
     expect(response.ok).toBe(true);
@@ -5333,30 +4776,37 @@ test("visible TUN switches save immediately, preserve advanced settings and prot
   await expect(toggle).toBeEnabled();
   expect(await api("settings")).toEqual(before);
   await page.getByRole("navigation").getByRole("link", { name: "设置", exact: true }).click();
-  await expect(toggle).toBeEnabled();
+  const tun = page.getByRole("combobox", { name: "TUN 模式", exact: true });
+  await expect(tun).toBeEnabled();
   await expect(page.locator(".settings-group[open]")).toHaveCount(0);
-  await expect(toggle).toBeInViewport();
+  await expect(tun).toBeInViewport();
   const mode = page.getByRole("combobox", { name: "代理模式", exact: true });
-  await mode.selectOption("global");
-  await expect(toggle).toBeDisabled();
-  await expect(page.getByText("请先保存或丢弃设置草稿，再操作此开关。")).toBeVisible();
-  await mode.selectOption("direct");
-  await expect(toggle).toBeEnabled();
-  await api("stop");
-  await expect(toggle).toBeEnabled();
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByRole("button", { name: "保存服务设置", exact: true })).toBeDisabled();
-  await expect(page.getByText("有未保存的修改", { exact: true })).toHaveCount(0);
+  await mode.focus(); await mode.selectOption("global");
+  await expect(tun).toBeDisabled();
+  await expect(page.getByText("请先应用或修正尚未生效的设置，再更改 TUN。")).toBeVisible();
+  await mode.selectOption("direct"); await mode.press("Enter");
+  await expect(tun).toBeEnabled();
+  await tun.focus(); await tun.selectOption("true");
+  expect(await api("settings")).toEqual(before);
+  await tun.press("Enter"); await tun.blur();
+  await expect(tun).toBeEnabled();
+  expect(await api("settings")).toEqual({ ...before, runtime: { ...runtime, tun: { ...runtime.tun, enable: true } } });
+  await expect(page.getByRole("button", { name: "保存服务设置", exact: true })).toHaveCount(0);
+  await expect(page.getByText("有待应用的修改", { exact: true })).toHaveCount(0);
+  const row = page.locator(".tun-setting-row");
+  const bounds = await row.boundingBox();
+  expect(bounds!.height).toBeLessThanOrEqual(50);
+  await expect(row.locator(".tun-indicator, .help-tip")).toHaveCount(0);
+  const label = await row.locator("label").boundingBox(), control = await tun.boundingBox();
+  expect(Math.abs(label!.y + label!.height / 2 - control!.y - control!.height / 2)).toBeLessThan(2);
   while (await page.locator(".toast-close").count()) await page.locator(".toast-close").first().click();
   await page.screenshot({ path: "test-results/tun-switch-settings-desktop.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: "test-results/tun-switch-settings-mobile.png", fullPage: true });
-  await expect(toggle).toBeInViewport();
+  await expect(tun).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-checked", "false");
-  await expect(toggle).toBeEnabled();
+  await tun.focus(); await tun.selectOption("false"); await tun.blur();
+  await expect(tun).toBeEnabled();
   expect(await api("settings")).toEqual(before);
 });
 
@@ -5437,4 +4887,42 @@ test("overview mode button group applies immediately, verifies live state and pr
   await group.getByRole("button", { name: "直连", exact: true }).click();
   await expect(card.getByRole("status")).toHaveText("直连");
   expect((await api("proxy_access")).reported.mode.toLowerCase()).toBe("direct");
+});
+
+test("settings read failures and unsupported schemas cannot publish empty replacements", async ({ page }) => {
+  let response: "failure" | "unknown" | "normal" = "failure", writes = 0;
+  await page.route("**/api/commands", async route => {
+    const { command } = route.request().postDataJSON();
+    if (command === "set_settings") writes++;
+    if (command === "settings" && response === "failure") return route.fulfill({ status: 503, json: { error: { message: "fixture initial read failed" } } });
+    if (command === "settings" && response === "unknown") return route.fulfill({ json: { schema_version: 1, runtime: { "future-setting": true } } });
+    await route.continue();
+  });
+  await page.goto(`${base}/settings#token=${encodeURIComponent(token)}`);
+  await expect(page.getByRole("alert")).toContainText("fixture initial read failed");
+  await expect(page.getByRole("form", { name: "运行设置表单" })).toHaveCount(0);
+  response = "unknown";
+  await page.getByRole("button", { name: "重试读取设置", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("暂不支持的设置 future-setting");
+  await expect(page.getByRole("form", { name: "运行设置表单" })).toHaveCount(0);
+  expect(writes).toBe(0);
+  response = "normal";
+  await page.getByRole("button", { name: "重试读取设置", exact: true }).click();
+  await expect(page.getByRole("form", { name: "运行设置表单" })).toBeVisible();
+  expect(writes).toBe(0);
+});
+
+test("settings language selection applies on blur or Enter and stays local", async ({ page }) => {
+  await loginSettings(page);
+  const before = await settingsApi("settings");
+  const language = page.getByRole("combobox", { name: "界面语言", exact: true });
+  await language.focus(); await language.selectOption("en");
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+  await language.blur();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  const english = page.getByRole("combobox", { name: "Interface language", exact: true });
+  await english.focus(); await english.selectOption("zhtw"); await english.press("Enter");
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-TW");
+  expect(await page.evaluate(() => localStorage.getItem("mihomo-server-language"))).toBe("zhtw");
+  expect(await settingsApi("settings")).toEqual(before);
 });

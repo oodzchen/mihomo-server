@@ -180,13 +180,13 @@ export function ProfileDnsPanel({
   return (
     <section className="panel profile-dns" aria-label="订阅 DNS 覆盖">
       <h2 className="setting-heading">当前订阅 DNS 覆盖<HelpTip label="订阅 DNS 覆盖帮助">
-        此开关决定当前订阅能否使用已保存的 DNS 页面设置和 hosts 映射。请先保存草稿；它与 DNS
+        此开关决定当前订阅能否使用已保存的 DNS 页面设置和 hosts 映射。请先应用运行设置；它与 DNS
         启用字段分别控制。
       </HelpTip></h2>
       <HelpTip label="DNS 会话确认帮助">
         确认仅在本次服务会话内有效。重启或专用解析来源变化后需重新确认；已提交的运行配置可能仍保留原值，下一次生成才应用保护。实际值请在配置页查看。
       </HelpTip>
-      {!hasDns && <p className="hint">启用覆盖前，请先保存 DNS 配置段或 hosts 映射。</p>}
+      {!hasDns && <p className="hint">启用覆盖前，请先填写并应用 DNS 配置段或 hosts 映射。</p>}
       {!uid ? (
         <p className="muted">尚未选择订阅。</p>
       ) : (

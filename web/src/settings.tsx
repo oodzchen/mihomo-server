@@ -1,7 +1,7 @@
 import { HelpTip } from "./help-tip";
 import { TunControl } from "./tun-control";
 import { useToast } from "./toast";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, command, type Perform, type Connection } from "./api";
 import type { CoreStatus } from "./types";
 import {
@@ -207,11 +207,20 @@ export function SettingsPage({
     [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState("");
   const notify = useToast();
-  const setNotice = (message: string) => notify(message, "info");
-  const [confirmation, setConfirmation] = useState<"reload" | "clear">();
+  const [confirmation, setConfirmation] = useState<"reload">();
   const alive = useRef(true),
     requests = useRef(new Set<AbortController>());
+  const saving = useRef(false), pending = useRef<Draft | undefined>(undefined);
+  const draftRef = useRef(draft), savedRef = useRef(saved), uncertainRef = useRef(uncertain);
+  draftRef.current = draft; savedRef.current = saved; uncertainRef.current = uncertain;
   const disabled = busy || working;
+  // Keep the next field editable while this form's transaction is in flight.
+  const fieldsDisabled = disabled && !saving.current;
+  function change(key: string, value: string) {
+    draftRef.current = { ...draftRef.current, [key]: value };
+    setDraft(draftRef.current);
+    setError(""); setConfirmation(undefined);
+  }
   const dirty = saved ? !matches(draft, saved) : false;
 
   function portDescription(key: string) {
@@ -252,14 +261,13 @@ export function SettingsPage({
   async function reload() {
     setWorking(true);
     setError("");
-    setNotice("");
     setConfirmation(undefined);
     try {
       const next = await read();
       if (alive.current) {
-        setSaved(next);
-        setDraft(toDraft(next));
-        setUncertain(false);
+        savedRef.current = next; setSaved(next);
+        draftRef.current = toDraft(next); setDraft(draftRef.current);
+        uncertainRef.current = false; setUncertain(false);
       }
     } catch (error) {
       if (alive.current) {
@@ -279,90 +287,89 @@ export function SettingsPage({
     };
   }, [token]);
 
-  async function verify() {
-    setWorking(true);
-    setUncertain(true);
-    setError("");
-    setNotice("");
-    try {
-      const next = await read();
-      if (alive.current) {
-        setSaved(next);
-        setUncertain(false);
-        setNotice(
-          matches(draft, next)
-            ? "已核对：服务已保存当前草稿。"
-            : "已核对：服务当前设置与草稿不同，草稿已保留。请修正或重新读取后再保存。",
-        );
-      }
-    } catch (error) {
-      if (alive.current)
-        setError(`核对设置失败：${explain(error)}。请核对已保存设置后再提交。`);
-    } finally {
-      if (alive.current) setWorking(false);
-    }
-  }
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-    setConfirmation(undefined);
+  async function save(submitted = { ...draftRef.current }) {
+    if (!savedRef.current || (busy && !saving.current) || (working && !saving.current)) return;
     let requested: Runtime;
     try {
-      requested = runtime(draft);
+      requested = runtime(submitted);
     } catch (error) {
+      pending.current = undefined;
       setError(explain(error));
       return;
     }
+    if (saving.current) { pending.current = submitted; return; }
+    if (!uncertainRef.current && same(requested, savedRef.current.runtime)) return;
+    saving.current = true;
     setWorking(true);
-    setUncertain(true);
+    setError(""); setConfirmation(undefined);
     const toast = notify.loading(t(language, "working"));
-    const setNotice = (message: string, kind: "success" | "info" | "error" = "info") => toast.finish(message, kind);
-    const result = await perform<Settings>("set_settings", {
-      runtime: requested,
-    }, { notify: false, toast, reconcile: true });
-    if (!alive.current) { toast.dismiss(); return; }
     try {
+      // A failed readback is reconciled automatically before another write.
+      if (uncertainRef.current) {
+        const next = await read();
+        if (!alive.current) return;
+        savedRef.current = next; setSaved(next);
+        uncertainRef.current = false; setUncertain(false);
+      }
+      if (same(requested, savedRef.current.runtime)) {
+        toast.finish("已核对：服务已保存当前草稿。", "info");
+        return;
+      }
+      uncertainRef.current = true; setUncertain(true);
+      const result = await perform<Settings>("set_settings", { runtime: requested }, { notify: false, toast, reconcile: true });
+      if (!alive.current) return;
       const next = await read();
       if (!alive.current) return;
-      setSaved(next);
-      setUncertain(false);
+      savedRef.current = next; setSaved(next);
+      uncertainRef.current = false; setUncertain(false);
       if (same(requested, next.runtime)) {
-        if (result) setDraft(toDraft(next));
-        setNotice(
-          result
-            ? "保存结果已核对，服务设置与提交内容一致。"
-            : "请求报告错误，但服务已保存此草稿，已核对，无需重复提交。",
-          result ? "success" : "info",
-        );
-      } else
-        setNotice(
-          "服务当前设置与提交内容不同，草稿已保留。请检查错误或重新读取设置。",
-          "error",
-        );
+        // Normalize only submitted values that have not been edited again.
+        const normalized = toDraft(next);
+        const merged = { ...draftRef.current };
+        for (const key of Object.keys(normalized)) {
+          if (merged[key] === submitted[key]) merged[key] = normalized[key];
+        }
+        draftRef.current = merged; setDraft(merged);
+        access.refresh();
+        toast.finish(result
+          ? "保存结果已核对，服务设置与提交内容一致。"
+          : "请求报告错误，但服务已保存此草稿，已核对，无需重复提交。", result ? "success" : "info");
+      } else {
+        const message = "服务当前设置与提交内容不同，草稿已保留。请检查错误或重新读取设置。";
+        setError(message); toast.finish(message, "error");
+      }
     } catch (error) {
       if (alive.current) {
-        const message = `保存结果尚未核对：${explain(error)}。草稿已保留，请先核对已保存设置。`;
-        setError(message);
-        toast.finish(explain(error), "error");
+        const message = `保存结果尚未核对：${explain(error)}。草稿已保留，修正后失去焦点或按 Enter 将自动核对并重试。`;
+        setError(message); toast.finish(explain(error), "error");
       }
     } finally {
       if (!alive.current) toast.dismiss();
-      if (alive.current) setWorking(false);
+      saving.current = false;
+      if (alive.current) {
+        setWorking(false);
+        if (pending.current) {
+          const next = pending.current;
+          pending.current = undefined;
+          // Continue with the latest committed edit; preserve still-focused input.
+          queueMicrotask(() => { if (alive.current) { void save(next); } });
+        }
+      }
     }
   }
 
   return (
     <div className="settings-layout">
-      <TunControl token={token} language={language} status={status} connection={connection} access={access} busy={disabled}
-        perform={perform} logout={logout} blocked={!saved || dirty || uncertain} onChanged={reload} />
       <section className="panel" aria-label="服务设置编辑器">
+        <TunControl compact token={token} language={language} status={status} connection={connection} access={access} busy={disabled}
+          perform={perform} logout={logout} blocked={!saved || dirty || uncertain} onChanged={reload} />
         <div className="panel-title">
-          <h2 className="setting-heading">服务运行设置<HelpTip label="运行设置帮助">留空或选择继承时使用订阅 / 配置值，端口 0 表示禁用。保存前会校验配置，已停止的内核保持停止。离开本页会丢弃草稿。保存会替换全部运行设置，当前订阅会重新生成并校验。未选择订阅时更新独立运行配置，移除设置会保留其当前值，之后可在配置页修改。保存结果不确定时，先核对服务设置再重试。服务地址、管理认证和启动参数不在此编辑器中。</HelpTip></h2>
+          <h2 className="setting-heading">服务运行设置<HelpTip label="运行设置帮助">留空或选择继承时使用订阅 / 配置值，端口 0 表示禁用。保存前会校验配置，已停止的内核保持停止。编辑后失去焦点或按 Enter 自动应用；多行文本用 Shift+Enter 换行。未通过校验的修改会保留在本页。保存会替换全部运行设置，当前订阅会重新生成并校验。未选择订阅时更新独立运行配置，移除设置会保留其当前值，之后可在配置页修改。保存结果不确定时，下次应用前自动核对服务设置。服务地址、管理认证和启动参数不在此编辑器中。</HelpTip></h2>
           <span>
             {uncertain
               ? "服务设置待核对"
               : dirty
-                ? "有未保存的修改"
+                ? "有待应用的修改"
                 : saved
                   ? "已读取服务设置"
                   : "尚未读取设置"}
@@ -384,7 +391,17 @@ export function SettingsPage({
           </p>
         )}
         {saved && (
-          <form aria-label="运行设置表单" onSubmit={save}>
+          <form aria-label="运行设置表单" onSubmit={event => { event.preventDefault(); void save(); }}
+            onBlur={event => {
+              if (event.target.matches("input, select, textarea")) void save();
+            }}
+            onKeyDown={event => {
+              if (event.key === "Enter" && !event.nativeEvent.isComposing &&
+                event.target instanceof HTMLElement && event.target.matches("input, select, textarea") &&
+                !(event.shiftKey && event.target.matches("textarea"))) {
+                event.preventDefault(); void save();
+              }
+            }}>
             <fieldset className="network-fields basic-settings"><legend>常用设置 <HelpTip>透明代理端口仅支持 Linux，服务会校验平台支持。</HelpTip></legend><div className="settings-fields">
               {fields.map((field) => (
                 <label key={field.key} htmlFor={`setting-${field.key}`}>
@@ -397,34 +414,18 @@ export function SettingsPage({
                         inputMode={field.kind === "port" ? "numeric" : "text"}
                         placeholder={field.kind === "port" ? portPlaceholder(field.key) : "留空继承"}
                         aria-describedby={`port-hint-${field.key}`}
-                        disabled={disabled}
+                        disabled={fieldsDisabled}
                         value={draft[field.key] ?? ""}
-                        onChange={(event) => {
-                          setDraft((previous) => ({
-                            ...previous,
-                            [field.key]: event.target.value,
-                          }));
-                          setError("");
-                          setNotice("");
-                          setConfirmation(undefined);
-                        }}
+                        onChange={event => change(field.key, event.target.value)}
                       />
                     </>
                   ) : (
                     <select
                       id={`setting-${field.key}`}
                       aria-label={field.label}
-                      disabled={disabled}
+                      disabled={fieldsDisabled}
                       value={draft[field.key] ?? ""}
-                      onChange={(event) => {
-                        setDraft((previous) => ({
-                          ...previous,
-                          [field.key]: event.target.value,
-                        }));
-                        setError("");
-                        setNotice("");
-                        setConfirmation(undefined);
-                      }}
+                      onChange={event => change(field.key, event.target.value)}
                     >
                       <option value="">继承</option>
                       {options(field).map(([value, label]) => (
@@ -441,58 +442,12 @@ export function SettingsPage({
             <button type="button" className="port-refresh" onClick={access.refresh} disabled={connection !== "connected"}>
               刷新端口信息
             </button>
-            <GeoFields draft={draft} disabled={disabled} change={(key, value) => {
-              setDraft(previous => ({ ...previous, [key]: value }));
-              setError(""); setNotice(""); setConfirmation(undefined);
-            }} />
-            <DownloadFields draft={draft} disabled={disabled} onChange={(key, value) => {
-              setDraft(previous => ({ ...previous, [key]: value }));
-              setError(""); setNotice(""); setConfirmation(undefined);
-            }} />
-            <OutboundFields draft={draft} disabled={disabled} onChange={(key, value) => {
-              setDraft(previous => ({ ...previous, [key]: value }));
-              setError(""); setNotice(""); setConfirmation(undefined);
-            }} />
-            <HostsFields draft={draft} disabled={disabled} change={(key, value) => {
-              setDraft(previous => ({ ...previous, [key]: value }));
-              setError(""); setNotice(""); setConfirmation(undefined);
-            }} />
-            <AuthorityFields draft={draft} disabled={disabled} onChange={(key, value) => {
-              setDraft(previous => ({ ...previous, [key]: value }));
-              setError(""); setNotice(""); setConfirmation(undefined);
-            }} />
-            <NetworkFields
-              draft={draft}
-              disabled={disabled}
-              change={(key, value) => {
-                setDraft((previous) => ({ ...previous, [key]: value }));
-                setError("");
-                setNotice("");
-                setConfirmation(undefined);
-              }}
-            />
-            <div className="actions">
-              <button
-                className="primary"
-                disabled={disabled || uncertain || !dirty}
-              >
-                保存服务设置
-              </button>
-              <button
-                type="button"
-                disabled={disabled || uncertain}
-                onClick={() => setConfirmation("clear")}
-              >
-                全部改为继承
-              </button>
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => void verify()}
-              >
-                核对已保存设置
-              </button>
-            </div>
+            <GeoFields draft={draft} disabled={fieldsDisabled} change={change} />
+            <DownloadFields draft={draft} disabled={fieldsDisabled} onChange={change} />
+            <OutboundFields draft={draft} disabled={fieldsDisabled} onChange={change} />
+            <HostsFields draft={draft} disabled={fieldsDisabled} change={change} />
+            <AuthorityFields draft={draft} disabled={fieldsDisabled} onChange={change} />
+            <NetworkFields draft={draft} disabled={fieldsDisabled} change={change} />
           </form>
         )}
         <div className="actions settings-reload">
@@ -506,35 +461,11 @@ export function SettingsPage({
           </button>
         </div>
         {confirmation && (
-          <div
-            className="reset-confirmation"
-            role="group"
-            aria-label="设置替换确认"
-          >
-            <p>
-              {confirmation === "reload"
-                ? "重新读取会用服务当前设置替换本页草稿。"
-                : "将全部字段改为继承。此操作仅修改草稿，保存后才生效。"}
-            </p>
+          <div className="reset-confirmation" role="group" aria-label="设置替换确认">
+            <p>重新读取会用服务当前设置替换本页未应用的修改。</p>
             <div className="actions">
-              <button
-                disabled={disabled}
-                onClick={() =>
-                  confirmation === "reload"
-                    ? void reload()
-                    : (setDraft(toDraft({ schema_version: 1, runtime: {} })),
-                      setConfirmation(undefined),
-                      setNotice("已将草稿改为继承，保存后生效。"))
-                }
-              >
-                {confirmation === "reload" ? "确认重新读取" : "确认改为继承"}
-              </button>
-              <button
-                disabled={disabled}
-                onClick={() => setConfirmation(undefined)}
-              >
-                继续编辑设置
-              </button>
+              <button disabled={disabled} onClick={() => void reload()}>确认重新读取</button>
+              <button disabled={disabled} onClick={() => setConfirmation(undefined)}>继续编辑设置</button>
             </div>
           </div>
         )}
@@ -551,7 +482,7 @@ export function SettingsPage({
                 : "选择用户界面显示语言，仅保存在当前浏览器中。"}
             </HelpTip></h2>
             </div>
-            <LanguagePicker language={language} changeLanguage={changeLanguage} />
+            <LanguagePicker autoApply language={language} changeLanguage={changeLanguage} />
           </section>
         )}
         <details className="settings-details"><summary>内核实际设置</summary>
