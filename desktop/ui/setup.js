@@ -1,87 +1,116 @@
 "use strict";
-// Local status page: detect, install or start this user's mihomo-server.
+// Local status page: detect, install or start this user's mihomo-server service.
 const invoke = (command, args) => window.__TAURI_INTERNALS__.invoke(command, args);
 
 const TEXT = {
   en: {
-    detecting: ["Detecting mihomo-server…", "Checking this user's service."],
-    not_installed: ["mihomo-server is not installed",
-      "Install downloads the official installer and sets up the latest release. Your system will ask for administrator authorization."],
-    inactive: ["mihomo-server is not running", "The service is installed but stopped. Start it to manage proxies."],
-    unreachable: ["Cannot reach mihomo-server", ""],
-    running: ["mihomo-server is running", ""],
-    install: "Install", installing: "Installing…", start: "Start service", starting: "Starting…",
-    open: "Open dashboard", retry: "Waiting…", log: "Output", empty: "No output yet.",
+    detecting: "Looking for the mihomo-server service on this computer…",
+    not_installed: "The mihomo-server service is not installed on this computer.",
+    installing: "Installing the service. Approve the system authorization prompt.",
+    inactive: "The mihomo-server service is installed but not running.",
+    starting: "Starting the service…",
+    stopping: "Stopping the service…",
+    restarting: "Restarting the service…",
+    unreachable: "The mihomo-server service is not responding.",
+    running: "The mihomo-server service is running",
+    install: "Install mihomo-server service", start: "Start service", restart: "Restart service",
+    open: "Open dashboard", wait: "Please wait…", busy_installing: "Installing…",
+    busy_starting: "Starting…", busy_stopping: "Stopping…", busy_restarting: "Restarting…",
+    show: "Show output", hide: "Hide output",
   },
   zh: {
-    detecting: ["正在检测 mihomo-server…", "正在检查当前用户的服务。"],
-    not_installed: ["未安装 mihomo-server", "点击安装将下载官方安装脚本并安装最新版本，安装过程中系统会请求管理员授权。"],
-    inactive: ["mihomo-server 未运行", "服务已安装但未启动，启动后即可管理代理。"],
-    unreachable: ["无法连接 mihomo-server", ""],
-    running: ["mihomo-server 运行中", ""],
-    install: "安装", installing: "正在安装…", start: "启动服务", starting: "正在启动…",
-    open: "打开管理界面", retry: "等待中…", log: "输出", empty: "暂无输出。",
+    detecting: "正在检测本机的 mihomo-server 服务…",
+    not_installed: "本机尚未安装 mihomo-server 服务",
+    installing: "正在安装服务，请在系统弹出的授权对话框中确认",
+    inactive: "mihomo-server 服务已安装，但未运行",
+    starting: "正在启动服务…",
+    stopping: "正在停止服务…",
+    restarting: "正在重启服务…",
+    unreachable: "mihomo-server 服务无响应",
+    running: "mihomo-server 服务运行中",
+    install: "安装 mihomo-server 服务", start: "启动服务", restart: "重启服务",
+    open: "打开管理程序", wait: "请稍候…", busy_installing: "正在安装…",
+    busy_starting: "正在启动…", busy_stopping: "正在停止…", busy_restarting: "正在重启…",
+    show: "显示输出", hide: "收起输出",
   },
   zhtw: {
-    detecting: ["正在偵測 mihomo-server…", "正在檢查目前使用者的服務。"],
-    not_installed: ["未安裝 mihomo-server", "點擊安裝將下載官方安裝腳本並安裝最新版本，安裝過程中系統會要求管理員授權。"],
-    inactive: ["mihomo-server 未執行", "服務已安裝但未啟動，啟動後即可管理代理。"],
-    unreachable: ["無法連線 mihomo-server", ""],
-    running: ["mihomo-server 執行中", ""],
-    install: "安裝", installing: "正在安裝…", start: "啟動服務", starting: "正在啟動…",
-    open: "開啟管理介面", retry: "等待中…", log: "輸出", empty: "尚無輸出。",
+    detecting: "正在偵測本機的 mihomo-server 服務…",
+    not_installed: "本機尚未安裝 mihomo-server 服務",
+    installing: "正在安裝服務，請在系統彈出的授權對話框中確認",
+    inactive: "mihomo-server 服務已安裝，但未執行",
+    starting: "正在啟動服務…",
+    stopping: "正在停止服務…",
+    restarting: "正在重新啟動服務…",
+    unreachable: "mihomo-server 服務無回應",
+    running: "mihomo-server 服務執行中",
+    install: "安裝 mihomo-server 服務", start: "啟動服務", restart: "重新啟動服務",
+    open: "開啟管理程式", wait: "請稍候…", busy_installing: "正在安裝…",
+    busy_starting: "正在啟動…", busy_stopping: "正在停止…", busy_restarting: "正在重新啟動…",
+    show: "顯示輸出", hide: "收起輸出",
   },
 };
-const DOT = { running: "ok", inactive: "warn", not_installed: "warn", unreachable: "bad", detecting: "" };
+// What the button does in each service state (no task running).
+const COMMAND = {
+  not_installed: ["install", "install_service"],
+  inactive: ["start", "start_service"],
+  unreachable: ["restart", "restart_service"],
+  running: ["open", "open_dashboard"],
+};
+const TASKS = ["installing", "starting", "stopping", "restarting"];
 
 const $ = (id) => document.getElementById(id);
-let current, lastLog = "";
+let command = null, open = false, text = TEXT.en, lastLog = "";
 
 function render(state) {
-  current = state;
-  const text = TEXT[state.language] || TEXT.en;
+  text = TEXT[state.language] || TEXT.en;
   document.documentElement.lang = state.language === "en" ? "en" : state.language === "zhtw" ? "zh-TW" : "zh-CN";
-  const [title, description] = text[state.state] || text.detecting;
-  $("title").textContent = title;
-  $("dot").className = "dot " + (DOT[state.state] || "");
-  $("detail").textContent = state.state === "running"
-    ? [state.address, state.version].filter(Boolean).join(" · ")
-    : state.detail || description;
-  $("error").textContent = state.last_error || "";
-  $("app-version").textContent = "v" + state.app_version;
-  $("log-title").textContent = text.log;
 
-  const button = $("primary"), busy = state.task !== "idle";
-  if (state.task === "installing") button.textContent = text.installing;
-  else if (state.task === "starting") button.textContent = text.starting;
-  else if (state.state === "not_installed") button.textContent = text.install;
-  else if (state.state === "inactive") button.textContent = text.start;
-  else if (state.state === "running") button.textContent = text.open;
-  else button.textContent = text.retry;
-  button.disabled = busy || !["not_installed", "inactive", "running"].includes(state.state);
+  const task = TASKS.includes(state.task) ? state.task : null;
+  const action = task ? null : COMMAND[state.state];
+  let status = text[task || state.state] || text.detecting;
+  if (!task && state.state === "running" && state.version) status += " · " + state.version;
+  $("status").textContent = status;
 
-  const log = $("log"), joined = state.log.join("\n") || text.empty;
+  command = action ? action[1] : null;
+  const button = $("primary");
+  $("label").textContent = action ? text[action[0]] : task ? text["busy_" + task] : text.wait;
+  button.classList.toggle("loading", !action);
+  button.disabled = !action;
+
+  const note = $("note");
+  note.textContent = state.last_error || (state.state === "unreachable" && state.detail) || "";
+  note.classList.toggle("error", Boolean(state.last_error));
+
+  const log = $("log"), joined = state.log.join("\n");
+  $("output").classList.toggle("has-log", joined !== "");
   if (joined !== lastLog) {
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
     log.textContent = joined;
     lastLog = joined;
     if (atBottom) log.scrollTop = log.scrollHeight;
   }
+  $("toggle").textContent = (open ? text.hide + " ▾" : text.show + " ▴");
 }
 
 async function refresh() {
   try { render(await invoke("local_state")); }
-  catch (error) { $("error").textContent = String(error); }
+  catch (error) { $("note").textContent = String(error); }
 }
 
 $("primary").addEventListener("click", async () => {
-  if (!current) return;
-  const command = { not_installed: "install_service", inactive: "start_service", running: "open_dashboard" }[current.state];
   if (!command) return;
   $("primary").disabled = true;
   try { await invoke(command); }
-  catch (error) { $("error").textContent = String(error); }
+  catch (error) { $("note").textContent = String(error); }
   refresh();
+});
+
+$("toggle").addEventListener("click", () => {
+  open = !open;
+  $("output").classList.toggle("open", open);
+  $("toggle").setAttribute("aria-expanded", String(open));
+  $("toggle").textContent = open ? text.hide + " ▾" : text.show + " ▴";
+  if (open) $("log").scrollTop = $("log").scrollHeight;
 });
 
 refresh();

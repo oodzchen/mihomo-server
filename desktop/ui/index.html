@@ -8,26 +8,18 @@
   <script src="setup.js" defer></script>
 </head>
 <body>
-  <main>
-    <header>
-      <h1>Mihomo Server</h1>
-      <span id="app-version" class="muted"></span>
-    </header>
-    <section class="card" aria-live="polite">
-      <div class="state">
-        <span id="dot" class="dot"></span>
-        <strong id="title"></strong>
-      </div>
-      <p id="detail" class="detail"></p>
-      <p id="error" class="error" role="alert"></p>
-      <div class="actions">
-        <button id="primary" type="button"></button>
-      </div>
-    </section>
-    <section class="log-panel">
-      <h2 id="log-title"></h2>
-      <pre id="log" tabindex="0"></pre>
-    </section>
+  <main aria-live="polite">
+    <img class="logo" src="app.svg" alt="" width="56" height="56">
+    <h1>Mihomo Server</h1>
+    <p id="status" class="status"></p>
+    <button id="primary" class="primary" type="button">
+      <span class="spinner" aria-hidden="true"></span><span id="label"></span>
+    </button>
+    <p id="note" class="note" role="alert"></p>
   </main>
+  <section id="output" class="output">
+    <pre id="log" tabindex="0"></pre>
+    <button id="toggle" class="toggle" type="button" aria-controls="log" aria-expanded="false"></button>
+  </section>
 </body>
 </html>

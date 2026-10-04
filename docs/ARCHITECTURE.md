@@ -49,7 +49,7 @@ core problems can be repaired through the same interface.
 | `crates/clash-verge-*` | Small reusable upstream components: drafts, admission limiting, locale resources and Unix signal handling. |
 | `service` | Axum management surface, authentication, durable stores, core actor, downloads, resource/core updates, backup/restore, multi-user isolation and shutdown. The same executable is the `mihomo-server` command-line client (`service/src/cli`): `serve` (or a leading service option) runs the service, any other command is a client. |
 | `web` | React browser client. It talks only to the Rust service and keeps browser language/session presentation state local. |
-| `desktop` | Optional Tauri 2 desktop client (separate Cargo workspace, own lockfile): a window showing the service's own Web UI, a tray menu for mode/TUN/node/subscription/core control, and detection, installation and start of the local instance. Never required by the service. |
+| `desktop` | Optional Tauri 2 desktop client (separate Cargo workspace, own lockfile): a window showing the service's own Web UI, a tray menu for mode/TUN/node/subscription control and the service lifecycle, and detection, installation and start of the local instance. Never required by the service. |
 | `deploy` and `scripts` | Pinned bundle creation, installation, systemd integration, per-user helper and lifecycle checks. |
 
 `headless-core` must remain independent of Axum, React, systemd and process
@@ -158,6 +158,17 @@ may call the app's commands (detect, install, start, open), which the capability
 ACL enforces per window and origin. Installation runs the published installer,
 whose root step uses polkit (`MIHOMO_INSTALL_ELEVATE=pkexec`) instead of a
 terminal sudo prompt.
+
+The client keeps three things apart: itself (versioned on its own), the
+systemd service (`mihomo-server`, started, stopped and restarted through the
+`mihomo-server-user` helper like the command line does) and the Mihomo core
+the service supervises. The tray manages the first two and proxy settings
+through the API; it never starts or stops the core and never presents the
+core's version or phase as the service's. The service version shown is read
+from the running service binary (`/proc/<MainPID>/exe --version`), since the
+API's `status` reports the core. Failures are sent as desktop notifications
+(freedesktop D-Bus) because Linux trays have no tooltip and the menu header
+stays limited to the client version and the service state.
 
 Browser operations use independent readback after mutations. Realtime feeds can
 disconnect and resubscribe without becoming configuration authority. Browser

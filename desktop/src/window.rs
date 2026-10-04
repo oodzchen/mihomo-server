@@ -29,8 +29,8 @@ pub fn open_service_page(app: &AppHandle) {
     }
     let built = WebviewWindowBuilder::new(app, "setup", WebviewUrl::App("index.html".into()))
         .title(TITLE)
-        .inner_size(640.0, 560.0)
-        .min_inner_size(480.0, 420.0)
+        .inner_size(560.0, 520.0)
+        .min_inner_size(420.0, 460.0)
         .on_navigation(is_bundled)
         .build();
     if let Err(error) = built {

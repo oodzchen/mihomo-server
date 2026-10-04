@@ -18,29 +18,26 @@ pub enum Action {
     Unfix { group: String },
     TestGroup { group: String },
     Profile { uid: String },
-    Core(CoreOp),
     StartService,
+    StopService,
+    RestartService,
     OpenServicePage,
     OpenDashboard,
     Autostart(bool),
     Quit,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CoreOp {
-    Start,
-    Stop,
-    Restart,
-}
-
-impl CoreOp {
-    pub fn command(self) -> &'static str {
-        match self {
-            Self::Start => "start",
-            Self::Stop => "stop",
-            Self::Restart => "restart",
-        }
-    }
+/// What the client is doing in the background; one task at a time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Task {
+    Idle,
+    Installing,
+    Starting,
+    Stopping,
+    Restarting,
+    /// A management command such as a mode switch or a latency test.
+    Command,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,8 +128,8 @@ impl MenuModel {
 /// The running instance as last read through the management API.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Live {
-    /// Management address shown to the user.
-    pub address: String,
+    /// The service's own version (not the core's, which `status` reports).
+    pub service_version: Option<String>,
     pub status: Value,
     pub access: Value,
     pub user: Value,
@@ -152,7 +149,7 @@ pub enum Service {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     pub service: Service,
-    pub working: bool,
+    pub task: Task,
     pub last_error: Option<String>,
     pub autostart: bool,
 }
@@ -288,34 +285,24 @@ fn group_menu(group: &view::Group, proxies: &Map<String, Value>, strings: &Strin
     }
 }
 
-fn phase_label<'a>(phase: &'a str, strings: &'a Strings) -> &'a str {
-    match phase {
-        "running" => strings.phase_running,
-        "stopped" | "shutdown" => strings.phase_stopped,
-        "starting" => strings.phase_starting,
-        "stopping" => strings.phase_stopping,
-        "recovering" => strings.phase_recovering,
-        "failed" => strings.phase_failed,
-        other => other,
-    }
-}
-
-fn core_entries(live: &Live, strings: &Strings, entries: &mut Vec<Entry>) {
-    let phase = live.phase();
+fn proxy_entries(live: &Live, strings: &Strings, entries: &mut Vec<Entry>) {
     let mode = live.mode();
-    let mode_action = |value: &'static str| (mode != Some(value)).then_some(Action::Mode(value));
-    for (value, text) in [
-        ("direct", strings.direct),
-        ("rule", strings.rule),
-        ("global", strings.global),
-    ] {
-        entries.push(Entry::Check {
-            label: text.into(),
-            enabled: mode.is_some(),
-            checked: mode == Some(value),
-            action: mode_action(value),
-        });
-    }
+    entries.push(Entry::Submenu {
+        label: match mode {
+            Some(current) => format!("{}: {}", strings.mode, mode_label(current, strings)),
+            None => strings.mode.into(),
+        },
+        enabled: true,
+        children: MODES
+            .into_iter()
+            .map(|value| Entry::Check {
+                label: mode_label(value, strings).into(),
+                enabled: mode.is_some(),
+                checked: mode == Some(value),
+                action: (mode != Some(value)).then_some(Action::Mode(value)),
+            })
+            .collect(),
+    });
 
     let tun = live.tun();
     let state = view::tun_state(&live.access, &live.user);
@@ -372,72 +359,95 @@ fn core_entries(live: &Live, strings: &Strings, entries: &mut Vec<Entry>) {
                 .collect(),
         });
     }
-    entries.push(Entry::Separator);
-    let enabled = |allowed: &[&str]| allowed.contains(&phase);
-    for (op, text, allowed) in [
-        (CoreOp::Start, strings.start_core, &["stopped", "failed"][..]),
-        (CoreOp::Stop, strings.stop_core, &["running"][..]),
-        (CoreOp::Restart, strings.restart_core, &["running", "failed"][..]),
-    ] {
-        entries.push(Entry::Item {
-            label: text.into(),
-            enabled: enabled(allowed),
-            action: Some(Action::Core(op)),
-        });
-    }
-}
-
-pub fn derive(snapshot: &Snapshot, strings: &Strings) -> MenuModel {
-    let mut entries = Vec::new();
-    let mut icon = Icon::Offline;
-    let status = match &snapshot.service {
-        Service::Detecting => strings.detecting.to_owned(),
-        Service::NotInstalled => strings.not_installed.to_owned(),
-        Service::Inactive => strings.inactive.to_owned(),
-        Service::Unreachable(reason) => strings.unreachable.replace("{reason}", &label(reason)),
-        Service::Running(live) => {
-            let phase = live.phase();
-            if phase == "running" {
-                icon = if live.tun() == Some(true) {
-                    Icon::Tun
-                } else {
-                    Icon::Normal
-                };
-            }
-            let version = live.status.get("version").and_then(Value::as_str);
-            [Some(live.address.as_str()), Some(phase_label(phase, strings)), version]
-                .into_iter()
-                .flatten()
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>()
-                .join(" · ")
-        }
-    };
-    entries.push(info(if snapshot.working {
-        format!("{status} — {}", strings.working)
-    } else {
-        status.clone()
-    }));
-    if let Some(error) = &snapshot.last_error {
-        entries.push(info(strings.last_error.replace("{reason}", &label(error))));
-    }
-    entries.push(Entry::Separator);
-    match &snapshot.service {
-        Service::Running(live) => core_entries(live, strings, &mut entries),
-        Service::NotInstalled => entries.push(item(strings.install, Some(Action::OpenServicePage))),
-        Service::Inactive => entries.push(item(strings.start_service, Some(Action::StartService))),
-        Service::Detecting | Service::Unreachable(_) => {}
-    }
     if !matches!(entries.last(), Some(Entry::Separator)) {
         entries.push(Entry::Separator);
     }
-    let running = matches!(snapshot.service, Service::Running(_));
-    entries.push(Entry::Item {
-        label: strings.open_dashboard.into(),
-        enabled: running,
-        action: Some(Action::OpenDashboard),
-    });
-    entries.push(item(strings.service_page, Some(Action::OpenServicePage)));
+}
+
+fn mode_label<'a>(mode: &str, strings: &'a Strings) -> &'a str {
+    match mode {
+        "direct" => strings.direct,
+        "global" => strings.global,
+        _ => strings.rule,
+    }
+}
+
+/// The service's state in a few words: what a running task is doing, else
+/// what systemd and the management API report. Never the core's state.
+fn service_status(snapshot: &Snapshot, strings: &Strings) -> String {
+    let state = match (snapshot.task, &snapshot.service) {
+        (Task::Installing, _) => strings.service_installing,
+        (Task::Starting, _) => strings.service_starting,
+        (Task::Stopping, _) => strings.service_stopping,
+        (Task::Restarting, _) => strings.service_restarting,
+        (_, Service::Detecting) => strings.service_detecting,
+        (_, Service::NotInstalled) => strings.service_not_installed,
+        (_, Service::Inactive) => strings.service_stopped,
+        (_, Service::Unreachable(_)) => strings.service_unreachable,
+        (_, Service::Running(_)) => strings.service_running,
+    };
+    match &snapshot.service {
+        Service::Running(live) if snapshot.task == Task::Idle || snapshot.task == Task::Command => {
+            match &live.service_version {
+                Some(version) => format!("{} {} · {state}", strings.service, label(version)),
+                None => format!("{} · {state}", strings.service),
+            }
+        }
+        _ => format!("{} · {state}", strings.service),
+    }
+}
+
+/// Details that would widen the menu go to the tooltip (where the platform
+/// shows one); failures are also sent as notifications.
+fn tooltip(snapshot: &Snapshot, status: &str, strings: &Strings) -> String {
+    let mut lines = vec![format!("Mihomo Server · {status}")];
+    if let Service::Unreachable(reason) = &snapshot.service {
+        lines.push(reason.clone());
+    }
+    if snapshot.task == Task::Command {
+        lines.push(strings.working.into());
+    }
+    if let Some(error) = &snapshot.last_error {
+        lines.push(format!("{}: {error}", strings.failed));
+    }
+    lines.join("\n")
+}
+
+pub fn derive(snapshot: &Snapshot, strings: &Strings, desktop_version: &str) -> MenuModel {
+    let status = service_status(snapshot, strings);
+    let mut entries = vec![
+        info(strings.desktop.replace("{version}", desktop_version)),
+        info(status.clone()),
+        Entry::Separator,
+    ];
+    let mut icon = Icon::Offline;
+    if let Service::Running(live) = &snapshot.service {
+        if live.phase() == "running" {
+            icon = if live.tun() == Some(true) {
+                Icon::Tun
+            } else {
+                Icon::Normal
+            };
+        }
+        proxy_entries(live, strings, &mut entries);
+    }
+    // Falls back to the status page while the service is not reachable.
+    entries.push(item(strings.open_dashboard, Some(Action::OpenDashboard)));
+    let service = |label: &str, action| Entry::Item {
+        label: label.into(),
+        enabled: snapshot.task == Task::Idle,
+        action: Some(action),
+    };
+    match &snapshot.service {
+        Service::Running(_) | Service::Unreachable(_) => {
+            entries.push(service(strings.restart_service, Action::RestartService));
+            entries.push(service(strings.stop_service, Action::StopService));
+        }
+        Service::Inactive => entries.push(service(strings.start_service, Action::StartService)),
+        Service::NotInstalled => entries.push(service(strings.install, Action::OpenServicePage)),
+        Service::Detecting => {}
+    }
+    entries.push(Entry::Separator);
     entries.push(check(
         strings.autostart,
         snapshot.autostart,
@@ -448,7 +458,7 @@ pub fn derive(snapshot: &Snapshot, strings: &Strings) -> MenuModel {
     MenuModel {
         entries,
         icon,
-        tooltip: status,
+        tooltip: tooltip(snapshot, &status, strings),
     }
 }
 
@@ -462,9 +472,13 @@ mod tests {
         Language::En.strings()
     }
 
+    fn derive(snapshot: &Snapshot, strings: &Strings) -> MenuModel {
+        super::derive(snapshot, strings, "0.1.0")
+    }
+
     fn live(phase: &str, access: Value) -> Live {
         Live {
-            address: "http://127.0.0.1:9090".into(),
+            service_version: Some("v0.1.9".into()),
             status: json!({"phase": phase, "version": "v1.19.0"}),
             access,
             user: json!({"tun_capable": true}),
@@ -495,7 +509,7 @@ mod tests {
     fn snapshot(service: Service) -> Snapshot {
         Snapshot {
             service,
-            working: false,
+            task: Task::Idle,
             last_error: None,
             autostart: false,
         }
@@ -651,71 +665,104 @@ mod tests {
     }
 
     #[test]
-    fn core_buttons_and_subscriptions_follow_state() {
-        let enabled = |model: &MenuModel, text| match find(model, text) {
-            Entry::Item { enabled, .. } => *enabled,
-            _ => unreachable!(),
+    fn mode_is_a_submenu_of_checked_choices() {
+        let model = derive(&snapshot(Service::Running(Box::new(running("rule", false)))), strings());
+        let Entry::Submenu { label, children, .. } = find(&model, "Proxy mode") else {
+            panic!()
+        };
+        assert_eq!(label, "Proxy mode: Rule");
+        let states: Vec<_> = children.iter().map(checked).collect();
+        assert_eq!(states, [(false, true), (true, true), (false, true)]);
+
+        let unknown = live("starting", json!({"has_config": true, "running": true}));
+        let model = derive(&snapshot(Service::Running(Box::new(unknown))), strings());
+        assert!(matches!(find(&model, "Proxy mode"), Entry::Submenu { label, .. } if label == "Proxy mode"));
+    }
+
+    #[test]
+    fn the_header_shows_versions_and_service_state_only() {
+        let header = |model: &MenuModel| -> Vec<String> {
+            model.entries[..2]
+                .iter()
+                .map(|entry| match entry {
+                    Entry::Item {
+                        label, enabled: false, ..
+                    } => label.clone(),
+                    other => panic!("not an info line: {other:?}"),
+                })
+                .collect()
+        };
+        let mut failed = snapshot(Service::Running(Box::new(live(
+            "failed",
+            json!({"has_config": true, "running": false}),
+        ))));
+        failed.last_error = Some("a long reason that must not widen the menu".into());
+        let model = derive(&failed, strings());
+        // The core failed, but the service is running: no core state here.
+        assert_eq!(header(&model), ["Desktop client v0.1.0", "Service v0.1.9 · running"]);
+        assert!(model.tooltip.contains("a long reason"));
+        assert_eq!(model.icon, Icon::Offline);
+
+        let mut installing = snapshot(Service::NotInstalled);
+        installing.task = Task::Installing;
+        assert_eq!(header(&derive(&installing, strings()))[1], "Service · installing…");
+        let model = derive(&snapshot(Service::Unreachable("refused".into())), strings());
+        assert_eq!(header(&model)[1], "Service · unreachable");
+        assert_eq!(model.tooltip, "Mihomo Server · Service · unreachable\nrefused");
+    }
+
+    #[test]
+    fn service_lifecycle_follows_its_state_and_the_core_is_not_offered() {
+        let action = |model: &MenuModel, text| match find(model, text) {
+            Entry::Item { action, enabled, .. } => (action.clone(), *enabled),
+            other => panic!("not an item: {other:?}"),
         };
         let model = derive(&snapshot(Service::Running(Box::new(running("rule", false)))), strings());
-        assert!(!enabled(&model, "Start core") && enabled(&model, "Stop core") && enabled(&model, "Restart core"));
+        assert_eq!(action(&model, "Restart service"), (Some(Action::RestartService), true));
+        assert_eq!(action(&model, "Stop service"), (Some(Action::StopService), true));
+        assert!(
+            !model.flatten().iter().any(|entry| matches!(entry,
+                Entry::Item { label, .. } | Entry::Check { label, .. } | Entry::Submenu { label, .. }
+                if label.to_lowercase().contains("core"))),
+            "the menu manages the desktop client and the service, never the core"
+        );
         let Entry::Submenu { children, .. } = find(&model, "Subscriptions") else {
             panic!()
         };
         assert_eq!(children.len(), 2, "enhancement items are not subscriptions");
         assert_eq!(checked(&children[0]), (true, true));
 
-        let failed = live("failed", json!({"has_config": true, "running": false}));
-        let model = derive(&snapshot(Service::Running(Box::new(failed))), strings());
-        assert!(enabled(&model, "Start core") && !enabled(&model, "Stop core") && enabled(&model, "Restart core"));
-        assert_eq!(model.icon, Icon::Offline);
-    }
-
-    #[test]
-    fn missing_service_offers_install_or_start() {
         let model = derive(&snapshot(Service::NotInstalled), strings());
-        assert!(matches!(
-            find(&model, "Install"),
-            Entry::Item {
-                action: Some(Action::OpenServicePage),
-                ..
-            }
-        ));
-        assert!(matches!(
-            find(&model, "Open dashboard"),
-            Entry::Item { enabled: false, .. }
-        ));
-        let model = derive(&snapshot(Service::Inactive), strings());
-        assert!(matches!(
-            find(&model, "Start service"),
-            Entry::Item {
-                action: Some(Action::StartService),
-                ..
-            }
-        ));
-        let mut failing = snapshot(Service::Unreachable("refused".into()));
-        failing.last_error = Some("boom".into());
-        failing.working = true;
-        let model = derive(&failing, strings());
-        assert_eq!(model.tooltip, "Cannot reach mihomo-server: refused");
-        assert!(matches!(find(&model, "Cannot reach"), Entry::Item { label, .. } if label.ends_with("Working…")));
-        assert!(matches!(
-            find(&model, "Failed: boom"),
-            Entry::Item { enabled: false, .. }
-        ));
+        assert_eq!(action(&model, "Install"), (Some(Action::OpenServicePage), true));
+        assert_eq!(action(&model, "Open dashboard"), (Some(Action::OpenDashboard), true));
+        let mut starting = snapshot(Service::Inactive);
+        assert_eq!(
+            action(&derive(&starting, strings()), "Start service"),
+            (Some(Action::StartService), true)
+        );
+        starting.task = Task::Starting;
+        assert!(!action(&derive(&starting, strings()), "Start service").1);
+        let model = derive(&snapshot(Service::Unreachable("refused".into())), strings());
+        assert_eq!(action(&model, "Restart service").0, Some(Action::RestartService));
     }
 
     #[test]
     fn state_changes_patch_the_menu_and_selections_rebuild_it() {
         let before = derive(&snapshot(Service::Running(Box::new(running("rule", false)))), strings());
-        // Mode, TUN and delays change text and checks only.
-        let mut changed = running("direct", true);
+        // TUN and delays change text and checks only.
+        let mut changed = running("rule", true);
         changed.proxies["proxies"]["Node A"]["history"] = json!([{"delay": 99}]);
         let after = derive(&snapshot(Service::Running(Box::new(changed))), strings());
         assert_ne!(before, after);
         assert_eq!(before.shape(), after.shape());
         assert_eq!(before.actions().len(), before.shape().len());
 
-        // A new selection renames the group's submenu; GLOBAL appears in global mode.
+        // A new mode or selection renames a submenu; GLOBAL appears in global mode.
+        let direct = derive(
+            &snapshot(Service::Running(Box::new(running("direct", false)))),
+            strings(),
+        );
+        assert_ne!(before.shape(), direct.shape());
         let mut selected = running("rule", false);
         selected.proxies["proxies"]["Proxies"]["now"] = json!("Node A");
         let selected = derive(&snapshot(Service::Running(Box::new(selected))), strings());

@@ -4,8 +4,8 @@ use crate::{
     autostart,
     i18n::Language,
     local::{self, Detected, Log},
-    model::{self, Action, Live, MenuModel, Service, Snapshot},
-    tray, window,
+    model::{self, Action, Live, MenuModel, Service, Snapshot, Task},
+    notify, tray, window,
 };
 use anyhow::{Context as _, Result};
 use management_client::{Api, Endpoint};
@@ -24,20 +24,12 @@ const ACTION_TIMEOUT: Duration = Duration::from_secs(180);
 /// selections made in the dashboard), so they are also re-read on this period.
 const FULL_REFRESH: Duration = Duration::from_secs(60);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Task {
-    Idle,
-    Installing,
-    Starting,
-    Command,
-}
-
 /// Never implements Debug: it holds the management token.
 pub struct Connection {
     pub api: Api,
     pub endpoint: Endpoint,
     pub token: String,
+    pub service_version: Option<String>,
 }
 
 struct Inner {
@@ -48,7 +40,6 @@ struct Inner {
     task: Task,
     last_error: Option<String>,
     force_full: bool,
-    open_dashboard_when_running: bool,
 }
 
 pub struct Controller {
@@ -69,7 +60,6 @@ impl Controller {
                 task: Task::Idle,
                 last_error: None,
                 force_full: true,
-                open_dashboard_when_running: false,
             }),
             wake: Notify::new(),
             log: Log::default(),
@@ -84,7 +74,7 @@ impl Controller {
         let inner = self.lock();
         Snapshot {
             service: inner.service.clone(),
-            working: inner.task != Task::Idle,
+            task: inner.task,
             last_error: inner.last_error.clone(),
             autostart: autostart::enabled(),
         }
@@ -112,7 +102,7 @@ impl Controller {
     }
 
     pub fn model(&self) -> MenuModel {
-        model::derive(&self.snapshot(), self.language.strings())
+        model::derive(&self.snapshot(), self.language.strings(), crate::VERSION)
     }
 }
 
@@ -150,8 +140,8 @@ struct Poll {
 impl Poll {
     async fn connect(&self, controller: &Controller) -> Result<Option<Arc<Connection>>> {
         let detected = tokio::task::spawn_blocking(local::detect).await??;
-        let endpoint = match detected {
-            Detected::Running(endpoint) => endpoint,
+        let (endpoint, service_version) = match detected {
+            Detected::Running { endpoint, version } => (endpoint, version),
             Detected::Inactive { enabled } => {
                 let mut inner = controller.lock();
                 inner.service = Service::Inactive;
@@ -167,7 +157,12 @@ impl Poll {
         let api = Api::with_token(endpoint.clone(), token.clone())?
             .with_timeout(ACTION_TIMEOUT)
             .with_language(controller.language.code());
-        let connection = Arc::new(Connection { api, endpoint, token });
+        let connection = Arc::new(Connection {
+            api,
+            endpoint,
+            token,
+            service_version,
+        });
         controller.lock().connection = Some(connection.clone());
         Ok(Some(connection))
     }
@@ -198,7 +193,7 @@ impl Poll {
             self.full_at = Some(Instant::now());
         }
         Ok(Live {
-            address: connection.endpoint.management_url.clone(),
+            service_version: connection.service_version.clone(),
             status,
             access,
             user: self.user.clone(),
@@ -264,11 +259,7 @@ pub async fn run(app: AppHandle, open_window: bool) {
     loop {
         let delay = poll.refresh(&controller).await;
         publish(&app);
-        let running = matches!(controller.lock().service, Service::Running(_));
-        let open_dashboard = running && std::mem::take(&mut controller.lock().open_dashboard_when_running);
-        if open_dashboard {
-            window::open_dashboard(&app);
-        } else if std::mem::take(&mut first) {
+        if std::mem::take(&mut first) {
             window::open_preferred(&app);
         }
         tokio::select! {
@@ -286,7 +277,6 @@ fn command(action: &Action) -> Option<(&'static str, Value)> {
         Action::Unfix { group } => ("unfix_node", json!({"group": group})),
         Action::TestGroup { group } => ("delay_group", json!({"group": group})),
         Action::Profile { uid } => ("select_profile", json!({"uid": uid})),
-        Action::Core(op) => (op.command(), json!({})),
         _ => return None,
     })
 }
@@ -311,10 +301,13 @@ pub fn start_task(app: &AppHandle, task: Task, action: Option<Action>) -> bool {
         let controller = self::controller(&app);
         let result = match task {
             Task::Installing => local::install(&controller.log).await,
+            // A never-enabled instance is enabled: started now and at boot.
             Task::Starting => {
-                let enabled = controller.lock().enabled;
-                local::start_service(enabled, &controller.log).await
+                let verb = if controller.lock().enabled { "start" } else { "enable" };
+                local::run_helper(verb, &controller.log).await
             }
+            Task::Stopping => local::run_helper("stop", &controller.log).await,
+            Task::Restarting => local::run_helper("restart", &controller.log).await,
             Task::Command => run_command(&controller, action).await,
             Task::Idle => Ok(()),
         };
@@ -323,9 +316,10 @@ pub fn start_task(app: &AppHandle, task: Task, action: Option<Action>) -> bool {
             inner.task = Task::Idle;
             inner.force_full = true;
             if task != Task::Command {
-                // Installation and service start change the endpoint and token.
+                // Installation and service lifecycle change the endpoint and
+                // token; detect again instead of showing the state from before.
                 inner.connection = None;
-                inner.open_dashboard_when_running = result.is_ok();
+                inner.service = Service::Detecting;
             }
             if let Err(error) = &result {
                 inner.last_error = Some(short(error));
@@ -338,6 +332,9 @@ pub fn start_task(app: &AppHandle, task: Task, action: Option<Action>) -> bool {
         }
         publish(&app);
         controller.wake();
+        if let Err(error) = &result {
+            notify::failure(controller.language.strings().failed, &short(error)).await;
+        }
     });
     true
 }
@@ -356,12 +353,22 @@ pub fn dispatch(app: &AppHandle, action: Action) {
         Action::OpenServicePage => window::open_service_page(app),
         Action::Autostart(enabled) => {
             if let Err(error) = autostart::set(enabled) {
-                controller(app).lock().last_error = Some(short(&error));
+                let controller = controller(app);
+                let reason = short(&error);
+                controller.lock().last_error = Some(reason.clone());
+                let summary = controller.language.strings().failed;
+                tauri::async_runtime::spawn(async move { notify::failure(summary, &reason).await });
             }
             publish(app);
         }
         Action::StartService => {
             start_task(app, Task::Starting, None);
+        }
+        Action::StopService => {
+            start_task(app, Task::Stopping, None);
+        }
+        Action::RestartService => {
+            start_task(app, Task::Restarting, None);
         }
         action => {
             start_task(app, Task::Command, Some(action));
@@ -372,7 +379,6 @@ pub fn dispatch(app: &AppHandle, action: Action) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::CoreOp;
 
     #[test]
     fn tray_actions_map_to_management_commands() {
@@ -391,7 +397,11 @@ mod tests {
             command(&Action::Tun(true)),
             Some(("set_tun_enabled", json!({"enabled": true})))
         );
-        assert_eq!(command(&Action::Core(CoreOp::Restart)), Some(("restart", json!({}))));
+        assert_eq!(
+            command(&Action::RestartService),
+            None,
+            "service lifecycle is not an API command"
+        );
         assert_eq!(command(&Action::Quit), None);
     }
 

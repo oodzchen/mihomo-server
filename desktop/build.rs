@@ -6,6 +6,7 @@ fn main() {
             "local_state",
             "install_service",
             "start_service",
+            "restart_service",
             "open_dashboard",
         ])),
     )

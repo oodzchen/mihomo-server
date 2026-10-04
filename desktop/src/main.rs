@@ -7,6 +7,7 @@ mod controller;
 mod i18n;
 mod local;
 mod model;
+mod notify;
 mod tray;
 mod window;
 
@@ -22,7 +23,8 @@ pub const VERSION: &str = match option_env!("MIHOMO_DESKTOP_VERSION") {
 const USAGE: &str = "Usage: mihomo-server-desktop [--hidden]
 
 Opens the local mihomo-server management page and a tray menu for proxy
-mode, TUN, nodes and the core. Installs mihomo-server when it is missing.
+mode, TUN, nodes and the service itself. Installs mihomo-server when it is
+missing.
 
   --hidden    Start in the tray without opening a window
   --version   Print the version
@@ -63,6 +65,7 @@ fn main() {
             commands::local_state,
             commands::install_service,
             commands::start_service,
+            commands::restart_service,
             commands::open_dashboard
         ])
         .setup(move |app| {

@@ -25,7 +25,11 @@ pub const REPOSITORY: &str = match option_env!("MIHOMO_SERVER_REPOSITORY") {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Detected {
-    Running(Endpoint),
+    /// `version` is the running service's own version, when it can be read.
+    Running {
+        endpoint: Endpoint,
+        version: Option<String>,
+    },
     /// Installed but this user's instance is not running.
     Inactive {
         enabled: bool,
@@ -62,7 +66,10 @@ pub fn classify(state: &ServiceState, installed: bool) -> Option<Detected> {
 pub fn detect() -> Result<Detected> {
     let token_file = environment("MIHOMO_SERVER_TOKEN_FILE").map(PathBuf::from);
     if let Some(api) = environment("MIHOMO_SERVER_API") {
-        return management_client::locate(Some(&api), token_file).map(Detected::Running);
+        return management_client::locate(Some(&api), token_file).map(|endpoint| Detected::Running {
+            endpoint,
+            version: None,
+        });
     }
     let state = management_client::service_state()?;
     if let Some(detected) = classify(&state, helper().is_file()) {
@@ -72,7 +79,30 @@ pub fn detect() -> Result<Detected> {
     if let Some(token_file) = token_file {
         endpoint.token_file = token_file;
     }
-    Ok(Detected::Running(endpoint))
+    Ok(Detected::Running {
+        endpoint,
+        version: running_version(state.main_pid),
+    })
+}
+
+/// The service's version from its own binary (the management API reports only
+/// the core's). The process may run a release that was since replaced.
+fn running_version(pid: u32) -> Option<String> {
+    let output = std::process::Command::new(format!("/proc/{pid}/exe"))
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    parse_version(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// `mihomo-server 0.1.9` → `v0.1.9`.
+fn parse_version(output: &str) -> Option<String> {
+    let version = output.strip_prefix("mihomo-server ")?.trim();
+    (!version.is_empty() && version.len() <= 32 && !version.contains(char::is_whitespace))
+        .then(|| format!("v{}", version.trim_start_matches('v')))
 }
 
 /// The token is re-read for every connection: reinstalling can rotate it.
@@ -88,14 +118,16 @@ pub fn read_token(endpoint: &Endpoint) -> Result<String> {
     Ok(token.to_owned())
 }
 
-/// Enable (start now and at boot) a never-enabled instance, otherwise start it.
-pub async fn start_service(enabled: bool, log: &Log) -> Result<()> {
+/// Run a lifecycle command (`enable`, `start`, `stop`, `restart`) of the
+/// installed `mihomo-server-user` helper, which owns the systemd side.
+pub async fn run_helper(verb: &str, log: &Log) -> Result<()> {
     let helper = helper();
-    let verb = if enabled { "start" } else { "enable" };
     log.push(format!("$ {} {verb}", helper.display()));
     let mut command = Command::new(&helper);
     command.arg(verb);
-    run_logged(command, log).await
+    run_logged(command, log)
+        .await
+        .with_context(|| format!("mihomo-server-user {verb} failed"))
 }
 
 /// One output line without carriage-return progress or terminal escapes.
@@ -216,7 +248,7 @@ async fn install_from(source: &str, log: &Log) -> Result<()> {
     run_logged(command, log).await.context("the installer failed")
 }
 
-/// Bounded output of the current install/start task, for the status page.
+/// Bounded output of the current install or service task, for the status page.
 #[derive(Default)]
 pub struct Log(Mutex<VecDeque<String>>);
 
@@ -278,6 +310,13 @@ mod tests {
             classify(&state("not-found", "inactive", "", 0), true),
             Some(Detected::Inactive { enabled: false })
         );
+    }
+
+    #[test]
+    fn service_versions_come_from_the_version_flag() {
+        assert_eq!(parse_version("mihomo-server 0.1.9\n").as_deref(), Some("v0.1.9"));
+        assert_eq!(parse_version("other 0.1.9\n"), None);
+        assert_eq!(parse_version("mihomo-server \n"), None);
     }
 
     #[test]
