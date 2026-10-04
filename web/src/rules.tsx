@@ -1,3 +1,4 @@
+import { ToastMessage } from "./toast";
 import { useEffect, useMemo, useState } from "react";
 import { command, type Perform } from "./api";
 import { t, type Language, type MessageKey } from "./i18n";
@@ -74,7 +75,8 @@ export function RulesPage({
     setError("");
     setNotice(null);
     try {
-      await perform("update_rule_provider", { name });
+      const result = await perform("update_rule_provider", { name }, { notify: false });
+      if (result === undefined) return;
       setNotice({ key: "ruleProviderUpdated", name });
       setRevision((v) => v + 1);
     } catch (err) {
@@ -92,7 +94,8 @@ export function RulesPage({
     for (const name of names) {
       setUpdating((prev) => ({ ...prev, [name]: true }));
       try {
-        await perform("update_rule_provider", { name });
+        const result = await perform("update_rule_provider", { name }, { notify: false });
+        if (result === undefined) return;
       } catch (err) {
         setError({
           key: "ruleProviderUpdateFailed",
@@ -146,9 +149,7 @@ export function RulesPage({
         </p>
       )}
       {notice && (
-        <p className="success" role="status">
-          {t(language, notice.key).replace("{name}", notice.name || "")}
-        </p>
+        <ToastMessage kind="success" message={t(language, notice.key).replace("{name}", notice.name || "")} />
       )}
 
       {providerList.length > 0 && (

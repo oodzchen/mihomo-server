@@ -20,6 +20,7 @@ import { ProfilePage } from "./profiles";
 import { ConfigPage } from "./config";
 import { ProxyPage } from "./proxies";
 import { LogPage } from "./logs";
+import { ToastProvider, useToast } from "./toast";
 import "./style.css";
 
 const pages: [string, MessageKey][] = [
@@ -112,7 +113,7 @@ function App() {
   }, [language]);
   if (restoring) return null;
   return session ? (
-    <Manager token={session.token} initial={session.status} logout={logout} language={language} changeLanguage={changeLanguage} />
+    <ToastProvider language={language}><Manager token={session.token} initial={session.status} logout={logout} language={language} changeLanguage={changeLanguage} /></ToastProvider>
   ) : (
     <Login error={loginError} login={login} language={language} changeLanguage={changeLanguage} />
   );
@@ -208,8 +209,8 @@ function Manager({
   const [route, setRoute] = useState(location.pathname),
     [connection, setConnection] = useState<Connection>("connecting");
   const [busy, setBusy] = useState(false),
-    [failure, setFailure] = useState(""),
-    [notice, setNotice] = useState("");
+    [failure, setFailure] = useState("");
+  const setNotice = useToast();
   const alive = useRef(true),
     pending = useRef(new Set<AbortController>()),
     locked = useRef(false);
@@ -263,6 +264,7 @@ function Manager({
   const perform: Perform = async <T,>(
     name: string,
     fields: Record<string, unknown> = {},
+    options: { notify?: boolean } = {},
   ) => {
     if (locked.current) return;
     locked.current = true;
@@ -278,7 +280,7 @@ function Manager({
       if (alive.current) {
         setStatus(current);
         setProfiles(catalog);
-        setNotice(t(language, "completed"));
+        if (options.notify !== false) setNotice(t(language, "completed"));
       }
       return result;
     } catch (error) {
@@ -368,11 +370,6 @@ function Manager({
           {failure && (
             <p className="alert" role="alert">
               {failure}
-            </p>
-          )}
-          {notice && (
-            <p className="success" role="status">
-              {notice}
             </p>
           )}
           {status.error && (

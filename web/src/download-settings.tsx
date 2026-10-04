@@ -1,3 +1,5 @@
+import { SettingsSection } from "./settings-section";
+import { HelpTip } from "./help-tip";
 import type { Draft, Runtime } from "./network-settings";
 
 export const DOWNLOAD_KEYS = new Set(["global-ua", "etag-support"]);
@@ -31,12 +33,10 @@ export function downloadRuntime(draft: Draft): Runtime {
   return runtime;
 }
 export function DownloadFields({ draft, disabled, onChange }: { draft: Draft; disabled: boolean; onChange: (key: string, value: string) => void }) {
-  return <fieldset className="network-fields" disabled={disabled}>
+  return <SettingsSection title="核心下载设置"><fieldset className="network-fields" disabled={disabled}>
     <legend>核心下载设置</legend>
     <label><input type="checkbox" checked={draft[owned] === "true"} onChange={event => onChange(owned, event.target.checked ? "true" : "")} />管理核心下载 User-Agent</label>
-    <label>核心下载 User-Agent<input aria-label="核心下载 User-Agent" value={draft["global-ua"] ?? ""} disabled={draft[owned] !== "true"} placeholder="可显式留空" aria-describedby="download-agent-hint" onChange={event => onChange("global-ua", event.target.value)} /></label>
-    <p id="download-agent-hint" className="muted">不勾选时继承配置；勾选后可自定义或显式留空。最多 1024 个可打印 ASCII 字符。</p>
-    <label>核心下载 ETag<select aria-label="核心下载 ETag" value={draft["etag-support"] ?? ""} onChange={event => onChange("etag-support", event.target.value)}><option value="">继承</option><option value="true">启用</option><option value="false">禁用</option></select></label>
-    <p className="muted">用于核心的外部资源下载；资源自带的 User-Agent 请求头可能优先。服务导入或刷新订阅使用该订阅的下载选项。</p>
-  </fieldset>;
+    <label>核心下载 User-Agent<input aria-label="核心下载 User-Agent" value={draft["global-ua"] ?? ""} disabled={draft[owned] !== "true"} placeholder="可显式留空" aria-describedby="download-agent-hint" onChange={event => onChange("global-ua", event.target.value)} /><HelpTip id="download-agent-hint">不勾选时继承配置；勾选后可自定义或显式留空。最多 1024 个可打印 ASCII 字符。</HelpTip></label>
+    <label>核心下载 ETag<select aria-label="核心下载 ETag" value={draft["etag-support"] ?? ""} onChange={event => onChange("etag-support", event.target.value)}><option value="">继承</option><option value="true">启用</option><option value="false">禁用</option></select><HelpTip>用于核心的外部资源下载；资源自带的 User-Agent 请求头可能优先。服务导入或刷新订阅使用该订阅的下载选项。</HelpTip></label>
+  </fieldset></SettingsSection>;
 }

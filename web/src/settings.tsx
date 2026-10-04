@@ -1,3 +1,5 @@
+import { HelpTip } from "./help-tip";
+import { useToast } from "./toast";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, command, type Perform, type Connection } from "./api";
 import type { CoreStatus } from "./types";
@@ -202,8 +204,9 @@ export function SettingsPage({
   const [draft, setDraft] = useState<Draft>({});
   const [working, setWorking] = useState(false),
     [uncertain, setUncertain] = useState(false);
-  const [error, setError] = useState(""),
-    [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const notify = useToast();
+  const setNotice = (message: string) => notify(message, "info");
   const [confirmation, setConfirmation] = useState<"reload" | "clear">();
   const alive = useRef(true),
     requests = useRef(new Set<AbortController>());
@@ -314,7 +317,7 @@ export function SettingsPage({
     setUncertain(true);
     const result = await perform<Settings>("set_settings", {
       runtime: requested,
-    });
+    }, { notify: false });
     if (!alive.current) return;
     try {
       const next = await read();
@@ -346,7 +349,7 @@ export function SettingsPage({
     <div className="settings-layout">
       <section className="panel" aria-label="服务设置编辑器">
         <div className="panel-title">
-          <h2>服务运行设置</h2>
+          <h2 className="setting-heading">服务运行设置<HelpTip label="运行设置帮助">留空或选择继承时使用订阅 / 配置值，端口 0 表示禁用。保存前会校验配置，已停止的内核保持停止。离开本页会丢弃草稿。保存会替换全部运行设置，当前订阅会重新生成并校验。未选择订阅时更新独立运行配置，移除设置会保留其当前值，之后可在配置页修改。保存结果不确定时，先核对服务设置再重试。服务地址、管理认证和启动参数不在此编辑器中。</HelpTip></h2>
           <span>
             {uncertain
               ? "服务设置待核对"
@@ -357,13 +360,6 @@ export function SettingsPage({
                   : "尚未读取设置"}
           </span>
         </div>
-        <p className="muted">
-          端口留空或选择「继承」时，由订阅或运行配置提供值。0
-          表示禁用端口，「禁用」会保存为显式设置。
-        </p>
-        <p className="hint">
-          保存将替换全部运行设置。当前订阅会重新生成并校验；已停止的内核保持停止。未选择订阅时更新独立运行配置，移除设置会保留其当前值，之后可在配置页修改。
-        </p>
         {!status.config_revision && (
           <p className="info">
             尚无已提交配置，保存仅记录设置，首次启动时使用。
@@ -374,11 +370,6 @@ export function SettingsPage({
             {error}
           </p>
         )}
-        {notice && (
-          <p className="info" role="status">
-            {notice}
-          </p>
-        )}
         {working && (
           <p className="muted" role="status">
             正在读取或核对设置…
@@ -386,13 +377,14 @@ export function SettingsPage({
         )}
         {saved && (
           <form aria-label="运行设置表单" onSubmit={save}>
-            <div className="settings-fields">
+            <fieldset className="network-fields basic-settings"><legend>常用设置 <HelpTip>透明代理端口仅支持 Linux，服务会校验平台支持。</HelpTip></legend><div className="settings-fields">
               {fields.map((field) => (
-                <label key={field.key}>
-                  {field.label}
+                <label key={field.key} htmlFor={`setting-${field.key}`}>
+                  <span className="setting-name">{field.label}<HelpTip id={`port-hint-${field.key}`} label={`${field.label}帮助`}>{field.kind === "port" ? portDescription(field.key) : field.kind === "seconds" ? "整数秒；0 使用核心默认值，负数保留系统参数（取决于核心版本）。留空继承；禁用开关优先。" : "选择继承时使用订阅或运行配置的值；启用和禁用均保存为显式设置。"}</HelpTip></span>
                   {field.kind === "port" || field.kind === "seconds" ? (
                     <>
                       <input
+                        id={`setting-${field.key}`}
                         aria-label={field.label}
                         inputMode={field.kind === "port" ? "numeric" : "text"}
                         placeholder={field.kind === "port" ? portPlaceholder(field.key) : "留空继承"}
@@ -409,12 +401,10 @@ export function SettingsPage({
                           setConfirmation(undefined);
                         }}
                       />
-                      <span id={`port-hint-${field.key}`} className={`port-field-hint${access.value?.ports.some(port => port.key === field.key && port.actual !== null && port.actual !== port.configured) ? " port-mismatch" : ""}`}>
-                        {field.kind === "port" ? portDescription(field.key) : "整数秒；0 使用核心默认值，负数保留系统参数（取决于核心版本）。留空继承；禁用开关优先。"}
-                      </span>
                     </>
                   ) : (
                     <select
+                      id={`setting-${field.key}`}
                       aria-label={field.label}
                       disabled={disabled}
                       value={draft[field.key] ?? ""}
@@ -439,6 +429,7 @@ export function SettingsPage({
                 </label>
               ))}
             </div>
+            </fieldset>
             <button type="button" className="port-refresh" onClick={access.refresh} disabled={connection !== "connected"}>
               刷新端口信息
             </button>
@@ -472,10 +463,6 @@ export function SettingsPage({
                 setConfirmation(undefined);
               }}
             />
-            <p className="hint">
-              透明代理端口仅支持 Linux，重定向端口不支持
-              Windows。服务会校验平台支持。
-            </p>
             <div className="actions">
               <button
                 className="primary"
@@ -543,30 +530,29 @@ export function SettingsPage({
             </div>
           </div>
         )}
-        <p className="hint">
-          离开此页会丢弃草稿。保存结果不确定时，先核对服务设置再重试。服务地址、认证及
-          服务启动参数不在此编辑器中。
-        </p>
       </section>
       <div className="settings-side">
         {changeLanguage && (
           <section className="panel" aria-label={t(language, "language")}>
             <div className="panel-title">
-              <h2>{t(language, "language")}</h2>
-            </div>
-            <p className="muted">
+              <h2 className="setting-heading">{t(language, "language")}<HelpTip>
               {language === "en"
                 ? "Select the user interface display language. It is saved in your browser."
                 : language === "zhtw"
                 ? "選擇使用者介面顯示語言，僅儲存在目前瀏覽器中。"
                 : "选择用户界面显示语言，仅保存在当前浏览器中。"}
-            </p>
+            </HelpTip></h2>
+            </div>
             <LanguagePicker language={language} changeLanguage={changeLanguage} />
           </section>
         )}
+        <details className="settings-details"><summary>内核实际设置</summary>
         <SettingsReadback label="连接设置读回" operation="connection_settings" hint="显示核心报告的设置，不保证已识别进程或改善连接速度。未指定项可能使用核心默认值。路由标记可能以有符号 32 位整数读回，同一位模式视为一致。" token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
         <GeoReadback token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
+        </details>
+        <details className="settings-details"><summary>资源与数据库</summary>
         <ResourcesPanel token={token} status={status} connection={connection} logout={logout} language={language} />
+        </details>
         <ProfileDnsPanel
           key={`${token}:${status.active_profile ?? ""}`}
           token={token}
@@ -577,11 +563,12 @@ export function SettingsPage({
           perform={perform}
           logout={logout}
         />
+        <details className="settings-details"><summary>已保存服务设置</summary>
         <section className="panel" aria-label="已保存服务设置">
           <h2>已读取的服务设置</h2>
-          <p className="muted">
+          <HelpTip>
             显示上次读取或核对的设置。继承项的实际值请在配置页查看。
-          </p>
+          </HelpTip>
           {saved ? (
             <dl className="settings-summary">
               {fields.map((field) => (
@@ -618,6 +605,7 @@ export function SettingsPage({
             </pre>
           )}
         </section>
+        </details>
       </div>
     </div>
   );

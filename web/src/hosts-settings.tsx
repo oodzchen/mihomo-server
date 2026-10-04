@@ -1,3 +1,5 @@
+import { SettingsSection } from "./settings-section";
+import { HelpTip } from "./help-tip";
 import type { Draft, Runtime } from "./network-settings";
 
 type Hosts = Record<string, string | string[]>;
@@ -55,11 +57,9 @@ export function hostsRuntime(draft: Draft): Runtime {
   return { hosts: Object.fromEntries(Object.entries(hosts).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) };
 }
 export function HostsFields({ draft, disabled, change }: { draft: Draft; disabled: boolean; change: (key: string, value: string) => void }) {
-  return <fieldset className="network-fields" disabled={disabled}>
-    <legend>hosts 映射</legend>
+  return <SettingsSection title="hosts 映射"><fieldset className="network-fields" disabled={disabled}>
+    <legend>hosts 映射 <HelpTip>DNS 设置中的两个 hosts 开关可显式启用或禁用。系统 hosts 只控制读取，不修改主机文件；核心仍可能保留内置 localhost。生成结果请在配置页核对，运行效果需通过 DNS 查询验证。</HelpTip></legend>
     <label><input type="checkbox" checked={draft["hosts:owned"] === "true"} onChange={e => change("hosts:owned", e.target.checked ? "true" : "")} />管理 hosts 映射</label>
-    <label>hosts JSON 映射<textarea aria-label="hosts JSON 映射" rows={6} disabled={draft["hosts:owned"] !== "true"} value={draft.hosts ?? "{}"} onChange={e => change("hosts", e.target.value)} /></label>
-    <p className="hint">不勾选继承；勾选后替换整个映射，{'{}'} 清除配置中的映射。支持通配域名、IPv4/IPv6、域名别名和 lan；IP 列表最多 64 项。需要当前订阅允许 DNS 覆盖。</p>
-    <p className="muted">DNS 设置中的两个 hosts 开关可显式启用或禁用。系统 hosts 只控制读取，不修改主机文件；核心仍可能保留内置 localhost。生成结果请在配置页核对，运行效果需通过 DNS 查询验证。</p>
-  </fieldset>;
+    <label>hosts JSON 映射<textarea aria-label="hosts JSON 映射" rows={6} disabled={draft["hosts:owned"] !== "true"} value={draft.hosts ?? "{}"} onChange={e => change("hosts", e.target.value)} /><HelpTip>不勾选继承；勾选后替换整个映射，{'{}'} 清除配置中的映射。支持通配域名、IPv4/IPv6、域名别名和 lan；IP 列表最多 64 项。需要当前订阅允许 DNS 覆盖。</HelpTip></label>
+  </fieldset></SettingsSection>;
 }

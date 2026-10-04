@@ -1,3 +1,4 @@
+import { ToastMessage } from "./toast";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, command, type Perform } from "./api";
 import { t, type Language, type MessageKey } from "./i18n";
@@ -162,7 +163,7 @@ export function RawEditor({
       uid: item.uid,
       revision: base.revision,
       yaml: requested,
-    });
+    }, { notify: false });
     if (!alive.current) return;
     try {
       const next = await read();
@@ -219,9 +220,7 @@ export function RawEditor({
             </p>
           )}
           {notice && (
-            <p className="info" role="status">
-              {renderMessage(language, notice)}
-            </p>
+            <ToastMessage message={renderMessage(language, notice)} />
           )}
           {conflict && (
             <p className="alert" role="alert">

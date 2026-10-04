@@ -233,6 +233,8 @@ textarea {
 .shell {
   display: flex;
   min-height: 100vh;
+  max-width: 1600px;
+  margin-inline: auto;
 }
 .sidebar {
   width: 196px;
@@ -338,6 +340,7 @@ nav a:hover {
   min-width: 0;
   max-width: 1450px;
   padding: 24px 32px 32px;
+  margin-inline: auto;
 }
 header {
   display: flex;
@@ -392,8 +395,7 @@ header {
   display: none;
 }
 .alert,
-.info,
-.success {
+.info {
   padding: 10px 14px;
   border-radius: 4px;
   margin-bottom: 14px;
@@ -409,11 +411,6 @@ header {
   background: #f4f4f5;
   color: #27272a;
   border: 1px solid #e4e4e7;
-}
-.success {
-  background: #f0fdf4;
-  color: #166534;
-  border: 1px solid #bbf7d0;
 }
 .metrics {
   display: grid;
@@ -1320,3 +1317,59 @@ footer {
 .group-toggle-icon.expanded {
   transform: rotate(90deg);
 }
+
+/* Runtime cards mirror Verge's mode segments and TUN status card. */
+.runtime-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.mode-segments { display: flex; gap: 4px; padding: 4px; background: #f4f4f5; border-radius: 8px; }
+.mode-segments span { flex: 1; padding: 8px 12px; text-align: center; color: #71717a; border-radius: 5px; }
+.mode-segments .active { color: #fff; background: #18181b; font-weight: 600; }
+.runtime-state { margin-top: 8px; font-size: 12px; color: #71717a; }
+.tun-status { display: flex; align-items: center; gap: 14px; min-height: 68px; }
+.tun-indicator { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; font-size: 24px; background: #f4f4f5; color: #71717a; }
+.tun-indicator.enabled { background: #ecfdf5; color: #047857; }
+.tun-status strong { font-size: 17px; font-weight: 600; }
+
+/* Help is shared across settings and rendered above panels and modal clipping. */
+.setting-heading, .setting-name { display: inline-flex; align-items: center; gap: 6px; }
+.help-tip { display: inline-flex; vertical-align: middle; margin-inline: 5px; }
+.help-trigger { display: inline-grid; place-items: center; width: 17px; height: 17px; padding: 0; border-radius: 50%; font-size: 11px; color: #71717a; line-height: 1; background: transparent; }
+.help-popup { position: fixed; z-index: 3000; width: max-content; max-width: min(360px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 10px 12px; border-radius: 6px; background: #27272a; color: #fafafa; font-size: 12px; line-height: 1.6; font-weight: 400; box-shadow: 0 4px 16px #0002; overflow-wrap: anywhere; pointer-events: none; }
+
+/* Compact, grouped name/control rows; diagnostic snapshots are expandable. */
+.settings-layout { grid-template-columns: minmax(0, 1fr); max-width: 980px; margin-inline: auto; }
+.settings-fields { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.settings-layout .network-fields { border: 0; border-top: 1px solid #e4e4e7; border-radius: 0; padding: 8px 0 0; margin: 22px 0 16px; }
+.settings-layout .network-fields legend { padding-right: 8px; font-size: 13px; }
+.settings-layout .network-fields label { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 0; padding: 7px 0; border-bottom: 1px solid #f4f4f5; font-weight: 400; }
+.settings-layout .network-fields label input, .settings-layout .network-fields label select, .settings-layout .network-fields label textarea { order: 1; width: 240px; max-width: 55%; margin: 0 0 0 auto; flex-shrink: 0; }
+.settings-layout .network-fields label textarea { width: 420px; }
+.settings-layout .network-fields label input[type="checkbox"] { width: 16px; height: 16px; accent-color: #18181b; }
+.settings-layout .setting-name { flex: 1; min-width: 0; }
+.settings-side { gap: 14px; }
+.settings-side .panel { margin-bottom: 0; }
+.settings-details { min-width: 0; background: #fff; border: 1px solid #e4e4e7; border-radius: 6px; }
+.settings-details > summary { padding: 14px 20px; font-weight: 600; cursor: pointer; }
+.settings-details > summary:hover { background: #fafafa; }
+.settings-details > .panel { border: 0; border-top: 1px solid #f4f4f5; border-radius: 0; }
+.settings-layout .language-picker { display: flex; align-items: center; justify-content: space-between; margin: 0; }
+.settings-layout .language-picker select { width: 180px; margin: 0; }
+
+/* Notifications overlay the viewport and survive page navigation. */
+.toast-stack { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 2000; display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(480px, calc(100vw - 28px)); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 4px; pointer-events: none; }
+.toast { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 14px; background: #fff; border: 1px solid #e4e4e7; border-radius: 8px; box-shadow: 0 4px 18px #0002; pointer-events: auto; }
+.toast > [role="status"] { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast-icon { display: grid; place-items: center; width: 20px; height: 20px; flex-shrink: 0; border-radius: 50%; background: #dcfce7; color: #15803d; }
+.toast-info .toast-icon { background: #f4f4f5; color: #52525b; }
+.toast-close { flex-shrink: 0; padding: 2px 6px; border: 0; background: transparent; color: #71717a; font-size: 18px; }
+@media (max-width: 600px) {
+  .runtime-cards { grid-template-columns: 1fr; gap: 0; }
+  .settings-layout .network-fields label { flex-wrap: wrap; }
+  .settings-layout .network-fields label input, .settings-layout .network-fields label select { width: 160px; }
+  .settings-layout .network-fields label textarea { width: 100%; max-width: 100%; }
+  .settings-layout .setting-name { flex: 1 0 45%; }
+  .settings-layout .panel-title { gap: 8px; }
+}
+.settings-group { border-top: 1px solid #e4e4e7; margin-top: 12px; }
+.settings-group > summary { padding: 13px 0; cursor: pointer; font-weight: 600; }
+.settings-group > summary:hover { color: #52525b; }
+.settings-group > .network-fields { margin-top: 4px; }

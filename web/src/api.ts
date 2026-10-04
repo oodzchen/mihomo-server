@@ -12,6 +12,7 @@ export type Connection =
 export type Perform = <T>(
   name: string,
   fields?: Record<string, unknown>,
+  options?: { notify?: boolean },
 ) => Promise<T | undefined>;
 
 export class ApiError extends Error {

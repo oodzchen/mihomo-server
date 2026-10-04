@@ -474,6 +474,7 @@ async fn proxy_access_authenticates_and_distinguishes_saved_settings_from_stoppe
         assert_eq!(access["ports"][0]["configured"], 12347);
         assert_eq!(access["ports"][0]["setting"], 12347);
         assert!(access["ports"][0]["actual"].is_null());
+        assert!(access["reported"].is_null());
         assert_eq!(access["ports"][1]["configured"], 12346);
         assert!(access["ports"][1]["setting"].is_null());
         assert!(!access.to_string().contains("private-password"));

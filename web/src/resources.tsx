@@ -1,3 +1,5 @@
+import { HelpTip } from "./help-tip";
+import { useToast } from "./toast";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, command, type Connection } from "./api";
 import { GeoSeedAction } from "./geo_seed";
@@ -92,8 +94,7 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
   const epoch = useRef(0);
   const [checks, setChecks] = useState<Record<string, { message: string; error?: boolean }>>({});
   const [checking, setChecking] = useState<string>();
-  const [notice, setNotice] = useState("");
-  useEffect(() => { setNotice(""); }, [token, status.config_revision, connection]);
+  const setNotice = useToast();
   const [value, setValue] = useState<Inventory>();
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
@@ -112,7 +113,7 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
       setRefresh(v => v + 1);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) logout(t(language, "expiredToken"));
-      else setNotice(err instanceof Error ? err.message : String(err));
+      else setError(err instanceof Error ? err.message : String(err));
     } finally {
       setOperating(undefined);
     }
@@ -126,7 +127,7 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
       setRefresh(v => v + 1);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) logout(t(language, "expiredToken"));
-      else setNotice(err instanceof Error ? err.message : String(err));
+      else setError(err instanceof Error ? err.message : String(err));
     } finally {
       setOperating(undefined);
     }
@@ -186,6 +187,7 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
         });
       }
       setChecks(previous => ({ ...previous, [name]: { message: t(language, "resourceValidationReport", { message, bytes: report.bytes, sha256: report.sha256 }) } }));
+      setNotice(`${name}: ${message}`, report.verified ? "success" : "info");
     } catch (error) {
       if (currentEpoch !== epoch.current) return;
       if (error instanceof ApiError && error.status === 401) logout(t(language, "expiredToken"));
@@ -207,7 +209,7 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
       )}
       {item.path && <code>{item.path}</code>}
       {item.section === "geo" && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && item.state === "available" && <button type="button" disabled={!!checking} onClick={() => void validate(item.name)}>{t(language, "resourceValidate", { name: item.name })}</button>}
-      {item.section === "geo" && checks[item.name] && <p role={checks[item.name].error ? "alert" : "status"} className={checks[item.name].error ? "alert" : "info"}>{checks[item.name].message}</p>}
+      {item.section === "geo" && checks[item.name] && <p role={checks[item.name].error ? "alert" : "status"} className={checks[item.name].error ? "alert" : "resource-check"}>{checks[item.name].message}</p>}
       {item.section === "geo" && value?.bundle_dir && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && <GeoSeedAction name={item.name} token={token} status={status} connection={connection} logout={logout} language={language} installed={message => { setNotice(message); setRefresh(previous => previous + 1); }} />}
       {item.section === "geo" && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && <GeoOnlineAction name={item.name} token={token} status={status} connection={connection} logout={logout} language={language} installed={message => { setNotice(message); setRefresh(previous => previous + 1); }} />}
       {item.section === "proxy-providers" && status.phase === "running" && (
@@ -244,8 +246,7 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
   }
 
   return <section className="panel" aria-label={t(language, "resourceRegion")}>
-    <div className="panel-title"><h2>{t(language, "resourceTitle")}</h2><button type="button" disabled={connection !== "connected"} onClick={() => setRefresh(value => value + 1)}>{t(language, "resourceRefresh")}</button></div>
-    {notice && <p role="status" className="info">{notice}</p>}
+    <div className="panel-title"><h2 className="setting-heading">{t(language, "resourceTitle")}<HelpTip label={t(language, "resourceTitle")}>{t(language, "resourceHint")}</HelpTip></h2><button type="button" disabled={connection !== "connected"} onClick={() => setRefresh(value => value + 1)}>{t(language, "resourceRefresh")}</button></div>
     {connection !== "connected" ? <p className="info">{t(language, "resourceDisconnected")}</p> : error ? <p className="alert" role="alert">{t(language, "resourceReadFailed", { message: error })}</p> : !value ? <p className="muted">{t(language, "resourceReading")}</p> : <>
       <p>{t(language, "resourceDataDir")}<code>{value.data_dir}</code></p>
       {value.bundle_dir && <p>{t(language, "resourceBundleDir")}<code>{value.bundle_dir}</code></p>}
@@ -259,7 +260,6 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
       </> : <p className="muted">{t(language, "resourcePolicyUnavailable")}</p>}
       <h3>{t(language, "resourceGeoFiles")}</h3>{rows(value.geo)}
       <h3>{t(language, "resourceProviderFiles")}</h3>{value.providers.length ? rows(value.providers) : <p className="muted">{t(language, "resourceNoProviders")}</p>}
-      <p className="hint">{t(language, "resourceHint")}</p>
     </>}
   </section>;
 }

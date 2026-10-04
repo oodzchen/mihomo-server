@@ -24,7 +24,12 @@ Rebuild assets after editing the frontend and refresh the browser.
 
 ## Current scope
 
-- Responsive overview: core lifecycle/state, traffic, memory and connection count.
+- Centered responsive overview: core lifecycle/state, traffic, memory, connection
+  count, actual Direct / Rule / Global mode and core-reported TUN status.
+- Compact settings rows with expandable advanced sections, question-mark help
+  (hover/focus/touch), and collapsed core/resource/saved-state diagnostics.
+- Shared top-center toast stack with individual close controls and eight-second
+  expiry; successful operations remain visible when navigating between pages.
 - Local YAML file/content import, saved-profile selection and current profile.
 - Direct remote URL download/import with optional name and reported usage display.
   Import preserves the current profile; downloaded content is activated separately.

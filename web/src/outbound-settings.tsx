@@ -1,3 +1,5 @@
+import { SettingsSection } from "./settings-section";
+import { HelpTip } from "./help-tip";
 import type { Draft, Runtime } from "./network-settings";
 
 export const OUTBOUND_KEYS = new Set(["interface-name", "routing-mark"]);
@@ -47,12 +49,10 @@ export function OutboundFields({ draft, disabled, onChange }: {
   onChange: (key: string, value: string) => void;
 }) {
   const managed = draft[owned] === "true";
-  return <fieldset className="network-fields" disabled={disabled}>
+  return <SettingsSection title="出口设置"><fieldset className="network-fields" disabled={disabled}>
     <legend>出口设置</legend>
     <label><input type="checkbox" checked={managed} onChange={event => onChange(owned, event.target.checked ? "true" : "")} />管理出口网卡</label>
-    <label>出口网卡名称<input aria-label="出口网卡名称" disabled={!managed} value={draft["interface-name"] ?? ""} placeholder="留空取消固定网卡" aria-describedby="outbound-interface-hint" onChange={event => onChange("interface-name", event.target.value)} /></label>
-    <p id="outbound-interface-hint" className="muted">不勾选时继承配置；勾选后留空取消固定网卡，交由核心选择。指定名称应是此 Linux 主机的网卡。</p>
-    <label>Linux 路由标记<input aria-label="Linux 路由标记" inputMode="numeric" value={draft["routing-mark"] ?? ""} placeholder="留空继承" aria-describedby="outbound-mark-hint" onChange={event => onChange("routing-mark", event.target.value)} /></label>
-    <p id="outbound-mark-hint" className="muted">整数 0–4294967295；0 取消默认标记，留空继承。非零标记需要系统权限及匹配的路由策略。</p>
-  </fieldset>;
+    <label>出口网卡名称<input aria-label="出口网卡名称" disabled={!managed} value={draft["interface-name"] ?? ""} placeholder="留空取消固定网卡" aria-describedby="outbound-interface-hint" onChange={event => onChange("interface-name", event.target.value)} /><HelpTip id="outbound-interface-hint">不勾选时继承配置；勾选后留空取消固定网卡，交由核心选择。指定名称应是此 Linux 主机的网卡。</HelpTip></label>
+    <label>Linux 路由标记<input aria-label="Linux 路由标记" inputMode="numeric" value={draft["routing-mark"] ?? ""} placeholder="留空继承" aria-describedby="outbound-mark-hint" onChange={event => onChange("routing-mark", event.target.value)} /><HelpTip id="outbound-mark-hint">整数 0–4294967295；0 取消默认标记，留空继承。非零标记需要系统权限及匹配的路由策略。</HelpTip></label>
+  </fieldset></SettingsSection>;
 }

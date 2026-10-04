@@ -1,3 +1,4 @@
+import { useToast } from "./toast";
 import { useEffect, useState, type FormEvent } from "react";
 import { command, type Perform } from "./api";
 import { t, type Language } from "./i18n";
@@ -15,10 +16,11 @@ export function ConfigPage({
   busy: boolean;
   perform: Perform;
 }) {
+  const notify = useToast();
   const [yaml, setYaml] = useState(""),
     [loading, setLoading] = useState(true),
     [message, setMessage] = useState<
-      { kind: "missing" } | { kind: "applied" } | { kind: "error"; detail: string } | null
+      { kind: "missing" } | { kind: "error"; detail: string } | null
     >(null),
     [dirty, setDirty] = useState(false);
   useEffect(() => {
@@ -41,10 +43,11 @@ export function ConfigPage({
   }, [token]);
   async function apply(event: FormEvent) {
     event.preventDefault();
-    const result = await perform<CoreStatus>("edit_config", { yaml });
+    const result = await perform<CoreStatus>("edit_config", { yaml }, { notify: false });
     if (result) {
       setDirty(false);
-      setMessage({ kind: "applied" });
+      setMessage(null);
+      notify(t(language, "configApplied"));
     }
   }
   return (
@@ -58,7 +61,7 @@ export function ConfigPage({
       </p>
       {message && <p className="info">
         {message.kind === "missing" ? t(language, "configMissing") :
-          message.kind === "applied" ? t(language, "configApplied") : message.detail}
+          message.detail}
       </p>}
       <form onSubmit={apply}>
         <label>

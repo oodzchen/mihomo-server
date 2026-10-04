@@ -53,6 +53,48 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
+## Increment: compact Web management interface
+
+**Implemented.** The Web interface follows the local Clash Verge Rev reference's
+`clash-mode-card`, `proxy-tun-card` and `SettingItem` layout patterns.
+
+- Overview adds a three-segment Direct / Rule / Global indicator and a TUN
+  status card. Both use the same `useProxyAccess` snapshot as the listener panel;
+  no second polling loop is created. The authenticated `proxy_access.reported`
+  projection now includes Mihomo's `tun.enable`. Stopped, disconnected and failed
+  readbacks clear active indicators instead of showing a configured value as a
+  live state. Existing five-second refresh and lifecycle/revision refresh apply.
+- Settings use compact name/control rows in a centered column. Advanced Geo,
+  download, outbound, hosts, listener, DNS and TUN sections are expandable;
+  their drafts remain mounted and are included in full-replacement saves.
+  Saved snapshots, actual-core readback and resource inventory are collapsed by
+  default. Existing inheritance, explicit false/empty values, validation,
+  DNS confirmation and uncertain-save reconciliation remain in place.
+- `HelpTip` replaces explanatory paragraphs with question-mark controls. Hover,
+  keyboard focus and touch expose help; Escape/blur dismiss it. Tooltips use a
+  viewport-bounded portal, so panels do not clip them. Current port/source
+  information is available through each port's help control and placeholder.
+- `ToastProvider` owns a viewport-top centered notification stack across routes.
+  Each item has an independent ID, manual close control, status announcement and
+  eight-second expiry; logout disposes notifications and timers. Shared command
+  success, settings/DNS reconciliation, raw edits, resource operations and core
+  upgrade receipts use this layer. `Perform` accepts an optional `notify: false`
+  for actions that publish their own verified receipt, avoiding duplicate generic
+  success. Rule-provider failures do not publish a success notification. Errors,
+  confirmations and ongoing operational states stay next to the relevant control.
+  Detailed Geo validation receipts remain available as plain resource results.
+- The application shell has a centered maximum width, with content centered
+  within the workspace; narrow viewports retain the existing mobile navigation.
+
+Verification: production TypeScript/Vite build and Rust formatting passed; the
+authenticated proxy-access test passed. The full real-Mihomo browser suite passed
+**56 tests with 5 existing conditional skips**, followed by **6 focused passes**
+after the final configuration-toast adjustment, including a new repeated-save
+regression. Desktop/mobile screenshots confirm layout, tooltip bounds and centered
+notifications. The opt-in resource/settings/HTTPS test passed using an isolated
+copy of the real `./data` subscription, verifying source fingerprints and a
+proxied HTTPS 204 response without changing production data.
+
 ## Increment: zero-argument shared installation
 
 Accepted design: one system-wide bundle and per-user systemd instances. The
@@ -155,7 +197,8 @@ out of scope; sockets stay under `<data-dir>/run`.
    UID with the packager's 0700 root (readable by alice only when the host UID was
    1000). run.sh now makes `/work` root-owned and the bundle world-readable.
 
-**Latest completed task:** Installer management links carry a token and log in automatically (see the increment below).
+**Latest completed task:** Compact Web management — live mode/TUN overview, grouped settings/help, stacked top-center toasts and centered content (see the increment above).
+**Previous completed task:** Installer management links carry a token and log in automatically (see the increment below).
 **Previous completed task:** Zero-argument shared installation, step 4 — per-user Web/installer core upgrades with the TUN capability launcher, complete uninstall and `--purge`.
 **Previous completed task:** Zero-argument shared installation, step 3 of 3 — isolated download/systemd/migration/real-node/reboot acceptance (95 checks), deployment docs and acceptance fixes.
 **Previous completed task:** Zero-argument shared installation, step 2 of 3 — unified installer, automatic authorization/linger and guarded legacy migration.

@@ -7,6 +7,7 @@ type ConnectionValues = {
   bind_address: string;
   mode: string;
   ipv6: boolean;
+  tun_enabled?: boolean;
 };
 type Access = {
   running: boolean;
@@ -64,13 +65,16 @@ export function useProxyAccess({ token, status, connection, logout }: {
   return { value, error, refresh: () => setRefresh(value => value + 1) };
 }
 
+export type ProxyAccessState = ReturnType<typeof useProxyAccess>;
+
 export function ProxyAccessPanel(props: {
   token: string;
   status: CoreStatus;
   connection: Connection;
   logout: (reason?: string) => void;
+  access: ProxyAccessState;
 }) {
-  const { value, error, refresh } = useProxyAccess(props);
+  const { value, error, refresh } = props.access;
   const { connection } = props;
 
   const live = value?.reported;

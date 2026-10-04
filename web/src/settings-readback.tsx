@@ -1,3 +1,4 @@
+import { HelpTip } from "./help-tip";
 import { useEffect, useState } from "react";
 import { ApiError, command, type Connection } from "./api";
 import type { CoreStatus } from "./types";
@@ -30,7 +31,7 @@ export function SettingsReadback({ token, status, connection, logout, settingsKe
         <p>服务设置：{show(field.setting, "继承")}</p><p>配置值：{show(field.configured, "未指定")}</p><p>内核实际值：{show(field.actual, "未确认")}</p>
         {field.mismatch && <p className="alert">配置值与内核实际值不一致。</p>}
       </li>)}</ul>
-      <p className="hint">{hint}</p>
+      <HelpTip>{hint}</HelpTip>
     </>}
   </section>;
 }

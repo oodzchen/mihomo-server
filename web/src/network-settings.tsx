@@ -1,3 +1,5 @@
+import { SettingsSection } from "./settings-section";
+import { HelpTip } from "./help-tip";
 type Value = number | boolean | string | string[] | Record<string, unknown>;
 export type Runtime = Record<string, Value | Record<string, Value>>;
 export type Draft = Record<string, string>;
@@ -179,13 +181,12 @@ export function NetworkFields({
   return (
     <>
       {(["dns", "tun"] as const).map((section) => (
-        <fieldset className="network-fields" key={section} disabled={disabled}>
-          <legend>{section.toUpperCase()} 设置</legend>
-          <p className="hint">
+        <SettingsSection key={section} title={`${section.toUpperCase()} 设置`}><fieldset className="network-fields" disabled={disabled}>
+          <legend>{section.toUpperCase()} 设置 <HelpTip>
             {section === "dns"
               ? "两个 hosts 开关的禁用会显式覆盖；其他 DNS 禁用项、空字符串和空列表仅保存并继承订阅值。DNS 和 hosts 设置需要当前订阅允许 DNS 覆盖。"
               : "TUN 的禁用和空列表会显式覆盖订阅值。自动重定向仅支持 Linux；实际启用需要服务主机权限和网络条件。"}
-          </p>
+          </HelpTip></legend>
           <label>
             {section.toUpperCase()} 设置来源
             <select
@@ -268,7 +269,7 @@ export function NetworkFields({
               })}
             </div>
           )}
-        </fieldset>
+        </fieldset></SettingsSection>
       ))}
     </>
   );

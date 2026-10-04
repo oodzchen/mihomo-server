@@ -83,6 +83,7 @@ pub(crate) async fn inspect(manager: &CoreManager) -> Result<Value> {
             "bind_address": core.bind_address,
             "mode": core.mode,
             "ipv6": core.ipv6,
+            "tun_enabled": core.tun.enable,
         })),
         "dns_enabled": config.get("dns").and_then(|value| value.get("enable")).and_then(|value| value.as_bool()).unwrap_or(false),
         "tun_enabled": config.get("tun").and_then(|value| value.get("enable")).and_then(|value| value.as_bool()).unwrap_or(false),

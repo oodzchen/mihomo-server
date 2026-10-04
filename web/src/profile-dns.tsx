@@ -1,3 +1,5 @@
+import { HelpTip } from "./help-tip";
+import { useToast } from "./toast";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, command, type Perform, type Connection } from "./api";
 import type { CoreStatus } from "./types";
@@ -47,8 +49,9 @@ export function ProfileDnsPanel({
   const [challenge, setChallenge] = useState<string>();
   const [working, setWorking] = useState(false),
     [uncertain, setUncertain] = useState(true);
-  const [error, setError] = useState(""),
-    [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const notify = useToast();
+  const setNotice = (message: string) => notify(message, "info");
   const alive = useRef(true),
     serial = useRef(0),
     requests = useRef(new Set<AbortController>());
@@ -115,7 +118,7 @@ export function ProfileDnsPanel({
       uid,
       enabled,
       ...(confirmation ? { confirmation } : {}),
-    });
+    }, { notify: false });
     if (!alive.current) return;
     // Independent readback also reconciles errors after a logical commit.
     const id = ++serial.current;
@@ -170,14 +173,13 @@ export function ProfileDnsPanel({
   const disabled = blocked || working || uncertain || connection !== "connected";
   return (
     <section className="panel profile-dns" aria-label="订阅 DNS 覆盖">
-      <h2>当前订阅 DNS 覆盖</h2>
-      <p className="muted">
+      <h2 className="setting-heading">当前订阅 DNS 覆盖<HelpTip label="订阅 DNS 覆盖帮助">
         此开关决定当前订阅能否使用已保存的 DNS 页面设置和 hosts 映射。请先保存草稿；它与 DNS
         启用字段分别控制。
-      </p>
-      <p className="hint">
+      </HelpTip></h2>
+      <HelpTip label="DNS 会话确认帮助">
         确认仅在本次服务会话内有效。重启或专用解析来源变化后需重新确认；已提交的运行配置可能仍保留原值，下一次生成才应用保护。实际值请在配置页查看。
-      </p>
+      </HelpTip>
       {!hasDns && <p className="hint">启用覆盖前，请先保存 DNS 配置段或 hosts 映射。</p>}
       {!uid ? (
         <p className="muted">尚未选择订阅。</p>
@@ -205,11 +207,6 @@ export function ProfileDnsPanel({
           {error && (
             <p className="alert" role="alert">
               {error}
-            </p>
-          )}
-          {notice && (
-            <p className="info" role="status">
-              {notice}
             </p>
           )}
           {uncertain && <p className="hint">DNS 状态待核对。</p>}

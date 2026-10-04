@@ -1,3 +1,5 @@
+import { SettingsSection } from "./settings-section";
+import { HelpTip } from "./help-tip";
 import type { Connection } from "./api";
 import { SettingsReadback } from "./settings-readback";
 import type { CoreStatus } from "./types";
@@ -65,9 +67,8 @@ export function geoRuntime(draft: Draft): Runtime {
   return result;
 }
 export function GeoFields({ draft, disabled, change }: { draft: Draft; disabled: boolean; change: (key: string, value: string) => void }) {
-  return <fieldset className="network-fields" disabled={disabled}>
-    <legend>Geo 设置</legend>
-    <p className="hint">留空或继承时保留订阅值。更新间隔单位为小时；启用自动更新后由 Mihomo 自行下载，不提供服务侧更新回滚。模式切换不保证所需数据库已准备好。</p>
+  return <SettingsSection title="Geo 设置"><fieldset className="network-fields" disabled={disabled}>
+    <legend>Geo 设置 <HelpTip>留空或继承时保留订阅值。更新间隔单位为小时；启用自动更新后由 Mihomo 自行下载，不提供服务侧更新回滚。模式切换不保证所需数据库已准备好。</HelpTip></legend>
     <div className="settings-fields">
       {scalars.map(f => <label key={f.key}>{f.label}<select aria-label={f.label} value={draft[f.key] ?? ""} onChange={event => change(f.key, event.target.value)}>
         <option value="">继承</option>{f.values.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
@@ -76,7 +77,7 @@ export function GeoFields({ draft, disabled, change }: { draft: Draft; disabled:
     </div>
     <label><input type="checkbox" checked={draft["geox-url"] === "true"} onChange={event => change("geox-url", event.target.checked ? "true" : "")} />管理 Geo 下载地址</label>
     <div className="settings-fields">{urls.map(([key, label]) => <label key={key}>{label}<input aria-label={label} disabled={draft["geox-url"] !== "true"} placeholder="留空继承此地址" value={draft[`geox-url.${key}`] ?? ""} onChange={event => change(`geox-url.${key}`, event.target.value)} /></label>)}</div>
-  </fieldset>;
+  </fieldset></SettingsSection>;
 }
 
 export function GeoReadback(props: { token: string; status: CoreStatus; connection: Connection; logout: (reason?: string) => void; settingsKey?: string }) {

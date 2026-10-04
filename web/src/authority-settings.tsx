@@ -1,3 +1,5 @@
+import { SettingsSection } from "./settings-section";
+import { HelpTip } from "./help-tip";
 import type { Draft, Runtime } from "./network-settings";
 
 export const AUTHORITY_KEYS = new Set([
@@ -157,8 +159,8 @@ export function AuthorityFields({
   onChange: (key: string, value: string) => void;
 }) {
   return (
-    <fieldset className="network-fields" disabled={disabled}>
-      <legend>监听与访问控制 (Listener & Access Control)</legend>
+    <SettingsSection title="监听与访问控制"><fieldset className="network-fields" disabled={disabled}>
+      <legend>监听与访问控制</legend>
 
       <label>
         <input
@@ -166,7 +168,7 @@ export function AuthorityFields({
           checked={draft[ownedBind] === "true"}
           onChange={(e) => onChange(ownedBind, e.target.checked ? "true" : "")}
         />
-        管理绑定监听地址 (bind-address)
+        管理绑定监听地址
       </label>
       <label>
         绑定地址
@@ -177,8 +179,7 @@ export function AuthorityFields({
           placeholder="*、localhost、127.0.0.1、::1 或留空"
           onChange={(e) => onChange("bind-address", e.target.value)}
         />
-      </label>
-      <p className="muted">勾选后自定义绑定地址或设为 '*'。未勾选时继承订阅或核心默认值。</p>
+      <HelpTip>勾选后自定义绑定地址或设为 '*'。未勾选时继承订阅或核心默认值。</HelpTip></label>
 
       <label>
         <input
@@ -186,7 +187,7 @@ export function AuthorityFields({
           checked={draft[ownedAuth] === "true"}
           onChange={(e) => onChange(ownedAuth, e.target.checked ? "true" : "")}
         />
-        管理 HTTP/SOCKS 认证（勾选且留空表示显式清空订阅认证）
+        管理 HTTP/SOCKS 认证<HelpTip>勾选且留空会显式清空订阅认证。</HelpTip>
       </label>
       <label>
         认证列表 (user:password，每行一条或逗号分隔)
@@ -206,7 +207,7 @@ export function AuthorityFields({
           checked={draft[ownedSkip] === "true"}
           onChange={(e) => onChange(ownedSkip, e.target.checked ? "true" : "")}
         />
-        管理跳过认证 IP 前缀（勾选且留空表示显式清空）
+        管理跳过认证 IP 前缀<HelpTip>勾选且留空会显式清空。每行一条 IP/CIDR。</HelpTip>
       </label>
       <label>
         跳过认证 IP/CIDR (每行一条)
@@ -298,6 +299,6 @@ export function AuthorityFields({
           <option value="false">禁用</option>
         </select>
       </label>
-    </fieldset>
+    </fieldset></SettingsSection>
   );
 }
