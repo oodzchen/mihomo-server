@@ -3,6 +3,8 @@
 //! running authenticated commands and reading their responses.
 mod api;
 mod endpoint;
+#[cfg(feature = "events")]
+pub mod events;
 pub mod view;
 
 pub use api::{Api, CommandError};

@@ -89,13 +89,11 @@ export function TunControl({ token, language, status, connection, access, busy, 
       <label htmlFor="setting-tun-mode">{text.title}</label>
       <select id="setting-tun-mode" aria-label={text.title} disabled={disabled}
         value={current === undefined ? "" : String(pending ?? current)}
-        onChange={event => setPending(event.target.value === "true")}
-        onBlur={() => { if (pending !== undefined && pending !== current) void toggle(pending); }}
-        onKeyDown={event => {
-          if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            if (pending !== undefined && pending !== current) void toggle(pending);
-          }
+        onChange={event => {
+          // Applied as soon as it is chosen; `pending` shows it until readback.
+          const enabled = event.target.value === "true";
+          setPending(enabled);
+          if (enabled !== current) void toggle(enabled);
         }}>
         {current === undefined && <option value="">{text.unknown}</option>}
         <option value="true">{text.on}</option><option value="false">{text.off}</option>

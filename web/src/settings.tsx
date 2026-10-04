@@ -489,13 +489,13 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
             <div className="panel-title">
               <h2 className="setting-heading">{t(language, "language")}<HelpTip>
               {language === "en"
-                ? "Select the user interface display language. It is saved in your browser."
+                ? "Select the user interface display language. It applies immediately, is saved with this instance and is shared with its other windows and the desktop client."
                 : language === "zhtw"
-                ? "選擇使用者介面顯示語言，僅儲存在目前瀏覽器中。"
-                : "选择用户界面显示语言，仅保存在当前浏览器中。"}
+                ? "選擇使用者介面顯示語言。選擇後立即生效，儲存在目前實例中，並同步到其他視窗和桌面端。"
+                : "选择用户界面显示语言。选择后立即生效，保存在当前实例中，并同步到其他窗口和桌面端。"}
             </HelpTip></h2>
             </div>
-            <LanguagePicker autoApply language={language} changeLanguage={changeLanguage} />
+            <LanguagePicker language={language} changeLanguage={changeLanguage} />
           </section>
         )}
         <details className="settings-details"><summary>内核实际设置</summary>

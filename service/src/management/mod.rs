@@ -2,6 +2,7 @@
 mod assets;
 pub mod auth;
 pub mod http;
+pub mod preferences;
 mod websocket;
 
 use crate::core_manager::{CoreManager, CorePhase};
@@ -226,6 +227,12 @@ pub enum ManagementCommand {
     UnfixNode {
         group: String,
     },
+    /// Interface preferences shared by this instance's clients.
+    Preferences {},
+    /// `null` clears it: each client then uses its own default.
+    SetLanguage {
+        language: Option<preferences::Language>,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -238,14 +245,22 @@ pub struct RequestCredentials<'a> {
 pub struct Management {
     manager: CoreManager,
     authentication: Authentication,
+    preferences: preferences::PreferenceStore,
 }
 
 impl Management {
+    /// Preferences stay in memory unless [`Self::with_preferences`] persists them.
     pub fn new(manager: CoreManager, authentication: Authentication) -> Self {
         Self {
             manager,
             authentication,
+            preferences: preferences::PreferenceStore::in_memory(),
         }
+    }
+
+    pub fn with_preferences(mut self, preferences: preferences::PreferenceStore) -> Self {
+        self.preferences = preferences;
+        self
     }
 
     pub fn authorize(&self, credentials: RequestCredentials<'_>) -> Result<()> {
@@ -403,6 +418,10 @@ impl Management {
             }
             ManagementCommand::ProxyAccess {} => crate::proxy_access::inspect(&self.manager).await?,
             ManagementCommand::SetProxyMode { mode } => serde_json::to_value(self.manager.set_proxy_mode(mode).await?)?,
+            ManagementCommand::Preferences {} => serde_json::to_value(self.preferences.get())?,
+            ManagementCommand::SetLanguage { language } => {
+                serde_json::to_value(self.preferences.set_language(language).await?)?
+            }
             ManagementCommand::SetTunEnabled { enabled } => {
                 serde_json::to_value(self.manager.set_tun_enabled(enabled).await?)?
             }

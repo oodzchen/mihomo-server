@@ -1598,9 +1598,12 @@ name = "management-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "futures-util",
  "libc",
  "reqwest",
  "serde_json",
+ "tokio",
+ "tokio-tungstenite 0.29.0",
  "url",
 ]
 

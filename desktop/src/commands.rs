@@ -33,7 +33,7 @@ pub fn local_state(controller: State<'_, Arc<Controller>>) -> LocalState {
         task: controller.task(),
         failed: controller.failed(),
         log: controller.log.lines(),
-        language: controller.language.code(),
+        language: controller.language().code(),
     }
 }
 

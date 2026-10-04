@@ -78,12 +78,15 @@ export interface ProxyProviders {
 export interface ProxyDelay {
   delay: number;
 }
+/** Interface preferences this instance shares with all of its clients. */
+export type Preferences = { language?: "zh" | "zhtw" | "en" | null };
 export type EventMessage = {
   type: string;
   data?: unknown;
   status?: CoreStatus;
   profiles?: Profiles;
   logs?: CoreLog[];
+  preferences?: Preferences;
   code?: string;
   message?: string;
 };

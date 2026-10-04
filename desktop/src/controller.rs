@@ -8,7 +8,7 @@ use crate::{
     notify, tray, window,
 };
 use anyhow::{Context as _, Result};
-use management_client::{Api, Endpoint};
+use management_client::{Api, Endpoint, events::Feed};
 use serde_json::{Value, json};
 use std::{
     sync::{Arc, Mutex, MutexGuard},
@@ -33,6 +33,8 @@ pub struct Connection {
 }
 
 struct Inner {
+    /// The instance's shared interface language, else the system locale.
+    language: Language,
     service: Service,
     /// Whether the detected-but-stopped unit is enabled at boot.
     enabled: bool,
@@ -45,7 +47,7 @@ struct Inner {
 }
 
 pub struct Controller {
-    pub language: Language,
+    system_language: Language,
     inner: Mutex<Inner>,
     wake: Notify,
     pub log: Log,
@@ -54,8 +56,9 @@ pub struct Controller {
 impl Controller {
     pub fn new(language: Language) -> Self {
         Self {
-            language,
+            system_language: language,
             inner: Mutex::new(Inner {
+                language,
                 service: Service::Detecting,
                 enabled: false,
                 connection: None,
@@ -91,6 +94,17 @@ impl Controller {
         self.lock().task
     }
 
+    pub fn language(&self) -> Language {
+        self.lock().language
+    }
+
+    /// Follow the instance's preference (`None`: the system locale); whether
+    /// the language changed.
+    fn set_language(&self, preference: Option<Language>) -> bool {
+        let language = preference.unwrap_or(self.system_language);
+        std::mem::replace(&mut self.lock().language, language) != language
+    }
+
     pub fn failed(&self) -> Option<Task> {
         self.lock().failed
     }
@@ -109,7 +123,7 @@ impl Controller {
     }
 
     pub fn model(&self) -> MenuModel {
-        model::derive(&self.snapshot(), self.language.strings())
+        model::derive(&self.snapshot(), self.language().strings())
     }
 }
 
@@ -161,9 +175,13 @@ impl Poll {
             }
         };
         let token = local::read_token(&endpoint)?;
-        let api = Api::with_token(endpoint.clone(), token.clone())?
-            .with_timeout(ACTION_TIMEOUT)
-            .with_language(controller.language.code());
+        let api = Api::with_token(endpoint.clone(), token.clone())?.with_timeout(ACTION_TIMEOUT);
+        // Adopt the instance's language before the first menu is shown; older
+        // services have no preferences and keep the system locale.
+        if let Ok(preferences) = timed(api.command("preferences", json!({}))).await {
+            controller.set_language(preference(&preferences));
+        }
+        let api = api.with_language(controller.language().code());
         let connection = Arc::new(Connection {
             api,
             endpoint,
@@ -281,6 +299,43 @@ pub async fn run(app: AppHandle, open_window: bool) {
     }
 }
 
+/// The language in a `preferences` value; unset or unknown is `None`.
+fn preference(preferences: &Value) -> Option<Language> {
+    preferences
+        .get("language")
+        .and_then(Value::as_str)
+        .and_then(Language::from_code)
+}
+
+/// Follow the instance's interface language as the service pushes it, so a
+/// change made in the Web UI (or any other client) reaches the tray at once.
+pub async fn follow_preferences(app: AppHandle) {
+    let controller = controller(&app);
+    let mut failures = 0u32;
+    loop {
+        let Some(connection) = controller.connection() else {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            continue;
+        };
+        match Feed::connect(&connection.endpoint, &connection.token, Some("preferences")).await {
+            Ok(mut feed) => {
+                failures = 0;
+                while let Ok(Some(event)) = feed.next().await {
+                    if event["type"] == "preferences" && controller.set_language(preference(&event["data"])) {
+                        // Service messages follow too: reconnect with the new Accept-Language.
+                        controller.drop_connection();
+                        publish(&app);
+                        controller.wake();
+                    }
+                }
+            }
+            // Stopped, restarting, or an older service without the feed.
+            Err(_) => failures = (failures + 1).min(5),
+        }
+        tokio::time::sleep(Duration::from_secs(2u64.pow(failures).min(30))).await;
+    }
+}
+
 fn command(action: &Action) -> Option<(&'static str, Value)> {
     Some(match action {
         Action::Mode(mode) => ("set_proxy_mode", json!({"mode": mode})),
@@ -342,7 +397,7 @@ pub fn start_task(app: &AppHandle, task: Task, action: Option<Action>) -> bool {
         publish(&app);
         controller.wake();
         if let Err(error) = &result {
-            notify::failure(controller.language.strings().failed, &short(error)).await;
+            notify::failure(controller.language().strings().failed, &short(error)).await;
         }
     });
     true
@@ -365,7 +420,7 @@ pub fn dispatch(app: &AppHandle, action: Action) {
                 let controller = controller(app);
                 let reason = short(&error);
                 controller.lock().last_error = Some(reason.clone());
-                let summary = controller.language.strings().failed;
+                let summary = controller.language().strings().failed;
                 tauri::async_runtime::spawn(async move { notify::failure(summary, &reason).await });
             }
             publish(app);
@@ -412,6 +467,20 @@ mod tests {
             "service lifecycle is not an API command"
         );
         assert_eq!(command(&Action::Quit), None);
+    }
+
+    #[test]
+    fn the_instance_language_wins_and_unset_falls_back_to_the_system() {
+        let controller = Controller::new(Language::En);
+        assert!(controller.set_language(preference(&json!({"language": "zhtw"}))));
+        assert_eq!(controller.language(), Language::Zhtw);
+        assert!(
+            !controller.set_language(preference(&json!({"language": "zhtw"}))),
+            "unchanged"
+        );
+        assert!(controller.set_language(preference(&json!({"language": null}))));
+        assert_eq!(controller.language(), Language::En);
+        assert!(!controller.set_language(preference(&json!({"language": "klingon"}))));
     }
 
     #[test]

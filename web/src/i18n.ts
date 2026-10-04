@@ -1,5 +1,6 @@
-// Browser language stays in this origin's storage; it never changes the
-// service-wide locale. The fallback and regional aliases follow upstream i18n.
+// The interface language is an instance preference on the service (shared with
+// the desktop client); this origin keeps a copy for the login page. The fallback
+// and regional aliases follow upstream i18n.
 import type { Connection } from "./api";
 
 export type Language = "zh" | "en" | "zhtw";

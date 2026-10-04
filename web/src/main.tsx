@@ -13,7 +13,7 @@ import { CoreUpgradePage } from "./core-upgrade";
 import { RulesPage } from "./rules";
 import { LanguagePicker } from "./language-picker";
 import { connectionLabel, phaseLabel, resolveLanguage, savedLanguage, saveLanguage, t, type Language, type MessageKey } from "./i18n";
-import type { CoreLog, CoreStatus, EventMessage, Profiles } from "./types";
+import type { CoreLog, CoreStatus, EventMessage, Preferences, Profiles } from "./types";
 import { describe } from "./format";
 import { Overview } from "./overview";
 import { ProfilePage } from "./profiles";
@@ -226,6 +226,21 @@ function Manager({
   settingsDirtyRef.current = settingsEditor.dirty;
   const languageRef = useRef(language);
   languageRef.current = language;
+  // The interface language is an instance preference shared with the other
+  // clients (desktop tray included): adopt what the service pushes, and save
+  // changes made here to the service, which pushes them to everyone else.
+  const adoptPreferences = useCallback((preferences?: Preferences) => {
+    if (preferences?.language && preferences.language !== languageRef.current) changeLanguage(preferences.language);
+  }, [changeLanguage]);
+  const changeSharedLanguage = useCallback((value: string) => {
+    const next = resolveLanguage(value);
+    changeLanguage(next);
+    command<Preferences>(token, "set_language", { language: next }).catch((error) => {
+      if (!alive.current) return;
+      if (error instanceof ApiError && error.status === 401) logout(t(languageRef.current, "expiredToken"));
+      else setNotice(describe(error), "error");
+    });
+  }, [changeLanguage, token, logout, setNotice]);
   const request = useCallback(
     async <T,>(name: string, fields: Record<string, unknown> = {}) => {
       const controller = new AbortController();
@@ -248,7 +263,9 @@ function Manager({
           setStatus(event.status!);
           setProfiles(event.profiles!);
           setLogs(event.logs || []);
+          adoptPreferences(event.preferences);
         }
+        if (event.type === "preferences") adoptPreferences(event.data as Preferences);
         if (event.type === "status") setStatus(event.data as CoreStatus);
         if (event.type === "profiles") setProfiles(event.data as Profiles);
         if (event.type === "log")
@@ -278,7 +295,7 @@ function Manager({
       pending.current.forEach((controller) => controller.abort());
       window.removeEventListener("popstate", popstate);
     };
-  }, [token, logout]);
+  }, [token, logout, adoptPreferences]);
   useEffect(() => {
     if (!settingsEditor.dirty) return;
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -510,7 +527,7 @@ function Manager({
             ref={settingsPage}
             token={token}
             language={language}
-            changeLanguage={changeLanguage}
+            changeLanguage={changeSharedLanguage}
             status={status}
             connection={connection}
             busy={busy}
@@ -557,7 +574,7 @@ function Manager({
         )}
         {route !== "/settings" && (
           <div style={{ position: "fixed", opacity: 0, pointerEvents: "none", width: 20, height: 20, overflow: "hidden" }}>
-            <LanguagePicker language={language} changeLanguage={changeLanguage} />
+            <LanguagePicker language={language} changeLanguage={changeSharedLanguage} />
           </div>
         )}
         <footer>{t(language, "footer")}</footer>

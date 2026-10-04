@@ -14,7 +14,7 @@ description = "Desktop window and tray for the local mihomo-server instance"
 tauri-build = { version = "2.7.1", default-features = false , features = [] }
 
 [dependencies]
-management-client = { path = "../crates/management-client" }
+management-client = { path = "../crates/management-client", features = ["events"] }
 tauri = { version = "2.12.1", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2.5.2"
 anyhow = "1.0.104"

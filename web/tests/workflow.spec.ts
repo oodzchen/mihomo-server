@@ -217,6 +217,15 @@ test.beforeAll(async () => {
   base = `http://127.0.0.1:${port}`;
   await start();
 });
+// The interface language is shared through the service; start every test unset.
+test.afterEach(async () => {
+  // Tolerant: a test may leave the service stopped.
+  await fetch(`${base}/api/commands`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ command: "set_language", language: null }),
+  }).catch(() => undefined);
+});
+
 test.afterAll(async () => {
   try {
     await stop();
@@ -1702,7 +1711,6 @@ test("resources panel, geo seed and online actions translate across language cha
   await expect(panel.getByRole("checkbox", { name: "显式忽略下载来源证书错误" })).toBeVisible();
 
   await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
-  await page.getByRole("combobox", { name: "界面语言" }).press("Enter");
   const enPanel = page.getByRole("region", { name: "Runtime resource inventory" });
   await expect(enPanel.getByRole("heading", { name: "Geo / Provider resources" })).toBeVisible();
   await expect(enPanel.getByRole("button", { name: "Refresh resource list" })).toBeVisible();
@@ -1716,7 +1724,6 @@ test("resources panel, geo seed and online actions translate across language cha
   await expect(enPanel.getByRole("checkbox", { name: "Explicitly ignore download source certificate errors" })).toBeVisible();
 
   await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
-  await page.getByRole("combobox", { name: "Interface language" }).press("Enter");
   await expect(page.getByRole("region", { name: "运行资源清单" })).toBeVisible();
 });
 
@@ -4965,17 +4972,25 @@ test("settings read failures and unsupported schemas cannot publish empty replac
   expect(writes).toBe(0);
 });
 
-test("settings language selection applies on blur or Enter and stays local", async ({ page }) => {
+test("settings language applies on change and is shared through the service", async ({ page }) => {
   await loginSettings(page);
   const before = await settingsApi("settings");
-  const language = page.getByRole("combobox", { name: "界面语言", exact: true });
-  await language.focus(); await language.selectOption("en");
-  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
-  await language.blur();
-  await expect(page.locator("html")).toHaveAttribute("lang", "en");
-  const english = page.getByRole("combobox", { name: "Interface language", exact: true });
-  await english.focus(); await english.selectOption("zhtw"); await english.press("Enter");
-  await expect(page.locator("html")).toHaveAttribute("lang", "zh-TW");
-  expect(await page.evaluate(() => localStorage.getItem("mihomo-server-language"))).toBe("zhtw");
-  expect(await settingsApi("settings")).toEqual(before);
+  try {
+    const language = page.getByRole("combobox", { name: "界面语言", exact: true });
+    await language.selectOption("en");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect.poll(async () => (await settingsApi("preferences")).language).toBe("en");
+    expect(await settingsApi("settings")).toEqual(before);
+    // A change made by another client (the desktop client, another window) arrives as an event.
+    await settingsApi("set_language", { language: "zhtw" });
+    await expect(page.locator("html")).toHaveAttribute("lang", "zh-TW");
+    await expect(page.getByRole("combobox", { name: "介面語言", exact: true })).toHaveValue("zhtw");
+    // A browser without a local choice adopts the instance's language once logged in.
+    const other = await page.context().browser()!.newPage();
+    await other.goto(`${base}/#token=${encodeURIComponent(token)}`);
+    await expect(other.locator("html")).toHaveAttribute("lang", "zh-TW");
+    await other.close();
+  } finally {
+    await settingsApi("set_language", { language: null });
+  }
 });

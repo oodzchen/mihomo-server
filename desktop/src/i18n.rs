@@ -21,6 +21,16 @@ impl Language {
         }
     }
 
+    /// A language the service shares as an instance preference.
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "en" => Some(Self::En),
+            "zh" => Some(Self::Zh),
+            "zhtw" => Some(Self::Zhtw),
+            _ => None,
+        }
+    }
+
     pub fn system() -> Self {
         Self::from_locale(&sys_locale::get_locale().unwrap_or_default())
     }

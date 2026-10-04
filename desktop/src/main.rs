@@ -76,6 +76,7 @@ fn main() {
             }
             let handle = app.handle().clone();
             tray::create(&handle, initial)?;
+            tauri::async_runtime::spawn(controller::follow_preferences(handle.clone()));
             tauri::async_runtime::spawn(controller::run(handle, !hidden));
             Ok(())
         })

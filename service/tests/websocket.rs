@@ -370,3 +370,33 @@ async fn live_streams_forward_and_cancel_independently_then_reconnect_after_core
     let cleanup = server.shutdown().await;
     result.and(cleanup)
 }
+
+#[tokio::test]
+async fn interface_preferences_are_pushed_to_event_and_preference_feeds() -> Result<()> {
+    let server = Server::new(false).await?;
+    let mut events = server.authenticated("/api/events").await?;
+    let snapshot = until(&mut events, |value| value["type"] == "snapshot").await?;
+    assert_eq!(snapshot["preferences"], json!({"language": null}));
+    let mut feed = server.authenticated("/api/streams/preferences").await?;
+    assert_eq!(receive(&mut feed).await?, json!({"type":"preferences","data":{"language":null}}));
+
+    let set = reqwest::Client::new()
+        .post(format!("http://{}/api/commands", server.address))
+        .bearer_auth(&server.token)
+        .json(&json!({"command":"set_language","language":"zhtw"}))
+        .send()
+        .await?;
+    ensure!(set.status().is_success(), "set_language failed: {}", set.status());
+    let expected = json!({"type":"preferences","data":{"language":"zhtw"}});
+    assert_eq!(receive(&mut feed).await?, expected);
+    assert_eq!(until(&mut events, |value| value["type"] == "preferences").await?, expected);
+
+    // The shared client (used by the desktop client) authenticates and reads the same feed.
+    let endpoint = management_client::Endpoint::new(server.address, None, server.directory.0.join("management-token"))?;
+    let mut client = management_client::events::Feed::connect(&endpoint, &server.token, Some("preferences")).await?;
+    assert_eq!(client.next().await?, Some(json!({"type":"preferences","data":{"language":"zhtw"}})));
+    let wrong = management_client::events::Feed::connect(&endpoint, &"0".repeat(64), Some("preferences")).await;
+    assert!(wrong.is_err(), "a wrong token is refused");
+    drop((events, feed, client));
+    server.shutdown().await
+}

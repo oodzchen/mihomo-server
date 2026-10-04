@@ -12,6 +12,13 @@ anyhow.workspace = true
 serde_json.workspace = true
 url = "2.5.8"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+# `events`: subscriptions to the service's WebSocket feeds (plain ws:// only).
+tokio-tungstenite = { version = "0.29", optional = true }
+futures-util = { version = "0.3", default-features = false, features = ["sink"], optional = true }
+tokio = { workspace = true, optional = true }
+
+[features]
+events = ["dep:tokio-tungstenite", "dep:futures-util", "dep:tokio"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.189"

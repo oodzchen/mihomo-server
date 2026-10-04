@@ -42,6 +42,9 @@ enum Feed {
     Connections,
     ConnectionsCount,
     Logs,
+    /// Interface preferences only: no core data, so clients that need just
+    /// these (the desktop client) do not receive every log line.
+    Preferences,
 }
 impl Feed {
     fn parse(value: &str) -> Option<Self> {
@@ -51,8 +54,13 @@ impl Feed {
             "connections" => Self::Connections,
             "connections_count" => Self::ConnectionsCount,
             "logs" => Self::Logs,
+            "preferences" => Self::Preferences,
             _ => return None,
         })
+    }
+
+    fn is_core(self) -> bool {
+        !matches!(self, Self::Preferences)
     }
 }
 
@@ -229,6 +237,7 @@ async fn subscribe(
         Feed::Connections => client.ws_connections_checked(callback).await,
         Feed::ConnectionsCount => client.ws_connections_count_checked(callback).await,
         Feed::Logs => client.ws_logs_checked(LogLevel::DEBUG, callback).await,
+        Feed::Preferences => unreachable!("preferences are not a core stream"),
     }
 }
 
@@ -257,17 +266,24 @@ async fn run(
     let mut status = manager.subscribe_status();
     let mut profiles = manager.subscribe_profiles();
     let mut logs = manager.subscribe_logs();
+    let mut preferences = state.management.preferences.subscribe();
     let initial_status = status.borrow_and_update().clone();
     let initial_profiles = profiles.borrow_and_update().clone();
+    let initial_preferences = preferences.borrow_and_update().clone();
+    let core_feed = feed.is_some_and(Feed::is_core);
+    let preference_events = feed.is_none_or(|feed| !feed.is_core());
     emit(socket, json!({"type":"ready"})).await?;
-    if feed.is_none() {
-        emit(
-            socket,
-            json!({"type":"snapshot", "status":initial_status, "profiles":initial_profiles, "logs":manager.logs()}),
-        )
-        .await?;
-    } else {
-        emit(socket, json!({"type":"core_state", "data":initial_status})).await?;
+    match feed {
+        None => {
+            emit(
+                socket,
+                json!({"type":"snapshot", "status":initial_status, "profiles":initial_profiles,
+                       "logs":manager.logs(), "preferences":initial_preferences}),
+            )
+            .await?;
+        }
+        Some(Feed::Preferences) => emit(socket, json!({"type":"preferences", "data":initial_preferences})).await?,
+        Some(_) => emit(socket, json!({"type":"core_state", "data":initial_status})).await?,
     }
     let mut generation = initial_status.generation;
     let mut subscription = None::<Subscription>;
@@ -285,7 +301,12 @@ async fn run(
             biased;
             _ = closed(closing) => break,
             message = socket.recv() => if !incoming(message, &mut last_pong).await? { break; },
-            changed = status.changed() => {
+            changed = preferences.changed(), if preference_events => {
+                if changed.is_err() { break; }
+                let current = preferences.borrow_and_update().clone();
+                emit(socket, json!({"type":"preferences","data":current})).await?;
+            }
+            changed = status.changed(), if !matches!(feed, Some(Feed::Preferences)) => {
                 if changed.is_err() { break; }
                 let current = status.borrow_and_update().clone();
                 if current.phase != CorePhase::Running || current.generation != generation {
@@ -334,7 +355,7 @@ async fn run(
                     }
                 }
             }
-            _ = sleep_until(retry_at), if feed.is_some() && subscription.is_none() && manager.status().phase == CorePhase::Running => {
+            _ = sleep_until(retry_at), if core_feed && subscription.is_none() && manager.status().phase == CorePhase::Running => {
                 let (sender, receiver) = mpsc::channel(SAMPLE_CAPACITY);
                 overflow = Arc::new(AtomicBool::new(false));
                 let mut connecting_state = status.clone();

@@ -48,7 +48,7 @@ core problems can be repaired through the same interface.
 | `crates/management-client` | Client side of the management API shared by the command line and the desktop client: locating this user's instance from systemd, authenticated commands with typed errors, and pure readings of proxy groups, subscriptions, mode and TUN. |
 | `crates/clash-verge-*` | Small reusable upstream components: drafts, admission limiting, locale resources and Unix signal handling. |
 | `service` | Axum management surface, authentication, durable stores, core actor, downloads, resource/core updates, backup/restore, multi-user isolation and shutdown. The same executable is the `mihomo-server` command-line client (`service/src/cli`): `serve` (or a leading service option) runs the service, any other command is a client. |
-| `web` | React browser client. It talks only to the Rust service and keeps browser language/session presentation state local. |
+| `web` | React browser client. It talks only to the Rust service, keeps session state local and shares the interface language through the instance's preferences. |
 | `desktop` | Optional Tauri 2 desktop client (separate Cargo workspace, own lockfile): a window showing the service's own Web UI, a tray menu for mode/TUN/node/subscription control and the service lifecycle, and detection, installation and start of the local instance. Never required by the service. |
 | `deploy` and `scripts` | Pinned bundle creation, installation, systemd integration, per-user helper and lifecycle checks. |
 
@@ -150,8 +150,9 @@ versioned independently of the service. It manages only the invoking user's loca
 instance, found the same way as by the command line, and re-reads the token file
 on every connection instead of storing it. Its tray polls `status` and
 `proxy_access`, and re-reads proxies, subscriptions and multi-user facts only when
-they change or once a minute. It does not use the WebSocket feeds, which carry
-every core log line. The management window loads the service origin directly and
+they change or once a minute. Of the WebSocket feeds it uses only
+`/api/streams/preferences`, never `/api/events`, which carries every core log
+line. The management window loads the service origin directly and
 logs in through the URL fragment, so the browser policy (same origin, no CORS)
 is unchanged. That window holds no Tauri capability. Only the bundled status page
 may call the app's commands (detect, install, start, open), which the capability
@@ -174,8 +175,20 @@ service state. Details go to the tooltip, and failures are also sent as desktop
 notifications (freedesktop D-Bus).
 
 Browser operations use independent readback after mutations. Realtime feeds can
-disconnect and resubscribe without becoming configuration authority. Browser
-language and login presentation state do not modify service-global settings.
+disconnect and resubscribe without becoming configuration authority.
+
+The interface language is a per-instance presentation preference, kept apart
+from the core's settings in `<data-dir>/preferences.json` (owner-only, replaced
+atomically) and never applied to the core. `preferences` reads it and
+`set_language` changes or clears it (`null`: each client uses its own default).
+Each change is persisted, then pushed as a `preferences` event on `/api/events`
+(whose snapshot also carries it) and on the lightweight
+`/api/streams/preferences` feed. The Web UI adopts the pushed language after
+login and writes changes made in its settings; the login page keeps a browser
+copy until then. The desktop client reads the preference when it connects, so
+its tray opens in the instance's language, then follows the feed; without a
+preference it uses the system locale. An unreadable preferences file is ignored
+(and replaced on the next change) rather than stopping the service.
 
 ## Resources, downloads and backups
 
