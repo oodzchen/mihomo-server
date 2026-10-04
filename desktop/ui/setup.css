@@ -7,10 +7,11 @@
   --border: #e5e7eb;
   --accent: #2563eb;
   --accent-text: #ffffff;
-  --bad: #dc2626;
   --log-bg: #f1f2f4;
-  /* Bottom band kept for the output panel: expanding it never moves the content. */
-  --output: 140px;
+  /* Fixed terminal viewport, and the bottom band reserved for it and its
+     toggle: expanding, collapsing or filling it never moves the content. */
+  --terminal: 132px;
+  --output: calc(var(--terminal) + 40px);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -20,7 +21,6 @@
     --faint: #6b7280;
     --border: #2a2e36;
     --accent: #3b82f6;
-    --bad: #f87171;
     --log-bg: #1c1f25;
   }
 }
@@ -83,16 +83,6 @@ h1 { margin: 0; font-size: 20px; font-weight: 600; }
 }
 .primary.loading .spinner { display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.note {
-  height: 3.6em;
-  max-width: 420px;
-  margin: 12px 0 0;
-  overflow: hidden;
-  color: var(--faint);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.note.error { color: var(--bad); }
 .output {
   position: absolute;
   inset: auto 0 0 0;
@@ -104,8 +94,8 @@ h1 { margin: 0; font-size: 20px; font-weight: 600; }
   padding: 0 20px 10px;
 }
 pre {
-  flex: 1;
-  min-height: 0;
+  flex: none;
+  height: var(--terminal);
   margin: 0;
   padding: 8px 10px;
   overflow: auto;
@@ -118,7 +108,8 @@ pre {
   overflow-wrap: anywhere;
   visibility: hidden;
 }
-.output.open.has-log pre { visibility: visible; }
+.output.open pre { visibility: visible; }
+pre:empty::before { content: attr(data-empty); opacity: 0.7; }
 .toggle {
   align-self: center;
   height: 24px;
@@ -129,7 +120,5 @@ pre {
   font: inherit;
   font-size: 12px;
   cursor: pointer;
-  visibility: hidden;
 }
-.output.has-log .toggle { visibility: visible; }
 .toggle:hover { color: var(--muted); }

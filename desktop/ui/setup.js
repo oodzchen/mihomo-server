@@ -16,7 +16,11 @@ const TEXT = {
     install: "Install mihomo-server service", start: "Start service", restart: "Restart service",
     open: "Open dashboard", wait: "Please wait…", busy_installing: "Installing…",
     busy_starting: "Starting…", busy_stopping: "Stopping…", busy_restarting: "Restarting…",
-    show: "Show output", hide: "Hide output",
+    failed_installing: "Installation did not finish. See the output below.",
+    failed_starting: "The service did not start. See the output below.",
+    failed_stopping: "The service did not stop. See the output below.",
+    failed_restarting: "The service did not restart. See the output below.",
+    show: "Show output", hide: "Hide output", empty: "No output yet.",
   },
   zh: {
     detecting: "正在检测本机的 mihomo-server 服务…",
@@ -31,7 +35,11 @@ const TEXT = {
     install: "安装 mihomo-server 服务", start: "启动服务", restart: "重启服务",
     open: "打开管理程序", wait: "请稍候…", busy_installing: "正在安装…",
     busy_starting: "正在启动…", busy_stopping: "正在停止…", busy_restarting: "正在重启…",
-    show: "显示输出", hide: "收起输出",
+    failed_installing: "安装未完成，详情请查看下方输出",
+    failed_starting: "服务启动失败，详情请查看下方输出",
+    failed_stopping: "服务停止失败，详情请查看下方输出",
+    failed_restarting: "服务重启失败，详情请查看下方输出",
+    show: "显示输出", hide: "收起输出", empty: "暂无输出",
   },
   zhtw: {
     detecting: "正在偵測本機的 mihomo-server 服務…",
@@ -46,7 +54,11 @@ const TEXT = {
     install: "安裝 mihomo-server 服務", start: "啟動服務", restart: "重新啟動服務",
     open: "開啟管理程式", wait: "請稍候…", busy_installing: "正在安裝…",
     busy_starting: "正在啟動…", busy_stopping: "正在停止…", busy_restarting: "正在重新啟動…",
-    show: "顯示輸出", hide: "收起輸出",
+    failed_installing: "安裝未完成，詳情請查看下方輸出",
+    failed_starting: "服務啟動失敗，詳情請查看下方輸出",
+    failed_stopping: "服務停止失敗，詳情請查看下方輸出",
+    failed_restarting: "服務重新啟動失敗，詳情請查看下方輸出",
+    show: "顯示輸出", hide: "收起輸出", empty: "尚無輸出",
   },
 };
 // What the button does in each service state (no task running).
@@ -61,14 +73,20 @@ const TASKS = ["installing", "starting", "stopping", "restarting"];
 const $ = (id) => document.getElementById(id);
 let command = null, open = false, text = TEXT.en, lastLog = "";
 
+function toggleText() {
+  $("toggle").textContent = open ? text.hide + " ▾" : text.show + " ▴";
+}
+
 function render(state) {
   text = TEXT[state.language] || TEXT.en;
   document.documentElement.lang = state.language === "en" ? "en" : state.language === "zhtw" ? "zh-TW" : "zh-CN";
 
+  // Only short, fixed phrases here; every detail goes to the output panel.
   const task = TASKS.includes(state.task) ? state.task : null;
   const action = task ? null : COMMAND[state.state];
   let status = text[task || state.state] || text.detecting;
-  if (!task && state.state === "running" && state.version) status += " · " + state.version;
+  if (!task && state.failed) status = text["failed_" + state.failed] || status;
+  else if (!task && state.state === "running" && state.version) status += " · " + state.version;
   $("status").textContent = status;
 
   command = action ? action[1] : null;
@@ -77,31 +95,28 @@ function render(state) {
   button.classList.toggle("loading", !action);
   button.disabled = !action;
 
-  const note = $("note");
-  note.textContent = state.last_error || (state.state === "unreachable" && state.detail) || "";
-  note.classList.toggle("error", Boolean(state.last_error));
-
   const log = $("log"), joined = state.log.join("\n");
-  $("output").classList.toggle("has-log", joined !== "");
+  log.dataset.empty = text.empty;
   if (joined !== lastLog) {
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
     log.textContent = joined;
     lastLog = joined;
     if (atBottom) log.scrollTop = log.scrollHeight;
   }
-  $("toggle").textContent = (open ? text.hide + " ▾" : text.show + " ▴");
+  toggleText();
 }
 
 async function refresh() {
   try { render(await invoke("local_state")); }
-  catch (error) { $("note").textContent = String(error); }
+  catch (error) { console.error(error); }
 }
 
 $("primary").addEventListener("click", async () => {
   if (!command) return;
   $("primary").disabled = true;
+  // A refusal is written to the output panel by the app itself.
   try { await invoke(command); }
-  catch (error) { $("note").textContent = String(error); }
+  catch (error) { console.error(error); }
   refresh();
 });
 
@@ -109,7 +124,7 @@ $("toggle").addEventListener("click", () => {
   open = !open;
   $("output").classList.toggle("open", open);
   $("toggle").setAttribute("aria-expanded", String(open));
-  $("toggle").textContent = open ? text.hide + " ▾" : text.show + " ▴";
+  toggleText();
   if (open) $("log").scrollTop = $("log").scrollHeight;
 });
 

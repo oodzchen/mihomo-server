@@ -248,7 +248,8 @@ async fn install_from(source: &str, log: &Log) -> Result<()> {
     run_logged(command, log).await.context("the installer failed")
 }
 
-/// Bounded output of the current install or service task, for the status page.
+/// Bounded output of install and service tasks and of failures, shown by the
+/// status page as a small terminal. Never cleared: older lines scroll away.
 #[derive(Default)]
 pub struct Log(Mutex<VecDeque<String>>);
 
@@ -265,10 +266,6 @@ impl Log {
             lines.pop_front();
         }
         lines.push_back(line);
-    }
-
-    pub fn clear(&self) {
-        self.lock().clear();
     }
 
     pub fn lines(&self) -> Vec<String> {
@@ -334,8 +331,6 @@ mod tests {
         }
         let lines = log.lines();
         assert_eq!((lines.len(), lines[0].as_str()), (400, "50"));
-        log.clear();
-        assert!(log.lines().is_empty());
     }
 
     #[test]

@@ -39,6 +39,8 @@ struct Inner {
     connection: Option<Arc<Connection>>,
     task: Task,
     last_error: Option<String>,
+    /// The install or lifecycle task that failed last, until the next task.
+    failed: Option<Task>,
     force_full: bool,
 }
 
@@ -59,6 +61,7 @@ impl Controller {
                 connection: None,
                 task: Task::Idle,
                 last_error: None,
+                failed: None,
                 force_full: true,
             }),
             wake: Notify::new(),
@@ -86,6 +89,10 @@ impl Controller {
 
     pub fn task(&self) -> Task {
         self.lock().task
+    }
+
+    pub fn failed(&self) -> Option<Task> {
+        self.lock().failed
     }
 
     /// Refresh now instead of at the next period.
@@ -246,6 +253,11 @@ impl Poll {
             }
         }
         let reason = failure.map_or_else(|| "unknown error".into(), |error| short(&error));
+        // The status page shows no reasons; its output panel gets each new one.
+        let repeated = matches!(&controller.lock().service, Service::Unreachable(previous) if *previous == reason);
+        if !repeated {
+            controller.log.push(format!("error: {reason}"));
+        }
         controller.set_service(Service::Unreachable(reason));
         self.backoff()
     }
@@ -291,9 +303,7 @@ pub fn start_task(app: &AppHandle, task: Task, action: Option<Action>) -> bool {
         }
         inner.task = task;
         inner.last_error = None;
-    }
-    if task != Task::Command {
-        controller.log.clear();
+        inner.failed = None;
     }
     publish(app);
     let app = app.clone();
@@ -323,11 +333,10 @@ pub fn start_task(app: &AppHandle, task: Task, action: Option<Action>) -> bool {
             }
             if let Err(error) = &result {
                 inner.last_error = Some(short(error));
+                inner.failed = (task != Task::Command).then_some(task);
             }
         }
-        if let Err(error) = &result
-            && task != Task::Command
-        {
+        if let Err(error) = &result {
             controller.log.push(format!("error: {}", short(error)));
         }
         publish(&app);
