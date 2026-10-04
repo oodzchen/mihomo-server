@@ -39,17 +39,10 @@ struct Core {
     sha256: String,
 }
 
-/// The administrator-managed core of a multi-user installation.
-#[derive(Debug, Clone)]
-pub struct SharedCore {
-    pub path: PathBuf,
-    /// The binary's file capabilities grant `CAP_NET_ADMIN`, as TUN requires.
-    pub tun_capable: bool,
-}
-
 #[derive(Debug, Clone)]
 pub struct Resources {
     root: PathBuf,
+    version: String,
     hash: String,
     #[cfg(unix)]
     geo: BTreeMap<String, crate::geo::resources::Seed>,
@@ -96,6 +89,7 @@ impl Resources {
         Ok(Self {
             root,
             hash: manifest.core.sha256.to_ascii_lowercase(),
+            version: manifest.core.version,
             #[cfg(unix)]
             geo: manifest.geo,
             licenses: manifest.licenses,
@@ -170,65 +164,10 @@ impl Resources {
         crate::geo::update::prepare(&self.root.join("geo"), data, seed, request)
     }
 
-    /// Multi-user installations run the administrator's read-only core in place.
-    /// The TUN variant carries file capabilities and is readable only by its group,
-    /// so other users fall back to the plain core.
-    #[cfg(target_os = "linux")]
-    pub fn shared_core(&self) -> Result<SharedCore> {
-        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
-        for (name, tun) in [("core/verge-mihomo-tun", true), ("core/verge-mihomo", false)] {
-            let path = self.root.join(name);
-            let file = OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-                .open(&path);
-            let mut file = match file {
-                Ok(file) => file,
-                Err(error)
-                    if tun
-                        && matches!(
-                            error.kind(),
-                            std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
-                        ) =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(error).with_context(|| format!("open shared core {name}")),
-            };
-            let metadata = file.metadata()?;
-            let mode = metadata.permissions().mode();
-            ensure!(
-                metadata.is_file() && metadata.len() > 0,
-                "shared core {name} must be a nonempty regular file"
-            );
-            ensure!(mode & 0o111 != 0, "shared core {name} must be executable");
-            ensure!(
-                mode & 0o022 == 0,
-                "shared core {name} must not be writable by group or others"
-            );
-            let mut digest = Context::new(&SHA256);
-            let mut buffer = [0_u8; 65536];
-            loop {
-                let count = file.read(&mut buffer)?;
-                if count == 0 {
-                    break;
-                }
-                digest.update(&buffer[..count]);
-            }
-            ensure!(
-                crate::secure_fs::hex(digest.finish().as_ref()) == self.hash,
-                "shared core {name} does not match the bundle SHA-256 pin"
-            );
-            return Ok(SharedCore {
-                tun_capable: tun && crate::secure_fs::file_grants_net_admin(&path),
-                path,
-            });
-        }
-        unreachable!("the plain core is always tried last")
-    }
-
     /// Called only while the manager owns its data-directory lock.
-    /// Existing managed cores are authoritative, including independently upgraded ones.
+    /// Existing managed cores are authoritative, including independently upgraded
+    /// ones, unless they are an older stable release than this bundle's pin: an
+    /// installer upgrade then brings them up to the pin. Newer and Alpha cores stay.
     pub fn initialize_core(&self, directory: &Path) -> Result<PathBuf> {
         #[cfg(unix)]
         {
@@ -251,8 +190,28 @@ impl Resources {
             crate::core_upgrade::repairable(&destination)?;
             #[cfg(not(target_os = "linux"))]
             check_executable(&destination)?;
+            if self.outdated(&destination) {
+                // The previous Web installation receipt no longer describes the core.
+                crate::core_upgrade::forget_installation(&directory)?;
+                self.seed(&directory, &destination, true)?;
+            }
             return Ok(destination);
         }
+        self.seed(&directory, &destination, false)
+    }
+
+    fn outdated(&self, core: &Path) -> bool {
+        match (
+            stable_version(&self.version),
+            core_version(core).as_deref().and_then(stable_version),
+        ) {
+            (Some(pinned), Some(installed)) => installed < pinned,
+            _ => false,
+        }
+    }
+
+    /// Copies the verified bundle core into place, atomically replacing an existing one.
+    fn seed(&self, directory: &Path, destination: &Path, replace: bool) -> Result<PathBuf> {
         let source = inside(&self.root, "core/verge-mihomo")?;
         let mut source = File::open(source)?;
         let temporary = directory.join(format!(
@@ -290,20 +249,65 @@ impl Resources {
             ensure!(actual == self.hash, "bundled core SHA-256 mismatch");
             check_executable(&temporary)?;
             output.sync_all()?;
-            // Atomic publication without replacing a concurrent initializer's core.
-            match fs::hard_link(&temporary, &destination) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(error.into()),
+            if replace {
+                fs::rename(&temporary, destination)?;
+            } else {
+                // Atomic publication without replacing a concurrent initializer's core.
+                match fs::hard_link(&temporary, destination) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => return Err(error.into()),
+                }
             }
             #[cfg(unix)]
-            File::open(&directory)?.sync_all()?;
-            check_executable(&destination)?;
-            Ok(destination)
+            File::open(directory)?.sync_all()?;
+            check_executable(destination)?;
+            Ok(destination.to_path_buf())
         })();
         let _ = fs::remove_file(&temporary);
         result
     }
+}
+
+/// `vMAJOR.MINOR.PATCH` only; Alpha and other builds are never compared.
+fn stable_version(version: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = version.strip_prefix('v')?.split('.');
+    let version = (
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    );
+    parts.next().is_none().then_some(version)
+}
+
+/// The version an installed core reports, or None if it cannot be determined quickly.
+fn core_version(core: &Path) -> Option<String> {
+    let mut child = std::process::Command::new(core)
+        .arg("-v")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let mut output = String::new();
+    child.stdout.take()?.take(4096).read_to_string(&mut output).ok()?;
+    let mut words = output.split_whitespace();
+    (words.next() == Some("Mihomo") && words.next() == Some("Meta")).then_some(())?;
+    words.next().map(str::to_owned)
 }
 
 fn inside(root: &Path, relative: &str) -> Result<PathBuf> {

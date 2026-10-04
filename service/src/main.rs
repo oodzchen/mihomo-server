@@ -15,6 +15,11 @@ use mihomo_server::{
 };
 
 fn main() -> Result<()> {
+    // The capable copy never runs the service, whatever its arguments.
+    #[cfg(target_os = "linux")]
+    if mihomo_server::tun_exec::invoked() {
+        return mihomo_server::tun_exec::run();
+    }
     if std::env::args().len() == 2 && std::env::args().nth(1).as_deref() == Some("--script-worker") {
         return mihomo_server::script::worker_stdio();
     }
@@ -69,8 +74,7 @@ async fn run() -> Result<()> {
                 .long("multi-user")
                 .action(ArgAction::SetTrue)
                 .requires("resource-dir")
-                .conflicts_with("core-dir")
-                .help("Shared system installation: run the bundle core in place and isolate ports/TUN per user"),
+                .help("Shared system installation: isolate ports/TUN per user; TUN uses the installed capability launcher"),
         )
         .arg(
             Arg::new("slot")

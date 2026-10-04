@@ -146,7 +146,12 @@ slot_rules() {
     ip rule | awk -F: -v lo="$base" -v hi="$((base + 32))" '$1 >= lo && $1 < hi' | wc -l
 }
 only_default_rules() { [ "$(ip rule | awk -F: '$1 > 0 && $1 < 32766' | wc -l)" = 0 ]; }
-core_pid() { pgrep -u "$1" verge-mihomo | head -n 1; }
+core_pid() { pgrep -u "$1" -x verge-mihomo | head -n 1; }
+core_exe() { readlink "/proc/$(core_pid "$1")/exe"; }
+# The user's own managed core runs with ambient CAP_NET_ADMIN only via the TUN launcher.
+has_net_admin() { local amb; amb=$(awk '/^CapAmb:/ {print $2}' "/proc/$(core_pid "$1")/status"); (( 16#$amb & 0x1000 )); }
+lacks_net_admin() { ! has_net_admin "$1"; }
+core_hash() { sha256sum "$(data_dir "$1")/core/verge-mihomo" | cut -d' ' -f1; }
 # wait_for TRIES COMMAND...: retry every half second.
 wait_for() {
     local tries="$1"
@@ -215,9 +220,9 @@ phase_install() {
     check "user config template private" test "$(stat -c '%a %U' /home/alice/.config/mihomo-server/env)" = '600 alice'
     check "global unit copied verbatim" cmp /work/bundle/mihomo-server.service /etc/systemd/user/mihomo-server.service
     check "public help excludes installation parameters" bash -c '! bash /work/install.sh --help | grep -E -- "--system|--bundle|--tun-user|--listen"'
-    TUN_CORE=/opt/mihomo-server/current/resources/core/verge-mihomo-tun
-    check "tun core has file capabilities" bash -c "getcap $TUN_CORE | grep -q cap_net_admin"
-    check "tun core is root:mihomo-tun 0750" test "$(stat -c '%a %U:%G' $TUN_CORE)" = '750 root:mihomo-tun'
+    TUN_LAUNCHER=/opt/mihomo-server/current/bin/mihomo-tun-exec
+    check "TUN launcher has file capabilities" bash -c "getcap $TUN_LAUNCHER | grep -q cap_net_admin"
+    check "TUN launcher is root:mihomo-tun 0750" test "$(stat -c '%a %U:%G' $TUN_LAUNCHER)" = '750 root:mihomo-tun'
     check "bundle is not writable by users" bash -c '! find /opt/mihomo-server/releases -perm /022 -not -type l | grep -q .'
     check "slot registry is root 1777" test "$(stat -c '%a %U' /var/lib/mihomo-server/slots)" = '1777 root'
     as alice mihomo-server-user info >/tmp/init-alice.log || fatal 'alice info'
@@ -251,8 +256,9 @@ CONFIG
         check "$user management + mixed ports listen" bash -c \
             "ss -ltn | grep -q ':$(port $user) ' && ss -ltn | grep -q ':$(mixed_port $user) '"
     done
-    check "alice runs the capable core" bash -c 'pgrep -u alice -x verge-mihomo-tu >/dev/null'
-    check "carol runs the plain core" bash -c 'pgrep -u carol -x verge-mihomo >/dev/null'
+    check "alice runs her own managed core" test "$(core_exe alice)" = /home/alice/.local/share/mihomo-server/core/verge-mihomo
+    check "alice's core has ambient TUN capabilities" has_net_admin alice
+    check "carol's core has no capabilities" lacks_net_admin carol
     ALICE_TOKEN_HASH=$(sha256sum /home/alice/.local/share/mihomo-server/management-token | cut -d' ' -f1)
 }
 
@@ -404,6 +410,24 @@ phase_crash() {
     check "alice unaffected by bob's crash" uses_tun alice alice
 }
 
+phase_core_upgrade() {
+    # ---------------------------------------------------------------- Web core upgrade
+    echo "== Web core upgrade keeps TUN"
+    api alice upgrade_clash_core '{"force":true}' >/tmp/core-upgrade.log 2>&1 \
+        || { cat /tmp/core-upgrade.log; fatal 'alice Web core upgrade failed'; }
+    check "Web upgrade installed a receipt" test -f /home/alice/.local/share/mihomo-server/core/.core-installation.json
+    check "alice reports the Web-installed version" bash -c \
+        "grep -q \"\$(api alice installed_core_version | tr -d '\"')\" /home/alice/.local/share/mihomo-server/core/.core-installation.json"
+    check "alice core after Web upgrade is still her managed core" wait_for 60 bash -c \
+        "[ \"\$(readlink /proc/\$(pgrep -u alice -x verge-mihomo | head -n 1)/exe)\" = /home/alice/.local/share/mihomo-server/core/verge-mihomo ]"
+    check "alice core keeps TUN capabilities after Web upgrade" has_net_admin alice
+    check "alice TUN up after Web upgrade" wait_for 60 link_up "$(dev alice)"
+    check "alice traffic uses only alice's TUN after Web upgrade" uses_tun alice alice
+    ALICE_CORE=$(core_hash alice)
+    # An outdated stable core (as left by an older installer) is brought up to the pin.
+    as carol bash -c "printf '#!/bin/sh\necho Mihomo Meta v1.0.0 linux amd64\n' >\"\$1/core/.old\" && chmod 755 \"\$1/core/.old\" && mv \"\$1/core/.old\" \"\$1/core/verge-mihomo\"" bash "$(data_dir carol)"
+}
+
 phase_upgrade() {
     # ---------------------------------------------------------------- upgrade
     echo "== upgrade restarts running instances"
@@ -421,6 +445,10 @@ phase_upgrade() {
     check "carol instance restarted" wait_for 40 restarted carol "$OLD_C"
     check "alice runs from the new release" wait_for 40 bash -c \
         "readlink /proc/\$(pgrep -u alice -x mihomo-server)/exe | grep -q /releases/vfixture2/"
+    check "installer upgrade replaced carol's outdated core with the pin" wait_for 40 bash -c \
+        "[ \"\$(sha256sum '$(data_dir carol)/core/verge-mihomo' | cut -d' ' -f1)\" = \"\$(sha256sum /opt/mihomo-server/current/resources/core/verge-mihomo | cut -d' ' -f1)\" ]"
+    check "carol core running after pin upgrade" wait_for 40 bash -c "pgrep -u carol -x verge-mihomo >/dev/null"
+    check "installer upgrade kept alice's Web-installed core" test "$(core_hash alice)" = "$ALICE_CORE"
     check "alice TUN back after upgrade" wait_for 60 link_up "$(dev alice)"
     check "bob TUN back after upgrade" wait_for 60 link_up "$(dev bob)"
     sleep 2
@@ -446,6 +474,25 @@ phase_cleanup() {
     check "bundle, unit and helper removed" bash -c \
         "[ ! -e /opt/mihomo-server ] && [ ! -e /etc/systemd/user/mihomo-server.service ] && [ ! -e /usr/local/bin/mihomo-server-user ]"
     check "users' data kept" bash -c "[ -s /home/alice/.local/share/mihomo-server/management-token ] && [ -s '/home/bob/private data%/mihomo-server/management-token' ]"
+    check "TUN group, slot registry and launcher removed" bash -c \
+        "! getent group mihomo-tun >/dev/null && [ ! -e /var/lib/mihomo-server ]"
+    check "installer-enabled lingering undone" test "$(loginctl show-user alice -p Linger --value 2>/dev/null || echo no)" = no
+    check "no enablement links left" bash -c "! compgen -G '/home/*/.config/systemd/user/default.target.wants/mihomo-server.service' >/dev/null"
+
+    echo "== reinstall from the kept data, then purge everything"
+    as alice env MIHOMO_INSTALL_BUNDLE=/work/bundle bash /work/install.sh >/tmp/reinstall.log 2>&1 \
+        || { cat /tmp/reinstall.log; fatal 'reinstall failed'; }
+    check "reinstall reuses alice's token" test "$(sha256sum /home/alice/.local/share/mihomo-server/management-token | cut -d' ' -f1)" = "$ALICE_TOKEN_HASH"
+    bash /work/install.sh --uninstall --purge >/tmp/purge.log 2>&1 || { cat /tmp/purge.log; fatal "purge failed"; }
+    check "purge removed default, custom-XDG and legacy data" bash -c \
+        "[ ! -e /home/alice/.local/share/mihomo-server ] && [ ! -e '/home/bob/private data%/mihomo-server' ] && [ ! -e /home/dave/legacy-data ]"
+    check "purge removed user configuration and drop-ins" bash -c \
+        "[ ! -e /home/alice/.config/mihomo-server ] && [ ! -e '/home/bob/config space%/mihomo-server' ] && ! compgen -G '/home/[abdf]*/.config/systemd/user/mihomo-server.service*' >/dev/null"
+    # eve's custom unit was never migrated, so it is not an instance to purge.
+    check "purge left eve's unmanaged custom unit alone" test -f /home/eve/.config/systemd/user/mihomo-server.service
+    check "purge removed migrated per-user programs" test ! -e /home/dave/.local/opt/mihomo-server
+    check "nothing of mihomo-server left on the system" bash -c \
+        "[ ! -e /opt/mihomo-server ] && [ ! -e /var/lib/mihomo-server ] && [ ! -e /etc/systemd/user/mihomo-server.service ] && ! pgrep -x mihomo-server >/dev/null && ! pgrep -x verge-mihomo >/dev/null"
 }
 
 case "${1:-before-reboot}" in
@@ -457,6 +504,7 @@ case "${1:-before-reboot}" in
         tun_enable
         tun_assert
         phase_crash
+        phase_core_upgrade
         phase_upgrade
         declare -p PASS FAIL A_RULES B_RULES ALICE_TOKEN_HASH >/work/checkpoint
         chmod 600 /work/checkpoint

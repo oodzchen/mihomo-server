@@ -120,7 +120,7 @@ async fn mixed_port(manager: &CoreManager) -> Result<u64> {
 
 #[tokio::test]
 #[ignore = "requires real Mihomo binary and local sockets"]
-async fn shared_core_restages_old_runtime_and_isolates_subscriptions() -> Result<()> {
+async fn multi_user_restages_old_runtime_and_isolates_subscriptions() -> Result<()> {
     let directory = Directory::new()?;
     let isolation = isolation()?;
 
@@ -137,7 +137,7 @@ async fn shared_core_restages_old_runtime_and_isolates_subscriptions() -> Result
     let single_revision = manager.status().config_revision;
     manager.shutdown().await?;
 
-    // Multi-user mode runs the bundle core in place and re-stages that runtime.
+    // Multi-user mode keeps the private managed core and re-stages that runtime.
     let manager = CoreManager::spawn(directory.options(Some(isolation), &bootstrap)?)?;
     let user = manager.multi_user().context("multi-user state")?.clone();
     assert_eq!((user.slot, user.mixed_port), (isolation.slot(), isolation.mixed_port()));
@@ -147,8 +147,9 @@ async fn shared_core_restages_old_runtime_and_isolates_subscriptions() -> Result
     assert_ne!(status.config_revision, single_revision);
     assert_eq!(mixed_port(&manager).await?, u64::from(isolation.mixed_port()));
     ensure!(!free(isolation.mixed_port()), "slot mixed port is not listening");
-    let error = manager.core_installation().await.unwrap_err();
-    assert!(format!("{error:#}").contains("system administrator"), "{error:#}");
+    // The managed core stays upgradable from the Web, as in single-user mode.
+    assert!(manager.core_installation().await?.is_none());
+    assert!(!manager.installed_core_version().await?.is_empty());
 
     // A subscription's fixed listeners and TUN routing move into the slot.
     let profile = manager
@@ -206,8 +207,8 @@ async fn shared_core_restages_old_runtime_and_isolates_subscriptions() -> Result
     assert_eq!(mixed_port(&manager).await?, u64::from(explicit));
     manager.shutdown().await?;
     assert!(
-        !directory.0.join("data/core").exists(),
-        "shared core must not be copied"
+        directory.0.join("data/core/verge-mihomo").is_file(),
+        "multi-user mode uses the private managed core"
     );
     Ok(())
 }

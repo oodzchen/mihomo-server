@@ -257,14 +257,19 @@ management `20000+10N`, proxy `20001+10N` and DNS `20002+10N`. Port conflicts ar
 reported rather than silently allocating alternatives. Existing slot-0 defaults
 change on upgrade; explicit user ports are preserved.
 
-The bundle core runs in place, with a root:mihomo-tun 0750 capable copy for
-members and the plain core otherwise. Both match the manifest core SHA-256.
-Web core upgrades stay disabled. Multi-user isolation still replaces subscription
+Each instance runs its own managed core in `<data-dir>/core`, seeded from the
+bundle and upgradable from the Web (stable/Alpha, with durable rollback) exactly
+as in single-user mode. TUN members start that core through
+`bin/mihomo-tun-exec`, a root:mihomo-tun 0750 copy of the service binary with
+`cap_net_admin,cap_net_bind_service,cap_net_raw+ep`; it raises those as ambient
+capabilities and executes the member's core. Re-running the installer upgrades an
+older stable managed core to the bundle pin at the next start; newer and Alpha
+cores are kept. Multi-user isolation still replaces subscription
 listeners, retains explicit settings-page values, scopes TUN to `ms<uid>` and
 `include-uid: [uid]`, assigns independent routing and fake-IP blocks and disables
 host-wide auto-redirect. Shared-resolver traffic uses the existing domain sniffer.
-Group members can run the capable core with arbitrary routes; authorize only
-trusted users.
+Group members can give any program these network capabilities through the
+launcher; authorize only trusted users.
 
 Re-running the installer upgrades the caller and other running instances. Other
 stopped instances stay stopped. Known legacy user units are backed up, original
@@ -272,11 +277,16 @@ data and arguments are preserved, and the old program directory is retained.
 Activation failure restores the old unit; custom units/drop-ins require review.
 
 ```sh
-curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash -s -- --uninstall
+curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash -s -- --uninstall [--purge]
 ```
 
-Uninstall removes shared files and enablement while retaining data, slots, group
-authorization and linger. Public options are only `--help` and `--uninstall`.
+Uninstall stops every instance and removes the program, unit, helper, enablement,
+slot registry, `mihomo-tun` group and the lingering the installer enabled. User
+data, env files and the helper's path drop-in are kept for a reinstall. `--purge`
+also deletes, as each owner, every instance's data and configuration (resolved
+from the saved XDG paths and env file), legacy unit backups and a migrated
+`~/.local/opt/mihomo-server`. Public options are only `--help`, `--uninstall`
+and `--purge`.
 For manual local deployment, verify the downloaded tarball and use the foreground
 launcher described above; local-bundle installer overrides are internal to tests.
 
@@ -291,5 +301,5 @@ MIHOMO_TEST_BINARY=/usr/bin/verge-mihomo cargo test -p mihomo-server \
 ```
 
 The validation suite covers:
-- Python tests verify packaging, integrity/transport failures, launcher argument boundaries and isolated service lifecycle. The privileged multi-user container tests the actual zero-argument download and sudo path, opt-in users, XDG persistence, immediate authorization, real-node traffic, upgrade, container reboot and uninstall. The host lifecycle test uses a unique unit instead of installing shared host files.
+- Python tests verify packaging, integrity/transport failures, launcher argument boundaries and isolated service lifecycle. The privileged multi-user container tests the actual zero-argument download and sudo path, opt-in users, XDG persistence, immediate authorization, real-node traffic, Web core upgrade with TUN, installer core-pin upgrade, upgrade, container reboot, uninstall, reinstall and purge. The host lifecycle test uses a unique unit instead of installing shared host files.
 - Opt-in Rust deployment test (`service/tests/deployment.rs`), packaging the actual service/core, launching from an unrelated working directory, testing first-use initialization, local-profile import/validation/start/node/config changes, failed validation, service restart, restored records and retained managed core, and requiring SIGTERM child reaping.

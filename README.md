@@ -52,7 +52,7 @@ sudo usermod -aG mihomo-tun 用户名
 sudo loginctl enable-linger 用户名
 ```
 
-授权后重启该实例即可使用 TUN，无需重新登录。`mihomo-tun` 成员可以运行具备整机网络管理能力的内核，仅授权可信用户。各实例的 TUN 默认只代理自己的 UID；使用共享系统 DNS 时，默认开启流量嗅探以恢复域名规则。
+授权后重启该实例即可使用 TUN，无需重新登录。`mihomo-tun` 成员可以让任意程序获得整机网络管理能力，只授权给可信用户。各实例的 TUN 默认只代理自己的 UID；使用共享系统 DNS 时，默认开启流量嗅探以恢复域名规则。
 
 ## 远程访问与服务管理
 
@@ -80,15 +80,28 @@ mihomo-server-user restart
 mihomo-server-user disable    # 停止并禁用自己的实例，保留数据
 ```
 
-升级时重新执行安装命令；其他正在运行的实例也会重启到新版本，其他停用实例保持停用。内核随共享安装统一升级，网页中不提供独立内核升级。
+## 升级与卸载
 
-卸载共享安装，保留所有用户的数据、槽位、TUN 授权和 linger：
+升级程序：重新执行安装命令。正在运行的实例会重启到新版本，已停用的实例保持停用。
+
+升级内核有两种方式，每个用户的内核各自独立：
+
+- 网页「内核」页：可升级到最新稳定版或 Alpha 版，失败自动回滚，升级后 TUN 照常可用。
+- 重新执行安装命令：实例启动时，如果内核是比安装包内置版本更旧的稳定版，会自动升级到内置版本；在网页上装的更新版本或 Alpha 版不会被覆盖。
+
+卸载：停止所有实例，删除程序、TUN 组、槽位登记，并关闭由安装脚本开启的 linger。各用户的订阅、设置和令牌会保留，重新安装后可以继续使用：
 
 ```sh
 curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash -s -- --uninstall
 ```
 
-删除自己的数据使用 `mihomo-server-user purge --yes`，需在共享程序卸载前执行。
+彻底卸载：在卸载的同时删除所有用户的实例数据和配置，包括迁移前旧版用户级安装留下的程序和备份：
+
+```sh
+curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash -s -- --uninstall --purge
+```
+
+只删除自己的数据：执行 `mihomo-server-user purge --yes`。
 
 构建和手动前台部署请参考 [部署文档](docs/DEPLOYMENT.md)。
 

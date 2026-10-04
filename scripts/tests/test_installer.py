@@ -72,7 +72,16 @@ class Installer(unittest.TestCase):
         result = self.run_shell('source "$1"; root_action() { printf "%s\\n" "$@"; }; main --uninstall',
                                 MIHOMO_INSTALL_BUNDLE="/missing")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "uninstall_shared")
+        self.assertEqual(result.stdout.split(), ["uninstall_shared", "0"])
+
+    def test_purge_requires_uninstall_and_is_forwarded(self):
+        result = self.run_shell('source "$1"; root_action() { printf "%s\\n" "$@"; }; main --uninstall --purge')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ["uninstall_shared", "1"])
+        result = self.run_shell('source "$1"; root_action() { echo MUTATED; }; main --purge')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("MUTATED", result.stdout)
+        self.assertIn("only valid with --uninstall", result.stderr)
 
     def test_sudo_preserves_values_as_arguments_without_shell_evaluation(self):
         tools = self.root / "tools"

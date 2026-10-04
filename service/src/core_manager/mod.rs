@@ -191,11 +191,13 @@ pub struct CoreOptions {
     pub policy: LifecyclePolicy,
     pub resources: Option<crate::resources::Resources>,
     pub core_dir: Option<PathBuf>,
-    /// Shared multi-user installation: run the administrator's core in place
-    /// and rewrite ports/TUN routing into this user's slot.
+    /// Shared multi-user installation: rewrite ports/TUN routing into this
+    /// user's slot; the managed core stays private and upgradable per user.
     pub isolation: Option<headless_core::enhance::isolation::Isolation>,
-    /// Whether the shared core may create TUN devices; known only in multi-user mode.
+    /// Whether this user may create TUN devices; known only in multi-user mode.
     pub(crate) tun_capable: Option<bool>,
+    /// The installation's capability launcher the core is started through.
+    pub(crate) tun_exec: Option<PathBuf>,
 }
 
 impl CoreOptions {
@@ -210,12 +212,13 @@ impl CoreOptions {
             core_dir: None,
             isolation: None,
             tun_capable: None,
+            tun_exec: None,
         }
     }
 
     /// The core lives in the data directory and can be upgraded from the Web.
     pub(crate) fn managed_core(&self) -> bool {
-        self.resources.is_some() && self.isolation.is_none()
+        self.resources.is_some()
     }
 
     fn prepare(&mut self) -> Result<(File, String)> {
@@ -256,20 +259,17 @@ impl CoreOptions {
         #[cfg(unix)]
         crate::geo::live::recover(&self.data_dir).context("live Geo rollback recovery failed")?;
         if let Some(resources) = &self.resources {
+            let core_directory = self.core_dir.clone().unwrap_or_else(|| self.data_dir.join("core"));
+            crate::core_upgrade::recover(&core_directory).context("managed core upgrade recovery failed")?;
+            self.binary = resources.initialize_core(&core_directory)?;
             if self.isolation.is_some() {
-                ensure!(self.core_dir.is_none(), "multi-user mode uses the shared core");
                 #[cfg(target_os = "linux")]
                 {
-                    let core = resources.shared_core()?;
-                    self.binary = core.path;
-                    self.tun_capable = Some(core.tun_capable);
+                    self.tun_exec = crate::tun_exec::available();
+                    self.tun_capable = Some(self.tun_exec.is_some());
                 }
                 #[cfg(not(target_os = "linux"))]
                 bail!("multi-user mode requires Linux");
-            } else {
-                let core_directory = self.core_dir.clone().unwrap_or_else(|| self.data_dir.join("core"));
-                crate::core_upgrade::recover(&core_directory).context("managed core upgrade recovery failed")?;
-                self.binary = resources.initialize_core(&core_directory)?;
             }
             resources.initialize_geo(&self.data_dir)?;
         } else {
@@ -321,7 +321,7 @@ pub struct MultiUser {
     pub mixed_port: u16,
     pub dns_listen: String,
     pub tun_device: String,
-    /// The shared core may create TUN devices (the user is in the TUN group).
+    /// The core runs through the capability launcher (the user is in the TUN group).
     pub tun_capable: bool,
 }
 

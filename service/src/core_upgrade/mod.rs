@@ -413,6 +413,14 @@ pub(crate) fn pending(core: &Path) -> Result<bool> {
     }
     Ok(journal(&root)?.phase == Phase::Pending)
 }
+/// Drops the Web installation receipt before the core is replaced outside a transaction.
+pub(crate) fn forget_installation(core: &Path) -> Result<()> {
+    match fs::remove_file(core.join(RECEIPT)) {
+        Ok(()) => sync_directory(core),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
 pub(crate) fn installation(core: &Path) -> Result<Option<CoreInstallation>> {
     let path = core.join(RECEIPT);
     if fs::symlink_metadata(&path).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {

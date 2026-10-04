@@ -5,9 +5,6 @@ impl CoreManager {
     fn downloads(&self, action: &str) -> Result<Arc<crate::core_release::CoreDownloads>> {
         match &self.core_downloads {
             Some(downloads) => Ok(Arc::clone(downloads)),
-            None if self.multi_user.is_some() => {
-                bail!("{action} is managed by the system administrator in multi-user mode")
-            }
             None => bail!("{action} requires bundle-managed resources"),
         }
     }

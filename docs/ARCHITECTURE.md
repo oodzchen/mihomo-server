@@ -58,7 +58,7 @@ Do not resume backup work based on an older chapter's next-task paragraph.
 Accepted design: one system-wide bundle and per-user systemd instances. The
 installing user receives automatic startup, linger and TUN group authorization;
 other users opt in with `mihomo-server-user enable`. Public installation takes no
-arguments; only help and data-preserving uninstall remain. Root without a caller
+arguments; only help, uninstall and `--uninstall --purge` remain. Root without a caller
 only deploys the shared bundle. Runtime/state/cache splitting is intentionally
 out of scope; sockets stay under `<data-dir>/run`.
 
@@ -124,7 +124,35 @@ out of scope; sockets stay under `<data-dir>/run`.
    passed outside the device-restricted sandbox. No global installation was made
    on the host; real-node data remains private and unchanged.
 
-**Latest completed task:** Zero-argument shared installation, step 3 of 3 — isolated download/systemd/migration/real-node/reboot acceptance (95 checks), deployment docs and acceptance fixes.
+4. **Per-user core upgrades and complete uninstall — implemented.** Multi-user
+   instances now use the private managed core (`<data-dir>/core`) like single-user
+   mode, so Web stable/Alpha upgrades, receipts and rollback apply per user. TUN no
+   longer needs a capable copy of the core: the installer copies the service binary
+   to `bin/mihomo-tun-exec` (root:mihomo-tun 0750, network capabilities +ep). Run
+   under that name, `main` only enters `tun_exec::run`: it raises the capabilities
+   as inheritable+ambient, re-arms the parent-death signal (cleared by the capable
+   exec) after checking the supervisor PID, and execs the user's core. The service
+   uses the launcher when it is beside the running binary, root-owned, executable
+   by this process and carries `cap_net_admin`. `Resources::initialize_core`
+   replaces an existing managed core only when it reports an older stable
+   `vX.Y.Z` than the bundle pin (dropping the stale Web receipt), so installer
+   re-runs upgrade cores without downgrading newer or Alpha choices.
+   `install.sh --uninstall` now also removes the slot registry, TUN group and
+   installer-enabled linger (recorded under `/var/lib/mihomo-server/linger`);
+   user data, env and path drop-ins stay for reinstall. `--uninstall --purge`
+   deletes each instance's data/config as its owner, including legacy backups and
+   a migrated per-user program. The Web "managed by administrator" branch is gone.
+   Verification: **114 container checks passed, 0 failed** (new: launcher caps,
+   member core with ambient CAP_NET_ADMIN and non-member without, real Web stable
+   upgrade through the managed route keeping TUN/isolated traffic, installer pin
+   upgrade of an outdated core while keeping a Web-installed one, full uninstall of
+   group/registry/linger, reinstall reusing data, purge of default, custom-XDG and
+   legacy data while leaving an unmigrated custom unit); 435 workspace Rust tests
+   passed, 0 failed, 92 ignored; live multi-user, deployment and core-activation
+   tests passed; 26 Python tests, fmt, clippy and ShellCheck passed.
+
+**Latest completed task:** Zero-argument shared installation, step 4 — per-user Web/installer core upgrades with the TUN capability launcher, complete uninstall and `--purge`.
+**Previous completed task:** Zero-argument shared installation, step 3 of 3 — isolated download/systemd/migration/real-node/reboot acceptance (95 checks), deployment docs and acceptance fixes.
 **Previous completed task:** Zero-argument shared installation, step 2 of 3 — unified installer, automatic authorization/linger and guarded legacy migration.
 **Previous completed task:** Zero-argument shared installation, step 1 of 3 — slot-0 ports, XDG-aware launcher and per-user enable/readiness helper (above).
 **Previous completed task:** Multi-user system installation, step 4 of 4 — README, fixes from a one-off QEMU/KVM acceptance run (sniffing for TUN behind shared resolvers, TUN start settle, helper unit check/readiness, SELinux relabel); further acceptance is manual on real machines (see "Increment: multi-user system installation").

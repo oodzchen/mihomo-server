@@ -4,14 +4,17 @@ set -euo pipefail
 
 usage() {
     cat <<'HELP'
-Usage: install.sh [--help | --uninstall]
+Usage: install.sh [--help | --uninstall [--purge]]
 
 With no arguments, install or upgrade the latest release system-wide.
 The installing user is automatically started, authorized for TUN and kept
 running after logout/reboot. sudo may ask for your password.
 
---uninstall  Remove the shared installation, keeping all user data.
---help       Show this help.
+--uninstall          Stop every instance and remove the shared installation,
+                     TUN group, slot registry and installer-enabled lingering.
+                     Users' subscriptions and settings are kept.
+--uninstall --purge  Also delete every user's instance data and configuration.
+--help               Show this help.
 
 Other users start their own instance with: mihomo-server-user enable
 HELP
@@ -167,10 +170,11 @@ install_shared() {
     chmod -R u+rwX,go+rX,go-w "$stage"
     chmod 755 "$stage"
     getent group mihomo-tun >/dev/null || groupadd --system mihomo-tun
-    cp "$stage/resources/core/verge-mihomo" "$stage/resources/core/verge-mihomo-tun"
-    chown root:mihomo-tun "$stage/resources/core/verge-mihomo-tun"
-    chmod 0750 "$stage/resources/core/verge-mihomo-tun"
-    setcap 'cap_net_admin,cap_net_bind_service,cap_net_raw+ep' "$stage/resources/core/verge-mihomo-tun"
+    # TUN launcher: grants network capabilities to each member's own (Web-upgradable) core.
+    cp "$stage/bin/mihomo-server" "$stage/bin/mihomo-tun-exec"
+    chown root:mihomo-tun "$stage/bin/mihomo-tun-exec"
+    chmod 0750 "$stage/bin/mihomo-tun-exec"
+    setcap 'cap_net_admin,cap_net_bind_service,cap_net_raw+ep' "$stage/bin/mihomo-tun-exec"
     mv -T "$stage" "$release"
     mkdir -p "$registry"
     chown root:root "$registry"
@@ -186,6 +190,11 @@ install_shared() {
     each_user_manager daemon-reload
     if [ -n "$caller" ]; then
         usermod -aG mihomo-tun "$caller"
+        if [ "$(loginctl show-user "$caller" -p Linger --value 2>/dev/null || true)" != yes ]; then
+            # Remember lingering we enabled, so uninstall can undo only that.
+            mkdir -p /var/lib/mihomo-server/linger
+            : > "/var/lib/mihomo-server/linger/$caller"
+        fi
         loginctl enable-linger "$caller"
         systemctl start "user@$uid.service"
         [ "$(loginctl show-user "$caller" -p Linger --value)" = yes ] || die 'linger was not enabled'
@@ -214,21 +223,67 @@ install_shared() {
     echo "System install complete: $root/current"
     if [ -z "$caller" ]; then echo 'No non-root caller: users opt in with mihomo-server-user enable'; fi
 }
+# Runs as the instance owner, never root, so only that user's files can be removed.
+purge_user() {
+    local home=$1 dropin config_home data_home env_file data configured
+    dropin="$home/.config/systemd/user/mihomo-server.service.d/10-mihomo-paths.conf"
+    config_home="$home/.config"
+    data_home="$home/.local/share"
+    if [ -f "$dropin" ]; then
+        configured=$(sed -n 's/^# config-home=//p' "$dropin")
+        [[ "$configured" != /?* ]] || config_home=$configured
+        configured=$(sed -n 's/^# data-home=//p' "$dropin")
+        [[ "$configured" != /?* ]] || data_home=$configured
+    fi
+    env_file="$config_home/mihomo-server/env"
+    data="$data_home/mihomo-server"
+    if [ -f "$env_file" ]; then
+        configured=$(sed -n 's/^MIHOMO_SERVER_DATA_DIR=//p' "$env_file" | tail -n 1)
+        configured=${configured#\"}; configured=${configured%\"}
+        [[ "$configured" != /?* ]] || data=$configured
+    fi
+    case "$data" in / | "$home" | "$home/") die "refusing to delete $data" ;; esac
+    rm -rf -- "$data" "$config_home/mihomo-server" "$home/.config/systemd/user/mihomo-server.service.d"
+    rm -f -- "$home/.config/systemd/user/mihomo-server.service".pre-system-*
+    # The program of a migrated per-user installation, if it is still there.
+    if [ -f "$home/.local/opt/mihomo-server/launch" ] && [ -f "$home/.local/opt/mihomo-server/bin/mihomo-server" ]; then
+        rm -rf -- "$home/.local/opt/mihomo-server"
+    fi
+    echo "Purged instance data of $(id -un): $data"
+}
 uninstall_shared() {
+    local purge=$1 user uid home link
     command -v systemctl >/dev/null || die 'missing systemctl'
-    each_user_manager disable --now mihomo-server.service
-    # Remove enablement for users whose managers are currently stopped too.
-    local user home
-    while IFS=: read -r user _ _ _ _ home _; do
-        local link="$home/.config/systemd/user/default.target.wants/mihomo-server.service"
-        [ -L "$link" ] || continue
-        runuser -u "$user" -- rm -f -- "$link"
+    each_user_manager disable --now mihomo-server.service || true
+    while IFS=: read -r user _ uid _ _ home _; do
+        [ "$uid" != 0 ] && [ -d "$home" ] || continue
+        # Enablement, also for stopped managers. The helper's path drop-in is
+        # user configuration: kept for a reinstall unless purging.
+        link="$home/.config/systemd/user/default.target.wants/mihomo-server.service"
+        if [ -L "$link" ]; then runuser -u "$user" -- rm -f -- "$link"; fi
+        if [ "$purge" = 1 ] && { [ -d "$home/.local/share/mihomo-server" ] || [ -d "$home/.config/mihomo-server" ] \
+            || [ -f "$home/.config/systemd/user/mihomo-server.service.d/10-mihomo-paths.conf" ] \
+            || [ -n "$(find /var/lib/mihomo-server/slots -maxdepth 1 -type f -uid "$uid" 2>/dev/null)" ]; }; then
+            runuser -u "$user" -- bash -euo pipefail -c "$(declare -f die purge_user); purge_user \"\$1\"" bash "$home"
+        fi
     done < <(getent passwd)
     rm -f /etc/systemd/user/mihomo-server.service
     if [ -L /usr/local/bin/mihomo-server-user ]; then rm -f /usr/local/bin/mihomo-server-user; fi
-    each_user_manager daemon-reload
+    each_user_manager daemon-reload || true
     rm -rf /opt/mihomo-server
-    echo 'Uninstalled shared files; user data, slots, TUN authorization and linger are kept.'
+    if [ -d /var/lib/mihomo-server/linger ]; then
+        for link in /var/lib/mihomo-server/linger/*; do
+            [ -f "$link" ] || continue
+            loginctl disable-linger "$(basename "$link")" || true
+        done
+    fi
+    rm -rf /var/lib/mihomo-server
+    if getent group mihomo-tun >/dev/null; then groupdel mihomo-tun; fi
+    if [ "$purge" = 1 ]; then
+        echo 'Uninstalled mihomo-server and deleted all instance data.'
+    else
+        echo "Uninstalled mihomo-server; users' subscriptions and settings are kept."
+    fi
 }
 root_action() {
     local action=$1
@@ -239,24 +294,27 @@ root_action() {
         command -v sudo >/dev/null || die 'sudo is required; alternatively run the installer as root'
         # Explicit script functions only, with values passed as argv, never code.
         local definitions
-        definitions=$(declare -f die verify_bundle each_user_manager activate_user install_shared uninstall_shared)
+        definitions=$(declare -f die verify_bundle each_user_manager activate_user install_shared purge_user uninstall_shared)
         sudo -- bash -euo pipefail -c "$definitions"$'\n'"$action \"\$@\"" bash "$@"
     fi
 }
 main() {
     # CI replaces this assignment, including for a piped/elevated invocation.
     local REPO="__REPO_SLUG__"
-    local uninstall=0 caller='' caller_home config_home data_home bundle tag work='' arch name base
-    if [ $# -gt 1 ]; then die 'only --help or --uninstall is accepted'; fi
-    case "${1:-}" in
-        '') ;;
-        -h | --help) usage; return ;;
-        --uninstall) uninstall=1 ;;
-        *) die "unknown option: $1 (see --help)" ;;
-    esac
+    local uninstall=0 purge=0 caller='' caller_home config_home data_home bundle tag work='' arch name base
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h | --help) usage; return ;;
+            --uninstall) uninstall=1 ;;
+            --purge) purge=1 ;;
+            *) die "unknown option: $1 (see --help)" ;;
+        esac
+        shift
+    done
+    if [ "$purge" = 1 ] && [ "$uninstall" = 0 ]; then die '--purge is only valid with --uninstall'; fi
     if [ "$(id -u)" != 0 ]; then caller=$(id -un)
     elif [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then caller=$SUDO_USER; fi
-    if [ "$uninstall" = 1 ]; then root_action uninstall_shared; return; fi
+    if [ "$uninstall" = 1 ]; then root_action uninstall_shared "$purge"; return; fi
     if [ -n "$caller" ]; then
         caller_home=$(getent passwd "$caller" | cut -d: -f6)
         [ -n "$caller_home" ] || die 'cannot find installing user'

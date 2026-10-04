@@ -180,7 +180,7 @@ impl Actor {
         Ok(())
     }
 
-    /// Host TUN checks, plus the shared core's capability in multi-user mode.
+    /// Host TUN checks, plus this user's TUN authorization in multi-user mode.
     pub(super) fn tun_preflight(&self, config: &Mapping) -> Result<()> {
         crate::native_tun::preflight(config)?;
         let enabled = config
@@ -190,8 +190,8 @@ impl Actor {
             == Some(true);
         ensure!(
             !enabled || self.options.tun_capable != Some(false),
-            "TUN is not available to this user: the shared core lacks CAP_NET_ADMIN for it; \
-             ask the administrator to add this user to the TUN group"
+            "TUN is not available to this user: ask the administrator to add this user to the \
+             TUN group (mihomo-tun)"
         );
         Ok(())
     }
@@ -331,7 +331,14 @@ impl Actor {
                 Err(error) => return Err(error).context("cannot inspect existing controller socket"),
             }
         }
-        let mut command = Command::new(&self.options.binary);
+        let mut command = match &self.options.tun_exec {
+            Some(launcher) => {
+                let mut command = Command::new(launcher);
+                command.arg(std::process::id().to_string()).arg(&self.options.binary);
+                command
+            }
+            None => Command::new(&self.options.binary),
+        };
         crate::shutdown::bind_child_lifetime(&mut command);
         let mut child = command
             .arg("-d")

@@ -309,36 +309,35 @@ fn manifest_with_license_inventory_is_exposed() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn shared_core_runs_in_place_and_falls_back_from_an_unreadable_tun_variant() -> Result<()> {
+fn installer_pin_upgrades_only_older_stable_managed_cores() -> Result<()> {
+    let script = |version: &str| format!("#!/bin/sh\necho 'Mihomo Meta {version} linux amd64'\n");
     let dir = Directory::new()?;
-    let plain = dir.0.join("resources/core/verge-mihomo");
-    fs::set_permissions(&plain, fs::Permissions::from_mode(0o755))?;
-    let core = dir.resources()?.shared_core()?;
-    assert_eq!(core.path, dir.resources()?.directory().join("core/verge-mihomo"));
-    assert!(!core.tun_capable);
-
-    // A readable TUN variant is preferred; without file capabilities it cannot run TUN.
-    let tun = dir.0.join("resources/core/verge-mihomo-tun");
-    fs::write(&tun, b"owned test core")?;
-    fs::set_permissions(&tun, fs::Permissions::from_mode(0o750))?;
-    let core = dir.resources()?.shared_core()?;
-    assert!(core.path.ends_with("core/verge-mihomo-tun"));
-    assert!(!core.tun_capable);
-
-    // Users outside the TUN group cannot open the variant and use the plain core.
-    fs::set_permissions(&tun, fs::Permissions::from_mode(0o000))?;
-    if fs::File::open(&tun).is_err() {
-        assert!(dir.resources()?.shared_core()?.path.ends_with("core/verge-mihomo"));
+    let pinned = script("v1.19.31");
+    fs::write(dir.0.join("resources/core/verge-mihomo"), &pinned)?;
+    dir.manifest(TARGET, &hash(pinned.as_bytes()))?;
+    let core_dir = dir.0.join("core");
+    let install = |installed: &str| -> Result<Vec<u8>> {
+        let _ = fs::remove_dir_all(&core_dir);
+        fs::create_dir(&core_dir)?;
+        fs::set_permissions(&core_dir, fs::Permissions::from_mode(0o700))?;
+        let core = core_dir.join("verge-mihomo");
+        fs::write(&core, script(installed))?;
+        fs::set_permissions(&core, fs::Permissions::from_mode(0o755))?;
+        fs::write(core_dir.join(".core-installation.json"), b"{}")?;
+        assert_eq!(
+            dir.resources()?.initialize_core(&core_dir)?,
+            core_dir.canonicalize()?.join("verge-mihomo")
+        );
+        Ok(fs::read(&core)?)
+    };
+    // An older stable core (the previous installer pin or an old Web upgrade) is replaced.
+    assert_eq!(install("v1.19.30")?, pinned.as_bytes());
+    assert!(!core_dir.join(".core-installation.json").exists(), "stale receipt kept");
+    assert_eq!(install("v1.9.99")?, pinned.as_bytes());
+    // Equal, newer, Alpha and unrecognized cores remain the user's choice.
+    for kept in ["v1.19.31", "v1.20.0", "alpha-1a2b3c4", "v1.19.32-rc1"] {
+        assert_eq!(install(kept)?, script(kept).as_bytes(), "{kept}");
+        assert!(core_dir.join(".core-installation.json").exists(), "{kept}");
     }
-
-    // Writable or tampered shared cores are rejected instead of executed.
-    fs::set_permissions(&tun, fs::Permissions::from_mode(0o770))?;
-    assert!(format!("{:#}", dir.resources()?.shared_core().unwrap_err()).contains("writable"));
-    fs::write(&tun, b"tampered core")?;
-    fs::set_permissions(&tun, fs::Permissions::from_mode(0o750))?;
-    assert!(format!("{:#}", dir.resources()?.shared_core().unwrap_err()).contains("SHA-256"));
-    fs::remove_file(&tun)?;
-    symlink(&plain, &tun)?;
-    assert!(dir.resources()?.shared_core().is_err());
     Ok(())
 }
