@@ -17,7 +17,7 @@ pub fn enabled() -> bool {
 }
 
 /// Quote an argument for a desktop entry `Exec` key.
-fn quote(argument: &str) -> String {
+pub fn quote(argument: &str) -> String {
     if !argument.contains(|c: char| c.is_whitespace() || "\"'\\`$;&|<>()*?#~".contains(c)) {
         return argument.to_owned();
     }

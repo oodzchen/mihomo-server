@@ -5,6 +5,7 @@ mod autostart;
 mod commands;
 mod controller;
 mod i18n;
+mod integration;
 mod local;
 mod model;
 mod notify;
@@ -69,6 +70,10 @@ fn main() {
             commands::open_dashboard
         ])
         .setup(move |app| {
+            // Before any window maps: the compositor reads the entry for its icon.
+            if let Err(error) = integration::ensure() {
+                eprintln!("cannot register the desktop entry: {error:#}");
+            }
             let handle = app.handle().clone();
             tray::create(&handle, initial)?;
             tauri::async_runtime::spawn(controller::run(handle, !hidden));
