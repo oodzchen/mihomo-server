@@ -430,6 +430,100 @@ tun_assert() {
     check "carol reaches resolved's fake IPs through alice's TUN" system_lookup_works carol
 }
 
+# cli USER ARGS...: the installed mihomo-server command, run as USER.
+cli() {
+    local user="$1"
+    shift
+    as "$user" mihomo-server "$@"
+}
+# fails_with PATTERN COMMAND...: COMMAND fails and explains itself with PATTERN.
+fails_with() {
+    local pattern="$1" output
+    shift
+    output="$("$@" 2>&1)" && { echo "      accepted: $output"; return 1; }
+    grep -q "$pattern" <<<"$output" || { echo "      got: $output"; return 1; }
+}
+# exits_with STATUS COMMAND...
+exits_with() {
+    local want="$1"
+    shift
+    "$@" >/dev/null 2>&1
+    [ $? = "$want" ]
+}
+link_down() { ! link_up "$1"; }
+# selected USER GROUP: the node GROUP currently uses, as the command reports it.
+selected() {
+    cli "$1" --json proxy list "$2" | python3 -c 'import json,sys; print(json.load(sys.stdin)["now"])'
+}
+
+phase_cli() {
+    # ---------------------------------------------------------------- mihomo-server command
+    echo "== mihomo-server command"
+    # shellcheck disable=SC2016 # expanded by the checking shell
+    check "command, manual and completions are linked into /usr/local" bash -c \
+        '[ "$(readlink /usr/local/bin/mihomo-server)" = /opt/mihomo-server/current/bin/mihomo-server ] \
+            && [ -f /usr/local/share/man/man1/mihomo-server.1 ] \
+            && [ -f /usr/local/share/bash-completion/completions/mihomo-server ] \
+            && [ -f /usr/local/share/zsh/site-functions/_mihomo-server ]'
+    check "command is on every user's PATH" as carol sh -c 'command -v mihomo-server >/dev/null'
+    check "root is told it has no instance" fails_with 'root has no instance' mihomo-server status
+    cli alice status >/tmp/cli-status-alice.log 2>&1
+    check "alice status shows her running core" grep -Eq '^core: +running, Mihomo v' /tmp/cli-status-alice.log
+    check "alice status shows her system-wide TUN" grep -q "^tun: *on (device $(dev alice), system-wide)" /tmp/cli-status-alice.log
+    check "alice status names her subscription" grep -Eq '^subscription: +(real|direct)$' /tmp/cli-status-alice.log
+    check "alice status shows her proxy port" grep -q "^proxy: *HTTP/SOCKS 127.0.0.1:$(mixed_port alice)" /tmp/cli-status-alice.log
+    cli bob status >/tmp/cli-status-bob.log 2>&1
+    check "bob status reaches his public-origin wildcard listener" grep -q '^manage: *https://bob.example$' /tmp/cli-status-bob.log
+    check "bob status names alice as TUN holder" grep -q '^tun: *off (the system-wide TUN is held by alice' /tmp/cli-status-bob.log
+    check "carol tun on is refused with the reason" fails_with 'TUN group' cli carol tun on
+    check "token command prints the token" test "$(cli alice token)" = "$(cat "$(data_dir alice)/management-token")"
+    check "logs passes journalctl options" cli alice logs -n 5 --no-pager
+    cli alice core >/tmp/cli-core.log 2>&1
+    check "core version" grep -q '^Mihomo v' /tmp/cli-core.log
+
+    cli alice sub >/tmp/cli-sub.log 2>&1
+    check "subscription list marks the one in use" grep -Eq '^\* +1 +local .* (real|direct)$' /tmp/cli-sub.log
+    check "sub use applies the subscription" cli alice sub use 1
+    check "alice TUN up after sub use" wait_for 60 link_up "$(dev alice)"
+
+    cli alice mode global >/dev/null
+    check "mode global via the command" test "$(cli alice mode)" = global
+    cli alice --json status >/tmp/cli-status.json 2>&1
+    check "core reports global mode" grep -q '"mode": "global"' /tmp/cli-status.json
+    cli alice mode rule >/dev/null
+    check "mode rule via the command" test "$(cli alice mode)" = rule
+    check "unknown mode is a usage error" exits_with 2 cli alice mode tun
+
+    local group original count
+    group="$(cli alice --json proxy list | python3 -c 'import json,sys; print(next(g["name"] for g in json.load(sys.stdin) if g["type"] == "Selector" and g["name"] != "GLOBAL"))')"
+    original="$(selected alice "$group")"
+    count="$(cli alice --json proxy list "$group" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["nodes"]))')"
+    cli alice proxy select "$group" "$count" >/dev/null
+    check "proxy select by list number" test "$(selected alice "$group")" = \
+        "$(cli alice --json proxy list "$group" | python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][-1]["name"])')"
+    cli alice proxy select "$group" "$original" >/dev/null
+    check "proxy select by name restores the node" test "$(selected alice "$group")" = "$original"
+    cli alice proxy test "$group" >/tmp/cli-delay.log 2>&1
+    check "proxy test measures the group" grep -Eq '^[* ] [0-9]+ ms ' /tmp/cli-delay.log
+    check "alice proxy port works after command selections" fetch alice -x "http://127.0.0.1:$(mixed_port alice)"
+
+    cli alice tun off >/dev/null
+    check "tun off via the command removes the device" wait_for 40 link_down "$(dev alice)"
+    check "tun off releases the system TUN" holder_is bob ''
+    cli alice tun on >/dev/null
+    check "tun on via the command brings the device back" wait_for 60 link_up "$(dev alice)"
+    check "alice holds the system TUN again" holder_is bob alice
+
+    cli alice stop >/dev/null
+    check "status exits 3 once stopped" exits_with 3 cli alice status
+    check "stopping releases the TUN" wait_for 40 link_down "$(dev alice)"
+    cli alice start >/tmp/cli-start.log 2>&1
+    check "start waits for a ready instance" grep -q '^manage:' /tmp/cli-start.log
+    check "status exits 0 once started" exits_with 0 cli alice status
+    check "start restores the saved TUN" wait_for 60 link_up "$(dev alice)"
+    check "alice traffic uses alice's TUN after command restart" uses_tun alice alice
+}
+
 phase_crash() {
     # ---------------------------------------------------------------- core crash
     echo "== core crash recovery"
@@ -473,9 +567,9 @@ phase_upgrade() {
     OLD_C="$(pgrep -u carol -x mihomo-server)"
     BEFORE_UPGRADE_RELEASE=$(readlink /opt/mihomo-server/current)
     echo vfixture2 >/work/releases/latest-tag
-    as alice env MIHOMO_INSTALL_BASE_URL=http://127.0.0.1:18080 bash -c \
-        'set -o pipefail; curl -fsSL http://127.0.0.1:18080/test/repo/releases/latest/download/install.sh | bash' \
-        >/tmp/upgrade.log 2>&1 || { cat /tmp/upgrade.log; fatal 'zero-argument upgrade failed'; }
+    as alice env MIHOMO_INSTALL_BASE_URL=http://127.0.0.1:18080 \
+        MIHOMO_SERVER_INSTALLER=http://127.0.0.1:18080/test/repo/releases/latest/download/install.sh \
+        mihomo-server update >/tmp/upgrade.log 2>&1 || { cat /tmp/upgrade.log; fatal 'mihomo-server update failed'; }
     check "current points at the new release" test "$(readlink /opt/mihomo-server/current)" = releases/vfixture2
     check "previous release kept" test -d "/opt/mihomo-server/$BEFORE_UPGRADE_RELEASE"
     restarted() { local p; p="$(pgrep -u "$1" -x mihomo-server)"; [ -n "$p" ] && [ "$p" != "$2" ]; }
@@ -533,12 +627,16 @@ phase_cleanup() {
         "! resolvectl query --legend=no -4 --cache=no www.gstatic.com | grep -q ' 198\.19\.'"
     check "alice keeps her slot after disable" test -n "$(slot_of alice)"
 
-    bash /work/install.sh --uninstall >/tmp/uninstall.log 2>&1 || { cat /tmp/uninstall.log; fatal "uninstall failed"; }
+    # The bundled installer: no download, run by the installing user via sudo.
+    cli alice uninstall --yes >/tmp/uninstall.log 2>&1 || { cat /tmp/uninstall.log; fatal "uninstall failed"; }
     check "no instances left" wait_for 40 bash -c "! pgrep -x mihomo-server >/dev/null && ! pgrep verge-mihomo >/dev/null"
     check "all TUN devices removed" bash -c "! ip -o link | grep -q ': ms[0-9]'"
     check "only default policy rules remain" only_default_rules
     check "bundle, unit and helper removed" bash -c \
         "[ ! -e /opt/mihomo-server ] && [ ! -e /etc/systemd/user/mihomo-server.service ] && [ ! -e /usr/local/bin/mihomo-server-user ]"
+    check "command, manual and completion links removed" bash -c \
+        '! compgen -G "/usr/local/bin/mihomo-server*" >/dev/null && [ ! -L /usr/local/share/man/man1/mihomo-server.1 ] \
+            && [ ! -L /usr/local/share/bash-completion/completions/mihomo-server ] && [ ! -L /usr/local/share/zsh/site-functions/_mihomo-server ]'
     check "users' data kept" bash -c "[ -s /home/alice/.local/share/mihomo-server/management-token ] && [ -s '/home/bob/private data%/mihomo-server/management-token' ]"
     check "TUN group, slot registry and launcher removed" bash -c \
         "! getent group mihomo-tun >/dev/null && [ ! -e /var/lib/mihomo-server ]"
@@ -570,6 +668,7 @@ case "${1:-before-reboot}" in
         phase_migration
         tun_enable
         tun_assert
+        phase_cli
         phase_crash
         phase_core_upgrade
         phase_upgrade

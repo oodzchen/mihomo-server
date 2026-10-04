@@ -79,6 +79,8 @@ bundle/
 │   └── web/                       # built React assets
 ├── mihomo-server.service           # shared systemd user unit
 ├── mihomo-server-user              # per-user control of the shared installation
+├── install.sh                     # installer copy for offline `mihomo-server uninstall`
+├── share/                         # mihomo-server(1), bash and zsh completions
 ├── checksums.sha256
 ├── LICENSE
 ├── LICENSES.txt                   # third-party license and dependency inventory
@@ -108,6 +110,10 @@ for different first-run settings, or `--no-start` to begin stopped. Listener/ori
 arguments can be appended to launch; existing Host/Origin and token policies apply.
 A failed bootstrap leaves the page available for local profile import and repair.
 
+`launch` runs `bin/mihomo-server` with service options; `mihomo-server serve
+[OPTIONS]` is the explicit form, and an invocation whose first argument is a service
+option (as `launch` and older units use) still runs the service. Any other first
+argument is a command of the `mihomo-server` control interface (below).
 `launch` uses `exec`, so its PID is the Rust service PID. Ctrl-C or SIGTERM to that
 PID stops command admission, closes HTTP/WS, cancels operations and terminates/reaps
 the owned core before exiting. Run it in the foreground or under one process manager.
@@ -216,7 +222,11 @@ Layout:
 - `/opt/mihomo-server/releases/<tag>` and atomic `current` link: root-owned,
   current and previous releases retained.
 - `/etc/systemd/user/mihomo-server.service`: shared user unit, copied verbatim.
-- `/usr/local/bin/mihomo-server-user`: user helper.
+- `/usr/local/bin/mihomo-server`: the control command (symlink into `current`),
+  with `/usr/local/share/man/man1/mihomo-server.1` and bash/zsh completions under
+  `/usr/local/share/{bash-completion/completions,zsh/site-functions}`. An existing
+  non-symlink file at any of these paths is kept and reported, never replaced.
+- `/usr/local/bin/mihomo-server-user`: user helper (service lifecycle and paths).
 - `/var/lib/mihomo-server/slots`: root-owned 1777 stable slot registry.
 - `${XDG_CONFIG_HOME:-$HOME/.config}/mihomo-server/env`: optional startup settings.
 - `${XDG_DATA_HOME:-$HOME/.local/share}/mihomo-server`: existing persistent layout.
@@ -239,12 +249,55 @@ Named settings override matching options in legacy `MIHOMO_SERVER_ARGS`.
 Restart the instance to apply changes. API Host/origin and token checks remain
 active, including for installer readiness checks behind a public origin.
 
+### The `mihomo-server` command
+
+`mihomo-server COMMAND` controls the invoking user's instance (see
+`mihomo-server --help` and `man mihomo-server`):
+
+```sh
+mihomo-server status                    # service, core, subscription, mode, TUN, ports
+mihomo-server start | stop | restart    # restart/start wait for a running core and API
+mihomo-server enable | disable          # also at boot / not at boot; data is kept
+mihomo-server info | token | logs [-n 100]
+mihomo-server sub [list|use|update|add|remove]
+mihomo-server proxy [list [GROUP]|select [GROUP] NODE|test [TARGET]|unfix GROUP]
+mihomo-server mode [rule|global|direct]
+mihomo-server tun [on|off]
+mihomo-server core [version|update [--alpha]]
+mihomo-server update                    # latest release installer, unless up to date
+mihomo-server uninstall [--purge]       # bundled installer; asks unless --yes
+```
+
+Service lifecycle commands execute the release's `mihomo-server-user` helper.
+API commands find the instance from the user's systemd unit: its main PID's
+command line gives the `--listen`, `--public-origin` and `--data-dir` the launcher
+passed (or the slot port from the registry), so wildcard listeners are reached on
+loopback with the authorized public-origin Host, and the token is read from the
+data directory. `--api URL` and `--token-file FILE` (or `MIHOMO_SERVER_API`,
+`MIHOMO_SERVER_TOKEN_FILE`) address a foreground service instead; start, stop and
+restart then control its core. Subscriptions, groups and nodes may be named
+exactly, by list number, case-insensitively or by a unique part of the name; an
+omitted operand is asked for on a terminal. `--json` prints machine-readable
+results. Exit status is 0 on success, 1 on failure, 2 on invalid usage, and 3
+from `status` when the instance is not running. Root has no instance.
+
+`update` compares the installed release (the `releases/<tag>` directory it runs
+from) with the tag GitHub's `releases/latest` redirects to, then runs the latest
+published `install.sh`; `--force` reinstalls. The repository is fixed at build
+time (`MIHOMO_SERVER_REPOSITORY`, set by the release workflow). Both `update` and
+`uninstall` honor `MIHOMO_SERVER_INSTALLER` (a path or URL), used by the
+multi-user test.
+
+The helper remains available directly:
+
 ```sh
 mihomo-server-user enable        # init is a compatibility alias
+mihomo-server-user start         # start and verify without enabling at boot
+mihomo-server-user stop
 mihomo-server-user info          # also the default without arguments
 mihomo-server-user token
 mihomo-server-user status
-mihomo-server-user logs
+mihomo-server-user logs [OPTS]   # follows; options replace -f for journalctl
 mihomo-server-user restart
 mihomo-server-user disable       # keep data
 mihomo-server-user purge --yes   # delete own data/config and release slot
@@ -295,7 +348,8 @@ Activation failure restores the old unit; custom units/drop-ins require review.
 curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash -s -- --uninstall [--purge]
 ```
 
-Uninstall stops every instance and removes the program, unit, helper, enablement,
+Uninstall stops every instance and removes the program, unit, helper, the
+`/usr/local` command/manual/completion links pointing into `/opt/mihomo-server`, enablement,
 slot registry, `mihomo-tun` group, the polkit TUN DNS rule and the lingering the
 installer enabled. User
 data, env files and the helper's path drop-in are kept for a reinstall. `--purge`
@@ -317,5 +371,6 @@ MIHOMO_TEST_BINARY=/usr/bin/verge-mihomo cargo test -p mihomo-server \
 ```
 
 The validation suite covers:
+- `service/tests/cli.rs` checks the command's usage, exit statuses and service routing; its opt-in live test drives a foreground service (subscriptions, node selection, modes, core start/stop) through `--api`. The multi-user container drives the installed command as real users: discovery behind a public-origin wildcard listener, status, subscriptions, node selection and delay tests with real nodes, mode, TUN switching and handover, stop/start, `update` and `uninstall`.
 - Python tests verify packaging, integrity/transport failures, launcher argument boundaries and isolated service lifecycle. The privileged multi-user container tests the actual zero-argument download and sudo path, opt-in users, XDG persistence, immediate authorization, real-node traffic, Web core upgrade with TUN, installer core-pin upgrade, upgrade, container reboot, uninstall, reinstall and purge. The host lifecycle test uses a unique unit instead of installing shared host files.
 - Opt-in Rust deployment test (`service/tests/deployment.rs`), packaging the actual service/core, launching from an unrelated working directory, testing first-use initialization, local-profile import/validation/start/node/config changes, failed validation, service restart, restored records and retained managed core, and requiring SIGTERM child reaping.

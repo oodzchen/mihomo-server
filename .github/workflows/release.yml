@@ -49,6 +49,9 @@ jobs:
           echo "sha256=$(jq -r .sha256 deploy/core-pin.json)" >> "$GITHUB_OUTPUT"
 
       - name: Build and package bundle
+        env:
+          # Where `mihomo-server update` fetches the installer from.
+          MIHOMO_SERVER_REPOSITORY: ${{ github.repository }}
         run: |
           python3 scripts/package_bundle.py --build \
             --target "$TARGET" \
@@ -60,6 +63,7 @@ jobs:
       - name: Smoke test bundle binary
         run: |
           dist/mihomo-server-$GITHUB_REF_NAME-$TARGET/bin/mihomo-server --help >/dev/null
+          dist/mihomo-server-$GITHUB_REF_NAME-$TARGET/bin/mihomo-server serve --help >/dev/null
           echo "Binary runs on this glibc version."
 
       - name: Create tarball and checksum

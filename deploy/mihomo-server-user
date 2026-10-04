@@ -10,15 +10,18 @@ usage() {
     cat <<'HELP'
 Usage: mihomo-server-user [COMMAND]
   enable      Enable, start and verify your instance (init is an alias)
+  start       Start and verify your instance without enabling it at boot
+  stop        Stop your instance
   info        Show addresses, paths and TUN state (default command)
   token       Print your management token
   status      Show systemd status
-  logs        Follow service logs
+  logs [OPT]  Follow service logs, or pass journalctl options (e.g. -n 100)
   restart     Restart and verify your instance
   disable     Stop and disable your instance, keeping data
   purge --yes Delete your instance data, configuration and slot claim
 
 Edit the displayed env file to configure remote access, then restart.
+Subscriptions, nodes, mode and TUN: see mihomo-server --help.
 HELP
 }
 die() { echo "error: $*" >&2; exit 1; }
@@ -77,7 +80,7 @@ save_paths() {
     mkdir -p "$(dirname "$ENV_FILE")" "$(dirname "$DROPIN")"
     if [ ! -e "$ENV_FILE" ]; then
         (set -o noclobber; cat > "$ENV_FILE" <<'CONFIG'
-# Optional settings; changes take effect after mihomo-server-user restart.
+# Optional settings; changes take effect after mihomo-server restart.
 # MIHOMO_SERVER_LISTEN=0.0.0.0:9090
 # MIHOMO_SERVER_PUBLIC_ORIGIN=http://server.example:9090
 # MIHOMO_SERVER_ARGS=""
@@ -179,7 +182,7 @@ info() {
     local state n tun line detail proxy manage token
     state=$(systemctl --user is-active "$UNIT" 2>/dev/null || true)
     if ! n=$(slot); then
-        echo "service:   $state (run: mihomo-server-user enable)"
+        echo "service:   $state (run: mihomo-server enable)"
         echo "config:    $ENV_FILE"
         return
     fi
@@ -254,7 +257,12 @@ case "$command" in
     info) info ;;
     token) endpoint || true; cat "${TOKEN_FILE:-$DATA_DIR/management-token}" ;;
     status) exec systemctl --user status "$UNIT" ;;
-    logs) exec journalctl --user -u "$UNIT" -f ;;
+    logs) if [ $# = 0 ]; then set -- -f; fi; exec journalctl --user -u "$UNIT" "$@" ;;
+    start)
+        # Record the effective XDG paths once, as enable does, without enabling.
+        if [ ! -f "$DROPIN" ]; then save_paths; systemctl --user daemon-reload; fi
+        systemctl --user start "$UNIT"; wait_ready; info ;;
+    stop) systemctl --user stop "$UNIT"; echo 'Stopped; start again with: mihomo-server start' ;;
     restart) systemctl --user restart "$UNIT"; wait_ready; info ;;
     disable) systemctl --user disable --now "$UNIT"; echo 'Disabled; data kept' ;;
     purge) purge "$@" ;;

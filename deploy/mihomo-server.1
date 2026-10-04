@@ -1,0 +1,224 @@
+.TH MIHOMO-SERVER 1 2026-10-04 "mihomo-server" "User Commands"
+.SH NAME
+mihomo-server \- control your headless Mihomo instance
+.SH SYNOPSIS
+.B mihomo-server
+.RB [ \-\-json ]
+.RB [ \-\-api
+.IR URL ]
+.RB [ \-\-token\-file
+.IR FILE ]
+.I command
+.RI [ argument ...]
+.br
+.B mihomo-server serve
+.RI [ service-option ...]
+.SH DESCRIPTION
+.B mihomo-server
+manages your own instance of the shared mihomo-server installation: the
+systemd user service, subscriptions, proxy groups and nodes, the proxy mode,
+the system-wide TUN and the Mihomo core.
+.PP
+Without
+.BR \-\-api ,
+commands act on the running systemd user unit
+.I mihomo-server.service
+of the invoking user and read its management address and token from that
+service.  Service commands (start, stop, restart, enable, disable, info,
+token, logs, purge) are performed by
+.BR mihomo-server-user ,
+which is installed alongside.
+.PP
+Wherever a subscription, group or node is expected, it may be given as its
+exact name, its number in the corresponding list, its name in any case, or
+any unique part of its name.  When an operand is omitted on a terminal, a
+numbered list is shown to choose from.
+.SH OPTIONS
+.TP
+.B \-\-json
+Write machine-readable JSON to standard output instead of text.
+.TP
+.BI \-\-api " URL"
+Use the management API at
+.I URL
+(for example a foreground service) instead of the systemd user instance.
+Service commands start, stop and restart then control the core only.
+.TP
+.BI \-\-token\-file " FILE"
+Read the management token from
+.IR FILE .
+.TP
+.BR \-h ", " \-\-help
+Write a usage summary; after a command, describe that command.
+.TP
+.BR \-V ", " \-\-version
+Write the program version.
+.SH COMMANDS
+.SS Service
+.TP
+.B status
+Show the service and core state, the subscription in use, the proxy mode,
+TUN, the proxy port and the management address.
+.TP
+.B start
+Start the instance and wait until its core and API are ready.
+.TP
+.B stop
+Stop the instance.
+.TP
+.B restart
+Restart the instance and wait until it is ready.
+.TP
+.B enable
+Start the instance now and at every boot (alias:
+.BR init ).
+.TP
+.B disable
+Stop the instance and do not start it at boot.  Data is kept.
+.TP
+.B info
+Show the management login address, token file, proxy port and paths.
+.TP
+.B token
+Write the management token.
+.TP
+.BR logs " [" \fIjournalctl-option\fR ...]
+Follow the service journal, or pass the options to
+.BR journalctl (1),
+for example
+.BR "logs \-n 100" .
+.TP
+.BR purge " [" \-y ]
+Delete your instance data, configuration and slot.
+.SS Subscriptions
+.TP
+.BR "sub " [ list ]
+List subscriptions; the one in use is marked with
+.BR * .
+.TP
+.BR "sub use " [\fIsubscription\fR]
+Use (apply) a subscription.
+.TP
+.BR "sub update " [\fIsubscription\fR...]
+Download remote subscriptions again; all remote ones when none is given.
+.TP
+.BR "sub add " \fIsource\fR " [" \-n " \fIname\fR] [" \-\-use ]
+Import an http(s) subscription URL or a local YAML file.
+.TP
+.BR "sub remove " \fIsubscription\fR " [" \-y ]
+Delete a subscription.
+.SS Proxies
+.TP
+.BR "proxy " [ list ]
+List proxy groups and their selected nodes; the main group is marked with
+.BR * .
+.TP
+.BI "proxy list " group
+List the nodes of
+.I group
+with their last measured delay.
+.TP
+.BR "proxy select " [[\fIgroup\fR] " \fInode\fR]"
+Select
+.I node
+in
+.IR group ,
+by default in the main group (GLOBAL in global mode, otherwise the group
+named Proxies, otherwise the first selector).
+.TP
+.BR "proxy test " [\fItarget\fR] " [" \-\-url " \fIURL\fR] [" \-\-timeout " \fIms\fR]"
+Test the delay of every node of a group, or of one node; the main group
+by default.  Results are sorted, fastest first.
+.TP
+.BI "proxy unfix " group
+Let an automatic (url-test or fallback) group choose again.
+.SS Mode, TUN and core
+.TP
+.BR "mode " [ rule | global | direct ]
+Show or set the proxy mode.
+.TP
+.BR "tun " [ on | off ]
+Show or switch the TUN.  It is system-wide: the first member of group
+mihomo-tun to enable it holds it until they disable it.
+.TP
+.BR "core " [ version ]
+Show the installed and running Mihomo version.
+.TP
+.BR "core update " [ \-\-alpha "] [" \-\-force ]
+Upgrade the core of this instance; it is rolled back when it fails.
+.SS Installation
+.TP
+.BR update " [" \-\-force ]
+Download and run the latest release installer, unless the installed
+release is already the latest.  Requires sudo.
+.TP
+.BR uninstall " [" \-\-purge "] [" \-y ]
+Remove the shared installation for all users; with
+.BR \-\-purge ,
+also every user's data.  Requires sudo.
+.TP
+.BR serve " [" \fIservice-option\fR ...]
+Run the management service in the foreground; this is what the systemd
+unit runs.  See
+.BR "mihomo-server serve \-\-help" .
+.SH ENVIRONMENT
+.TP
+.B MIHOMO_SERVER_API
+Default for
+.BR \-\-api .
+.TP
+.B MIHOMO_SERVER_TOKEN_FILE
+Default for
+.BR \-\-token\-file .
+.TP
+.B MIHOMO_SERVER_INSTALLER
+Installer path or URL used by
+.B update
+and
+.BR uninstall .
+.TP
+.BR XDG_CONFIG_HOME ", " XDG_DATA_HOME
+Base directories of the configuration and data files.
+.SH FILES
+.TP
+.I ~/.config/mihomo-server/env
+Startup settings, such as
+.B MIHOMO_SERVER_LISTEN
+and
+.BR MIHOMO_SERVER_PUBLIC_ORIGIN .
+.TP
+.I ~/.local/share/mihomo-server/
+Subscriptions, settings, core and the
+.I management-token
+file.
+.TP
+.I /opt/mihomo-server/current/
+The installed program.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+The operation failed.
+.TP
+.B 2
+Invalid usage.
+.TP
+.B 3
+.B status
+only: the instance is not running.
+.SH EXAMPLES
+.nf
+mihomo-server status
+mihomo-server sub add https://example.com/sub \-n work \-\-use
+mihomo-server proxy test
+mihomo-server proxy select \(aqTokyo 03\(aq
+mihomo-server proxy select AI 3
+mihomo-server mode global
+mihomo-server tun on
+mihomo-server logs \-n 50 \-\-no\-pager
+.fi
+.SH SEE ALSO
+.BR systemctl (1),
+.BR journalctl (1)

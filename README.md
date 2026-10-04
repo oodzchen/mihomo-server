@@ -12,7 +12,7 @@
 curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash
 ```
 
-脚本下载并校验最新版本，自动通过 sudo 安装到 `/opt/mihomo-server`，为你启动独立的 systemd 用户实例，授权使用 TUN，并启用注销后、重启后继续运行。sudo 可能要求输入密码。安装完成会显示管理地址、代理端口、配置文件和令牌位置。
+脚本下载并校验最新版本，自动通过 sudo 安装到 `/opt/mihomo-server`，为你启动独立的 systemd 用户实例，授权使用 TUN，并启用注销后、重启后继续运行。sudo 可能要求输入密码。安装完成会显示管理地址、代理端口、配置文件和令牌位置，并提供 `mihomo-server` 命令（`/usr/local/bin`，附 man 手册和 bash/zsh 补全）。
 
 程序全系统共享，用户配置和数据各自独立：
 
@@ -21,6 +21,7 @@ curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/in
 | 启动配置 | `~/.config/mihomo-server/env` |
 | 订阅、设置及令牌等数据 | `~/.local/share/mihomo-server` |
 | 程序 | `/opt/mihomo-server/current` |
+| 命令 | `/usr/local/bin/mihomo-server`，`man mihomo-server` |
 
 配置和数据分别遵循 `XDG_CONFIG_HOME`、`XDG_DATA_HOME`。初始化时保存有效路径，之后重启服务无需重新设置环境变量；空值或相对路径使用默认目录。已知的旧用户级安装会保留原数据、启动参数和回退副本，自定义服务单元需要自行迁移。
 
@@ -31,17 +32,46 @@ curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/in
 首个用户（slot 0）的默认管理地址是 `http://127.0.0.1:9090`，HTTP/SOCKS 混合代理为 `127.0.0.1:7890`，DNS 监听为 `127.0.0.1:1053`。已有程序占用默认端口时，脚本会报告冲突；通过用户配置或设置页调整后重新启动。
 
 ```sh
-mihomo-server-user info     # 查看实际地址和文件路径
-mihomo-server-user token    # 查看登录令牌
+mihomo-server info     # 查看登录地址（含令牌）和文件路径
+mihomo-server token    # 查看登录令牌
 ```
 
-打开管理页面，使用令牌登录；在「订阅」页导入 YAML 或远程订阅链接并使用订阅，然后在「代理」页选择节点。开启 TUN 仍在「设置」页完成。
+打开管理页面，使用令牌登录；在「订阅」页导入 YAML 或远程订阅链接并使用订阅，然后在「代理」页选择节点。开启 TUN 在「设置」页或用 `mihomo-server tun on` 完成。
 
 其他用户按需启用自己的实例：
 
 ```sh
-mihomo-server-user enable   # init 仍可作为兼容别名
+mihomo-server enable   # init 仍可作为兼容别名
 ```
+
+### 命令行管理
+
+不打开网页，也可以用 `mihomo-server` 完成常用操作，均作用于你自己的实例：
+
+```sh
+mihomo-server status                 # 服务、内核、当前订阅、代理模式、TUN、端口
+mihomo-server start | stop | restart
+mihomo-server enable | disable       # 开机自启 / 停止并取消自启（保留数据）
+mihomo-server logs [-n 100]          # 跟踪日志，或传入 journalctl 选项
+
+mihomo-server sub                    # 列出订阅，* 为正在使用
+mihomo-server sub add URL|文件 [-n 名称] [--use]
+mihomo-server sub use [订阅]          # 切换订阅；省略时列出编号供选择
+mihomo-server sub update [订阅...]    # 更新远程订阅，省略时更新全部
+mihomo-server sub remove 订阅
+
+mihomo-server proxy                  # 列出代理组及当前节点，* 为主分组
+mihomo-server proxy list 分组         # 节点及最近延迟
+mihomo-server proxy test [分组|节点]   # 测速，按延迟排序
+mihomo-server proxy select [分组] 节点  # 默认主分组（全局模式下为 GLOBAL）
+
+mihomo-server mode [rule|global|direct]
+mihomo-server tun [on|off]
+mihomo-server core [update [--alpha]]
+mihomo-server update                 # 升级程序到最新版本
+```
+
+订阅、分组和节点可以写全名、列表中的编号，或名称中唯一的一部分，如 `mihomo-server proxy select '日本 03'`、`mihomo-server proxy select AI 3`。加 `--json` 输出 JSON，便于脚本调用。`status` 在实例未运行时退出码为 3。
 
 slot 1–63 的管理端口为 `20000+10N`，代理端口为 `20001+10N`，DNS 端口为 `20002+10N`。订阅中写死的端口自动替换，在设置页显式指定的端口保留。
 
@@ -58,14 +88,14 @@ sudo loginctl enable-linger 用户名
 
 ## 远程访问与服务管理
 
-编辑 `mihomo-server-user info` 显示的 `env` 文件，例如：
+编辑 `mihomo-server info` 显示的 `env` 文件，例如：
 
 ```ini
 MIHOMO_SERVER_LISTEN=0.0.0.0:9090
 MIHOMO_SERVER_PUBLIC_ORIGIN=http://服务器IP:9090
 ```
 
-然后执行 `mihomo-server-user restart`。明确的监听和公开地址配置优先于兼容的 `MIHOMO_SERVER_ARGS` 中同名选项。通过 HTTPS 反向代理访问时，公开地址填写代理的 HTTPS 地址。
+然后执行 `mihomo-server restart`。明确的监听和公开地址配置优先于兼容的 `MIHOMO_SERVER_ARGS` 中同名选项。通过 HTTPS 反向代理访问时，公开地址填写代理的 HTTPS 地址。
 
 也可以使用 SSH 隧道，不必修改监听配置：
 
@@ -73,28 +103,21 @@ MIHOMO_SERVER_PUBLIC_ORIGIN=http://服务器IP:9090
 ssh -L 9090:127.0.0.1:9090 用户名@服务器
 ```
 
-常用命令：
-
-```sh
-mihomo-server-user status
-mihomo-server-user logs
-mihomo-server-user restart
-mihomo-server-user disable    # 停止并禁用自己的实例，保留数据
-```
+常用命令见上文「命令行管理」；`mihomo-server-user` 仍可使用，提供同样的服务管理命令。
 
 ## 升级与卸载
 
-升级程序：重新执行安装命令。正在运行的实例会重启到新版本，已停用的实例保持停用。
+升级程序：执行 `mihomo-server update`（或重新执行安装命令）。正在运行的实例会重启到新版本，已停用的实例保持停用。
 
 升级内核有两种方式，每个用户的内核各自独立：
 
 - 网页「内核」页：可升级到最新稳定版或 Alpha 版，失败自动回滚，升级后 TUN 照常可用。
 - 重新执行安装命令：实例启动时，如果内核是比安装包内置版本更旧的稳定版，会自动升级到内置版本；在网页上装的更新版本或 Alpha 版不会被覆盖。
 
-卸载：停止所有实例，删除程序、TUN 组、槽位登记，并关闭由安装脚本开启的 linger。各用户的订阅、设置和令牌会保留，重新安装后可以继续使用：
+卸载：停止所有实例，删除程序、命令、TUN 组、槽位登记，并关闭由安装脚本开启的 linger。各用户的订阅、设置和令牌会保留，重新安装后可以继续使用：
 
 ```sh
-curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash -s -- --uninstall
+mihomo-server uninstall    # 或：curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash -s -- --uninstall
 ```
 
 彻底卸载：在卸载的同时删除所有用户的实例数据和配置，包括迁移前旧版用户级安装留下的程序和备份：
@@ -103,7 +126,7 @@ curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/in
 curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash -s -- --uninstall --purge
 ```
 
-只删除自己的数据：执行 `mihomo-server-user purge --yes`。
+彻底卸载也可以执行 `mihomo-server uninstall --purge`。只删除自己的数据：执行 `mihomo-server purge`。
 
 构建和手动前台部署请参考 [部署文档](docs/DEPLOYMENT.md)。
 

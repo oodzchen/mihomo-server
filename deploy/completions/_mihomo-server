@@ -1,0 +1,71 @@
+#compdef mihomo-server
+# zsh completion for mihomo-server
+
+_mihomo-server() {
+    local curcontext=$curcontext state line
+    typeset -A opt_args
+    _arguments -C \
+        '--json[print machine-readable JSON]' \
+        '--api=[management API of a service outside systemd]:URL:_urls' \
+        '--token-file=[management token file]:file:_files' \
+        '(- *)'{-h,--help}'[print help]' \
+        '(- *)'{-V,--version}'[print version]' \
+        '1:command:->command' \
+        '*::argument:->argument' && return
+    case $state in
+        command)
+            local -a commands=(
+                'status:show service, core, subscription, mode, TUN and addresses'
+                'start:start your instance and wait until it is ready'
+                'stop:stop your instance'
+                'restart:restart your instance and wait until it is ready'
+                'enable:start your instance now and at boot'
+                'disable:stop your instance and do not start it at boot'
+                'info:show management address, token, proxy port and paths'
+                'token:print your management token'
+                'logs:follow service logs'
+                'sub:list, select, update, add and remove subscriptions'
+                'proxy:list groups and nodes, test delays and select nodes'
+                'mode:show or set the proxy mode'
+                'tun:show or switch the system-wide TUN'
+                'core:show or upgrade the Mihomo core'
+                'update:update mihomo-server to the latest release'
+                'uninstall:remove the shared installation'
+                'purge:delete your own instance data'
+                'serve:run the management service in the foreground'
+                'help:print help'
+            )
+            _describe -t commands 'mihomo-server command' commands ;;
+        argument)
+            case $line[1] in
+                sub|subscription|profile)
+                    if (( CURRENT == 2 )); then
+                        _values 'sub command' list use update add remove
+                    elif [[ $line[2] == (add|import) ]]; then
+                        _arguments '(-n --name)'{-n,--name}'[display name]:name:' '--use[use it after importing]' '1:source:_files'
+                    elif [[ $line[2] == (remove|rm) ]]; then
+                        _arguments '(-y --yes)'{-y,--yes}'[do not ask]' '1:subscription:'
+                    fi ;;
+                proxy|node)
+                    if (( CURRENT == 2 )); then
+                        _values 'proxy command' list select test unfix
+                    elif [[ $line[2] == (test|delay) ]]; then
+                        _arguments '--url=[test URL]:URL:_urls' '--timeout=[timeout in ms]:ms:' '1:target:'
+                    fi ;;
+                mode) (( CURRENT == 2 )) && _values mode rule global direct ;;
+                tun) (( CURRENT == 2 )) && _values state on off ;;
+                core)
+                    if (( CURRENT == 2 )); then
+                        _values 'core command' version update
+                    elif [[ $line[2] == (update|upgrade) ]]; then
+                        _arguments '--alpha[alpha channel]' '--force[reinstall]'
+                    fi ;;
+                update|upgrade) _arguments '--force[reinstall even when up to date]' ;;
+                uninstall) _arguments '--purge[also delete all user data]' '(-y --yes)'{-y,--yes}'[do not ask]' ;;
+                purge) _arguments '(-y --yes)'{-y,--yes}'[do not ask]' ;;
+                logs) _message 'journalctl options' ;;
+            esac ;;
+    esac
+}
+
+_mihomo-server "$@"

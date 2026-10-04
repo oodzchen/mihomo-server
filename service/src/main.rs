@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{Context as _, Result};
 use clap::{Arg, ArgAction, ArgMatches, Command, parser::ValueSource, value_parser};
@@ -23,10 +23,15 @@ fn main() -> Result<()> {
     if std::env::args().len() == 2 && std::env::args().nth(1).as_deref() == Some("--script-worker") {
         return mihomo_server::script::worker_stdio();
     }
+    let arguments: Vec<OsString> = std::env::args_os().collect();
+    let arguments = match mihomo_server::cli::route(&arguments) {
+        mihomo_server::cli::Route::Serve(arguments) => arguments,
+        mihomo_server::cli::Route::Cli => std::process::exit(mihomo_server::cli::main(arguments)),
+    };
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(run())
+        .block_on(run(arguments))
 }
 
 /// This user's slot, and the installation's system TUN lock when it has one.
@@ -54,8 +59,9 @@ fn isolation(_: &ArgMatches) -> Result<(Isolation, Option<std::convert::Infallib
     anyhow::bail!("multi-user mode requires Linux")
 }
 
-async fn run() -> Result<()> {
+async fn run(arguments: Vec<OsString>) -> Result<()> {
     let arguments = Command::new("mihomo-server")
+        .bin_name("mihomo-server serve")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Headless Mihomo supervisor with an authenticated management API")
         .arg(
@@ -178,7 +184,7 @@ async fn run() -> Result<()> {
                 .action(ArgAction::SetTrue)
                 .help("Keep the service running with the core stopped"),
         )
-        .get_matches();
+        .get_matches_from(arguments);
     let binary = arguments
         .get_one::<PathBuf>("mihomo")
         .cloned()

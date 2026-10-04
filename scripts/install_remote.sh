@@ -16,7 +16,7 @@ running after logout/reboot. sudo may ask for your password.
 --uninstall --purge  Also delete every user's instance data and configuration.
 --help               Show this help.
 
-Other users start their own instance with: mihomo-server-user enable
+Other users start their own instance with: mihomo-server enable
 HELP
 }
 die() { echo "error: $*" >&2; exit 1; }
@@ -238,8 +238,24 @@ install_shared() {
     mkdir -p /etc/systemd/user /usr/local/bin
     install -m 644 "$release/mihomo-server.service" /etc/systemd/user/mihomo-server.service
     ln -sfn "$root/current/mihomo-server-user" /usr/local/bin/mihomo-server-user
+    # The mihomo-server command, its manual and completions, following the
+    # release through the current link. Never replace a file we did not create.
+    local file link
+    for file in bin/mihomo-server share/man/man1/mihomo-server.1 \
+        share/bash-completion/completions/mihomo-server share/zsh/site-functions/_mihomo-server; do
+        [ -f "$release/share/man/man1/mihomo-server.1" ] || break
+        link=/usr/local/$file
+        if [ -e "$link" ] && [ ! -L "$link" ]; then
+            echo "warning: keeping existing $link; mihomo-server is at $root/current/$file" >&2
+            continue
+        fi
+        mkdir -p "$(dirname "$link")"
+        ln -sfn "$root/current/$file" "$link"
+    done
     if command -v restorecon >/dev/null; then
         restorecon -R "$root" "$registry" /etc/systemd/user/mihomo-server.service /usr/local/bin/mihomo-server-user \
+            /usr/local/bin/mihomo-server /usr/local/share/man/man1/mihomo-server.1 \
+            /usr/local/share/bash-completion/completions/mihomo-server /usr/local/share/zsh/site-functions/_mihomo-server \
             /etc/polkit-1/rules.d /etc/polkit-1/localauthority 2>/dev/null || true
     fi
     each_user_manager daemon-reload
@@ -276,7 +292,8 @@ install_shared() {
         case "$(basename "$entry")" in "$(basename "$release")" | "${previous:-/}") ;; *) rm -rf -- "${entry:?}" ;; esac
     done
     echo "System install complete: $root/current"
-    if [ -z "$caller" ]; then echo 'No non-root caller: users opt in with mihomo-server-user enable'; fi
+    if [ -z "$caller" ]; then echo 'No non-root caller: users opt in with mihomo-server enable'; fi
+    if [ -L /usr/local/bin/mihomo-server ]; then echo 'Manage your instance with: mihomo-server --help'; fi
 }
 # Runs as the instance owner, never root, so only that user's files can be removed.
 purge_user() {
@@ -323,7 +340,10 @@ uninstall_shared() {
         fi
     done < <(getent passwd)
     rm -f /etc/systemd/user/mihomo-server.service
-    if [ -L /usr/local/bin/mihomo-server-user ]; then rm -f /usr/local/bin/mihomo-server-user; fi
+    for link in /usr/local/bin/mihomo-server-user /usr/local/bin/mihomo-server /usr/local/share/man/man1/mihomo-server.1 \
+        /usr/local/share/bash-completion/completions/mihomo-server /usr/local/share/zsh/site-functions/_mihomo-server; do
+        if [ -L "$link" ] && [[ "$(readlink "$link")" = /opt/mihomo-server/* ]]; then rm -f "$link"; fi
+    done
     each_user_manager daemon-reload || true
     rm -rf /opt/mihomo-server
     if [ -d /var/lib/mihomo-server/linger ]; then

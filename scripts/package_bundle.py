@@ -140,6 +140,14 @@ def package(args):
         shutil.copyfile(ROOT / "deploy" / "mihomo-server.service", stage / "mihomo-server.service")
         shutil.copyfile(ROOT / "deploy" / "mihomo-server-user", stage / "mihomo-server-user")
         (stage / "mihomo-server-user").chmod(0o755)
+        # Installed into /usr/local by the installer; bundled again for offline uninstall.
+        shutil.copyfile(ROOT / "scripts" / "install_remote.sh", stage / "install.sh")
+        (stage / "install.sh").chmod(0o755)
+        for source, target in [("mihomo-server.1", "man/man1/mihomo-server.1"),
+                               ("completions/mihomo-server.bash", "bash-completion/completions/mihomo-server"),
+                               ("completions/_mihomo-server", "zsh/site-functions/_mihomo-server")]:
+            (stage / "share" / target).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / "deploy" / source, stage / "share" / target)
         shutil.copyfile(ROOT / "LICENSE", stage / "LICENSE")
         shutil.copyfile(ROOT / "LICENSES.txt", stage / "LICENSES.txt")
         (stage / "docs").mkdir()
