@@ -381,12 +381,25 @@ root_action() {
     if [ "$(id -u)" = 0 ]; then
         "$action" "$@"
     else
-        command -v sudo >/dev/null || die 'sudo is required; alternatively run the installer as root'
         # Explicit script functions only, with values passed as argv, never code.
         local definitions
         definitions=$(declare -f die verify_bundle each_user_manager activate_user polkit_tun_dns install_shared purge_user uninstall_shared)
-        sudo -- bash -euo pipefail -c "$definitions"$'\n'"$action \"\$@\"" bash "$@"
+        if [ "${MIHOMO_INSTALL_ELEVATE:-}" = pkexec ]; then
+            # Graphical clients have no terminal for sudo; polkit asks instead.
+            pkexec "$(command -v bash)" -euo pipefail -c "$definitions"$'\n'"$action \"\$@\"" bash "$@"
+        else
+            sudo -- bash -euo pipefail -c "$definitions"$'\n'"$action \"\$@\"" bash "$@"
+        fi
     fi
+}
+# The elevation tool root_action will use, when not already root.
+require_elevation() {
+    [ "$(id -u)" != 0 ] || return 0
+    case "${MIHOMO_INSTALL_ELEVATE:-sudo}" in
+        sudo) command -v sudo >/dev/null || die 'sudo is required; alternatively run the installer as root' ;;
+        pkexec) command -v pkexec >/dev/null || die 'pkexec (polkit) is required for a graphical installation' ;;
+        *) die "unsupported MIHOMO_INSTALL_ELEVATE: $MIHOMO_INSTALL_ELEVATE" ;;
+    esac
 }
 main() {
     # CI replaces this assignment, including for a piped/elevated invocation.
@@ -404,6 +417,7 @@ main() {
     if [ "$purge" = 1 ] && [ "$uninstall" = 0 ]; then die '--purge is only valid with --uninstall'; fi
     if [ "$(id -u)" != 0 ]; then caller=$(id -un)
     elif [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then caller=$SUDO_USER; fi
+    require_elevation
     if [ "$uninstall" = 1 ]; then root_action uninstall_shared "$purge"; return; fi
     if [ -n "$caller" ]; then
         caller_home=$(getent passwd "$caller" | cut -d: -f6)
@@ -412,7 +426,6 @@ main() {
     case "${XDG_CONFIG_HOME:-}" in /*) config_home=$XDG_CONFIG_HOME ;; *) config_home="$caller_home/.config" ;; esac
     case "${XDG_DATA_HOME:-}" in /*) data_home=$XDG_DATA_HOME ;; *) data_home="$caller_home/.local/share" ;; esac
     command -v systemctl >/dev/null || die 'missing systemctl'
-    if [ "$(id -u)" != 0 ]; then command -v sudo >/dev/null || die 'sudo is required; alternatively run as root'; fi
     # Internal environment overrides are for the isolated acceptance harness.
     bundle=${MIHOMO_INSTALL_BUNDLE:-}
     tag=${MIHOMO_INSTALL_TAG:-}

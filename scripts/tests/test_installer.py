@@ -104,6 +104,29 @@ class Installer(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), value)
 
+    def test_pkexec_elevation_preserves_values_as_arguments(self):
+        tools = self.root / "tools"
+        tools.mkdir()
+        for name, content in {
+            "id": '#!/bin/sh\nif [ "$1" = -u ]; then echo 1000; else echo tester; fi\n',
+            "pkexec": '#!/bin/sh\ncase "$1" in /*) exec "$@" ;; esac\necho "relative program" >&2; exit 1\n',
+            "sudo": '#!/bin/sh\necho SUDO; exit 1\n',
+        }.items():
+            p = tools / name
+            p.write_text(content)
+            p.chmod(0o755)
+        value = str(self.root / "spaces 'quotes' $(touch unexpected)")
+        result = self.run_shell('source "$1"; install_shared() { printf "%s\\n" "$@"; }; '
+                                'require_elevation; root_action install_shared "$VALUE"',
+                                PATH=str(tools) + ":" + self.env["PATH"], VALUE=value,
+                                MIHOMO_INSTALL_ELEVATE="pkexec")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), value)
+        result = self.run_shell('source "$1"; require_elevation',
+                                PATH=str(tools) + ":" + self.env["PATH"], MIHOMO_INSTALL_ELEVATE="doas")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsupported MIHOMO_INSTALL_ELEVATE", result.stderr)
+
     def test_truncated_pipe_never_calls_main(self):
         source = SCRIPT.read_text().split("# Also usable as an internal library")[0]
         result = subprocess.run(["bash"], input=source, env=self.env, capture_output=True, text=True)
