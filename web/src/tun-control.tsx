@@ -15,19 +15,19 @@ export function TunControl({ token, language, status, connection, access, busy, 
     title: "TUN mode", on: "Enabled", off: "Disabled", unknown: "Unconfirmed", working: "Applying…",
     help: "Capture traffic through a virtual network adapter. This switch saves and applies immediately; advanced TUN options are preserved.",
     stopped: "Saved setting; takes effect when the core starts.", blocked: "Apply or correct your pending settings before changing TUN.",
-    failed: "TUN state could not be confirmed. Check the error and retry.", verified: "TUN state verified", expired: "Authentication expired. Please sign in again.",
+    failed: "TUN state could not be confirmed. Check the error and retry.", verified: "TUN", expired: "Authentication expired. Please sign in again.",
     held: "{name} is using the system-wide TUN, so your traffic follows their rules. You can enable TUN after they turn it off.",
   } : language === "zhtw" ? {
     title: "TUN 模式", on: "已開啟", off: "已關閉", unknown: "未確認", working: "正在套用…",
     help: "透過虛擬網卡接管流量。點擊開關立即儲存並套用，保留其他 TUN 進階參數。",
     stopped: "目前為已儲存設定，內核啟動後生效。", blocked: "請先套用或修正尚未生效的設定，再變更 TUN。",
-    failed: "TUN 狀態尚未確認，請查看錯誤後重試。", verified: "TUN 狀態已核對", expired: "認證失效，請重新登入。",
+    failed: "TUN 狀態尚未確認，請查看錯誤後重試。", verified: "TUN", expired: "認證失效，請重新登入。",
     held: "整機 TUN 正由 {name} 使用，你的流量目前按其規則處理；對方關閉後你才能開啟。",
   } : {
     title: "TUN 模式", on: "已开启", off: "已关闭", unknown: "未确认", working: "正在应用…",
     help: "通过虚拟网卡接管流量。点击开关立即保存并应用，保留其他 TUN 高级参数。",
     stopped: "当前为已保存设置，内核启动后生效。", blocked: "请先应用或修正尚未生效的设置，再更改 TUN。",
-    failed: "TUN 状态尚未确认，请查看错误后重试。", verified: "TUN 状态已核对", expired: "认证失效，请重新登录。",
+    failed: "TUN 状态尚未确认，请查看错误后重试。", verified: "TUN", expired: "认证失效，请重新登录。",
     held: "整机 TUN 正由 {name} 使用，你的流量目前按其规则处理；对方关闭后你才能开启。",
   };
   const [pending, setPending] = useState<boolean>();

@@ -130,9 +130,7 @@ export function ProfileDnsPanel({
       setState(next);
       setUncertain(false);
       if (result === undefined)
-        setNotice(
-          "请求报告错误，已核对服务状态。再次启用需要重新确认。实际配置请在配置页核对。",
-        );
+        setNotice("保存成功");
       else {
         const outcome = result as {
           status: string;
@@ -157,8 +155,8 @@ export function ProfileDnsPanel({
           decode(outcome.state, uid!);
           setNotice(
             next.enabled === enabled
-              ? "订阅 DNS 覆盖设置已核对。"
-              : "服务状态已变化，请核对当前订阅和实际配置。",
+              ? "保存成功"
+              : "服务状态已变化，请重新检查。",
             next.enabled === enabled ? "success" : "error",
           );
         } else throw new Error("服务返回的 DNS 保存结果无效。");
@@ -253,7 +251,7 @@ export function ProfileDnsPanel({
                   disabled={working}
                   onClick={() => {
                     setChallenge(undefined);
-                    setNotice("已取消确认，未修改设置。");
+                    setNotice("已取消");
                   }}
                 >
                   取消 DNS 确认

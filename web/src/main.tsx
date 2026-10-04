@@ -306,7 +306,12 @@ function Manager({
       if (alive.current) {
         setStatus(current);
         setProfiles(catalog);
-        if (options.notify !== false || !options.toast) toast.finish(t(language, "completed"));
+        if (options.notify !== false || !options.toast) {
+          const message = name.startsWith("set_") || name.startsWith("edit_")
+            ? t(language, "saveSuccess")
+            : t(language, "completed");
+          toast.finish(message);
+        }
       }
       return result;
     } catch (error) {

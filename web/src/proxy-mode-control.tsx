@@ -20,15 +20,15 @@ export function ProxyModeControl({ token, language, status, connection, access, 
   const text = language === "en" ? {
     title: "Proxy mode", direct: "Direct", rule: "Rule", global: "Global", unknown: "Unconfirmed", working: "Applying…",
     help: "Direct bypasses proxies; Rule follows routing rules; Global uses the GLOBAL group. Click to save and apply immediately, preserving other settings.",
-    stopped: "Saved mode; takes effect when the core starts.", verified: "Proxy mode verified", failed: "Proxy mode could not be confirmed. Check the error and retry.", expired: "Authentication expired. Please sign in again.",
+    stopped: "Saved mode; takes effect when the core starts.", verified: "Proxy mode", failed: "Proxy mode could not be confirmed. Check the error and retry.", expired: "Authentication expired. Please sign in again.",
   } : language === "zhtw" ? {
     title: "代理模式", direct: "直連", rule: "規則", global: "全域", unknown: "未確認", working: "正在套用…",
     help: "直連不經代理；規則按設定分流；全域使用 GLOBAL 群組。點擊立即儲存並套用，保留其他設定。",
-    stopped: "目前為已儲存模式，內核啟動後生效。", verified: "代理模式已核對", failed: "代理模式尚未確認，請查看錯誤後重試。", expired: "認證失效，請重新登入。",
+    stopped: "目前為已儲存模式，內核啟動後生效。", verified: "代理模式", failed: "代理模式尚未確認，請查看錯誤後重試。", expired: "認證失效，請重新登入。",
   } : {
     title: "代理模式", direct: "直连", rule: "规则", global: "全局", unknown: "未确认", working: "正在应用…",
     help: "直连不经代理；规则按配置分流；全局使用 GLOBAL 分组。点击立即保存并应用，保留其他设置。",
-    stopped: "当前为已保存模式，内核启动后生效。", verified: "代理模式已核对", failed: "代理模式尚未确认，请查看错误后重试。", expired: "认证失效，请重新登录。",
+    stopped: "当前为已保存模式，内核启动后生效。", verified: "代理模式", failed: "代理模式尚未确认，请查看错误后重试。", expired: "认证失效，请重新登录。",
   };
   const notify = useToast();
   const [working, setWorking] = useState(false), [error, setError] = useState("");

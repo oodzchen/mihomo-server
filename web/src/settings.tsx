@@ -325,7 +325,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         uncertainRef.current = false; setUncertain(false);
       }
       if (same(requested, savedRef.current.runtime)) {
-        toast.finish("已核对：服务已保存当前草稿。", "info");
+        toast.finish(t(language, "saveSuccess"), "info");
         return true;
       }
       uncertainRef.current = true; setUncertain(true);
@@ -344,9 +344,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         }
         draftRef.current = merged; setDraft(merged);
         access.refresh();
-        toast.finish(result
-          ? "保存结果已核对，服务设置与提交内容一致。"
-          : "请求报告错误，但服务已保存此草稿，已核对，无需重复提交。", result ? "success" : "info");
+        toast.finish(t(language, "saveSuccess"), result ? "success" : "info");
         return true;
       } else {
         const message = "服务当前设置与提交内容不同，草稿已保留。请检查错误或重新读取设置。";

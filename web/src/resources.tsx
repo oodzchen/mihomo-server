@@ -105,10 +105,10 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
     try {
       if (section === "proxy-providers") {
         await command(token, "update_proxy_provider", { name });
-        setNotice(t(language, "ruleProviderUpdated", { name } as any) ? `${name} 更新完成` : `${name} updated`);
+        setNotice(t(language, "ruleProviderUpdated", { name }));
       } else {
         await command(token, "update_rule_provider", { name });
-        setNotice(t(language, "ruleProviderUpdated", { name } as any) || `${name} 更新完成`);
+        setNotice(t(language, "ruleProviderUpdated", { name }));
       }
       setRefresh(v => v + 1);
     } catch (err) {
@@ -123,7 +123,7 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
     setOperating(name);
     try {
       await command(token, "healthcheck_proxy_provider", { name });
-      setNotice(`${name}: ${t(language, "proxyProviderHealthcheck") || "健康检查"} 完成`);
+      setNotice(`${t(language, "proxyProviderHealthcheck")}${language === "en" ? ": " : "："}${name}`);
       setRefresh(v => v + 1);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) logout(t(language, "expiredToken"));

@@ -544,9 +544,9 @@ test("raw profile editor retranslates feedback and preserves draft across langua
   await chinese.getByRole("button", { name: "继续编辑原始订阅" }).click();
   await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
   await english.getByRole("button", { name: "Verify raw profile" }).click();
-  await expect(page.locator(".toast").filter({ hasText: "service content differs from the draft" }).last()).toBeVisible();
+  await expect(page.locator(".toast").filter({ hasText: "Content differs. Reload it." }).last()).toBeVisible();
   await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
-  await expect(page.locator(".toast").filter({ hasText: "服务内容与草稿不同" }).last()).toBeVisible();
+  await expect(page.locator(".toast").filter({ hasText: "内容不同，请重新读取。" }).last()).toBeVisible();
   await expect(chinese.getByRole("textbox", { name: "原始订阅 YAML" })).toHaveValue(draft);
   const after = await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
   expect(after.generation).toBe(before.generation);
@@ -1174,13 +1174,13 @@ test("browser repairs failed startup, saves selection/config, restores after ser
     .selectOption("global");
   await applySettings(page);
   await expect(
-    page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
+    page.getByText("保存成功", { exact: true }).last(),
   ).toBeVisible();
   await expect(page.locator(".sidebar-status")).toContainText("启动失败");
   await page.getByRole("combobox", { name: "代理模式", exact: true }).selectOption("");
   await applySettings(page);
   await expect(
-    page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
+    page.getByText("保存成功", { exact: true }).last(),
   ).toBeVisible();
   await page
     .getByRole("navigation", { name: "主导航" })
@@ -1254,7 +1254,7 @@ test("browser repairs failed startup, saves selection/config, restores after ser
     .getByLabel("运行配置 YAML")
     .fill(yaml.replace("mode: rule", "mode: direct"));
   await page.getByRole("button", { name: "校验并应用" }).click();
-  await expect(page.getByText("此配置已通过校验并提交。")).toBeVisible();
+  await expect(page.getByText("保存成功")).toBeVisible();
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "停止内核" }).click();
   await expect(page.locator(".sidebar-status")).toContainText("已停止");
@@ -1522,9 +1522,9 @@ test("rule provider inventory and update controls translate while an update is p
   await expect(card.getByRole("button", { name: "更新中…" })).toBeVisible();
   releaseUpdate();
   await expect(card.getByRole("button", { name: "更新", exact: true })).toBeEnabled();
-  await expect(page.getByText("规则集 DirectRules 更新完成")).toBeVisible();
+  await expect(page.getByText("更新成功：DirectRules")).toBeVisible();
   await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
-  await expect(page.getByText("Rule provider DirectRules updated")).toBeVisible();
+  await expect(page.getByText("Updated: DirectRules")).toBeVisible();
   await page.getByRole("button", { name: "Update all" }).click();
   await expect.poll(() => calls.length).toBe(2);
   await expect(card.getByRole("button", { name: "Update", exact: true })).toBeEnabled();
@@ -2864,7 +2864,7 @@ test("settings save explicitly, preserve edits made during a save and reconcile 
       } else await route.continue();
     });
     await editSetting(page, "代理模式", "global", true);
-    await expect(page.locator(".toast").filter({ hasText: "无需重复提交" }).last()).toBeVisible();
+    await expect(page.locator(".toast").filter({ hasText: "保存成功" }).last()).toBeVisible();
     expect((await settingsApi("settings")).runtime.mode).toBe("global");
     await page.unroute("**/api/commands");
     await editSetting(page, "代理模式", "", true);
@@ -2961,7 +2961,7 @@ test("nested network settings persist and scalar edits preserve them", async ({
     .selectOption("direct");
   await applySettings(page);
   await expect(
-    page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
+    page.getByText("保存成功", { exact: true }).last(),
   ).toBeVisible();
   expect((await api("settings")).runtime).toEqual({
     ...runtime,
@@ -3156,7 +3156,7 @@ test("final cleanup applies on remote refresh and settings authority without cha
     .selectOption("false");
   await applySettings(page);
   await expect(
-    page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
+    page.getByText("保存成功", { exact: true }).last(),
   ).toBeVisible();
   expect((await api("config")).yaml).toContain("bind-address: localhost");
   subscriptionBody = subscriptionBody
@@ -3174,7 +3174,7 @@ test("final cleanup applies on remote refresh and settings authority without cha
     .selectOption("true");
   await applySettings(page);
   await expect(
-    page.getByText("保存结果已核对，服务设置与提交内容一致。", { exact: true }).last(),
+    page.getByText("保存成功", { exact: true }).last(),
   ).toBeVisible();
   yaml = (await api("config")).yaml;
   expect(yaml).toMatch(/bind-address: ['"]?\*['"]?/);
@@ -3288,7 +3288,7 @@ test("raw subscription editor preserves failed drafts, reconciles lost responses
     await save.click();
     await expect(
       page.getByText(
-        "服务原始订阅与提交内容不同，草稿已保留。请检查错误；版本变化时需重新读取。",
+        "保存失败：服务内容不一致，请重新读取。",
         { exact: true },
       ).last(),
     ).toBeVisible();
@@ -3303,7 +3303,7 @@ test("raw subscription editor preserves failed drafts, reconciles lost responses
   await input.fill(draft);
   await save.click();
   await expect(
-    page.getByText("原始订阅保存结果已核对。", { exact: true }).last(),
+    page.getByText("保存成功", { exact: true }).last(),
   ).toBeVisible();
   expect((await api("profile_raw", { uid })).yaml).toBe(draft);
   let nextMetadata = (await api("profiles")).items.find(
@@ -3323,11 +3323,9 @@ test("raw subscription editor preserves failed drafts, reconciles lost responses
   draft = draft.replace("# manual edit", "# lost reply");
   await input.fill(draft);
   await save.click();
+  await expect(page.locator(".toast-loading")).toHaveCount(0);
   await expect(
-    page.getByText(
-      "请求报告错误，但服务已保存此草稿，已核对，无需重复提交。",
-      { exact: true },
-    ),
+    page.getByText("保存成功", { exact: true }).last(),
   ).toBeVisible();
   await expect(save).toBeDisabled();
   expect((await api("profile_raw", { uid })).yaml).toBe(draft);
@@ -3347,7 +3345,7 @@ test("raw subscription editor preserves failed drafts, reconciles lost responses
     .getByRole("button", { name: "核对原始订阅", exact: true })
     .click();
   await expect(
-    page.getByText("已核对：服务已保存当前原始订阅草稿。", { exact: true }).last(),
+    page.getByText("内容一致", { exact: true }).last(),
   ).toBeVisible();
   // Refresh changes the immutable source revision; checking does not adopt it
   // as the editing base and silently overwrite the external change.
@@ -3398,7 +3396,7 @@ test("raw subscription editor preserves failed drafts, reconciles lost responses
   await input.fill(draft);
   await save.click();
   await expect(
-    page.getByText("原始订阅保存结果已核对。", { exact: true }).last(),
+    page.getByText("保存成功", { exact: true }).last(),
   ).toBeVisible();
   expect((await api("status")).config_revision).toBe(before.config_revision);
   expect((await api("profile_raw", { uid })).yaml).toBe(draft);
@@ -4371,13 +4369,13 @@ for (const channel of ["stable", "alpha"] as const) {
     await expect(page.getByLabel("升级通道")).toBeDisabled();
     release();
     await expect(
-      page.getByText(`已是最新${label} ${version}，无需重新安装。`, {
+      page.getByText(`已是最新${label} ${version}`, {
         exact: true,
       }),
     ).toBeVisible();
     await page.locator(".toast").filter({ hasText: `已是最新${label} ${version}` }).getByRole("button").click();
     await page.getByLabel("升级通道").selectOption(alpha ? "stable" : "alpha");
-    await expect(page.getByText(`已是最新${label} ${version}，无需重新安装。`, { exact: true })).toHaveCount(0);
+    await expect(page.getByText(`已是最新${label} ${version}`, { exact: true })).toHaveCount(0);
     await page.getByLabel("升级通道").selectOption(channel);
     await expect(panel.locator("dd").nth(1)).toHaveText("尚未检查");
     expect((await api("status")).pid).toBe(before.pid);
@@ -4398,7 +4396,7 @@ for (const channel of ["stable", "alpha"] as const) {
       }),
     ).toBeVisible();
     await expect(
-      page.getByText(`已是最新${label} ${version}，无需重新安装。`, {
+      page.getByText(`已是最新${label} ${version}`, {
         exact: true,
       }),
     ).toHaveCount(0);
@@ -4407,7 +4405,7 @@ for (const channel of ["stable", "alpha"] as const) {
     page.once("dialog", (dialog) => dialog.accept());
     await forced.click();
     await expect(
-      page.getByText(`升级完成：${version} → ${version}`, { exact: true }).last(),
+      page.getByText(`升级成功：${version}`, { exact: true }).last(),
     ).toBeVisible();
     await expect(
       panel.getByText(`已验证安装 ${version}`, { exact: true }),
@@ -4420,7 +4418,7 @@ for (const channel of ["stable", "alpha"] as const) {
     await forced.click();
     await expect.poll(async () => (await api("status")).phase).toBe("stopped");
     await expect(
-      page.getByText(`升级完成：${version} → ${version}`, { exact: true }).last(),
+      page.getByText(`升级成功：${version}`, { exact: true }).last(),
     ).toBeVisible();
     await page.getByRole("button", { name: "退出登录", exact: true }).click();
     await stop();
@@ -4515,7 +4513,7 @@ for (const channel of ["stable", "alpha"] as const) {
     await expect(repair).toBeEnabled();
     fail = false;
     await repair.click();
-    await expect(page.getByText(`修复完成：${version}`, { exact: true })).toBeVisible();
+    await expect(page.getByText(`修复成功：${version}`, { exact: true })).toBeVisible();
     await expect(panel.getByText(`已验证安装 ${version}`, { exact: true })).toBeVisible();
     expect((await stat(binary)).ino).not.toBe(inode);
     expect((await api("status")).phase).toBe("stopped");
@@ -4725,7 +4723,7 @@ for (const outcome of ["success", "error"] as const) {
       releaseReadback();
       await expect(toast).toHaveClass(`toast toast-${outcome}`);
       await expect(toast).toHaveAttribute("data-toast-id", id!);
-      await expect(toast).toContainText(outcome === "success" ? "此配置已通过校验并提交。" : "fixture save failure");
+      await expect(toast).toContainText(outcome === "success" ? "保存成功" : "fixture save failure");
       await expect(toast.locator(".toast-spinner")).toHaveCount(0);
       expect(await toast.evaluate(node => getComputedStyle(node).backgroundColor)).not.toBe(loadingColor);
       expect((await panel.boundingBox())!.y).toBe(before!.y);
@@ -4755,8 +4753,8 @@ test("repeated configuration saves produce separate success toasts", async ({ pa
   await expect(save).toBeEnabled();
   await save.click();
   await expect(page.locator(".toast")).toHaveCount(2);
-  await expect(page.locator(".toast").first()).toContainText("此配置已通过校验并提交。");
-  await expect(page.locator(".toast").last()).toContainText("此配置已通过校验并提交。");
+  await expect(page.locator(".toast").first()).toContainText("保存成功");
+  await expect(page.locator(".toast").last()).toContainText("保存成功");
 });
 
 test("overview TUN switch and compact settings row preserve advanced settings and auto-apply", async ({ page }) => {
@@ -4777,13 +4775,13 @@ test("overview TUN switch and compact settings row preserve advanced settings an
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   await page.screenshot({ path: "test-results/tun-switch-overview-desktop.png", fullPage: true });
   await toggle.click();
-  await expect(page.locator(".toast").filter({ hasText: "TUN 状态已核对：已开启" })).toBeVisible();
+  await expect(page.locator(".toast").filter({ hasText: "TUN：已开启" })).toBeVisible();
   await expect(toggle).toBeEnabled();
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   expect(await api("settings")).toEqual({ ...before, runtime: { ...runtime, tun: { ...runtime.tun, enable: true } } });
   expect((await api("status")).phase).toBe("stopped");
   await toggle.focus(); await toggle.press("Space");
-  await expect(page.locator(".toast").filter({ hasText: "TUN 状态已核对：已关闭" })).toBeVisible();
+  await expect(page.locator(".toast").filter({ hasText: "TUN：已关闭" })).toBeVisible();
   await expect(toggle).toBeEnabled();
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   expect(await api("settings")).toEqual(before);
@@ -4892,7 +4890,7 @@ test("overview mode button group applies immediately, verifies live state and pr
     await expect(card.getByRole("status")).toHaveText(label);
     await expect(group.getByRole("button", { pressed: true })).toHaveText(label);
     await expect(button).toBeEnabled();
-    await expect(page.locator(".toast").filter({ hasText: `代理模式已核对：${label}` })).toBeVisible();
+    await expect(page.locator(".toast").filter({ hasText: `代理模式：${label}` })).toBeVisible();
     expect(await api("settings")).toEqual({ ...before, runtime: { ...runtime, mode } });
     expect((await api("proxy_access")).reported.mode.toLowerCase()).toBe(mode);
   }
@@ -4916,7 +4914,7 @@ test("overview mode button group applies immediately, verifies live state and pr
   };
   await page.route("**/api/commands", lostMode);
   await group.getByRole("button", { name: "全局", exact: true }).click();
-  await expect(page.locator(".toast-info").filter({ hasText: "代理模式已核对：全局" })).toBeVisible();
+  await expect(page.locator(".toast-info").filter({ hasText: "代理模式：全局" })).toBeVisible();
   await expect(group.getByRole("button", { pressed: true })).toHaveText("全局");
   await expect(group.getByRole("button", { name: "规则", exact: true })).toBeEnabled();
   expect((await api("settings")).runtime).toEqual({ ...runtime, mode: "global" });
