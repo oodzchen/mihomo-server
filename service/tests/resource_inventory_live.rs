@@ -124,6 +124,14 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
         assert_eq!(toggled.runtime, expected);
         assert_eq!(manager.status().phase, mihomo_server::core_manager::CorePhase::Running);
         assert!(!manager.client().get_base_config().await?.tun.enable);
+        for mode in [headless_core::config::settings::Mode::Direct, headless_core::config::settings::Mode::Global, headless_core::config::settings::Mode::Rule] {
+            let changed = manager.set_proxy_mode(mode).await?;
+            expected.mode = Some(mode);
+            assert_eq!(changed.runtime, expected);
+            assert_eq!(manager.runtime_config().await?["mode"], serde_yaml_ng::to_value(mode)?);
+            assert_eq!(serde_json::to_value(manager.client().get_base_config().await?.mode)?, serde_json::to_value(mode)?);
+            assert_eq!(manager.status().phase, mihomo_server::core_manager::CorePhase::Running);
+        }
         let inventory = manager.resource_inventory().await?;
         assert_eq!(inventory.config_revision, manager.status().config_revision);
         assert_eq!(inventory.providers.len(), 4);

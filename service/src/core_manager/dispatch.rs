@@ -245,6 +245,15 @@ impl Actor {
                     let _ = reply.send(result);
                 }
             }
+            CommandMessage::SetProxyMode { mode, reply } => {
+                if !reply.is_closed() {
+                    let mut runtime = self.settings.runtime.clone();
+                    runtime.mode = Some(mode);
+                    let result = self.update_settings(runtime).await;
+                    self.record_error(&result);
+                    let _ = reply.send(result);
+                }
+            }
             CommandMessage::ReadConnectionSettings(reply) => {
                 if !reply.is_closed() {
                     let _ = reply.send(self.read_connection_settings().await);

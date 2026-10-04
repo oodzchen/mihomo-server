@@ -157,6 +157,10 @@ pub(super) enum CommandMessage {
         enabled: bool,
         reply: oneshot::Sender<Result<ServiceSettings>>,
     },
+    SetProxyMode {
+        mode: headless_core::config::settings::Mode,
+        reply: oneshot::Sender<Result<ServiceSettings>>,
+    },
     ReadEnhancement {
         uid: String,
         kind: ProfileEnhancement,
@@ -233,9 +237,10 @@ impl CommandMessage {
             Self::ValidateGeo { reply, .. } => reject(reply, message),
             Self::ReadGeoSettings(reply) => reject(reply, message),
             Self::ReadConnectionSettings(reply) => reject(reply, message),
-            Self::ReadSettings(reply) | Self::SetSettings { reply, .. } | Self::SetTunEnabled { reply, .. } => {
-                reject(reply, message)
-            }
+            Self::ReadSettings(reply)
+            | Self::SetSettings { reply, .. }
+            | Self::SetTunEnabled { reply, .. }
+            | Self::SetProxyMode { reply, .. } => reject(reply, message),
             Self::ReadResources(reply) => reject(reply, message),
             Self::ReadEnhancement { reply, .. } => reject(reply, message),
             Self::SetEnhancement { reply, .. }

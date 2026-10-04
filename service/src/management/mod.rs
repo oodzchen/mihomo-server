@@ -115,6 +115,9 @@ pub enum ManagementCommand {
         name: String,
     },
     ProxyAccess {},
+    SetProxyMode {
+        mode: headless_core::config::settings::Mode,
+    },
     SetTunEnabled {
         enabled: bool,
     },
@@ -393,6 +396,7 @@ impl Management {
                 serde_json::to_value(self.manager.delay_group(&group, url.as_deref(), timeout).await?)?
             }
             ManagementCommand::ProxyAccess {} => crate::proxy_access::inspect(&self.manager).await?,
+            ManagementCommand::SetProxyMode { mode } => serde_json::to_value(self.manager.set_proxy_mode(mode).await?)?,
             ManagementCommand::SetTunEnabled { enabled } => {
                 serde_json::to_value(self.manager.set_tun_enabled(enabled).await?)?
             }

@@ -67,6 +67,16 @@ impl CoreManager {
         )
         .await
     }
+
+    /// Preserve other authoritative settings when changing the proxy mode.
+    pub async fn set_proxy_mode(&self, mode: headless_core::config::settings::Mode) -> Result<ServiceSettings> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        self.call(
+            |reply| CommandMessage::SetProxyMode { mode, reply },
+            "proxy mode update cancelled during shutdown",
+        )
+        .await
+    }
 }
 
 impl Actor {

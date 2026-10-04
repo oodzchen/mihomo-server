@@ -25,7 +25,8 @@ Rebuild assets after editing the frontend and refresh the browser.
 ## Current scope
 
 - Centered responsive overview: core lifecycle/state, traffic, memory, connection
-  count, actual Direct / Rule / Global mode and core-reported TUN status.
+  count, directly clickable Direct / Rule / Global mode buttons and core-reported
+  TUN status. Mode switching preserves other settings and verifies saved/core state.
 - Visible TUN switches on Overview and at the top of Settings: save/apply
   immediately, preserve advanced parameters and verify persisted/core state.
   Stopped cores stay stopped; unsaved settings drafts block immediate toggling.

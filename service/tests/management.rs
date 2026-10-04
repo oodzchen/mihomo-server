@@ -2113,3 +2113,34 @@ async fn tun_toggle_authenticates_and_preserves_all_other_settings() -> Result<(
     let cleanup = manager.shutdown().await;
     result.and(cleanup)
 }
+
+#[tokio::test]
+async fn proxy_mode_command_authenticates_and_preserves_other_settings() -> Result<()> {
+    let directory = Directory::new()?;
+    let manager = directory.manager()?;
+    let app = router(HttpState::new(Management::new(
+        manager.clone(),
+        directory.authentication()?,
+    )));
+    let token = directory.token()?;
+    let result = async {
+        manager.set_settings(serde_yaml_ng::from_str("mixed-port: 12345\nipv6: false\ndns: {nameserver: [1.1.1.1]}\ntun: {enable: false, stack: mixed, mtu: 1400, auto-route: false, dns-hijack: []}")?).await?;
+        let before = serde_json::to_value(manager.settings().await?)?;
+        assert_eq!(response(&app, request("wrong", "/api/commands", Some(json!({"command":"set_proxy_mode","mode":"global"})))?).await?.0, StatusCode::UNAUTHORIZED);
+        for invalid in [json!({"command":"set_proxy_mode"}), json!({"command":"set_proxy_mode","mode":"invalid"}), json!({"command":"set_proxy_mode","mode":true}), json!({"command":"set_proxy_mode","mode":"rule","runtime":{}})] {
+            assert_eq!(response(&app, request(&token, "/api/commands", Some(invalid))?).await?.0, StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        assert_eq!(serde_json::to_value(manager.settings().await?)?, before);
+        for mode in ["direct", "global", "rule"] {
+            let (code, saved) = response(&app, request(&token, "/api/commands", Some(json!({"command":"set_proxy_mode","mode":mode})))?).await?;
+            let mut expected = before.clone(); expected["runtime"]["mode"] = mode.into();
+            assert_eq!(code, StatusCode::OK);
+            assert_eq!(saved, expected);
+            assert_eq!(serde_json::to_value(manager.settings().await?)?, expected);
+            assert!(manager.status().pid.is_none());
+        }
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}

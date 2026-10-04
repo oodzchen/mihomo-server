@@ -5055,7 +5055,7 @@ test("overview shows actual modes and TUN state without retaining stale state", 
   for (const [mode, label] of [["rule", "规则"], ["global", "全局"], ["direct", "直连"]]) {
     await api("set_settings", { runtime: { mode } });
     await expect(modes.getByRole("status")).toHaveText(label);
-    await expect(modes.locator('[aria-current="true"]')).toHaveText(label);
+    await expect(modes.getByRole("button", { pressed: true })).toHaveText(label);
     const access = await api("proxy_access");
     expect(access.reported.mode.toLowerCase()).toBe(mode);
     expect(access.reported.tun_enabled).toBe(false);
@@ -5075,7 +5075,8 @@ test("overview shows actual modes and TUN state without retaining stale state", 
   await page.screenshot({ path: "test-results/overview-runtime-desktop.png", fullPage: true });
   await page.unroute("**/api/commands");
   await api("stop");
-  await expect(modes.locator('[aria-current="true"]')).toHaveCount(0);
+  await expect(modes.getByRole("button", { pressed: true })).toHaveText("直连");
+  await expect(modes.getByText("直连 · 当前为已保存模式，内核启动后生效。")).toBeVisible();
   await expect(tun.getByRole("status")).not.toHaveText(/已开启|已关闭/);
   await api("start");
   await page.route("**/api/commands", async route => {
@@ -5084,6 +5085,8 @@ test("overview shows actual modes and TUN state without retaining stale state", 
   });
   await page.getByRole("button", { name: "刷新连接信息", exact: true }).click();
   await expect(modes.getByRole("status")).toHaveText("未确认");
+  await expect(modes.getByRole("button", { pressed: true })).toHaveCount(0);
+  for (const button of await modes.getByRole("group").getByRole("button").all()) await expect(button).toBeDisabled();
   await expect(tun.getByRole("status")).toHaveText("未确认");
   await page.unroute("**/api/commands");
 });
@@ -5280,4 +5283,83 @@ test("visible TUN switches save immediately, preserve advanced settings and prot
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   await expect(toggle).toBeEnabled();
   expect(await api("settings")).toEqual(before);
+});
+
+test("overview mode button group applies immediately, verifies live state and preserves other settings", async ({ page }) => {
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  await api("stop");
+  await api("set_settings", { runtime: {} });
+  const profile = await api("import_profile", { name: "Mode button group", yaml: "mode: rule\nmixed-port: 0\ndns: {enable: false, nameserver: [1.1.1.1]}\ntun: {enable: false, auto-route: false}\nrules: ['MATCH,DIRECT']" });
+  await api("select_profile", { uid: profile.uid });
+  const runtime = { mode: "rule", "mixed-port": 0, ipv6: false, dns: { nameserver: ["1.1.1.1"] }, tun: { enable: false, stack: "mixed", mtu: 1400, "auto-route": false, "dns-hijack": [] } };
+  const before = await api("set_settings", { runtime });
+  await api("start");
+  let writes = 0;
+  page.on("request", request => { if (request.url().endsWith("/api/commands") && request.postDataJSON()?.command === "set_proxy_mode") writes++; });
+  await page.goto(`${base}/#token=${encodeURIComponent(token)}`);
+  const card = page.getByRole("region", { name: "代理模式", exact: true });
+  const group = card.getByRole("group", { name: "代理模式", exact: true });
+  await expect(group.getByRole("button")).toHaveCount(3);
+  await expect(group.getByRole("button", { pressed: true })).toHaveText("规则");
+  for (const [mode, label] of [["direct", "直连"], ["global", "全局"], ["rule", "规则"]]) {
+    const button = group.getByRole("button", { name: label, exact: true });
+    await expect(button).toBeEnabled();
+    if (mode === "direct") { await button.focus(); await button.press("Enter"); } else await button.click();
+    await expect(card.getByRole("status")).toHaveText(label);
+    await expect(group.getByRole("button", { pressed: true })).toHaveText(label);
+    await expect(button).toBeEnabled();
+    await expect(page.locator(".toast").filter({ hasText: `代理模式已核对：${label}` })).toBeVisible();
+    expect(await api("settings")).toEqual({ ...before, runtime: { ...runtime, mode } });
+    expect((await api("proxy_access")).reported.mode.toLowerCase()).toBe(mode);
+  }
+  expect(writes).toBe(3);
+  await group.getByRole("button", { name: "规则", exact: true }).click();
+  expect(writes).toBe(3);
+  const failedMode = async (route: import("@playwright/test").Route) => {
+    if (route.request().postDataJSON().command !== "set_proxy_mode") return route.continue();
+    await route.fulfill({ status: 422, json: { error: { message: "fixture mode apply rejected" } } });
+  };
+  await page.route("**/api/commands", failedMode);
+  await group.getByRole("button", { name: "全局", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "fixture mode apply rejected" })).toBeVisible();
+  await expect(group.getByRole("button", { name: "全局", exact: true })).toBeEnabled();
+  await expect(group.getByRole("button", { pressed: true })).toHaveText("规则");
+  expect(await api("settings")).toEqual(before);
+  await page.unroute("**/api/commands", failedMode);
+  const lostMode = async (route: import("@playwright/test").Route) => {
+    if (route.request().postDataJSON().command !== "set_proxy_mode") return route.continue();
+    await route.fetch(); await route.abort("failed");
+  };
+  await page.route("**/api/commands", lostMode);
+  await group.getByRole("button", { name: "全局", exact: true }).click();
+  await expect(page.locator(".toast-info").filter({ hasText: "代理模式已核对：全局" })).toBeVisible();
+  await expect(group.getByRole("button", { pressed: true })).toHaveText("全局");
+  await expect(group.getByRole("button", { name: "规则", exact: true })).toBeEnabled();
+  expect((await api("settings")).runtime).toEqual({ ...runtime, mode: "global" });
+  await page.unroute("**/api/commands", lostMode);
+  await api("stop");
+  await expect(card.getByRole("status")).toHaveText("已停止");
+  await expect(group.getByRole("button", { name: "规则", exact: true })).toBeEnabled();
+  await group.getByRole("button", { name: "规则", exact: true }).click();
+  await expect(group.getByRole("button", { pressed: true })).toHaveText("规则");
+  await expect(group.getByRole("button", { name: "规则", exact: true })).toBeEnabled();
+  expect((await api("status")).phase).toBe("stopped");
+  expect(await api("settings")).toEqual(before);
+  await api("start");
+  await expect(card.getByRole("status")).toHaveText("规则");
+  while (await page.locator(".toast-close").count()) await page.locator(".toast-close").first().click();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: "test-results/mode-button-group-desktop.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: "test-results/mode-button-group-mobile.png" });
+  await expect(group).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await group.getByRole("button", { name: "直连", exact: true }).click();
+  await expect(card.getByRole("status")).toHaveText("直连");
+  expect((await api("proxy_access")).reported.mode.toLowerCase()).toBe("direct");
 });

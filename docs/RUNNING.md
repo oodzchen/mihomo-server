@@ -1314,6 +1314,18 @@ are available in the browser as described below.
 
 ### Browser runtime settings editor
 
+Overview also provides a Direct / Rule / Global button group. Clicking saves and
+applies the chosen mode immediately while retaining other runtime settings, and
+checks saved/configured/core-reported mode before showing a toast. Selecting the
+current mode sends no write. Stopped or failed cores display the saved mode with
+a next-start hint; the action does not start the core. Unconfirmed or disconnected
+state disables the buttons.
+
+The equivalent authenticated API command is
+`{"command":"set_proxy_mode","mode":"rule"}` (also `direct` or `global`). It
+returns `{"schema_version":1,"runtime":{...}}` and changes only the mode leaf
+inside the settings actor, using the existing persistence/apply/rollback flow.
+
 Open Settings to edit the supported service runtime subset. Port fields left blank
 and Inherit selections omit explicit authority; 0 disables a listener and Disabled
 persists false. Save submits the entire subset, preserving unmodified fields.

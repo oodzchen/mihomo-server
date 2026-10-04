@@ -53,6 +53,40 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
+## Increment: interactive overview proxy-mode buttons
+
+**Implemented.** Overview's Direct / Rule / Global indicator is now a native
+button group (`role=group`, `aria-pressed`) with mouse, touch and keyboard
+activation. It follows the local Clash Verge Rev `clash-mode-card` interaction;
+the existing centered segmented appearance is retained with hover/focus states.
+
+- Authenticated `set_proxy_mode { mode }` accepts only `direct`, `rule` and
+  `global`. It updates only the mode leaf inside the serialized lifecycle actor,
+  preserving current TUN/DNS/listener settings and profile DNS preferences. The
+  existing settings generation, validation, persistence, apply and rollback
+  transaction is reused; inactive cores are not started by the control.
+- `ProxyModeControl` shares Overview's existing proxy-access snapshot with TUN
+  and listener information. Running selection comes from core readback;
+  stopped/failed selection shows the generated saved mode with an explicit
+  next-start hint. Missing/unconfirmed state, disconnection and transitions
+  disable the buttons. Selecting the current mode is a no-op; an operation lock
+  blocks overlapping clicks. No new polling loop is added.
+- After switching, persisted settings, generated configuration and (when
+  running) actual core mode must agree before a verified toast appears. A lost
+  response is reconciled by readback. Failures keep the actual selection and
+  show an error; unmount aborts pending verification. English, simplified and
+  traditional Chinese labels/help are supported.
+
+Verification: production TypeScript/Vite build, Rust formatting, full-workspace
+Clippy (`-D warnings`) and management
+API regression passed **25 tests with 1 existing opt-in test ignored**. Four
+focused real-Mihomo browser tests passed, covering all three live modes, other
+settings preservation, no-op selection, keyboard activation, rejection, lost
+responses, stopped-core behavior and mobile interaction. Desktop/mobile visual
+checks confirm placement and no horizontal overflow. The isolated real-node
+test passed all three mode readbacks and subsequent proxied HTTPS 204 traffic
+without modifying production data.
+
 ## Increment: CI listener/public-origin assertion repair
 
 The multi-user end-to-end test previously looked for Bob's internal listener
@@ -262,7 +296,8 @@ out of scope; sockets stay under `<data-dir>/run`.
    UID with the packager's 0700 root (readable by alice only when the host UID was
    1000). run.sh now makes `/work` root-owned and the bundle world-readable.
 
-**Latest completed task:** Repair the multi-user CI assertions to verify the actual listener independently of the public-origin management URL (see the increment above).
+**Latest completed task:** Directly clickable proxy-mode button group on Overview, with atomic settings preservation and verified core state (see the increment above).
+**Previous completed task:** Repair the multi-user CI assertions to verify the actual listener independently of the public-origin management URL.
 **Previous completed task:** Direct TUN switches on Overview and at the top of Settings, with immediate application, verified state and preserved settings.
 **Previous completed task:** Compact Web management — live mode/TUN overview, grouped settings/help, stacked top-center toasts and centered content.
 **Previous completed task:** Installer management links carry a token and log in automatically (see the increment below).

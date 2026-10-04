@@ -1321,8 +1321,12 @@ footer {
 /* Runtime cards mirror Verge's mode segments and TUN status card. */
 .runtime-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .mode-segments { display: flex; gap: 4px; padding: 4px; background: #f4f4f5; border-radius: 8px; }
-.mode-segments span { flex: 1; padding: 8px 12px; text-align: center; color: #71717a; border-radius: 5px; }
+.mode-segments button { flex: 1; padding: 8px 12px; text-align: center; color: #71717a; border: 0; background: transparent; border-radius: 5px; font-size: 14px; }
+.mode-segments button:hover:not(:disabled) { background: #e4e4e7; color: #18181b; }
 .mode-segments .active { color: #fff; background: #18181b; font-weight: 600; }
+.mode-segments button.active:hover:not(:disabled) { color: #fff; background: #3f3f46; }
+.mode-segments button:focus-visible { outline: 2px solid #10b981; outline-offset: 2px; }
+.proxy-mode-control .alert { margin: 10px 0 0; }
 .runtime-state { margin-top: 8px; font-size: 12px; color: #71717a; }
 .tun-status { display: flex; align-items: center; gap: 14px; min-height: 68px; }
 .tun-indicator { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; font-size: 24px; background: #f4f4f5; color: #71717a; }

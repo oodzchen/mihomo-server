@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { subscribe, type Connection, type Perform } from "./api";
 import { TunControl } from "./tun-control";
+import { ProxyModeControl } from "./proxy-mode-control";
 import { ProxyAccessPanel, useProxyAccess } from "./proxy-access";
 import { MultiUserPanel } from "./multi-user";
 import { phaseLabel, t, type Language } from "./i18n";
@@ -61,24 +62,11 @@ export function Overview({
     memory = useFeed<{ inuse: number }>(token, "memory"),
     connections = useFeed<{ count: number }>(token, "connections_count");
   const access = useProxyAccess({ token, status, connection, logout });
-  const live = connection === "connected" && status.phase === "running" && access.value?.running
-    ? access.value.reported : null;
-  const mode = live?.mode.toLowerCase();
-  const labels = language === "en"
-    ? { mode: "Proxy mode", direct: "Direct", rule: "Rule", global: "Global", unknown: "Unconfirmed" }
-    : language === "zhtw"
-      ? { mode: "代理模式", direct: "直連", rule: "規則", global: "全域", unknown: "未確認" }
-      : { mode: "代理模式", direct: "直连", rule: "规则", global: "全局", unknown: "未确认" };
   return (
     <>
       <div className="runtime-cards">
-        <section className="panel" aria-label={labels.mode}>
-          <div className="panel-title"><h2>{labels.mode}</h2><a href="/settings" onClick={event => navigate(event, "/settings")}>{t(language, "settings")}</a></div>
-          <div className="mode-segments">
-            {(["direct", "rule", "global"] as const).map(value => <span key={value} className={mode === value ? "active" : ""} aria-current={mode === value ? "true" : undefined}>{labels[value]}</span>)}
-          </div>
-          <p className="runtime-state" role="status">{mode && ["direct", "rule", "global"].includes(mode) ? labels[mode as "direct" | "rule" | "global"] : status.phase !== "running" ? phaseLabel(language, status.phase) : labels.unknown}</p>
-        </section>
+        <ProxyModeControl token={token} language={language} status={status} connection={connection} access={access} busy={busy} perform={perform} logout={logout}
+          extra={<a href="/settings" onClick={event => navigate(event, "/settings")}>{t(language, "settings")}</a>} />
         <TunControl token={token} language={language} status={status} connection={connection} access={access} busy={busy} perform={perform} logout={logout}
           extra={<a href="/settings" onClick={event => navigate(event, "/settings")}>{language === "en" ? "Advanced settings" : language === "zhtw" ? "進階設定" : "高级设置"}</a>} />
       </div>
