@@ -4994,3 +4994,33 @@ test("settings language applies on change and is shared through the service", as
     await settingsApi("set_language", { language: null });
   }
 });
+
+test("settings uses the compact layout and shows browser-safe version information", async ({ page, browser }) => {
+  await loginSettings(page);
+  await expect(page.getByText("工作空间", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("独立运行 · 配置与节点选择由服务保存", { exact: true })).toHaveCount(0);
+  for (const removed of ["内核实际设置", "当前订阅 DNS 覆盖", "已保存服务设置"])
+    await expect(page.getByText(removed, { exact: true })).toHaveCount(0);
+
+  const versions = page.getByRole("region", { name: "版本信息" });
+  await expect(versions).toBeVisible();
+  await expect(versions.getByText("mihomo内核版本", { exact: true })).toBeVisible();
+  const serviceVersion = await settingsApi("service_version");
+  await expect(versions.locator("div").filter({ hasText: "服务端版本" }).locator("dd")).toHaveText(serviceVersion);
+  await expect(versions.getByText("桌面客户端版本", { exact: true })).toHaveCount(0);
+  const selectHeight = await page.getByRole("combobox", { name: "代理模式", exact: true }).evaluate(element => element.getBoundingClientRect().height);
+  expect(selectHeight).toBeLessThanOrEqual(32);
+
+  const desktop = await browser.newContext();
+  await desktop.addInitScript(() => {
+    Object.defineProperty(window, "__MIHOMO_DESKTOP_VERSION__", { value: "0.1.0-desktop-test" });
+  });
+  try {
+    const desktopPage = await desktop.newPage();
+    await desktopPage.goto(`${base}/settings#token=${encodeURIComponent(token)}`);
+    const desktopVersions = desktopPage.getByRole("region", { name: "版本信息" });
+    await expect(desktopVersions.locator("div").filter({ hasText: "桌面客户端版本" }).locator("dd")).toHaveText("0.1.0-desktop-test");
+  } finally {
+    await desktop.close();
+  }
+});

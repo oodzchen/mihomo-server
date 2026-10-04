@@ -1,7 +1,7 @@
 //! Two windows with different trust. `main` shows the service's own
 //! management page and is granted no capability; `setup` is the bundled
 //! status page and is the only window allowed to call the app's commands.
-use crate::controller::Controller;
+use crate::{VERSION, controller::Controller};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager as _, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
@@ -20,6 +20,13 @@ fn reveal(window: &WebviewWindow) {
 /// The status page's own origin (custom protocol, or its http form).
 fn is_bundled(url: &Url) -> bool {
     url.scheme() == "tauri" || (matches!(url.scheme(), "http" | "https") && url.host_str() == Some("tauri.localhost"))
+}
+
+fn desktop_version_script() -> String {
+    format!(
+        "Object.defineProperty(window, '__MIHOMO_DESKTOP_VERSION__', {{ value: {} }});",
+        serde_json::to_string(VERSION).expect("desktop version is serializable")
+    )
 }
 
 pub fn open_service_page(app: &AppHandle) {
@@ -65,6 +72,9 @@ pub fn open_dashboard(app: &AppHandle) {
         .title(TITLE)
         .inner_size(1280.0, 860.0)
         .min_inner_size(760.0, 520.0)
+        // The remote management page has no desktop IPC capability. Expose
+        // only this immutable build value so it can identify the host client.
+        .initialization_script(desktop_version_script())
         // Let the page's own file inputs receive dropped files.
         .disable_drag_drop_handler()
         .on_navigation(move |url| url.origin().ascii_serialization() == allowed)
@@ -104,5 +114,11 @@ mod tests {
         assert!(is_bundled(&Url::parse("http://tauri.localhost/index.html").unwrap()));
         assert!(!is_bundled(&Url::parse("http://127.0.0.1:9090/").unwrap()));
         assert!(!is_bundled(&Url::parse("http://tauri.localhost.example/").unwrap()));
+    }
+    #[test]
+    fn dashboard_receives_the_desktop_build_version() {
+        let script = desktop_version_script();
+        assert!(script.contains("__MIHOMO_DESKTOP_VERSION__"));
+        assert!(script.contains(&serde_json::to_string(VERSION).unwrap()));
     }
 }

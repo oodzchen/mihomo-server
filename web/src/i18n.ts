@@ -33,7 +33,7 @@ export function saveLanguage(language: Language) {
 }
 
 const zh = {
-  language: "界面语言", navLabel: "工作空间", navAria: "主导航",
+  language: "界面语言", navAria: "主导航",
   overview: "概览", proxies: "代理", profiles: "订阅", config: "配置", rules: "规则",
   logs: "日志", settings: "设置", core: "内核", logout: "退出登录",
   saveSettings: "保存服务设置", unsavedSettingsTitle: "有未保存的设置",
@@ -50,7 +50,6 @@ const zh = {
   working: "处理中…", completed: "操作成功", saveSuccess: "保存成功",
   coreError: "内核错误", operationError: "上次操作错误",
   selectionRestore: "节点恢复", restoringNodes: "正在恢复节点",
-  footer: "独立运行 · 配置与节点选择由服务保存",
   loginEyebrow: "独立服务 · 浏览器管理", loginTitleFirst: "让连接",
   loginTitleSecond: "尽在掌握。", loginIntroFirst: "订阅、配置与内核状态，",
   loginIntroSecond: "在同一个地方管理。", loginEntry: "服务管理入口",
@@ -357,7 +356,7 @@ const zh = {
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
-  language: "Interface language", navLabel: "Workspace", navAria: "Main navigation",
+  language: "Interface language", navAria: "Main navigation",
   overview: "Overview", profiles: "Profiles", config: "Configuration", proxies: "Proxies", rules: "Rules",
   logs: "Logs", settings: "Settings", core: "Core", logout: "Log out",
   saveSettings: "Save service settings", unsavedSettingsTitle: "Unsaved settings",
@@ -374,7 +373,6 @@ const en: Record<keyof typeof zh, string> = {
   working: "Working…", completed: "Success", saveSuccess: "Saved",
   coreError: "Core error", operationError: "Previous operation error",
   selectionRestore: "Node restoration", restoringNodes: "Restoring nodes",
-  footer: "Standalone service · Configuration and node selection are saved by the service",
   loginEyebrow: "Standalone service · Browser management", loginTitleFirst: "Your connection,",
   loginTitleSecond: "under control.", loginIntroFirst: "Manage profiles, configuration,",
   loginIntroSecond: "and core status in one place.", loginEntry: "Management access",
@@ -681,7 +679,7 @@ const en: Record<keyof typeof zh, string> = {
 };
 
 const zhtw: Record<keyof typeof zh, string> = {
-  language: "介面語言", navLabel: "工作空間", navAria: "主導航",
+  language: "介面語言", navAria: "主導航",
   overview: "概覽", proxies: "代理", profiles: "訂閱", config: "設定", rules: "規則",
   logs: "記錄", settings: "設定", core: "核心", logout: "登出",
   saveSettings: "儲存服務設定", unsavedSettingsTitle: "有未儲存的設定",
@@ -698,7 +696,6 @@ const zhtw: Record<keyof typeof zh, string> = {
   working: "處理中…", completed: "操作成功", saveSuccess: "儲存成功",
   coreError: "核心錯誤", operationError: "上次操作錯誤",
   selectionRestore: "節點復原", restoringNodes: "正在復原節點",
-  footer: "獨立執行 · 設定與節點選擇由服務儲存",
   loginEyebrow: "獨立服務 · 瀏覽器管理", loginTitleFirst: "讓連線",
   loginTitleSecond: "盡在掌握。", loginIntroFirst: "訂閱、設定與核心狀態，",
   loginIntroSecond: "在同一個地方管理。", loginEntry: "服務管理入口",

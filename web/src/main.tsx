@@ -416,7 +416,6 @@ function Manager({
             SERVER
           </span>
         </div>
-        <p className="nav-label">{t(language, "navLabel")}</p>
         <nav aria-label={t(language, "navAria")}>
           {pages.map(([path, key]) => (
             <a
@@ -533,6 +532,7 @@ function Manager({
             busy={busy}
             perform={perform}
             logout={logout}
+            desktopVersion={window.__MIHOMO_DESKTOP_VERSION__}
             onEditorStateChange={updateSettingsEditor}
           />
         ) : (
@@ -577,7 +577,6 @@ function Manager({
             <LanguagePicker language={language} changeLanguage={changeSharedLanguage} />
           </div>
         )}
-        <footer>{t(language, "footer")}</footer>
       </div>
     </div>
   );

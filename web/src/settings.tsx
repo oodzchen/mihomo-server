@@ -11,13 +11,11 @@ import {
   type Runtime,
   type Draft,
 } from "./network-settings";
-import { ProfileDnsPanel } from "./profile-dns";
 import { useProxyAccess } from "./proxy-access";
-import { GEO_KEYS, GeoFields, GeoReadback, geoDraft, geoRuntime, validateGeo } from "./geo-settings";
+import { GEO_KEYS, GeoFields, geoDraft, geoRuntime, validateGeo } from "./geo-settings";
 import { OUTBOUND_KEYS, OutboundFields, outboundDraft, outboundRuntime, validateOutbound } from "./outbound-settings";
 import { DOWNLOAD_KEYS, DownloadFields, downloadDraft, downloadRuntime, validateDownload } from "./download-settings";
 import { HostsFields, hostsDraft, hostsRuntime, validateHosts } from "./hosts-settings";
-import { SettingsReadback } from "./settings-readback";
 import { ResourcesPanel } from "./resources";
 import {
   AUTHORITY_KEYS,
@@ -194,8 +192,41 @@ type SettingsPageProps = {
   busy: boolean;
   perform: Perform;
   logout: (reason?: string) => void;
+  desktopVersion?: string;
   onEditorStateChange: (dirty: boolean, busy: boolean) => void;
 };
+
+function VersionInfo({ token, status, desktopVersion }: {
+  token: string;
+  status: CoreStatus;
+  desktopVersion?: string;
+}) {
+  const [versions, setVersions] = useState<{ core?: string; service?: string }>({});
+  useEffect(() => {
+    const controller = new AbortController();
+    Promise.allSettled([
+      command<string | null>(token, "installed_core_version", {}, controller.signal),
+      command<string>(token, "service_version", {}, controller.signal),
+    ]).then(([core, service]) => {
+      if (controller.signal.aborted) return;
+      setVersions({
+        core: core.status === "fulfilled" ? core.value ?? undefined : undefined,
+        service: service.status === "fulfilled" ? service.value : undefined,
+      });
+    });
+    return () => controller.abort();
+  }, [token]);
+  return (
+    <section className="panel version-info" aria-label="版本信息">
+      <h2>版本信息</h2>
+      <dl className="settings-summary">
+        <div><dt>mihomo内核版本</dt><dd>{status.version ?? versions.core ?? "未知"}</dd></div>
+        <div><dt>服务端版本</dt><dd>{versions.service ?? "未知"}</dd></div>
+        {desktopVersion && <div><dt>桌面客户端版本</dt><dd>{desktopVersion}</dd></div>}
+      </dl>
+    </section>
+  );
+}
 
 export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(function SettingsPage({
   token,
@@ -206,6 +237,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   busy,
   perform,
   logout,
+  desktopVersion,
   onEditorStateChange,
 }, ref) {
   const access = useProxyAccess({ token, status, connection, logout });
@@ -498,66 +530,10 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
             <LanguagePicker language={language} changeLanguage={changeLanguage} />
           </section>
         )}
-        <details className="settings-details"><summary>内核实际设置</summary>
-        <SettingsReadback label="连接设置读回" operation="connection_settings" hint="显示核心报告的设置，不保证已识别进程或改善连接速度。未指定项可能使用核心默认值。路由标记可能以有符号 32 位整数读回，同一位模式视为一致。" token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
-        <GeoReadback token={token} status={status} connection={connection} logout={logout} settingsKey={JSON.stringify(saved?.runtime)} />
-        </details>
         <details className="settings-details"><summary>资源与数据库</summary>
         <ResourcesPanel token={token} status={status} connection={connection} logout={logout} language={language} />
         </details>
-        <ProfileDnsPanel
-          key={`${token}:${status.active_profile ?? ""}`}
-          token={token}
-          status={status}
-          connection={connection}
-          hasDns={saved?.runtime.dns != null || saved?.runtime.hosts != null}
-          blocked={disabled || uncertain || dirty || !saved}
-          perform={perform}
-          logout={logout}
-        />
-        <details className="settings-details"><summary>已保存服务设置</summary>
-        <section className="panel" aria-label="已保存服务设置">
-          <h2>已读取的服务设置</h2>
-          <HelpTip>
-            显示上次读取或核对的设置。继承项的实际值请在配置页查看。
-          </HelpTip>
-          {saved ? (
-            <dl className="settings-summary">
-              {fields.map((field) => (
-                <div key={field.key}>
-                  <dt>{field.label}</dt>
-                  <dd>
-                    {saved.runtime[field.key] == null
-                      ? "继承"
-                      : field.kind === "port" || field.kind === "seconds"
-                        ? String(saved.runtime[field.key])
-                        : options(field).find(
-                            ([value]) =>
-                              value === String(saved.runtime[field.key]),
-                          )?.[1]}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            <p className="muted">尚未读取到设置。</p>
-          )}
-          {saved && <pre className="network-snapshot" aria-label="已保存 hosts 映射">{saved.runtime.hosts == null ? "继承" : JSON.stringify(saved.runtime.hosts, null, 2)}</pre>}
-          {saved && <pre className="network-snapshot" aria-label="已保存核心下载设置">{JSON.stringify(Object.fromEntries([...DOWNLOAD_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
-          {saved && <pre className="network-snapshot" aria-label="已保存出口设置">{JSON.stringify(Object.fromEntries([...OUTBOUND_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
-          {saved && <pre className="network-snapshot" aria-label="已保存监听与访问控制设置">{JSON.stringify(Object.fromEntries([...AUTHORITY_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
-          {saved && <pre className="network-snapshot" aria-label="已保存 Geo 设置">{JSON.stringify(Object.fromEntries([...GEO_KEYS].map(key => [key, saved.runtime[key]])), null, 2)}</pre>}
-          {saved && (
-            <pre className="network-snapshot" aria-label="已保存网络设置">
-              {JSON.stringify(
-                { dns: saved.runtime.dns, tun: saved.runtime.tun },
-                null,
-                2,
-              )}
-            </pre>
-          )}
-        </section>
-        </details>
+        <VersionInfo token={token} status={status} desktopVersion={desktopVersion} />
       </div>
     </div>
   );

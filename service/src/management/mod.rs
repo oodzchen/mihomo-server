@@ -16,6 +16,7 @@ use serde_json::Value;
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ManagementCommand {
     Status {},
+    ServiceVersion {},
     CoreRelease {
         version: Option<String>,
     },
@@ -329,6 +330,7 @@ impl Management {
                 serde_json::to_value(self.manager.upgrade_alpha_core(force).await?)?
             }
             ManagementCommand::Status {} => serde_json::to_value(self.manager.status())?,
+            ManagementCommand::ServiceVersion {} => serde_json::to_value(env!("CARGO_PKG_VERSION"))?,
             ManagementCommand::Logs {} => serde_json::to_value(self.manager.logs())?,
             ManagementCommand::Profiles {} => serde_json::to_value(self.manager.profiles())?,
             ManagementCommand::Settings {} => serde_json::to_value(self.manager.settings().await?)?,
