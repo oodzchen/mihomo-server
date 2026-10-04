@@ -441,6 +441,8 @@ function Manager({
           />
         ) : (
           <Overview
+            busy={busy}
+            perform={perform}
             language={language}
             token={token}
             connection={connection}

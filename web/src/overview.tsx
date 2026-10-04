@@ -1,5 +1,6 @@
 import { useEffect, useState, type MouseEvent } from "react";
-import { subscribe, type Connection } from "./api";
+import { subscribe, type Connection, type Perform } from "./api";
+import { TunControl } from "./tun-control";
 import { ProxyAccessPanel, useProxyAccess } from "./proxy-access";
 import { MultiUserPanel } from "./multi-user";
 import { phaseLabel, t, type Language } from "./i18n";
@@ -42,6 +43,8 @@ export function Overview({
   active,
   navigate,
   logs,
+  busy,
+  perform,
 }: {
   language: Language;
   token: string;
@@ -51,6 +54,8 @@ export function Overview({
   active?: Profile;
   navigate: (event: MouseEvent, path: string) => void;
   logs: CoreLog[];
+  busy: boolean;
+  perform: Perform;
 }) {
   const traffic = useFeed<{ up: number; down: number }>(token, "traffic"),
     memory = useFeed<{ inuse: number }>(token, "memory"),
@@ -60,10 +65,10 @@ export function Overview({
     ? access.value.reported : null;
   const mode = live?.mode.toLowerCase();
   const labels = language === "en"
-    ? { mode: "Proxy mode", direct: "Direct", rule: "Rule", global: "Global", tun: "TUN mode", on: "Enabled", off: "Disabled", unknown: "Unconfirmed" }
+    ? { mode: "Proxy mode", direct: "Direct", rule: "Rule", global: "Global", unknown: "Unconfirmed" }
     : language === "zhtw"
-      ? { mode: "代理模式", direct: "直連", rule: "規則", global: "全域", tun: "TUN 模式", on: "已開啟", off: "已關閉", unknown: "未確認" }
-      : { mode: "代理模式", direct: "直连", rule: "规则", global: "全局", tun: "TUN 模式", on: "已开启", off: "已关闭", unknown: "未确认" };
+      ? { mode: "代理模式", direct: "直連", rule: "規則", global: "全域", unknown: "未確認" }
+      : { mode: "代理模式", direct: "直连", rule: "规则", global: "全局", unknown: "未确认" };
   return (
     <>
       <div className="runtime-cards">
@@ -74,10 +79,8 @@ export function Overview({
           </div>
           <p className="runtime-state" role="status">{mode && ["direct", "rule", "global"].includes(mode) ? labels[mode as "direct" | "rule" | "global"] : status.phase !== "running" ? phaseLabel(language, status.phase) : labels.unknown}</p>
         </section>
-        <section className="panel" aria-label={labels.tun}>
-          <div className="panel-title"><h2>{labels.tun}</h2><a href="/settings" onClick={event => navigate(event, "/settings")}>{t(language, "settings")}</a></div>
-          <div className="tun-status"><span className={`tun-indicator${live?.tun_enabled === true ? " enabled" : ""}`} aria-hidden="true">↔</span><strong role="status">{live?.tun_enabled === undefined ? status.phase !== "running" ? phaseLabel(language, status.phase) : labels.unknown : live.tun_enabled ? labels.on : labels.off}</strong></div>
-        </section>
+        <TunControl token={token} language={language} status={status} connection={connection} access={access} busy={busy} perform={perform} logout={logout}
+          extra={<a href="/settings" onClick={event => navigate(event, "/settings")}>{language === "en" ? "Advanced settings" : language === "zhtw" ? "進階設定" : "高级设置"}</a>} />
       </div>
       <div className="metrics">
         <div>

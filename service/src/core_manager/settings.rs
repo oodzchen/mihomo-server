@@ -57,6 +57,16 @@ impl CoreManager {
         )
         .await
     }
+
+    /// Change only the TUN enable leaf inside the serialized settings actor.
+    pub async fn set_tun_enabled(&self, enabled: bool) -> Result<ServiceSettings> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        self.call(
+            |reply| CommandMessage::SetTunEnabled { enabled, reply },
+            "TUN settings update cancelled during shutdown",
+        )
+        .await
+    }
 }
 
 impl Actor {

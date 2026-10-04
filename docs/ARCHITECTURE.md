@@ -53,6 +53,40 @@ Windows compatibility remains deferred. Existing verified backup/upgrade and
 other delivered functionality is retained; it does not justify expanding it now.
 Do not resume backup work based on an older chapter's next-task paragraph.
 
+## Increment: directly accessible TUN switch
+
+**Implemented.** Overview's TUN card now has a visible switch, and Settings
+places the same control above the editor, independent of the collapsed advanced
+TUN fields. The interaction follows the local Clash Verge Rev
+`proxy-control-switches.tsx` reference.
+
+- Authenticated `set_tun_enabled { enabled }` updates only `runtime.tun.enable`
+  inside the lifecycle actor, cloning its current settings. Other runtime and
+  advanced TUN values are preserved without a browser read/replace race. The
+  existing settings validation, persistence, apply and rollback transaction is
+  reused; a stopped core remains stopped.
+- `TunControl` saves/applies immediately, then checks both persisted settings and
+  generated configuration; a running core must also report the requested TUN
+  state before the verified toast appears. Running state comes from core readback;
+  stopped/failed state explicitly describes a saved setting that takes effect on
+  start, so a failed core can be repaired through the same switch.
+  Duplicate clicks, lifecycle transitions, disconnected or unconfirmed state are
+  disabled. Failures retain the observed state and display an error.
+- Settings drafts block the immediate switch until saved or discarded. Switching
+  reloads the editor's saved snapshot and draft, preventing a later full settings
+  save from undoing the toggle. Both pages share their existing proxy-access
+  refresh; no additional polling loop is introduced. Keyboard activation,
+  accessible switch state, question-mark help and mobile placement are supported.
+
+Verification: production TypeScript/Vite build and Rust formatting passed;
+management API tests passed **24 tests with 1 existing opt-in test ignored**.
+The full real-Mihomo browser suite passed **58 tests with 5 existing conditional
+skips**; the focused TUN workflow passed again after the final failed-startup
+snapshot support. Desktop/mobile screenshots confirm visible switches and no
+horizontal overflow. The isolated real-node test also passed: it applies the
+dedicated TUN command to a running core, verifies core readback and preserved
+settings, and checks proxied HTTPS traffic without changing production data.
+
 ## Increment: compact Web management interface
 
 **Implemented.** The Web interface follows the local Clash Verge Rev reference's
@@ -197,7 +231,8 @@ out of scope; sockets stay under `<data-dir>/run`.
    UID with the packager's 0700 root (readable by alice only when the host UID was
    1000). run.sh now makes `/work` root-owned and the bundle world-readable.
 
-**Latest completed task:** Compact Web management — live mode/TUN overview, grouped settings/help, stacked top-center toasts and centered content (see the increment above).
+**Latest completed task:** Direct TUN switches on Overview and at the top of Settings, with immediate application, verified state and preserved settings (see the increment above).
+**Previous completed task:** Compact Web management — live mode/TUN overview, grouped settings/help, stacked top-center toasts and centered content.
 **Previous completed task:** Installer management links carry a token and log in automatically (see the increment below).
 **Previous completed task:** Zero-argument shared installation, step 4 — per-user Web/installer core upgrades with the TUN capability launcher, complete uninstall and `--purge`.
 **Previous completed task:** Zero-argument shared installation, step 3 of 3 — isolated download/systemd/migration/real-node/reboot acceptance (95 checks), deployment docs and acceptance fixes.

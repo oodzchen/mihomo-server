@@ -1335,9 +1335,26 @@ failed. With no runtime it only saves settings for bootstrap; stopped updates ke
 the core stopped. Without a selected subscription, removing authority retains the
 current standalone value until manually edited/imported. Service bind/authentication,
 resources, upgrades and backups are outside this editor's current subset.
-The supported DNS/TUN fields are available below the scalar controls.
+Overview's TUN card and the top of Settings expose a direct TUN switch. Clicking
+saves and applies immediately, preserves other settings and verifies the result
+before displaying a toast. Stopped or failed cores show the saved state that will
+take effect on start; switching does not start them. Save or discard an existing settings draft before
+using the immediate switch. Advanced DNS/TUN fields remain in expandable sections
+below the scalar controls.
 
 ### DNS/TUN settings through the management API
+
+To change only TUN enable, use the authenticated dedicated command:
+
+```json
+{"command":"set_tun_enabled","enabled":true}
+```
+
+It returns `{"schema_version":1,"runtime":{...}}`, preserves all other current
+runtime/TUN settings inside the serialized lifecycle actor, and uses the existing
+validation/application/rollback transaction. Pass `false` to disable; stopped
+cores remain stopped. Read `settings` and `proxy_access` to verify saved and
+core-reported state.
 
 The authenticated `set_settings` command now accepts optional `dns` and `tun`
 objects inside `runtime`, using the same **whole-runtime replacement** transaction.

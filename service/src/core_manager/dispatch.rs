@@ -236,6 +236,15 @@ impl Actor {
                     let _ = reply.send(result);
                 }
             }
+            CommandMessage::SetTunEnabled { enabled, reply } => {
+                if !reply.is_closed() {
+                    let mut runtime = self.settings.runtime.clone();
+                    runtime.tun.get_or_insert_with(Default::default).enable = Some(enabled);
+                    let result = self.update_settings(runtime).await;
+                    self.record_error(&result);
+                    let _ = reply.send(result);
+                }
+            }
             CommandMessage::ReadConnectionSettings(reply) => {
                 if !reply.is_closed() {
                     let _ = reply.send(self.read_connection_settings().await);

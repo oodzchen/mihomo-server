@@ -2080,3 +2080,36 @@ async fn proxy_provider_and_delay_commands_reject_when_unauthorized_or_core_stop
 
     manager.shutdown().await
 }
+
+#[tokio::test]
+async fn tun_toggle_authenticates_and_preserves_all_other_settings() -> Result<()> {
+    let directory = Directory::new()?;
+    let manager = directory.manager()?;
+    let app = router(HttpState::new(Management::new(
+        manager.clone(),
+        directory.authentication()?,
+    )));
+    let token = directory.token()?;
+    let result = async {
+        manager.set_settings(serde_yaml_ng::from_str("mixed-port: 12345\nipv6: false\nmode: direct\ndns: {nameserver: [1.1.1.1]}\ntun: {stack: mixed, mtu: 1400, auto-route: false, dns-hijack: []}")?).await?;
+        let before = serde_json::to_value(manager.settings().await?)?;
+        let payload = json!({"command":"set_tun_enabled","enabled":true});
+        assert_eq!(response(&app, request("wrong", "/api/commands", Some(payload.clone()))?).await?.0, StatusCode::UNAUTHORIZED);
+        for invalid in [json!({"command":"set_tun_enabled"}), json!({"command":"set_tun_enabled","enabled":"true"}), json!({"command":"set_tun_enabled","enabled":true,"runtime":{}})] {
+            assert_eq!(response(&app, request(&token, "/api/commands", Some(invalid))?).await?.0, StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        assert_eq!(serde_json::to_value(manager.settings().await?)?, before);
+        for enabled in [true, false] {
+            let (code, saved) = response(&app, request(&token, "/api/commands", Some(json!({"command":"set_tun_enabled","enabled":enabled})))?).await?;
+            assert_eq!(code, StatusCode::OK);
+            let mut expected = before.clone();
+            expected["runtime"]["tun"]["enable"] = enabled.into();
+            assert_eq!(saved, expected);
+            assert_eq!(serde_json::to_value(manager.settings().await?)?, expected);
+            assert!(manager.status().pid.is_none());
+        }
+        Ok::<_, anyhow::Error>(())
+    }.await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}

@@ -26,6 +26,9 @@ Rebuild assets after editing the frontend and refresh the browser.
 
 - Centered responsive overview: core lifecycle/state, traffic, memory, connection
   count, actual Direct / Rule / Global mode and core-reported TUN status.
+- Visible TUN switches on Overview and at the top of Settings: save/apply
+  immediately, preserve advanced parameters and verify persisted/core state.
+  Stopped cores stay stopped; unsaved settings drafts block immediate toggling.
 - Compact settings rows with expandable advanced sections, question-mark help
   (hover/focus/touch), and collapsed core/resource/saved-state diagnostics.
 - Shared top-center toast stack with individual close controls and eight-second

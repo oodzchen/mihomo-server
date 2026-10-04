@@ -9,7 +9,7 @@ type ConnectionValues = {
   ipv6: boolean;
   tun_enabled?: boolean;
 };
-type Access = {
+export type Access = {
   running: boolean;
   has_config: boolean;
   core_error: string | null;

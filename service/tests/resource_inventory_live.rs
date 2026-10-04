@@ -117,6 +117,13 @@ async fn real_nodes_local_providers_inventory_and_https_proxy_remain_usable() ->
         let uid = profile.uid.context("import did not assign UID")?.to_string();
         manager.select_profile(uid.clone()).await?;
         manager.start().await?;
+        let settings = manager.settings().await?;
+        let toggled = manager.set_tun_enabled(false).await?;
+        let mut expected = settings.runtime;
+        expected.tun.get_or_insert_with(Default::default).enable = Some(false);
+        assert_eq!(toggled.runtime, expected);
+        assert_eq!(manager.status().phase, mihomo_server::core_manager::CorePhase::Running);
+        assert!(!manager.client().get_base_config().await?.tun.enable);
         let inventory = manager.resource_inventory().await?;
         assert_eq!(inventory.config_revision, manager.status().config_revision);
         assert_eq!(inventory.providers.len(), 4);

@@ -153,6 +153,10 @@ pub(super) enum CommandMessage {
         runtime: Box<RuntimeSettings>,
         reply: oneshot::Sender<Result<ServiceSettings>>,
     },
+    SetTunEnabled {
+        enabled: bool,
+        reply: oneshot::Sender<Result<ServiceSettings>>,
+    },
     ReadEnhancement {
         uid: String,
         kind: ProfileEnhancement,
@@ -229,7 +233,9 @@ impl CommandMessage {
             Self::ValidateGeo { reply, .. } => reject(reply, message),
             Self::ReadGeoSettings(reply) => reject(reply, message),
             Self::ReadConnectionSettings(reply) => reject(reply, message),
-            Self::ReadSettings(reply) | Self::SetSettings { reply, .. } => reject(reply, message),
+            Self::ReadSettings(reply) | Self::SetSettings { reply, .. } | Self::SetTunEnabled { reply, .. } => {
+                reject(reply, message)
+            }
             Self::ReadResources(reply) => reject(reply, message),
             Self::ReadEnhancement { reply, .. } => reject(reply, message),
             Self::SetEnhancement { reply, .. }

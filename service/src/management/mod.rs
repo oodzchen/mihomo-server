@@ -115,6 +115,9 @@ pub enum ManagementCommand {
         name: String,
     },
     ProxyAccess {},
+    SetTunEnabled {
+        enabled: bool,
+    },
     ProfileDns {
         uid: String,
     },
@@ -390,6 +393,9 @@ impl Management {
                 serde_json::to_value(self.manager.delay_group(&group, url.as_deref(), timeout).await?)?
             }
             ManagementCommand::ProxyAccess {} => crate::proxy_access::inspect(&self.manager).await?,
+            ManagementCommand::SetTunEnabled { enabled } => {
+                serde_json::to_value(self.manager.set_tun_enabled(enabled).await?)?
+            }
             ManagementCommand::SetSettings { runtime } => {
                 serde_json::to_value(self.manager.set_settings(*runtime).await?)?
             }

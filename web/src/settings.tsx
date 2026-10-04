@@ -1,4 +1,5 @@
 import { HelpTip } from "./help-tip";
+import { TunControl } from "./tun-control";
 import { useToast } from "./toast";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, command, type Perform, type Connection } from "./api";
@@ -347,6 +348,8 @@ export function SettingsPage({
 
   return (
     <div className="settings-layout">
+      <TunControl token={token} language={language} status={status} connection={connection} access={access} busy={disabled}
+        perform={perform} logout={logout} blocked={!saved || dirty || uncertain} onChanged={reload} />
       <section className="panel" aria-label="服务设置编辑器">
         <div className="panel-title">
           <h2 className="setting-heading">服务运行设置<HelpTip label="运行设置帮助">留空或选择继承时使用订阅 / 配置值，端口 0 表示禁用。保存前会校验配置，已停止的内核保持停止。离开本页会丢弃草稿。保存会替换全部运行设置，当前订阅会重新生成并校验。未选择订阅时更新独立运行配置，移除设置会保留其当前值，之后可在配置页修改。保存结果不确定时，先核对服务设置再重试。服务地址、管理认证和启动参数不在此编辑器中。</HelpTip></h2>

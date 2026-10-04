@@ -5184,3 +5184,100 @@ test("repeated configuration saves produce separate success toasts", async ({ pa
   await expect(page.locator(".toast").first()).toContainText("此配置已通过校验并提交。");
   await expect(page.locator(".toast").last()).toContainText("此配置已通过校验并提交。");
 });
+
+test("visible TUN switches save immediately, preserve advanced settings and protect settings drafts", async ({ page }) => {
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  await api("stop");
+  await api("set_settings", { runtime: {} });
+  const profile = await api("import_profile", { name: "TUN controls", yaml: "mode: direct\nmixed-port: 0\ndns: {enable: false, nameserver: [1.1.1.1]}\ntun: {enable: false, auto-route: false}\nrules: ['MATCH,DIRECT']" });
+  await api("select_profile", { uid: profile.uid });
+  const runtime = { mode: "direct", "mixed-port": 0, ipv6: false, tun: { enable: false, stack: "mixed", mtu: 1400, "auto-route": false, "dns-hijack": [] } };
+  const before = await api("set_settings", { runtime });
+  await page.goto(`${base}/#token=${encodeURIComponent(token)}`);
+  const toggle = page.getByRole("switch", { name: "TUN 模式", exact: true });
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await page.screenshot({ path: "test-results/tun-switch-overview-desktop.png", fullPage: true });
+  await toggle.click();
+  await expect(page.locator(".toast").filter({ hasText: "TUN 状态已核对：已开启" })).toBeVisible();
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  expect(await api("settings")).toEqual({ ...before, runtime: { ...runtime, tun: { ...runtime.tun, enable: true } } });
+  expect((await api("status")).phase).toBe("stopped");
+  await toggle.focus(); await toggle.press("Space");
+  await expect(page.locator(".toast").filter({ hasText: "TUN 状态已核对：已关闭" })).toBeVisible();
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  expect(await api("settings")).toEqual(before);
+  await api("start");
+  let writes = 0;
+  // Permission failures leave the switch at the actual value and keep the running core.
+  await page.route("**/api/commands", async route => {
+    if (route.request().postDataJSON().command !== "set_tun_enabled") return route.continue();
+    writes++;
+    await route.fulfill({ status: 403, json: { error: { message: "fixture TUN permission denied" } } });
+  });
+  await expect(toggle).toBeEnabled();
+  const running = await api("status");
+  await toggle.click();
+  await expect(page.getByRole("alert").filter({ hasText: "fixture TUN permission denied" })).toBeVisible();
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  expect(writes).toBe(1);
+  expect((await api("status")).pid).toBe(running.pid);
+  expect(await api("settings")).toEqual(before);
+  await page.unroute("**/api/commands");
+  // Project a failed startup snapshot while the actual test core stays stopped.
+  await api("stop");
+  await page.routeWebSocket("**/api/events", socket => {
+    const server = socket.connectToServer();
+    server.onMessage(message => {
+      if (typeof message === "string") {
+        const event = JSON.parse(message);
+        if (event.type === "snapshot") event.status.phase = "failed";
+        socket.send(JSON.stringify(event));
+      } else socket.send(message);
+    });
+  });
+  await page.goto(`${base}/?token=${encodeURIComponent(token)}`);
+  await expect(page.getByRole("region", { name: "TUN 模式", exact: true }).getByRole("status")).toHaveText("启动失败");
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await expect(toggle).toBeEnabled();
+  expect((await api("status")).phase).toBe("stopped");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(toggle).toBeEnabled();
+  expect(await api("settings")).toEqual(before);
+  await page.getByRole("navigation").getByRole("link", { name: "设置", exact: true }).click();
+  await expect(toggle).toBeEnabled();
+  await expect(page.locator(".settings-group[open]")).toHaveCount(0);
+  await expect(toggle).toBeInViewport();
+  const mode = page.getByRole("combobox", { name: "代理模式", exact: true });
+  await mode.selectOption("global");
+  await expect(toggle).toBeDisabled();
+  await expect(page.getByText("请先保存或丢弃设置草稿，再操作此开关。")).toBeVisible();
+  await mode.selectOption("direct");
+  await expect(toggle).toBeEnabled();
+  await api("stop");
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("button", { name: "保存服务设置", exact: true })).toBeDisabled();
+  await expect(page.getByText("有未保存的修改", { exact: true })).toHaveCount(0);
+  while (await page.locator(".toast-close").count()) await page.locator(".toast-close").first().click();
+  await page.screenshot({ path: "test-results/tun-switch-settings-desktop.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: "test-results/tun-switch-settings-mobile.png", fullPage: true });
+  await expect(toggle).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(toggle).toBeEnabled();
+  expect(await api("settings")).toEqual(before);
+});
