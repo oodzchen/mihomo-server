@@ -8,6 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/install_remote.sh"
+HELPER = ROOT / "deploy/mihomo-server-user"
 
 
 class Installer(unittest.TestCase):
@@ -106,6 +107,69 @@ class Installer(unittest.TestCase):
         result = subprocess.run(["bash"], input=source, env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
+
+
+class UserManagementLinks(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="ms-management-link-")
+        self.data = Path(self.temp.name) / "data with spaces"
+        self.data.mkdir()
+        self.token = "a1" * 32
+        (self.data / "management-token").write_text(self.token + "\n")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def info(self, listen="127.0.0.1:20030", origin="", running=True):
+        # Load functions only; exercise real endpoint/info without a user manager.
+        source = HELPER.read_text().split("\ncommand=${1:-info}")[0]
+        source += '''
+systemctl() {
+    case "$*" in
+        *MainPID*) echo "$TEST_PID" ;;
+        *is-active*) echo active ;;
+    esac
+}
+slot() { echo 3; }
+current_log() { echo 'multi-user slot 3 (available)'; }
+process_argument() {
+    case "$2" in
+        --listen) echo "$TEST_LISTEN" ;;
+        --public-origin) echo "$TEST_ORIGIN" ;;
+        --data-dir) echo "$TEST_DATA" ;;
+    esac
+}
+request() { echo '{"mixed-port":20031}'; }
+DATA_DIR="$TEST_DATA"
+ENV_FILE="$TEST_DATA/env"
+info
+'''
+        result = subprocess.run(["bash"], input=source, capture_output=True, text=True,
+                                env=os.environ | {"TEST_DATA": str(self.data), "TEST_LISTEN": listen,
+                                                  "TEST_ORIGIN": origin, "TEST_PID": "42" if running else "0"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return next(line.removeprefix("manage:    ") for line in result.stdout.splitlines()
+                    if line.startswith("manage:"))
+
+    def test_management_link_contains_token_for_default_and_wildcard_listeners(self):
+        for listen, address in [("127.0.0.1:20030", "127.0.0.1:20030"),
+                                ("0.0.0.0:20030", "127.0.0.1:20030"),
+                                ("[::]:20030", "[::1]:20030")]:
+            with self.subTest(listen=listen):
+                self.assertEqual(self.info(listen), f"http://{address}/#token={self.token}")
+
+    def test_public_origin_is_used_for_browser_login(self):
+        self.assertEqual(self.info("0.0.0.0:20030", "https://manage.example/"),
+                         f"https://manage.example/#token={self.token}")
+
+    def test_stopped_instance_uses_saved_token_and_slot_address(self):
+        self.assertEqual(self.info(running=False), f"http://127.0.0.1:20030/#token={self.token}")
+
+    def test_missing_or_invalid_token_keeps_plain_management_link(self):
+        (self.data / "management-token").unlink()
+        self.assertEqual(self.info(), "http://127.0.0.1:20030")
+        (self.data / "management-token").write_text("invalid&extra=parameter\n")
+        self.assertEqual(self.info(), "http://127.0.0.1:20030")
 
 
 if __name__ == "__main__":

@@ -155,7 +155,8 @@ out of scope; sockets stay under `<data-dir>/run`.
    UID with the packager's 0700 root (readable by alice only when the host UID was
    1000). run.sh now makes `/work` root-owned and the bundle world-readable.
 
-**Latest completed task:** Zero-argument shared installation, step 4 — per-user Web/installer core upgrades with the TUN capability launcher, complete uninstall and `--purge`.
+**Latest completed task:** Installer management links carry a token and log in automatically (see the increment below).
+**Previous completed task:** Zero-argument shared installation, step 4 — per-user Web/installer core upgrades with the TUN capability launcher, complete uninstall and `--purge`.
 **Previous completed task:** Zero-argument shared installation, step 3 of 3 — isolated download/systemd/migration/real-node/reboot acceptance (95 checks), deployment docs and acceptance fixes.
 **Previous completed task:** Zero-argument shared installation, step 2 of 3 — unified installer, automatic authorization/linger and guarded legacy migration.
 **Previous completed task:** Zero-argument shared installation, step 1 of 3 — slot-0 ports, XDG-aware launcher and per-user enable/readiness helper (above).
@@ -169,6 +170,39 @@ out of scope; sockets stay under `<data-dir>/run`.
 
 **Previous completed task:** Minimalist centered login page layout redesign. Replaced the split-screen layout and promotional copy (`.login-art` with marketing slogans/intros) with a clean, centered minimalist card layout. The login view centers the card vertically and horizontally in the viewport with top title (`连接你的服务`), concise explanation (`loginHelp`), and centered login box (`token` password input, submit button, and data directory hint). Moved interface language selection cleanly to the top-right corner, ensuring responsive display on both desktop and mobile viewports while maintaining complete e2e test compatibility.
 **Next implementation task:** None for the zero-argument installation plan. All three increments are complete; publishing a release or installing shared host files remains a separate action.
+
+## Increment: automatic login from installer management links
+
+`deploy/mihomo-server-user info` now prints `manage: http://address/#token=<token>`
+when its effective token file contains the service's 64-character hexadecimal
+credential. `enable` and `restart` use the same output, and `install_remote.sh`
+forwards `enable` output to the installing user. The browser address uses the
+effective `--public-origin` when supplied; authenticated readiness requests keep
+using the local API address and the required Host header. Missing/invalid token
+files retain a plain management address. Stopped instances reuse their saved
+token and slot address.
+
+`web/src/main.tsx` consumes `#token=…` (also accepting `?token=…`) before rendering,
+removes token parameters with `history.replaceState`, preserves other parameters,
+and verifies the supplied credential with the existing bearer-authenticated
+`status` command. An explicit link takes precedence over an older tab session.
+Only successful verification caches the credential in sessionStorage; refresh
+revalidates it, and logout/401 clears it. Invalid credentials or a failed request
+show the login form with an error and allow manual login. Generated fragment
+links keep credentials out of HTTP request URLs and referrers; query links are
+accepted as a compatibility input, not emitted by the installer. HTTP and
+WebSocket authentication retain their existing bearer/header and first-frame
+contracts.
+
+Verification: 29 installer/launcher/packaging Python tests; Web TypeScript/Vite
+build; 5 Playwright tests covering fragment/query login, stale session override,
+URL cleanup, refresh/logout, invalid credentials, transient errors, and the
+existing service restart workflow; Bash syntax and `git diff --check`. A live
+isolated service using a temporary copy of `./data` loaded 62 real nodes,
+passed browser automatic login/refresh/logout, and returned HTTP 204 through
+a selected node and the HTTP proxy. The original data was not modified.
+ShellCheck was unavailable locally. Release publication and shared host
+installation were not part of this change.
 
 ## Increment: multi-user system installation
 
@@ -981,7 +1015,9 @@ The responsive UI provides token login, core state/start/stop/restart, local YAM
 file/content import and profile selection, runtime YAML editing, proxy-group node
 selection/unfix, a bounded core-output viewer, and traffic/memory/connection-count
 metrics. HTTP commands and first-frame-authenticated WebSocket adapters use only
-the management listener. The token is cached in browser sessionStorage (`mihomo.token`, per-tab, never localStorage) and re-validated via `status` on page load, so refresh keeps the session; logout or a 401 clears it.
+the management listener. Installer links supply a `#token` parameter for automatic
+login; the UI also accepts `?token` and removes these parameters before verification.
+The token is cached in browser sessionStorage (`mihomo.token`, per-tab, never localStorage) and re-validated via `status` on page load, so refresh keeps the session; logout or a 401 clears it.
 Event reconnection receives current snapshots, feed views clear stale samples,
 and view disposal/logout closes owned sockets and cancels pending HTTP requests.
 Core startup/validation failures remain visible and repairable in the browser.

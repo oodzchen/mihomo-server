@@ -47,6 +47,24 @@ function storeToken(token: string) {
   } catch { /* Private browser storage can be unavailable. */ }
 }
 
+function consumeUrlToken(): string | undefined {
+  const url = new URL(window.location.href);
+  const fragment = new URLSearchParams(url.hash.slice(1));
+  const token = fragment.get("token") ?? url.searchParams.get("token");
+  if (token === null) return undefined;
+  url.searchParams.delete("token");
+  if (fragment.has("token")) {
+    fragment.delete("token");
+    url.hash = fragment.toString();
+  }
+  window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+  return token.trim();
+}
+
+// Consume the URL once before React renders; explicit links take precedence
+// over an older session, and credentials leave the address before API calls.
+const initialToken = consumeUrlToken() ?? savedToken();
+
 function App() {
   const [language, setLanguage] = useState<Language>(savedLanguage);
   const [session, setSession] = useState<{
@@ -54,7 +72,7 @@ function App() {
     status: CoreStatus;
   }>();
   const [loginError, setLoginError] = useState("");
-  const [restoring, setRestoring] = useState(() => !!savedToken());
+  const [restoring, setRestoring] = useState(!!initialToken);
   const logout = useCallback((reason = "") => {
     storeToken("");
     setSession(undefined);
@@ -71,17 +89,23 @@ function App() {
     setSession(value);
   }, []);
   useEffect(() => {
-    const token = savedToken();
+    const token = initialToken;
     if (!token) return;
     let active = true;
     command<CoreStatus>(token, "status")
-      .then((status) => active && setSession({ token, status }))
+      .then((status) => active && login({ token, status }))
       .catch((error) => {
-        if (error instanceof ApiError && error.status === 401) storeToken("");
+        if (!active) return;
+        if (error instanceof ApiError && error.status === 401) {
+          storeToken("");
+          setLoginError(t(savedLanguage(), "invalidToken"));
+        } else {
+          setLoginError(describe(error));
+        }
       })
       .finally(() => active && setRestoring(false));
     return () => { active = false; };
-  }, []);
+  }, [login]);
   useEffect(() => {
     document.documentElement.lang = language === "en" ? "en" : language === "zhtw" ? "zh-TW" : "zh-CN";
     document.title = `Mihomo · ${t(language, "serviceManagement")}`;

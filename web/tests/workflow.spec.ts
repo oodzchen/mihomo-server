@@ -189,6 +189,58 @@ test.afterAll(async () => {
   }
 });
 
+for (const parameter of ["fragment", "query"]) {
+  test(`management link ${parameter} token logs in automatically and is consumed`, async ({ page }) => {
+    // A new link must override a stale credential left in this tab.
+    await page.goto(base);
+    await expect(page.getByLabel("管理令牌")).toBeVisible();
+    await page.evaluate(() => sessionStorage.setItem("mihomo.token", "stale-token"));
+    const requests: string[] = [];
+    page.on("request", request => requests.push(request.url()));
+    const link = parameter === "fragment"
+      ? `${base}/?view=install#panel=overview&token=${token}`
+      : `${base}/?view=install&token=${token}#panel=overview`;
+    await page.goto(link);
+    await expect(page.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(`${base}/?view=install#panel=overview`);
+    expect(await page.evaluate(() => sessionStorage.getItem("mihomo.token"))).toBe(token);
+    expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(token);
+    if (parameter === "fragment") expect(requests.some(url => url.includes(token))).toBe(false);
+    expect(requests.filter(url => new URL(url).pathname.startsWith("/api/"))
+      .some(url => url.includes(token))).toBe(false);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "退出登录" }).click();
+    await expect(page.getByLabel("管理令牌")).toHaveValue("");
+    expect(await page.evaluate(() => sessionStorage.getItem("mihomo.token"))).toBeNull();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "连接你的服务" })).toBeVisible();
+  });
+}
+
+test("invalid management link token is removed and permits manual login", async ({ page }) => {
+  await page.goto(`${base}/#token=incorrect`);
+  await expect(page.getByRole("alert")).toContainText("令牌无效");
+  await expect(page).toHaveURL(`${base}/`);
+  expect(await page.evaluate(() => sessionStorage.getItem("mihomo.token"))).toBeNull();
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+  await expect(page.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+});
+
+test("failed management link verification shows the login error without caching the token", async ({ page }) => {
+  await page.route("**/api/commands", route => route.fulfill({
+    status: 503, contentType: "application/json",
+    body: JSON.stringify({ error: { message: "temporarily unavailable" } }),
+  }));
+  await page.goto(`${base}/#token=${token}`);
+  await expect(page.getByRole("alert")).toContainText("temporarily unavailable");
+  await expect(page).toHaveURL(`${base}/`);
+  expect(await page.evaluate(() => sessionStorage.getItem("mihomo.token"))).toBeNull();
+});
+
 test("browser language selection persists locally without changing service state", async ({ page, browser }) => {
   await page.goto(base);
   await expect(page.getByRole("heading", { name: "连接你的服务" })).toBeVisible();

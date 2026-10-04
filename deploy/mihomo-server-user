@@ -146,6 +146,7 @@ endpoint() {
         '[::]:'*) API_URL="http://[::1]:${LISTEN##*:}" ;;
         *) API_URL="http://$LISTEN" ;;
     esac
+    MANAGEMENT_URL=${origin:-$API_URL}
 }
 request() {
     local path=$1 token
@@ -175,7 +176,7 @@ wait_ready() {
     die "$UNIT failed to reach a running core and authenticated API; check configuration and port conflicts"
 }
 info() {
-    local state n tun line proxy
+    local state n tun line proxy manage token
     state=$(systemctl --user is-active "$UNIT" 2>/dev/null || true)
     if ! n=$(slot); then
         echo "service:   $state (run: mihomo-server-user enable)"
@@ -185,6 +186,14 @@ info() {
     LISTEN="127.0.0.1:$(management_port "$n")"
     TOKEN_FILE="$DATA_DIR/management-token"
     endpoint || true
+    manage=${MANAGEMENT_URL:-http://$LISTEN}
+    if [ -s "$TOKEN_FILE" ]; then
+        token=$(cat "$TOKEN_FILE")
+        # Service credentials are 64 hex characters, safe as a URL parameter.
+        if [[ "$token" =~ ^[[:xdigit:]]{64}$ ]]; then
+            manage="${manage%/}/#token=$token"
+        fi
+    fi
     line=$(current_log | grep '^multi-user slot ' | tail -n 1 || true)
     case "$line" in *'(available)'*) tun=available ;; *) tun='unavailable (administrator must authorize group mihomo-tun)' ;; esac
     proxy=$(mixed_port "$n")
@@ -196,7 +205,7 @@ info() {
     cat <<DETAILS
 service:   $state
 slot:      $n
-manage:    ${API_URL:-http://$LISTEN}
+manage:    $manage
 token:     $TOKEN_FILE
 proxy:     HTTP/SOCKS 127.0.0.1:$proxy (settings can override)
 tun:       $tun (device ms$(id -u))
