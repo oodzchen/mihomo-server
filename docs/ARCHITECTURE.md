@@ -46,7 +46,7 @@ core problems can be repaired through the same interface.
 | `crates/headless-core` | Tauri-independent domain logic: profile/catalog schema, settings authority, enhancement generation, runtime revisions, resource paths, backup models and recovery plans. |
 | `crates/mihomo-client` | Typed Mihomo control API over Unix socket or explicit loopback HTTP, including realtime streams. |
 | `crates/clash-verge-*` | Small reusable upstream components: drafts, admission limiting, locale resources and Unix signal handling. |
-| `service` | Axum management surface, authentication, durable stores, core actor, downloads, resource/core updates, backup/restore, multi-user isolation and shutdown. |
+| `service` | Axum management surface, authentication, durable stores, core actor, downloads, resource/core updates, backup/restore, multi-user isolation and shutdown. The same executable is the `mihomo-server` command-line client (`service/src/cli`): `serve` (or a leading service option) runs the service, any other command is a client. |
 | `web` | React browser client. It talks only to the Rust service and keeps browser language/session presentation state local. |
 | `deploy` and `scripts` | Pinned bundle creation, installation, systemd integration, per-user helper and lifecycle checks. |
 
@@ -135,6 +135,14 @@ The management command allowlist covers:
 - Geo/provider inventory, validation and controlled updates;
 - backup export, inspection, restore and private retained archives.
 
+The `mihomo-server` command is a second client of the same authenticated command
+API, with no private path into the service. It locates the invoking user's
+instance from the systemd unit's main process (listener, public origin and data
+directory from its command line), so it sends the Host the service authorizes and
+reads the token the service wrote. Service lifecycle is delegated to the release's
+`mihomo-server-user` helper and program updates/uninstall to the installer, so
+systemd and root actions keep a single implementation.
+
 Browser operations use independent readback after mutations. Realtime feeds can
 disconnect and resubscribe without becoming configuration authority. Browser
 language and login presentation state do not modify service-global settings.
@@ -163,8 +171,9 @@ backups, change-triggered backups, WebDAV and a backup Web UI are deferred.
 The default Linux installation shares immutable program files under
 `/opt/mihomo-server` while each account owns an independent systemd user service,
 data directory, token, managed core, profile catalog and proxy ports. A root-run
-installation may install only the shared program; users initialize their own
-instances through `mihomo-server-user`.
+installation may install only the shared program; users initialize and control
+their own instances through `mihomo-server` (linked into `/usr/local/bin` with its
+manual and completions) or the underlying `mihomo-server-user` helper.
 
 Slots provide deterministic non-overlapping management, proxy and DNS ports.
 Port rewriting is applied as a final generated-configuration overlay, leaving the
