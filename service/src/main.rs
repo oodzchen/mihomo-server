@@ -10,6 +10,7 @@ use mihomo_server::{
         auth::Authentication,
         http::{HttpState, router},
         preferences::PreferenceStore,
+        update_checks::UpdateCheckStore,
     },
     resources::Resources,
     shutdown::ShutdownSignals,
@@ -264,7 +265,12 @@ async fn run(arguments: Vec<OsString>) -> Result<()> {
         socket.bind(listen).context("bind management listener")?;
         let listener = socket.listen(1024).context("listen management listener")?;
         let preferences = PreferenceStore::load(data_dir.join("preferences.json"));
-        let mut state = HttpState::new(Management::new(manager.clone(), authentication).with_preferences(preferences));
+        let update_checks = UpdateCheckStore::load(data_dir.join("update-checks.json"));
+        let mut state = HttpState::new(
+            Management::new(manager.clone(), authentication)
+                .with_preferences(preferences)
+                .with_update_checks(update_checks),
+        );
         if let Some(directory) = &web_dir {
             state = state.with_web_assets(directory)?;
         }

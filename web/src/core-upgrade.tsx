@@ -3,12 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, command, type Perform, type Connection } from "./api";
 import { describe } from "./format";
 import { phaseLabel, t, type Language } from "./i18n";
-import type { CoreStatus } from "./types";
+import type { CoreStatus, UpdateChecks } from "./types";
 import { HelpTip } from "./help-tip";
 
 type Release = { version: string; bytes: number; target: string };
 type Installation = { version: string; stage_id: string };
 type Report = { upgraded: boolean; from: string; to: string };
+type Check = NonNullable<UpdateChecks["core"]>;
 
 export function CoreUpgradePage({
   token,
@@ -34,13 +35,15 @@ export function CoreUpgradePage({
   const label = channel === "alpha" ? "Alpha" : t(language, "channelStable");
   const [version, setVersion] = useState<string>();
   const [installation, setInstallation] = useState<Installation | null>();
-  const [latest, setLatest] = useState<Release>();
+  const [check, setCheck] = useState<Check | null>(null);
   const [report, setReport] = useState<Report>();
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const alive = useRef(true);
   const locked = useRef(false);
+  /** The channel of the recorded check is adopted once, on the first read. */
+  const adopted = useRef(false);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -90,22 +93,36 @@ export function CoreUpgradePage({
     };
   }, [token, connection, status.generation, refresh, logout, language]);
 
-  async function run(force?: boolean) {
-    if (locked.current || busy) return;
-    if (
-      force === true &&
-      !window.confirm(t(language, "coreUpgradeConfirmReinstall", { label }))
-    )
-      return;
+  /** Checks for the latest release, or installs the one a check found. */
+  // Read once per connection: later checks on this page are newer.
+  useEffect(() => {
+    if (connection !== "connected") return;
+    const controller = new AbortController();
+    command<UpdateChecks>(token, "update_checks", {}, controller.signal)
+      .then((checks) => {
+        // A check or update running now gives the newer answer.
+        if (locked.current) return;
+        setCheck(checks.core);
+        if (checks.core && !adopted.current) setChannel(checks.core.channel);
+        adopted.current = true;
+      })
+      .catch(() => {
+        // Without a record the page simply offers a new check.
+      });
+    return () => controller.abort();
+  }, [token, connection]);
+
+  async function run(upgrade: boolean) {
+    if (locked.current || busy || !version) return;
     locked.current = true;
     setWorking(true);
     setReport(undefined);
     try {
-      if (force === undefined) {
-        setLatest(undefined);
+      if (!upgrade) {
         try {
           const value = await command<Release>(token, channel === "alpha" ? "alpha_core_release" : "core_release");
-          if (alive.current) setLatest(value);
+          // The service records the same check for later visits.
+          if (alive.current) setCheck({ channel, installed: version, latest: value.version });
         } catch (error) {
           if (!alive.current) return;
           if (error instanceof ApiError && error.status === 401)
@@ -114,7 +131,7 @@ export function CoreUpgradePage({
         }
       } else {
         const toast = notify.loading(t(language, "coreUpgradeWorking"));
-        const value = await perform<Report>(channel === "alpha" ? "upgrade_alpha_core" : "upgrade_clash_core", { force }, { notify: false, toast });
+        const value = await perform<Report>(channel === "alpha" ? "upgrade_alpha_core" : "upgrade_clash_core", { force: false }, { notify: false, toast });
         if (alive.current && value) {
           setReport(value);
           toast.finish(value.upgraded
@@ -138,6 +155,13 @@ export function CoreUpgradePage({
     "shutdown",
   ].includes(status.phase);
   const disabled = busy || working || connection !== "connected" || !version;
+  // A check taken before the installed core changed says nothing about it,
+  // unless it found exactly the version installed since.
+  const known =
+    check?.channel === channel && (check.installed === version || check.latest === version)
+      ? check
+      : undefined;
+  const available = known && known.installed === version && known.latest !== version ? known.latest : undefined;
   return (
     <>
       <section className="panel" aria-label={t(language, "coreStatus")}>
@@ -201,13 +225,6 @@ export function CoreUpgradePage({
             <span>{t(language, "coreUpgradeHint")}</span>
           </HelpTip>
         </h2>
-        <button
-          type="button"
-          disabled={busy || working || connection !== "connected"}
-          onClick={() => setRefresh((value) => value + 1)}
-        >
-          {t(language, "coreUpgradeRefresh")}
-        </button>
       </div>
       <label>
         {t(language, "coreUpgradeChannel")}
@@ -217,7 +234,6 @@ export function CoreUpgradePage({
           onChange={(event) => {
             if (locked.current || busy) return;
             setChannel(event.target.value === "alpha" ? "alpha" : "stable");
-            setLatest(undefined);
             setReport(undefined);
           }}
         >
@@ -251,7 +267,13 @@ export function CoreUpgradePage({
           </div>
           <div>
             <dt>{t(language, "coreUpgradeLatestChannel", { label })}</dt>
-            <dd>{latest?.version || t(language, "coreUpgradeNotChecked")}</dd>
+            <dd>
+              {!known
+                ? t(language, "coreUpgradeNotChecked")
+                : known.latest === version
+                ? t(language, "updateLatestCurrent", { version: known.latest })
+                : known.latest}
+            </dd>
           </div>
           <div>
             <dt>{t(language, "coreUpgradeInstallRecord")}</dt>
@@ -266,23 +288,13 @@ export function CoreUpgradePage({
         </dl>
       )}
       <div className="actions">
-        <button type="button" disabled={disabled} onClick={() => void run()}>
-          {t(language, "coreUpgradeCheck", { label })}
-        </button>
         <button
           type="button"
-          className="primary"
+          className={available ? "primary" : undefined}
           disabled={disabled}
-          onClick={() => void run(false)}
+          onClick={() => void run(available !== undefined)}
         >
-          {t(language, "coreUpgradeUpgrade", { label })}
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => void run(true)}
-        >
-          {t(language, "coreUpgradeReinstall", { label })}
+          {available ? t(language, "updateTo", { version: available }) : t(language, "updateCheck")}
         </button>
       </div>
       {report && version && version !== report.to && (

@@ -1598,43 +1598,77 @@ test("core upgrade page controls and channels translate across language changes"
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务", exact: true }).click();
   await expect(page.getByRole("heading", { name: "稳定版内核升级" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "刷新安装信息" })).toBeVisible();
   await expect(page.getByLabel("升级通道")).toBeVisible();
   await expectHelp(page, "稳定版内核升级", "检查并安装 Mihomo 最新稳定版。升级时会短暂中断代理连接；失败时恢复上一份内核，停止的内核仍保持停止。");
-  await expectHelp(page, "稳定版内核升级", "默认跳过相同版本；强制重新安装会重新验证并替换内核。");
+  await expectHelp(page, "稳定版内核升级", "检查更新发现新版本后，按钮变为“更新至”该版本；检查结果在页面刷新和服务重启后仍保留。");
   await expect(page.getByText("已验证安装 v1.18.0")).toBeVisible();
-  await expect(page.getByRole("button", { name: "检查稳定版更新" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "升级至最新稳定版" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "强制重新安装稳定版" })).toBeVisible();
+  const panel = page.getByRole("region", { name: "稳定版内核升级" });
+  // Only the check is offered until a check finds a new version.
+  await expect(panel.locator(".actions button")).toHaveText(["检查更新"]);
+  await panel.getByRole("button", { name: "检查更新", exact: true }).click();
+  await expect(panel.locator(".actions button")).toHaveText(["更新至 v1.19.0"]);
+  await expect(panel.locator("dd").nth(1)).toHaveText("v1.19.0");
 
   await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
   await expect(page.getByRole("heading", { name: "Stable core upgrade" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Refresh install info" })).toBeVisible();
   await expect(page.getByLabel("Upgrade channel")).toBeVisible();
   await expectHelp(page, "Stable core upgrade", "Check and install the latest Stable Mihomo core. Proxy connections will briefly pause during upgrades; previous core is restored on failure, stopped cores remain stopped.");
   await expect(page.getByText("Verified install v1.18.0")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Check Stable update" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Upgrade to latest Stable" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Force reinstall Stable" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Update to v1.19.0", exact: true })).toBeVisible();
 
+  // The check belongs to its channel.
   await page.getByLabel("Upgrade channel").selectOption("alpha");
   await expect(page.getByRole("heading", { name: "Alpha core upgrade" })).toBeVisible();
   await expectHelp(page, "Alpha core upgrade", "Alpha is a pre-release channel. Switch back to Stable channel anytime.");
   await expectHelp(page, "Alpha core upgrade", "Check and install the latest Alpha Mihomo core. Proxy connections will briefly pause during upgrades; previous core is restored on failure, stopped cores remain stopped.");
-  await expect(page.getByRole("button", { name: "Check Alpha update" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Upgrade to latest Alpha" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Force reinstall Alpha" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Check for updates", exact: true })).toBeVisible();
+  await expect(page.getByText("Not checked yet", { exact: true })).toBeVisible();
 
   await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
   await expect(page.getByRole("heading", { name: "Alpha内核升级" })).toBeVisible();
   await expectHelp(page, "Alpha内核升级", "Alpha 是预发布版本。可选择稳定版通道切回最新稳定版。");
   await expectHelp(page, "Alpha内核升级", "检查并安装 Mihomo 最新Alpha。升级时会短暂中断代理连接；失败时恢复上一份内核，停止的内核仍保持停止。");
-  await expect(page.getByRole("button", { name: "检查Alpha更新" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "升级至最新Alpha" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "强制重新安装Alpha" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "检查更新", exact: true })).toBeVisible();
 
   await page.getByLabel("升级通道").selectOption("stable");
   await expect(page.getByRole("heading", { name: "稳定版内核升级" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "更新至 v1.19.0", exact: true })).toBeVisible();
+});
+
+test("core page offers a recorded update only while the checked core is installed", async ({ page }) => {
+  let installed = "v1.18.0";
+  await page.route("**/api/commands", async (route) => {
+    const command = route.request().postDataJSON()?.command;
+    if (command === "installed_core_version") await route.fulfill({ json: installed });
+    else if (command === "core_installation") await route.fulfill({ json: { version: installed, stage_id: "init-stage" } });
+    else if (command === "update_checks")
+      await route.fulfill({ json: { core: { channel: "alpha", installed: "v1.18.0", latest: "alpha-abc1234" }, service: null } });
+    else await route.continue();
+  });
+  await page.goto(`${base}/core#token=${encodeURIComponent(token)}`);
+  // The recorded check names its channel, which the page adopts.
+  const panel = page.getByRole("region", { name: "Alpha内核升级" });
+  await expect(page.getByLabel("升级通道")).toHaveValue("alpha");
+  await expect(panel.locator(".actions button")).toHaveText(["更新至 alpha-abc1234"]);
+  await expect(panel.locator("dd").nth(1)).toHaveText("alpha-abc1234");
+  await page.getByLabel("升级通道").selectOption("stable");
+  await expect(page.getByRole("region", { name: "稳定版内核升级" }).locator(".actions button")).toHaveText(["检查更新"]);
+
+  // Once another core is installed, the old check says nothing about it.
+  installed = "v1.18.5";
+  await page.reload();
+  await expect(page.getByLabel("升级通道")).toHaveValue("alpha");
+  await expect(panel.locator("dd").first()).toHaveText("v1.18.5");
+  await expect(panel.locator(".actions button")).toHaveText(["检查更新"]);
+  await expect(panel.locator("dd").nth(1)).toHaveText("尚未检查");
+
+  // Unless it is the version the check found.
+  installed = "alpha-abc1234";
+  await page.reload();
+  await expect(panel.locator("dd").first()).toHaveText("alpha-abc1234");
+  await expect(panel.locator(".actions button")).toHaveText(["检查更新"]);
+  await expect(panel.locator("dd").nth(1)).toHaveText("alpha-abc1234（已是最新）");
+  await page.unroute("**/api/commands");
 });
 
 test("resources panel, geo seed and online actions translate across language changes", async ({ page }) => {
@@ -4281,6 +4315,7 @@ for (const channel of ["stable", "alpha"] as const) {
         },
         body: JSON.stringify({ command, ...fields }),
       });
+      if (!response.ok) console.log("DEBUGAPI", command, JSON.stringify(fields), await response.text());
       expect(response.ok).toBe(true);
       return response.json();
     };
@@ -4314,12 +4349,13 @@ for (const channel of ["stable", "alpha"] as const) {
     );
     await chmod(cache, 0o700);
     let calls = 0,
-      fail = true;
+      fail = true,
+      latest = version;
     let release!: () => void;
     const hold = new Promise<void>((resolve) => {
       release = resolve;
     });
-    // The browser gets fixture official-discovery/results; forced success delegates
+    // The browser gets fixture official-discovery/results; a successful update delegates
     // to real authenticated staging/activation. Rust and separate official smoke
     // tests exercise the actual wrapper's metadata/download/no-op decisions.
     await page.route("**/api/commands", async (route) => {
@@ -4327,15 +4363,15 @@ for (const channel of ["stable", "alpha"] as const) {
       if (body.command === (alpha ? "alpha_core_release" : "core_release")) {
         await route.fulfill({
           json: {
-            version,
+            version: latest,
             bytes: packageBytes.length,
             target: "x86_64-unknown-linux-gnu",
           },
         });
       } else if (body.command === (alpha ? "upgrade_alpha_core" : "upgrade_clash_core")) {
         calls += 1;
-        expect(Object.keys(body).sort()).toEqual(["command", "force"]);
-        if (!body.force) {
+        expect(body).toEqual({ command: body.command, force: false });
+        if (calls === 1) {
           await hold;
           await route.fulfill({
             json: { upgraded: false, from: version, to: version },
@@ -4369,19 +4405,20 @@ for (const channel of ["stable", "alpha"] as const) {
     await page.getByRole("button", { name: "连接服务", exact: true }).click();
     if (alpha) await page.getByLabel("升级通道").selectOption("alpha");
     const panel = page.getByRole("region", { name: `${label}内核升级` });
-    await expect(
-      panel.getByRole("button", { name: `升级至最新${label}`, exact: true }),
-    ).toBeEnabled();
-    await panel
-      .getByRole("button", { name: `检查${label}更新`, exact: true })
-      .click();
-    await expect(panel.locator("dd").nth(1)).toHaveText(version);
-    await panel
-      .getByRole("button", { name: `升级至最新${label}`, exact: true })
-      .click();
-    await expect(
-      panel.getByRole("button", { name: `升级至最新${label}`, exact: true }),
-    ).toBeDisabled();
+    // The region is named after the selected channel.
+    const button = page.getByRole("region", { name: /内核升级$/ }).locator(".actions button");
+    await expect(button).toHaveText(["检查更新"]);
+    await expect(button).toBeEnabled();
+    // The installed version is the latest: the check offers nothing.
+    await button.click();
+    await expect(panel.locator("dd").nth(1)).toHaveText(`${version}（已是最新）`);
+    await expect(button).toHaveText(["检查更新"]);
+    latest = `${version}-next`;
+    await button.click();
+    await expect(panel.locator("dd").nth(1)).toHaveText(latest);
+    await expect(button).toHaveText([`更新至 ${latest}`]);
+    await button.click();
+    await expect(button).toBeDisabled();
     await expect(page.getByLabel("升级通道")).toBeDisabled();
     release();
     await expect(
@@ -4390,22 +4427,14 @@ for (const channel of ["stable", "alpha"] as const) {
       }),
     ).toBeVisible();
     await page.locator(".toast").filter({ hasText: `已是最新${label} ${version}` }).getByRole("button").click();
+    // The check belongs to its channel.
     await page.getByLabel("升级通道").selectOption(alpha ? "stable" : "alpha");
-    await expect(page.getByText(`已是最新${label} ${version}`, { exact: true })).toHaveCount(0);
+    await expect(button).toHaveText(["检查更新"]);
     await page.getByLabel("升级通道").selectOption(channel);
-    await expect(panel.locator("dd").nth(1)).toHaveText("尚未检查");
+    await expect(button).toHaveText([`更新至 ${latest}`]);
     expect((await api("status")).pid).toBe(before.pid);
     expect((await stat(binary)).ino).toBe(inode);
-    const forced = panel.getByRole("button", {
-      name: `强制重新安装${label}`,
-      exact: true,
-    });
-    await expect(forced).toBeEnabled();
-    page.once("dialog", (dialog) => dialog.dismiss());
-    await forced.click();
-    expect(calls).toBe(1);
-    page.once("dialog", (dialog) => dialog.accept());
-    await forced.click();
+    await button.click();
     await expect(
       page.getByText("fixture upgrade failed; previous core restored", {
         exact: true,
@@ -4416,10 +4445,10 @@ for (const channel of ["stable", "alpha"] as const) {
         exact: true,
       }),
     ).toHaveCount(0);
-    await expect(forced).toBeEnabled();
+    await expect(button).toHaveText([`更新至 ${latest}`]);
+    await expect(button).toBeEnabled();
     fail = false;
-    page.once("dialog", (dialog) => dialog.accept());
-    await forced.click();
+    await button.click();
     await expect(
       page.getByText(`升级成功：${version}`, { exact: true }).last(),
     ).toBeVisible();
@@ -4429,9 +4458,8 @@ for (const channel of ["stable", "alpha"] as const) {
     expect((await api("status")).pid).not.toBe(before.pid);
     expect((await stat(binary)).ino).not.toBe(inode);
     await api("stop");
-    page.once("dialog", (dialog) => dialog.accept());
-    await expect(forced).toBeEnabled();
-    await forced.click();
+    await expect(button).toBeEnabled();
+    await button.click();
     await expect.poll(async () => (await api("status")).phase).toBe("stopped");
     await expect(
       page.getByText(`升级成功：${version}`, { exact: true }).last(),
@@ -4501,6 +4529,10 @@ for (const channel of ["stable", "alpha"] as const) {
     let fail = true;
     await page.route("**/api/commands", async (route) => {
       const body = route.request().postDataJSON();
+      if (body.command === (alpha ? "alpha_core_release" : "core_release")) {
+        await route.fulfill({ json: { version, bytes: workingBytes.length, target: "x86_64-unknown-linux-gnu" } });
+        return;
+      }
       if (body.command !== (alpha ? "upgrade_alpha_core" : "upgrade_clash_core")) { await route.continue(); return; }
       expect(body.force).toBe(false);
       // Discovery is supplied locally; staging, activation, rollback and readback use the real service.
@@ -4517,9 +4549,11 @@ for (const channel of ["stable", "alpha"] as const) {
     await page.getByRole("button", { name: "连接服务", exact: true }).click();
     if (alpha) await page.getByLabel("升级通道").selectOption("alpha");
     const panel = page.getByRole("region", { name: `${label}内核升级` });
-    const repair = panel.getByRole("button", { name: `升级至最新${label}`, exact: true });
+    const repair = panel.getByRole("button", { name: `更新至 ${version}`, exact: true });
     await expect(panel.getByText("未知（需要修复）", { exact: true })).toBeVisible();
     await expect(panel.getByText("记录未验证", { exact: true })).toBeVisible();
+    // Any found release repairs a core that cannot report its version.
+    await panel.getByRole("button", { name: "检查更新", exact: true }).click();
     await expect(repair).toBeEnabled();
     await repair.click();
     await expect(page.getByText("core activation failed; previous core restored", { exact: true })).toBeVisible();
@@ -4531,6 +4565,7 @@ for (const channel of ["stable", "alpha"] as const) {
     await repair.click();
     await expect(page.getByText(`修复成功：${version}`, { exact: true })).toBeVisible();
     await expect(panel.getByText(`已验证安装 ${version}`, { exact: true })).toBeVisible();
+    await expect(panel.locator(".actions button")).toHaveText(["检查更新"]);
     expect((await stat(binary)).ino).not.toBe(inode);
     expect((await api("status")).phase).toBe("stopped");
     await page.getByRole("button", { name: "退出登录", exact: true }).click();
@@ -4673,14 +4708,16 @@ test("core update check uses button state without a loading toast", async ({ pag
   });
   await page.goto(`${base}/core#token=${encodeURIComponent(token)}`);
   const panel = page.getByRole("region", { name: "稳定版内核升级" });
-  const check = panel.getByRole("button", { name: "检查稳定版更新", exact: true });
-  await expect(check).toBeEnabled();
-  await check.click();
-  await expect(check).toBeDisabled();
+  const button = panel.locator(".actions button");
+  await expect(button).toHaveText(["检查更新"]);
+  await expect(button).toBeEnabled();
+  await button.click();
+  await expect(button).toBeDisabled();
   await expect(page.locator(".toast")).toHaveCount(0);
   finishCheck();
   await expect(panel.locator("dd").nth(1)).toHaveText("v1.19.0");
-  await expect(check).toBeEnabled();
+  await expect(button).toHaveText(["更新至 v1.19.0"]);
+  await expect(button).toBeEnabled();
   await expect(page.locator(".toast")).toHaveCount(0);
 });
 
@@ -4690,13 +4727,15 @@ test("core upgrade reuses its operation toast for success and failure", async ({
     const { command } = route.request().postDataJSON();
     if (command === "installed_core_version") return route.fulfill({ json: "v1.18.0" });
     if (command === "core_installation") return route.fulfill({ json: { version: "v1.18.0", stage_id: "fixture" } });
+    if (command === "update_checks")
+      return route.fulfill({ json: { core: { channel: "stable", installed: "v1.18.0", latest: "v1.19.0" }, service: null } });
     if (command === "upgrade_clash_core") return fail
       ? route.fulfill({ status: 503, json: { error: { message: "fixture upgrade failure" } } })
       : route.fulfill({ json: { upgraded: false, from: "v1.18.0", to: "v1.18.0" } });
     return route.continue();
   });
   await page.goto(`${base}/core#token=${encodeURIComponent(token)}`);
-  const upgrade = page.getByRole("button", { name: "升级至最新稳定版", exact: true });
+  const upgrade = page.getByRole("button", { name: "更新至 v1.19.0", exact: true });
   await expect(upgrade).toBeEnabled();
   await upgrade.click();
   await expect(page.locator(".toast")).toHaveCount(1);
@@ -5084,11 +5123,14 @@ test("service page controls the foreground service and keeps long help in toolti
   await expect(upgrade.getByText("不可用", { exact: true })).toBeVisible();
   await expect(upgrade.getByLabel("升级输出")).toBeHidden();
   await expect(upgrade.getByLabel("升级输出")).toHaveText("需要共享安装才能在此升级。");
-  await expect(upgrade.getByRole("button", { name: "升级至最新版" })).toBeDisabled();
   await expectHelp(page, "服务升级", "升级由系统更新单元以管理员权限完成");
   await expectHelp(page, "不可用", "请在终端运行 mihomo-server update 升级一次。");
+  await expect(upgrade.locator(".actions button")).toHaveText(["检查更新"]);
   await upgrade.getByRole("button", { name: "检查更新" }).click();
   await expect(upgrade.locator("div").filter({ hasText: "最新版本" }).locator("dd")).toHaveText("v9.9.9");
+  // A found release is offered, but this installation cannot apply it here.
+  await expect(upgrade.locator(".actions button")).toHaveText(["更新至 v9.9.9"]);
+  await expect(upgrade.getByRole("button", { name: "更新至 v9.9.9" })).toBeDisabled();
 
   // The management address logs a browser straight in through the fragment.
   const address = page.getByRole("link", { name: `${base}/#token=${encodeURIComponent(token)}`, exact: true });
@@ -5133,10 +5175,16 @@ test("service restart and upgrade report progress without moving the page", asyn
   const disconnect = () => sockets.splice(0).forEach(socket => void socket.close());
   let info = { version: "0.2.0", release: "v0.2.0", unit: "mihomo-server.service", upgrade: { available: true, state: "inactive", result: "success", log: [] as string[] } };
   let failNext = false;
+  // Stands in for the service's record of its latest check.
+  let recorded: { installed: string | null; latest: string } | null = null;
   await page.route("**/api/commands", async route => {
     const command = route.request().postDataJSON()?.command;
     if (command === "service_info") await route.fulfill({ json: info });
-    else if (command === "service_release") await route.fulfill({ json: "v0.3.0" });
+    else if (command === "update_checks") await route.fulfill({ json: { core: null, service: recorded } });
+    else if (command === "service_release") {
+      recorded = { installed: info.release, latest: "v0.3.0" };
+      await route.fulfill({ json: "v0.3.0" });
+    }
     else if (command === "restart_service") {
       await route.fulfill({ json: { action: "restart" } });
       setTimeout(disconnect, 100);
@@ -5167,7 +5215,7 @@ test("service restart and upgrade report progress without moving the page", asyn
   await expect(upgrade.locator("div").filter({ hasText: "最新版本" }).locator("dd")).toHaveText("v0.3.0");
   const actions = await upgrade.locator(".actions").boundingBox();
   page.once("dialog", dialog => dialog.accept());
-  await upgrade.getByRole("button", { name: "升级至最新版" }).click();
+  await upgrade.getByRole("button", { name: "更新至 v0.3.0" }).click();
   await expect(upgrade.getByText("升级中…", { exact: true })).toBeVisible();
   await expect(output).toContainText("downloading mihomo-server-v0.3.0");
   info = { ...info, upgrade: { ...info.upgrade, log: Array.from({ length: 40 }, (_, index) => `line ${index}`) } };
@@ -5179,19 +5227,22 @@ test("service restart and upgrade report progress without moving the page", asyn
   info = { ...info, version: "0.3.0", release: "v0.3.0", upgrade: { ...info.upgrade, state: "inactive", log: [...info.upgrade.log, "System install complete"] } };
   disconnect();
   await expect(page.locator(".toast").filter({ hasText: "已升级至 v0.3.0" })).toBeVisible();
-  await expect(upgrade.getByRole("button", { name: "已是最新版本 v0.3.0" })).toBeDisabled();
+  await expect(upgrade.locator(".actions button")).toHaveText(["检查更新"]);
+  await expect(upgrade.locator("div").filter({ hasText: "最新版本" }).locator("dd")).toHaveText("v0.3.0（已是最新）");
   await expect(control.locator("div").filter({ hasText: "服务版本" }).locator("dd")).toHaveText("0.3.0");
 
   // A failed run is reported with its output.
   info = { ...info, version: "0.2.0", release: "v0.2.0" };
   failNext = true;
+  // The recorded check outlives the page: the update is offered without checking again.
   await page.reload();
-  await upgrade.getByRole("button", { name: "检查更新" }).click();
+  await expect(upgrade.locator(".actions button")).toHaveText(["更新至 v0.3.0"]);
   page.once("dialog", dialog => dialog.accept());
-  await upgrade.getByRole("button", { name: "升级至最新版" }).click();
+  await upgrade.getByRole("button", { name: "更新至 v0.3.0" }).click();
   await expect(page.locator(".toast").filter({ hasText: "升级失败，详见升级输出" })).toBeVisible();
   await expect(upgrade.getByText("上次升级失败", { exact: true })).toBeVisible();
   await expect(output).toHaveText("error: checksum mismatch");
+  await expect(upgrade.getByRole("button", { name: "更新至 v0.3.0" })).toBeEnabled();
   await page.unroute("**/api/commands");
 });
 

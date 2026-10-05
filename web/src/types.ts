@@ -111,3 +111,9 @@ export interface RuleProvider {
 export interface RuleProviders {
   providers: Record<string, RuleProvider>;
 }
+
+/** The latest recorded update checks; each names the version installed then. */
+export type UpdateChecks = {
+  core: { channel: "stable" | "alpha"; installed: string; latest: string } | null;
+  service: { installed: string | null; latest: string } | null;
+};
