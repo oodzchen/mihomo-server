@@ -206,14 +206,117 @@ impl Drop for TempDir {
     }
 }
 
-async fn download_installer(url: &str, directory: &Path) -> Result<PathBuf> {
-    let client = reqwest::Client::builder()
+/// A temporary proxy for the installer's downloads, normalized; empty is none.
+/// `host:port` means an HTTP proxy.
+pub fn parse_proxy(input: &str) -> Result<Option<String>> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Ok(None);
+    }
+    let with_scheme = if input.contains("://") {
+        input.to_owned()
+    } else {
+        format!("http://{input}")
+    };
+    let url = reqwest::Url::parse(&with_scheme).context("not a URL")?;
+    ensure!(
+        matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h"),
+        "unsupported proxy scheme {}",
+        url.scheme()
+    );
+    ensure!(
+        url.host_str().is_some_and(|host| !host.is_empty()),
+        "missing proxy host"
+    );
+    ensure!(url.port_or_known_default().is_some(), "missing proxy port");
+    ensure!(
+        matches!(url.path(), "" | "/") && url.query().is_none() && url.fragment().is_none(),
+        "a proxy address has no path"
+    );
+    Ok(Some(url.as_str().trim_end_matches('/').to_owned()))
+}
+
+/// The proxy without its password, for the output panel.
+fn redact(proxy: &str) -> String {
+    match reqwest::Url::parse(proxy) {
+        Ok(mut url) if url.password().is_some() => {
+            let _ = url.set_password(Some("***"));
+            url.as_str().trim_end_matches('/').to_owned()
+        }
+        _ => proxy.to_owned(),
+    }
+}
+
+/// Without a temporary proxy the environment's proxy settings apply.
+fn http_client(proxy: Option<&str>, timeout: Duration) -> Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder()
         .user_agent(concat!("mihomo-server-desktop/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(20))
-        .timeout(Duration::from_secs(120))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()?;
-    let script = client
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::limited(5));
+    if let Some(proxy) = proxy {
+        builder = builder.proxy(reqwest::Proxy::all(proxy)?);
+    }
+    Ok(builder.build()?)
+}
+
+/// The installer's own downloads (curl or wget) go through PROXY too; the
+/// service's local API never does.
+fn proxy_environment(command: &mut Command, proxy: &str) {
+    for name in [
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ] {
+        command.env(name, proxy);
+    }
+    for name in ["no_proxy", "NO_PROXY"] {
+        command.env(name, "localhost,127.0.0.1,::1");
+    }
+}
+
+fn installer_source() -> String {
+    environment("MIHOMO_SERVER_INSTALLER")
+        .unwrap_or_else(|| format!("https://github.com/{REPOSITORY}/releases/latest/download/install.sh"))
+}
+
+/// Download what the installer downloads first, through PROXY (none: the
+/// environment's settings); how long the response took.
+pub async fn test_proxy(proxy: Option<&str>) -> Result<Duration> {
+    let source = installer_source();
+    let url = if source.starts_with("https://") || source.starts_with("http://") {
+        source
+    } else {
+        format!("https://github.com/{REPOSITORY}/releases/latest/download/install.sh")
+    };
+    let started = std::time::Instant::now();
+    http_client(proxy, Duration::from_secs(15))?
+        .get(&url)
+        .send()
+        .await
+        .map_err(|error| anyhow::anyhow!(describe_request_error(&error)))?
+        .error_for_status()?;
+    Ok(started.elapsed())
+}
+
+/// reqwest's top-level message names only the URL; the cause says why.
+fn describe_request_error(error: &reqwest::Error) -> String {
+    let mut cause: &dyn std::error::Error = error;
+    while let Some(source) = cause.source() {
+        cause = source;
+    }
+    if error.is_timeout() {
+        "timed out".into()
+    } else {
+        cause.to_string()
+    }
+}
+
+async fn download_installer(url: &str, directory: &Path, proxy: Option<&str>) -> Result<PathBuf> {
+    let script = http_client(proxy, Duration::from_secs(120))?
         .get(url)
         .send()
         .await
@@ -229,22 +332,27 @@ async fn download_installer(url: &str, directory: &Path) -> Result<PathBuf> {
 
 /// Run the published installer (`MIHOMO_SERVER_INSTALLER`: a path or URL
 /// instead). Its root step asks for authorization through polkit.
-pub async fn install(log: &Log) -> Result<()> {
-    let source = environment("MIHOMO_SERVER_INSTALLER")
-        .unwrap_or_else(|| format!("https://github.com/{REPOSITORY}/releases/latest/download/install.sh"));
-    install_from(&source, log).await
+/// PROXY is the status page's temporary proxy for the downloads.
+pub async fn install(log: &Log, proxy: Option<&str>) -> Result<()> {
+    install_from(&installer_source(), log, proxy).await
 }
 
-async fn install_from(source: &str, log: &Log) -> Result<()> {
+async fn install_from(source: &str, log: &Log, proxy: Option<&str>) -> Result<()> {
     let directory = TempDir::create()?;
+    if let Some(proxy) = proxy {
+        log.push(format!("==> using temporary proxy {}", redact(proxy)));
+    }
     let script = if source.starts_with("https://") || source.starts_with("http://") {
         log.push(format!("==> downloading {source}"));
-        download_installer(source, &directory.0).await?
+        download_installer(source, &directory.0, proxy).await?
     } else {
         PathBuf::from(source)
     };
     let mut command = Command::new("bash");
     command.arg(&script).env("MIHOMO_INSTALL_ELEVATE", "pkexec");
+    if let Some(proxy) = proxy {
+        proxy_environment(&mut command, proxy);
+    }
     run_logged(command, log).await.context("the installer failed")
 }
 
@@ -343,14 +451,67 @@ mod tests {
         )
         .unwrap();
         let log = Log::default();
-        tauri::async_runtime::block_on(install_from(script.to_str().unwrap(), &log)).unwrap();
+        tauri::async_runtime::block_on(install_from(script.to_str().unwrap(), &log, None)).unwrap();
         let mut lines = log.lines();
         lines.sort();
         assert_eq!(lines, ["elevate=pkexec", "ok", "warn"]);
 
         std::fs::write(&script, "#!/bin/sh\necho broken\nexit 3\n").unwrap();
-        let error = tauri::async_runtime::block_on(install_from(script.to_str().unwrap(), &log)).unwrap_err();
+        let error = tauri::async_runtime::block_on(install_from(script.to_str().unwrap(), &log, None)).unwrap_err();
         assert!(format!("{error:#}").contains("the installer failed"), "{error:#}");
+    }
+
+    #[test]
+    fn the_temporary_proxy_reaches_the_installer_without_its_password_in_the_log() {
+        let directory = TempDir::create().unwrap();
+        let script = directory.0.join("install.sh");
+        std::fs::write(&script, "#!/bin/sh\necho \"$https_proxy $ALL_PROXY $no_proxy\"\n").unwrap();
+        let log = Log::default();
+        let proxy = "socks5h://user:secret@127.0.0.1:7891";
+        tauri::async_runtime::block_on(install_from(script.to_str().unwrap(), &log, Some(proxy))).unwrap();
+        assert_eq!(
+            log.lines(),
+            [
+                "==> using temporary proxy socks5h://user:***@127.0.0.1:7891",
+                &format!("{proxy} {proxy} localhost,127.0.0.1,::1"),
+            ]
+        );
+    }
+
+    #[test]
+    fn proxy_addresses_are_normalized_or_refused() {
+        let parse = |input| parse_proxy(input).ok().flatten();
+        assert_eq!(parse_proxy("  ").unwrap(), None);
+        assert_eq!(parse("127.0.0.1:7890").as_deref(), Some("http://127.0.0.1:7890"));
+        assert_eq!(
+            parse("http://127.0.0.1:7890/").as_deref(),
+            Some("http://127.0.0.1:7890")
+        );
+        assert_eq!(parse("socks5://[::1]:7891").as_deref(), Some("socks5://[::1]:7891"));
+        assert_eq!(
+            parse("socks5h://u:p@proxy.lan:1080").as_deref(),
+            Some("socks5h://u:p@proxy.lan:1080")
+        );
+        for invalid in [
+            "ftp://127.0.0.1:21",
+            "http://127.0.0.1:7890/path",
+            "socks5://127.0.0.1",
+            "http://:80",
+            "not a proxy",
+        ] {
+            assert!(parse_proxy(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    /// `MIHOMO_TEST_PROXY=http://127.0.0.1:7897 cargo test -- --ignored live_proxy`
+    #[test]
+    #[ignore = "needs network access and a local proxy in MIHOMO_TEST_PROXY"]
+    fn live_proxy_test_downloads_the_installer() {
+        let proxy = parse_proxy(&std::env::var("MIHOMO_TEST_PROXY").unwrap()).unwrap();
+        let elapsed = tauri::async_runtime::block_on(test_proxy(proxy.as_deref())).unwrap();
+        assert!(elapsed < Duration::from_secs(15));
+        let refused = tauri::async_runtime::block_on(test_proxy(Some("http://127.0.0.1:9"))).unwrap_err();
+        assert!(format!("{refused:#}").contains("refused"), "{refused:#}");
     }
 
     #[test]

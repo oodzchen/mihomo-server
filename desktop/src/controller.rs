@@ -4,7 +4,7 @@ use crate::{
     i18n::Language,
     local::{self, Detected, Log},
     model::{self, Action, Live, MenuModel, Service, Snapshot, Task},
-    notify, tray, window,
+    notify, settings, tray, window,
 };
 use anyhow::{Context as _, Result};
 use management_client::{Api, Endpoint, events::Feed};
@@ -32,8 +32,13 @@ pub struct Connection {
 }
 
 struct Inner {
-    /// The instance's shared interface language, else the system locale.
+    /// The instance's shared interface language, else the saved one, else the
+    /// system locale.
     language: Language,
+    /// The saved copy of the shared language (see `settings`).
+    saved: Option<Language>,
+    /// The status page's temporary proxy for installation, never saved.
+    proxy: Option<String>,
     service: Service,
     /// Whether the detected-but-stopped unit is enabled at boot.
     enabled: bool,
@@ -47,17 +52,22 @@ struct Inner {
 
 pub struct Controller {
     system_language: Language,
+    settings: settings::Store,
     inner: Mutex<Inner>,
     wake: Notify,
     pub log: Log,
 }
 
 impl Controller {
-    pub fn new(language: Language) -> Self {
+    pub fn new(system_language: Language, settings: settings::Store) -> Self {
+        let saved = settings.language();
         Self {
-            system_language: language,
+            system_language,
+            settings,
             inner: Mutex::new(Inner {
-                language,
+                language: saved.unwrap_or(system_language),
+                saved,
+                proxy: None,
                 service: Service::Detecting,
                 enabled: false,
                 connection: None,
@@ -96,11 +106,31 @@ impl Controller {
         self.lock().language
     }
 
-    /// Follow the instance's preference (`None`: the system locale); whether
-    /// the language changed.
+    /// Follow the instance's preference (`None`: the system locale) and keep
+    /// a copy of it; whether the language changed.
     fn set_language(&self, preference: Option<Language>) -> bool {
         let language = preference.unwrap_or(self.system_language);
-        std::mem::replace(&mut self.lock().language, language) != language
+        let (changed, save) = {
+            let mut inner = self.lock();
+            let save = std::mem::replace(&mut inner.saved, preference) != preference;
+            (std::mem::replace(&mut inner.language, language) != language, save)
+        };
+        if save && let Err(error) = self.settings.save_language(preference) {
+            eprintln!("cannot save the interface language: {error:#}");
+        }
+        changed
+    }
+
+    fn saved_language(&self) -> Option<Language> {
+        self.lock().saved
+    }
+
+    pub fn proxy(&self) -> Option<String> {
+        self.lock().proxy.clone()
+    }
+
+    pub fn set_proxy(&self, proxy: Option<String>) {
+        self.lock().proxy = proxy;
     }
 
     pub fn failed(&self) -> Option<Task> {
@@ -175,9 +205,19 @@ impl Poll {
         let token = local::read_token(&endpoint)?;
         let api = Api::with_token(endpoint.clone(), token.clone())?.with_timeout(ACTION_TIMEOUT);
         // Adopt the instance's language before the first menu is shown; older
-        // services have no preferences and keep the system locale.
+        // services have no preferences and keep the saved or system language.
+        // A language chosen while no instance ran becomes the instance's.
         if let Ok(preferences) = timed(api.command("preferences", json!({}))).await {
-            controller.set_language(preference(&preferences));
+            let mut shared = preference(&preferences);
+            if shared.is_none()
+                && let Some(saved) = controller.saved_language()
+                && timed(api.command("set_language", json!({"language": saved.code()})))
+                    .await
+                    .is_ok()
+            {
+                shared = Some(saved);
+            }
+            controller.set_language(shared);
         }
         let api = api.with_language(controller.language().code());
         let connection = Arc::new(Connection {
@@ -319,11 +359,8 @@ pub async fn follow_preferences(app: AppHandle) {
             Ok(mut feed) => {
                 failures = 0;
                 while let Ok(Some(event)) = feed.next().await {
-                    if event["type"] == "preferences" && controller.set_language(preference(&event["data"])) {
-                        // Service messages follow too: reconnect with the new Accept-Language.
-                        controller.drop_connection();
-                        publish(&app);
-                        controller.wake();
+                    if event["type"] == "preferences" {
+                        adopt_language(&app, preference(&event["data"]));
                     }
                 }
             }
@@ -332,6 +369,31 @@ pub async fn follow_preferences(app: AppHandle) {
         }
         tokio::time::sleep(Duration::from_secs(2u64.pow(failures).min(30))).await;
     }
+}
+
+fn adopt_language(app: &AppHandle, preference: Option<Language>) {
+    let controller = controller(app);
+    if controller.set_language(preference) {
+        // Service messages follow too: reconnect with the new Accept-Language.
+        controller.drop_connection();
+        publish(app);
+        controller.wake();
+    }
+}
+
+/// The status page's language choice: the instance's shared preference when
+/// one runs (as the Web UI's settings do), else saved until one does.
+pub async fn choose_language(app: &AppHandle, language: Language) -> Result<()> {
+    if let Some(connection) = controller(app).connection() {
+        timed(
+            connection
+                .api
+                .command("set_language", json!({"language": language.code()})),
+        )
+        .await?;
+    }
+    adopt_language(app, Some(language));
+    Ok(())
 }
 
 fn command(action: &Action) -> Option<(&'static str, Value)> {
@@ -363,7 +425,7 @@ pub fn start_task(app: &AppHandle, task: Task, action: Option<Action>) -> bool {
     tauri::async_runtime::spawn(async move {
         let controller = self::controller(&app);
         let result = match task {
-            Task::Installing => local::install(&controller.log).await,
+            Task::Installing => local::install(&controller.log, controller.proxy().as_deref()).await,
             // A never-enabled instance is enabled: started now and at boot.
             Task::Starting => {
                 let verb = if controller.lock().enabled { "start" } else { "enable" };
@@ -459,7 +521,7 @@ mod tests {
 
     #[test]
     fn the_instance_language_wins_and_unset_falls_back_to_the_system() {
-        let controller = Controller::new(Language::En);
+        let controller = Controller::new(Language::En, settings::Store::memory());
         assert!(controller.set_language(preference(&json!({"language": "zhtw"}))));
         assert_eq!(controller.language(), Language::Zhtw);
         assert!(
@@ -469,6 +531,28 @@ mod tests {
         assert!(controller.set_language(preference(&json!({"language": null}))));
         assert_eq!(controller.language(), Language::En);
         assert!(!controller.set_language(preference(&json!({"language": "klingon"}))));
+    }
+
+    #[test]
+    fn the_shared_language_is_saved_for_the_next_start() {
+        let directory = std::env::temp_dir().join(format!("mihomo-desktop-controller-{}", std::process::id()));
+        let path = directory.join("settings.json");
+        let controller = Controller::new(Language::En, settings::Store::at(path.clone()));
+        assert_eq!(
+            (controller.language(), controller.saved_language()),
+            (Language::En, None)
+        );
+        controller.set_language(Some(Language::Zh));
+        let restarted = Controller::new(Language::En, settings::Store::at(path.clone()));
+        assert_eq!(
+            (restarted.language(), restarted.saved_language()),
+            (Language::Zh, Some(Language::Zh))
+        );
+        // A cleared preference falls back to the system locale, also after a restart.
+        restarted.set_language(None);
+        let cleared = Controller::new(Language::En, settings::Store::at(path));
+        assert_eq!((cleared.language(), cleared.saved_language()), (Language::En, None));
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

@@ -18,7 +18,7 @@ management-client = { path = "../crates/management-client", features = ["events"
 tauri = { version = "2.12.1", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2.5.2"
 anyhow = "1.0.104"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "system-proxy"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "socks", "system-proxy"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sys-locale = "0.3.2"

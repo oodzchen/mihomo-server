@@ -7,11 +7,7 @@ use std::path::PathBuf;
 const FILE: &str = "mihomo-server-desktop.desktop";
 
 fn path() -> Option<PathBuf> {
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
-    Some(config.join("autostart").join(FILE))
+    Some(crate::settings::config_home()?.join("autostart").join(FILE))
 }
 
 pub fn enabled() -> bool {

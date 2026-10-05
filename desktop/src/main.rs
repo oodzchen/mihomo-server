@@ -9,6 +9,7 @@ mod integration;
 mod local;
 mod model;
 mod notify;
+mod settings;
 mod tray;
 mod window;
 
@@ -52,7 +53,7 @@ fn main() {
         return;
     }
     let hidden = arguments.iter().any(|argument| argument == "--hidden");
-    let controller = Arc::new(Controller::new(i18n::Language::system()));
+    let controller = Arc::new(Controller::new(i18n::Language::system(), settings::Store::user()));
     let initial = controller.model();
     tauri::Builder::default()
         // Must be registered first: a second launch only focuses this one.
@@ -69,6 +70,9 @@ fn main() {
             commands::start_service,
             commands::restart_service,
             commands::open_dashboard,
+            commands::set_interface_language,
+            commands::set_install_proxy,
+            commands::test_install_proxy,
             commands::client_autostart,
             commands::set_client_autostart
         ])

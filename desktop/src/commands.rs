@@ -2,6 +2,8 @@
 //! the only two the management page may call (see `window::grant_dashboard`).
 use crate::autostart;
 use crate::controller::{self, Controller};
+use crate::i18n::Language;
+use crate::local;
 use crate::model::{Service, Task};
 use crate::window;
 use serde::Serialize;
@@ -18,6 +20,8 @@ pub struct LocalState {
     failed: Option<Task>,
     log: Vec<String>,
     language: &'static str,
+    /// The temporary proxy installation downloads through.
+    proxy: Option<String>,
 }
 
 #[tauri::command]
@@ -36,6 +40,7 @@ pub fn local_state(controller: State<'_, Arc<Controller>>) -> LocalState {
         failed: controller.failed(),
         log: controller.log.lines(),
         language: controller.language().code(),
+        proxy: controller.proxy(),
     }
 }
 
@@ -57,6 +62,34 @@ pub async fn restart_service(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn open_dashboard(app: AppHandle) {
     window::open_dashboard(&app);
+}
+
+/// The global interface language, shared with the management page.
+#[tauri::command]
+pub async fn set_interface_language(app: AppHandle, language: String) -> Result<(), String> {
+    let language = Language::from_code(&language).ok_or("unknown language")?;
+    controller::choose_language(&app, language)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Refused as `invalid_proxy`; returns the normalized address (empty: none).
+#[tauri::command]
+pub fn set_install_proxy(controller: State<'_, Arc<Controller>>, proxy: String) -> Result<Option<String>, String> {
+    let proxy = local::parse_proxy(&proxy).map_err(|_| "invalid_proxy")?;
+    controller.set_proxy(proxy.clone());
+    Ok(proxy)
+}
+
+/// Milliseconds the installer's download took through PROXY (empty: none);
+/// refused as `invalid_proxy`, else with why it failed.
+#[tauri::command]
+pub async fn test_install_proxy(proxy: String) -> Result<u64, String> {
+    let proxy = local::parse_proxy(&proxy).map_err(|_| "invalid_proxy")?;
+    let elapsed = local::test_proxy(proxy.as_deref())
+        .await
+        .map_err(|error| format!("{error:#}"))?;
+    Ok(u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
 }
 
 /// Whether this client starts (into the tray) at login.

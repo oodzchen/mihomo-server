@@ -184,7 +184,12 @@ enables or disables the service's own systemd unit (`set_service_autostart`)
 without stopping it, and is unavailable for transient units or a directly
 started service. Installation runs the published installer,
 whose root step uses polkit (`MIHOMO_INSTALL_ELEVATE=pkexec`) instead of a
-terminal sudo prompt.
+terminal sudo prompt. The status page's settings view (gear button) offers the
+interface language and a temporary proxy for installation. The proxy is kept
+in memory only and used only by the install task: for the installer download
+and, through `http(s)_proxy`/`all_proxy`, for the installer's own downloads,
+which all run as the user before the polkit step; its test fetches that same
+installer URL through it.
 
 The client keeps three things apart: itself (versioned on its own), the
 systemd service (`mihomo-server`, started, stopped and restarted through the
@@ -212,8 +217,12 @@ Each change is persisted, then pushed as a `preferences` event on `/api/events`
 `/api/streams/preferences` feed. The Web UI adopts the pushed language after
 login and writes changes made in its settings; the login page keeps a browser
 copy until then. The desktop client reads the preference when it connects, so
-its tray opens in the instance's language, then follows the feed; without a
-preference it uses the system locale. An unreadable preferences file is ignored
+its tray opens in the instance's language, then follows the feed, and keeps a
+copy in `$XDG_CONFIG_HOME/mihomo-server-desktop/settings.json` for when no
+instance runs. Its status page changes the preference with `set_language`
+while connected; otherwise the choice is saved there and becomes the
+instance's preference on the next connection if the instance has none.
+Without either it uses the system locale. An unreadable preferences file is ignored
 (and replaced on the next change) rather than stopping the service.
 
 ## Resources, downloads and backups

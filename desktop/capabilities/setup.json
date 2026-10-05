@@ -3,5 +3,5 @@
   "identifier": "setup",
   "description": "The bundled local service page; the management page gets no capability.",
   "windows": ["setup"],
-  "permissions": ["allow-local-state", "allow-install-service", "allow-start-service", "allow-restart-service", "allow-open-dashboard"]
+  "permissions": ["allow-local-state", "allow-install-service", "allow-start-service", "allow-restart-service", "allow-open-dashboard", "allow-set-interface-language", "allow-set-install-proxy", "allow-test-install-proxy"]
 }
