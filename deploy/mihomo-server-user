@@ -205,17 +205,23 @@ info() {
         *) tun='unavailable (administrator must authorize group mihomo-tun)' ;;
     esac
     proxy=$(mixed_port "$n")
+    local actual=
     if [ "$state" = active ] && [ -s "$TOKEN_FILE" ]; then
-        local actual
-        actual=$(request /api/config 2>/dev/null | sed -n 's/.*"mixed-port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p') || true
-        [ -z "$actual" ] || proxy=$actual
+        # /api/config wraps the effective runtime YAML in a JSON string; the
+        # top-level key follows the opening quote or an escaped newline.
+        actual=$(request /api/config 2>/dev/null |
+            sed -nE 's/.*(\\n|")mixed-port:[[:space:]]*([0-9]+).*/\2/p') || true
+    elif [ -s "${TOKEN_FILE%/management-token}/settings.yaml" ]; then
+        actual=$(sed -nE 's/^[[:space:]]+mixed-port:[[:space:]]*([0-9]+).*/\1/p' \
+            "${TOKEN_FILE%/management-token}/settings.yaml" | head -n 1) || true
     fi
+    [ -z "$actual" ] || proxy=$actual
     cat <<DETAILS
 service:   $state
 slot:      $n
 manage:    $manage
 token:     $TOKEN_FILE
-proxy:     HTTP/SOCKS 127.0.0.1:$proxy (settings can override)
+proxy:     HTTP/SOCKS 127.0.0.1:$proxy
 tun:       $tun (device ms$(id -u))
 config:    $ENV_FILE
 data:      ${TOKEN_FILE%/management-token}

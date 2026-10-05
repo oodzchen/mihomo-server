@@ -166,14 +166,14 @@ class UserManagementLinks(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def info(self, listen="127.0.0.1:20030", origin="", running=True):
+    def info(self, listen="127.0.0.1:20030", origin="", running=True, field="manage", state="active"):
         # Load functions only; exercise real endpoint/info without a user manager.
         source = HELPER.read_text().split("\ncommand=${1:-info}")[0]
         source += '''
 systemctl() {
     case "$*" in
         *MainPID*) echo "$TEST_PID" ;;
-        *is-active*) echo active ;;
+        *is-active*) echo "$TEST_STATE" ;;
     esac
 }
 slot() { echo 3; }
@@ -185,17 +185,18 @@ process_argument() {
         --data-dir) echo "$TEST_DATA" ;;
     esac
 }
-request() { echo '{"mixed-port":20031}'; }
+request() { printf '%s' '{"yaml":"allow-lan: false\\nmixed-port: 1089\\nport: 0\\n"}'; }
 DATA_DIR="$TEST_DATA"
 ENV_FILE="$TEST_DATA/env"
 info
 '''
         result = subprocess.run(["bash"], input=source, capture_output=True, text=True,
                                 env=os.environ | {"TEST_DATA": str(self.data), "TEST_LISTEN": listen,
-                                                  "TEST_ORIGIN": origin, "TEST_PID": "42" if running else "0"})
+                                                  "TEST_ORIGIN": origin, "TEST_PID": "42" if running else "0",
+                                                  "TEST_STATE": state})
         self.assertEqual(result.returncode, 0, result.stderr)
-        return next(line.removeprefix("manage:    ") for line in result.stdout.splitlines()
-                    if line.startswith("manage:"))
+        return next(line.removeprefix(f"{field}:").strip() for line in result.stdout.splitlines()
+                    if line.startswith(f"{field}:"))
 
     def test_management_link_contains_token_for_default_and_wildcard_listeners(self):
         for listen, address in [("127.0.0.1:20030", "127.0.0.1:20030"),
@@ -216,6 +217,12 @@ info
         self.assertEqual(self.info(), "http://127.0.0.1:20030")
         (self.data / "management-token").write_text("invalid&extra=parameter\n")
         self.assertEqual(self.info(), "http://127.0.0.1:20030")
+
+    def test_proxy_port_follows_runtime_config_then_saved_settings(self):
+        self.assertEqual(self.info(field="proxy"), "HTTP/SOCKS 127.0.0.1:1089")
+        self.assertEqual(self.info(field="proxy", state="inactive"), "HTTP/SOCKS 127.0.0.1:20031")
+        (self.data / "settings.yaml").write_text("schema_version: 1\nruntime:\n  mixed-port: 7899\n  mode: rule\n")
+        self.assertEqual(self.info(field="proxy", state="inactive"), "HTTP/SOCKS 127.0.0.1:7899")
 
 
 if __name__ == "__main__":
