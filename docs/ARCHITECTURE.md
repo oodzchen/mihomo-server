@@ -189,7 +189,11 @@ interface language and a temporary proxy for installation. The proxy is kept
 in memory only and used only by the install task: for the installer download
 and, through `http(s)_proxy`/`all_proxy`, for the installer's own downloads,
 which all run as the user before the polkit step; its test fetches that same
-installer URL through it.
+installer URL through it. The page's output panel shows the installer's output
+as it is produced: the client sets `MIHOMO_INSTALL_PROGRESS=1` so curl draws its
+download bar without a terminal and updates that line in place on each carriage
+return, and the installer streams the user activation step line by line instead of
+printing it once it has finished.
 
 The client keeps three things apart: itself (versioned on its own), the
 systemd service (`mihomo-server`, started, stopped and restarted through the

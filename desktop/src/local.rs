@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncBufReadExt as _, AsyncRead, BufReader},
+    io::{AsyncRead, AsyncReadExt as _},
     process::Command,
 };
 
@@ -154,13 +154,42 @@ pub fn clean_line(line: &str) -> String {
     out
 }
 
-async fn pump(reader: impl AsyncRead + Unpin, log: &Log) {
-    let mut lines = BufReader::new(reader).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let line = clean_line(&line);
-        if !line.trim().is_empty() {
-            log.push(line);
+/// Forwards output to LOG as it arrives. A carriage return ends a progress
+/// update (curl's bar), which replaces the previous update in place instead
+/// of waiting for the newline that ends the whole bar.
+async fn pump(mut reader: impl AsyncRead + Unpin, log: &Log) {
+    let mut pending = Vec::new();
+    let mut progress = None;
+    let mut chunk = [0u8; 4096];
+    loop {
+        let read = match reader.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        for &byte in &chunk[..read] {
+            if byte != b'\r' && byte != b'\n' {
+                pending.push(byte);
+                continue;
+            }
+            let line = clean_line(&String::from_utf8_lossy(&pending));
+            pending.clear();
+            if !line.trim().is_empty() {
+                let id = match progress {
+                    Some(id) => log.replace(id, line),
+                    None => log.push(line),
+                };
+                progress = (byte == b'\r').then_some(id);
+            } else if byte == b'\n' {
+                progress = None;
+            }
         }
+    }
+    let line = clean_line(&String::from_utf8_lossy(&pending));
+    if !line.trim().is_empty() {
+        let _ = match progress {
+            Some(id) => log.replace(id, line),
+            None => log.push(line),
+        };
     }
 }
 
@@ -349,7 +378,12 @@ async fn install_from(source: &str, log: &Log, proxy: Option<&str>) -> Result<()
         PathBuf::from(source)
     };
     let mut command = Command::new("bash");
-    command.arg(&script).env("MIHOMO_INSTALL_ELEVATE", "pkexec");
+    // Download progress as a bar narrow enough for the output panel.
+    command
+        .arg(&script)
+        .env("MIHOMO_INSTALL_ELEVATE", "pkexec")
+        .env("MIHOMO_INSTALL_PROGRESS", "1")
+        .env("COLUMNS", "50");
     if let Some(proxy) = proxy {
         proxy_environment(&mut command, proxy);
     }
@@ -359,25 +393,48 @@ async fn install_from(source: &str, log: &Log, proxy: Option<&str>) -> Result<()
 /// Bounded output of install and service tasks and of failures, shown by the
 /// status page as a small terminal. Never cleared: older lines scroll away.
 #[derive(Default)]
-pub struct Log(Mutex<VecDeque<String>>);
+pub struct Log(Mutex<Lines>);
+
+#[derive(Default)]
+struct Lines {
+    /// Each line with its id, for updates in place.
+    lines: VecDeque<(u64, String)>,
+    next: u64,
+}
 
 const LOG_LINES: usize = 400;
 
 impl Log {
-    fn lock(&self) -> std::sync::MutexGuard<'_, VecDeque<String>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Lines> {
         self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    pub fn push(&self, line: String) {
-        let mut lines = self.lock();
-        if lines.len() == LOG_LINES {
-            lines.pop_front();
+    /// Returns the line's id.
+    pub fn push(&self, line: String) -> u64 {
+        let mut log = self.lock();
+        if log.lines.len() == LOG_LINES {
+            log.lines.pop_front();
         }
-        lines.push_back(line);
+        let id = log.next;
+        log.next += 1;
+        log.lines.push_back((id, line));
+        id
+    }
+
+    /// Update line ID in place, or append it once it has scrolled away;
+    /// returns its id.
+    pub fn replace(&self, id: u64, line: String) -> u64 {
+        let mut log = self.lock();
+        if let Some((_, text)) = log.lines.iter_mut().find(|(existing, _)| *existing == id) {
+            *text = line;
+            return id;
+        }
+        drop(log);
+        self.push(line)
     }
 
     pub fn lines(&self) -> Vec<String> {
-        self.lock().iter().cloned().collect()
+        self.lock().lines.iter().map(|(_, line)| line.clone()).collect()
     }
 }
 
@@ -429,6 +486,37 @@ mod tests {
         assert_eq!(clean_line("\u{1b}[1;32m==> done\u{1b}[0m"), "==> done");
         assert_eq!(clean_line("#  10%\r###  50%\r##### 100%"), "##### 100%");
         assert_eq!(clean_line("a\u{7}b\tc"), "ab\tc");
+    }
+
+    #[test]
+    fn progress_updates_replace_each_other_and_lines_stream_as_they_arrive() {
+        let log = Log::default();
+        let output: &[u8] = b"==> downloading x\n\r#=#=#\r##   10.0%\r#### 100.0%\nnext\r\nlast";
+        tauri::async_runtime::block_on(pump(output, &log));
+        assert_eq!(log.lines(), ["==> downloading x", "#### 100.0%", "next", "last"]);
+
+        // A line is visible before the command writes anything else.
+        let (mut writer, reader) = tokio::io::duplex(64);
+        let log = std::sync::Arc::new(Log::default());
+        let pumping = tauri::async_runtime::spawn({
+            let log = log.clone();
+            async move { pump(reader, &log).await }
+        });
+        tauri::async_runtime::block_on(async {
+            use tokio::io::AsyncWriteExt as _;
+            writer.write_all(b"first\n##  5%\r").await.unwrap();
+            for _ in 0..100 {
+                if log.lines().len() == 2 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_eq!(log.lines(), ["first", "##  5%"]);
+            writer.write_all(b"### 50%\r").await.unwrap();
+            drop(writer);
+            pumping.await.unwrap();
+        });
+        assert_eq!(log.lines(), ["first", "### 50%"]);
     }
 
     #[test]

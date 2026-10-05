@@ -43,8 +43,9 @@ latest_tag() {
     fi
     sed -n "s#.*/releases/tag/\([^/[:space:]'\"]*\).*#\1#p" <<< "$location" | head -n 1
 }
+# A graphical client (MIHOMO_INSTALL_PROGRESS=1) shows the bar from its pipe.
 fetch_progress() {
-    if command -v curl >/dev/null 2>&1 && [ -t 2 ]; then
+    if command -v curl >/dev/null 2>&1 && { [ -t 2 ] || [ "${MIHOMO_INSTALL_PROGRESS:-}" = 1 ]; }; then
         curl -fL --retry 3 --progress-bar -o "$2" "$1"
     else
         fetch "$@"
@@ -263,6 +264,7 @@ install_shared() {
         command -v "$tool" >/dev/null || die "missing required tool: $tool"
     done
     verify_bundle "$bundle"
+    echo '==> installing the shared files'
     if [ -n "$caller" ]; then
         uid=$(id -u "$caller")
         [ "$uid" != 0 ] || die 'the instance owner must not be root'
@@ -335,11 +337,15 @@ install_shared() {
         systemctl start "user@$uid.service"
         [ "$(loginctl show-user "$caller" -p Linger --value)" = yes ] || die 'linger was not enabled'
         # Preserve the caller's XDG values through sudo, and activate as that user.
+        # The output is shown as it is produced (on the inherited stderr; reopening
+        # /dev/stderr would truncate a log file) and also kept for the TUN check.
+        echo "==> starting the mihomo-server instance of $caller"
         output=$(runuser -u "$caller" -- env HOME="$home" XDG_RUNTIME_DIR="/run/user/$uid" \
             XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
             bash -euo pipefail -c "$(declare -f die activate_user); activate_user \"\$@\"" \
-            bash "$home" "$config_home" /usr/local/bin/mihomo-server-user) || die 'installation did not produce a usable user instance'
-        printf '%s\n' "$output"
+            bash "$home" "$config_home" /usr/local/bin/mihomo-server-user \
+            | while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "$line" >&2; printf '%s\n' "$line"; done) \
+            || die 'installation did not produce a usable user instance'
         grep -q '^tun: *available ' <<< "$output" || die 'TUN authorization did not take effect'
     fi
     # Upgrade all other running instances. Caller has already been verified.

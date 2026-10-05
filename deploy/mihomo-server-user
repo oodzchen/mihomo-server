@@ -229,6 +229,7 @@ enable() {
     [ "$(systemctl --user show -p LoadState --value "$UNIT")" = loaded ] || die 'shared installation is missing'
     systemctl --user enable "$UNIT" >/dev/null
     systemctl --user restart "$UNIT"
+    echo "==> waiting for $UNIT to start"
     wait_ready
     info
 }
