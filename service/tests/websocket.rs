@@ -378,7 +378,10 @@ async fn interface_preferences_are_pushed_to_event_and_preference_feeds() -> Res
     let snapshot = until(&mut events, |value| value["type"] == "snapshot").await?;
     assert_eq!(snapshot["preferences"], json!({"language": null}));
     let mut feed = server.authenticated("/api/streams/preferences").await?;
-    assert_eq!(receive(&mut feed).await?, json!({"type":"preferences","data":{"language":null}}));
+    assert_eq!(
+        receive(&mut feed).await?,
+        json!({"type":"preferences","data":{"language":null}})
+    );
 
     let set = reqwest::Client::new()
         .post(format!("http://{}/api/commands", server.address))
@@ -389,12 +392,18 @@ async fn interface_preferences_are_pushed_to_event_and_preference_feeds() -> Res
     ensure!(set.status().is_success(), "set_language failed: {}", set.status());
     let expected = json!({"type":"preferences","data":{"language":"zhtw"}});
     assert_eq!(receive(&mut feed).await?, expected);
-    assert_eq!(until(&mut events, |value| value["type"] == "preferences").await?, expected);
+    assert_eq!(
+        until(&mut events, |value| value["type"] == "preferences").await?,
+        expected
+    );
 
     // The shared client (used by the desktop client) authenticates and reads the same feed.
     let endpoint = management_client::Endpoint::new(server.address, None, server.directory.0.join("management-token"))?;
     let mut client = management_client::events::Feed::connect(&endpoint, &server.token, Some("preferences")).await?;
-    assert_eq!(client.next().await?, Some(json!({"type":"preferences","data":{"language":"zhtw"}})));
+    assert_eq!(
+        client.next().await?,
+        Some(json!({"type":"preferences","data":{"language":"zhtw"}}))
+    );
     let wrong = management_client::events::Feed::connect(&endpoint, &"0".repeat(64), Some("preferences")).await;
     assert!(wrong.is_err(), "a wrong token is refused");
     drop((events, feed, client));

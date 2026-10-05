@@ -23,7 +23,10 @@ impl Feed {
     /// Subscribe to `/api/streams/<name>` (or `/api/events` for `None`).
     pub async fn connect(endpoint: &Endpoint, token: &str, name: Option<&str>) -> Result<Self> {
         let Some(authority) = endpoint.base.strip_prefix("http://") else {
-            bail!("event feeds need a plain http:// management address, not {}", endpoint.base);
+            bail!(
+                "event feeds need a plain http:// management address, not {}",
+                endpoint.base
+            );
         };
         let path = name.map_or_else(|| "/api/events".to_owned(), |name| format!("/api/streams/{name}"));
         let mut request = format!("ws://{authority}{path}").into_client_request()?;
@@ -40,7 +43,10 @@ impl Feed {
             ))
             .await?;
         let mut feed = Self { socket };
-        let ready = feed.next().await?.context("the event feed closed before it was ready")?;
+        let ready = feed
+            .next()
+            .await?
+            .context("the event feed closed before it was ready")?;
         ensure!(ready["type"] == "ready", "event feed refused: {}", ready["message"]);
         Ok(feed)
     }
