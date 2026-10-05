@@ -318,6 +318,22 @@ fn proxy_entries(live: &Live, strings: &Strings, entries: &mut Vec<Entry>) {
     ));
     entries.push(Entry::Separator);
 
+    let subscriptions = view::subscriptions(&live.profiles);
+    if !subscriptions.is_empty() {
+        entries.push(Entry::Submenu {
+            label: strings.profiles.into(),
+            enabled: true,
+            children: subscriptions
+                .into_iter()
+                .map(|subscription| Entry::Check {
+                    label: label(&subscription.name),
+                    enabled: true,
+                    checked: subscription.current,
+                    action: (!subscription.current).then_some(Action::Profile { uid: subscription.uid }),
+                })
+                .collect(),
+        });
+    }
     let proxies = live
         .proxies
         .get("proxies")
@@ -339,22 +355,6 @@ fn proxy_entries(live: &Live, strings: &Strings, entries: &mut Vec<Entry>) {
             children: groups
                 .iter()
                 .map(|group| group_menu(group, &proxies, strings))
-                .collect(),
-        });
-    }
-    let subscriptions = view::subscriptions(&live.profiles);
-    if !subscriptions.is_empty() {
-        entries.push(Entry::Submenu {
-            label: strings.profiles.into(),
-            enabled: true,
-            children: subscriptions
-                .into_iter()
-                .map(|subscription| Entry::Check {
-                    label: label(&subscription.name),
-                    enabled: true,
-                    checked: subscription.current,
-                    action: (!subscription.current).then_some(Action::Profile { uid: subscription.uid }),
-                })
                 .collect(),
         });
     }
@@ -609,6 +609,19 @@ mod tests {
             })
             .collect();
         assert_eq!(names, ["Proxies", "Auto"], "no LoadBalance, GLOBAL only in global mode");
+        let submenus: Vec<_> = model
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Submenu { label, .. } => Some(label.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            submenus[1..],
+            ["Subscriptions", "Proxies: Node B", "Proxy groups"],
+            "subscriptions come before the node choices"
+        );
         let Entry::Submenu { children, .. } = &groups[1] else {
             panic!()
         };
