@@ -21,7 +21,7 @@ _mihomo-server() {
                 'restart:restart your instance and wait until it is ready'
                 'enable:start your instance now and at boot'
                 'disable:stop your instance and do not start it at boot'
-                'info:show management address, token, proxy port and paths'
+                'info:show versions, management address, token, proxy port and paths'
                 'token:print your management token'
                 'logs:follow service logs'
                 'sub:list, select, update, add and remove subscriptions'

@@ -12,7 +12,7 @@ Usage: mihomo-server-user [COMMAND]
   enable      Enable, start and verify your instance (init is an alias)
   start       Start and verify your instance without enabling it at boot
   stop        Stop your instance
-  info        Show addresses, paths and TUN state (default command)
+  info        Show versions, addresses, paths and TUN state (default command)
   token       Print your management token
   status      Show systemd status
   logs [OPT]  Follow service logs, or pass journalctl options (e.g. -n 100)
@@ -151,15 +151,20 @@ endpoint() {
     esac
     MANAGEMENT_URL=${origin:-$API_URL}
 }
+# GET PATH, or POST the JSON body given as the second argument.
 request() {
     local path=$1 token
+    local -a body=()
     token=$(cat "$TOKEN_FILE")
     if command -v curl >/dev/null 2>&1; then
+        [ $# = 1 ] || body=(-H 'Content-Type: application/json' --data "$2")
         curl --noproxy '*' -fsS --max-time 2 -H "Host: $AUTHORITY" \
-            -H "Authorization: Bearer $token" "$API_URL$path"
+            -H "Authorization: Bearer $token" ${body[@]+"${body[@]}"} "$API_URL$path"
     else
+        [ $# = 1 ] || body=(--header='Content-Type: application/json' --post-data="$2")
         wget -q -O - -e use_proxy=no --timeout=2 --tries=1 \
-            --header="Host: $AUTHORITY" --header="Authorization: Bearer $token" "$API_URL$path"
+            --header="Host: $AUTHORITY" --header="Authorization: Bearer $token" \
+            ${body[@]+"${body[@]}"} "$API_URL$path"
     fi
 }
 ready() {
@@ -205,8 +210,13 @@ info() {
         *) tun='unavailable (administrator must authorize group mihomo-tun)' ;;
     esac
     proxy=$(mixed_port "$n")
-    local actual=
+    local actual='' version='' core=''
     if [ "$state" = active ] && [ -s "$TOKEN_FILE" ]; then
+        # Report the running processes, which may predate an upgrade on disk.
+        version=$(request /api/commands '{"command":"service_version"}' 2>/dev/null |
+            sed -nE 's/^"([^"]+)"$/\1/p') || true
+        core=$(request /api/status 2>/dev/null |
+            sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p') || true
         # /api/config wraps the effective runtime YAML in a JSON string; the
         # top-level key follows the opening quote or an escaped newline.
         actual=$(request /api/config 2>/dev/null |
@@ -216,8 +226,16 @@ info() {
             "${TOKEN_FILE%/management-token}/settings.yaml" | head -n 1) || true
     fi
     [ -z "$actual" ] || proxy=$actual
+    if [ -z "$version" ]; then
+        local installed
+        installed="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]:-$0}")")/bin/mihomo-server"
+        [ ! -x "$installed" ] || version=$("$installed" --version 2>/dev/null | sed -n 's/^mihomo-server //p') || true
+    fi
+    [ -n "$core" ] || core="unknown (core not running)"
     cat <<DETAILS
 service:   $state
+version:   ${version:-unknown}
+core:      $core
 slot:      $n
 manage:    $manage
 token:     $TOKEN_FILE

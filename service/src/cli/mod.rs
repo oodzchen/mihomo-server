@@ -107,7 +107,7 @@ pub fn command() -> Command {
                 .alias("init"),
         )
         .subcommand(Command::new("disable").about("Stop your instance and do not start it at boot; data is kept"))
-        .subcommand(Command::new("info").about("Show management address, token, proxy port and file paths"))
+        .subcommand(Command::new("info").about("Show versions, management address, token, proxy port and file paths"))
         .subcommand(Command::new("token").about("Print your management token"))
         .subcommand(
             Command::new("logs")
