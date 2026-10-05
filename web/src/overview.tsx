@@ -6,7 +6,6 @@ import { ProxyAccessPanel, useProxyAccess } from "./proxy-access";
 import { MultiUserPanel } from "./multi-user";
 import { phaseLabel, t, type Language } from "./i18n";
 import type { CoreLog, CoreStatus, Profile } from "./types";
-import { bytes } from "./format";
 import { LogLines } from "./logs";
 
 export function useFeed<T>(token: string, feed: string) {
@@ -58,9 +57,6 @@ export function Overview({
   busy: boolean;
   perform: Perform;
 }) {
-  const traffic = useFeed<{ up: number; down: number }>(token, "traffic"),
-    memory = useFeed<{ inuse: number }>(token, "memory"),
-    connections = useFeed<{ count: number }>(token, "connections_count");
   const access = useProxyAccess({ token, status, connection, logout, language });
   return (
     <>
@@ -69,30 +65,6 @@ export function Overview({
           extra={<a href="/settings" onClick={event => navigate(event, "/settings")}>{t(language, "settings")}</a>} />
         <TunControl token={token} language={language} status={status} connection={connection} access={access} busy={busy} perform={perform} logout={logout}
           extra={<a href="/settings" onClick={event => navigate(event, "/settings")}>{t(language, "advancedSettings")}</a>} />
-      </div>
-      <div className="metrics">
-        <div>
-          <p>{t(language, "uploadRate")}</p>
-          <strong>
-            {bytes(traffic?.up)}
-            <small>/s</small>
-          </strong>
-        </div>
-        <div>
-          <p>{t(language, "downloadRate")}</p>
-          <strong>
-            {bytes(traffic?.down)}
-            <small>/s</small>
-          </strong>
-        </div>
-        <div>
-          <p>{t(language, "activeConnections")}</p>
-          <strong>{connections?.count ?? "—"}</strong>
-        </div>
-        <div>
-          <p>{t(language, "memory")}</p>
-          <strong>{bytes(memory?.inuse)}</strong>
-        </div>
       </div>
       <ProxyAccessPanel
         access={access}

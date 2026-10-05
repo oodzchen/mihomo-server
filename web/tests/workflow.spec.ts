@@ -1226,12 +1226,9 @@ test("browser repairs failed startup, saves selection/config, restores after ser
     .getByRole("link", { name: /概览/ })
     .click();
   await expect(page.getByText("已连接", { exact: true })).toBeVisible();
-  await expect(
-    page.locator(".metrics > div").nth(2).locator("strong"),
-  ).toHaveText(/^\d+$/);
-  await expect(
-    page.locator(".metrics > div").nth(3).locator("strong"),
-  ).not.toHaveText("—");
+  await expect(page.locator(".metrics")).toHaveCount(0);
+  await expect(page.getByLabel("上传速率", { exact: true })).toHaveText(/^\d+\.\d (KB|MB)\/s$/);
+  await expect(page.getByLabel("下载速率", { exact: true })).toHaveText(/^\d+\.\d (KB|MB)\/s$/);
   await page.screenshot({ path: "test-results/overview.png", fullPage: true });
   await stop();
   await start();

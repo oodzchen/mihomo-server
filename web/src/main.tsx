@@ -15,8 +15,8 @@ import { RulesPage } from "./rules";
 import { LanguagePicker } from "./language-picker";
 import { connectionLabel, LanguageContext, phaseLabel, resolveLanguage, savedLanguage, saveLanguage, t, type Language, type MessageKey } from "./i18n";
 import type { CoreLog, CoreStatus, EventMessage, Preferences, Profiles } from "./types";
-import { describe } from "./format";
-import { Overview } from "./overview";
+import { bytes, describe } from "./format";
+import { Overview, useFeed } from "./overview";
 import { ProfilePage } from "./profiles";
 import { ConfigPage } from "./config";
 import { ProxyPage } from "./proxies";
@@ -37,6 +37,25 @@ const pages: [string, MessageKey][] = [
 ];
 
 const TOKEN_KEY = "mihomo.token";
+
+/** Live upload/download rates shown above the status lines on every page. */
+function SidebarTraffic({ token, language }: { token: string; language: Language }) {
+  const traffic = useFeed<{ up: number; down: number }>(token, "traffic");
+  const colon = t(language, "colon");
+  const rate = (value?: number) => (value === undefined ? "—" : `${bytes(value)}/s`);
+  return (
+    <div className="sidebar-traffic">
+      <div className="status-item">
+        <span className="status-label">{t(language, "uploadRate")}{colon}</span>
+        <span className="traffic-value" aria-label={t(language, "uploadRate")}>{rate(traffic?.up)}</span>
+      </div>
+      <div className="status-item">
+        <span className="status-label">{t(language, "downloadRate")}{colon}</span>
+        <span className="traffic-value" aria-label={t(language, "downloadRate")}>{rate(traffic?.down)}</span>
+      </div>
+    </div>
+  );
+}
 
 type PendingNavigation =
   | { kind: "route"; path: string; method: "push" | "replace" }
@@ -451,6 +470,7 @@ function Manager({
           ))}
         </nav>
         <div className="sidebar-bottom">
+          <SidebarTraffic token={token} language={language} />
           <div className="sidebar-status">
             <div className="status-item">
               <span className="status-label">{t(language, "coreStatus")}{colon}</span>
