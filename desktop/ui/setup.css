@@ -13,7 +13,7 @@
   --danger: #b91c1c;
   /* Fixed terminal viewport, and the bottom band reserved for it and its
      toggle: expanding, collapsing or filling it never moves the content. */
-  --terminal: 132px;
+  --terminal: 220px;
   --output: calc(var(--terminal) + 40px);
 }
 @media (prefers-color-scheme: dark) {
@@ -112,9 +112,11 @@ pre {
   font: 11.5px/1.45 ui-monospace, "JetBrains Mono", "Noto Sans Mono", monospace;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  visibility: hidden;
+  /* Not visibility: WebKitGTK leaves an empty terminal unpainted when it is
+     made visible, so the panel looked blank until output arrived. */
+  display: none;
 }
-.output.open pre { visibility: visible; }
+.output.open pre { display: block; }
 pre:empty::before { content: attr(data-empty); opacity: 0.7; }
 .toggle {
   align-self: center;

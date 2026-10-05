@@ -1,12 +1,19 @@
 [Desktop Entry]
 Type=Application
-Name=Mihomo Server
-Name[zh_CN]=Mihomo Server
+Version=1.5
+Name=Mihomo Server Desktop
+GenericName=Proxy Service Manager
+GenericName[zh_CN]=代理服务管理
+GenericName[zh_TW]=代理服務管理
 Comment=Manage the local mihomo-server proxy service
 Comment[zh_CN]=管理本机 mihomo-server 代理服务
 Comment[zh_TW]=管理本機 mihomo-server 代理服務
+Keywords=mihomo;clash;proxy;tun;vpn;network;
+Keywords[zh_CN]=mihomo;clash;代理;网络;
+Keywords[zh_TW]=mihomo;clash;代理;網路;
 Exec={{exec}}
 Icon={{icon}}
 Terminal=false
-Categories={{categories}}
+StartupNotify=true
+Categories=Network;
 StartupWMClass=mihomo-server-desktop

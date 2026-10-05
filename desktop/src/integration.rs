@@ -2,6 +2,9 @@
 //! builds). Wayland compositors take a window's icon from the desktop entry
 //! named after its app_id (the program name), so without one the window shows
 //! a generic icon. Packages install that entry system-wide; then ours is removed.
+//! An AppImage's entry is listed with the applications, so the image can be
+//! started from the menu like an installed program; a development build's is
+//! hidden.
 use anyhow::{Context as _, Result};
 use std::path::{Path, PathBuf};
 
@@ -27,16 +30,21 @@ fn system_dirs() -> Vec<PathBuf> {
     std::env::split_paths(&dirs).filter(|path| path.is_absolute()).collect()
 }
 
-fn entry(exec: &str, icon: &Path) -> String {
+fn entry(exec: &str, icon: &Path, listed: bool) -> String {
+    let visibility = if listed {
+        "Comment=Manage the local mihomo-server proxy service\nCategories=Network;\n"
+    } else {
+        "NoDisplay=true\n"
+    };
     format!(
-        "[Desktop Entry]\nType=Application\nName=Mihomo Server\nExec={}\nIcon={}\nTerminal=false\nNoDisplay=true\nStartupWMClass={APP_ID}\n{MARKER}\n",
+        "[Desktop Entry]\nType=Application\nName=Mihomo Server Desktop\nExec={}\nIcon={}\nTerminal=false\n{visibility}StartupWMClass={APP_ID}\n{MARKER}\n",
         crate::autostart::quote(exec),
         icon.display()
     )
 }
 
 /// Write, refresh or remove the generated entry; `exec` is this program.
-fn ensure_in(data_home: &Path, system: &[PathBuf], exec: &str) -> Result<()> {
+fn ensure_in(data_home: &Path, system: &[PathBuf], exec: &str, listed: bool) -> Result<()> {
     let file = data_home.join("applications").join(format!("{APP_ID}.desktop"));
     let icon = data_home.join(APP_ID).join("icon.png");
     let existing = std::fs::read_to_string(&file).ok();
@@ -57,7 +65,7 @@ fn ensure_in(data_home: &Path, system: &[PathBuf], exec: &str) -> Result<()> {
         std::fs::create_dir_all(icon.parent().context("icon directory")?)?;
         std::fs::write(&icon, ICON).with_context(|| format!("cannot write {}", icon.display()))?;
     }
-    let wanted = entry(exec, &icon);
+    let wanted = entry(exec, &icon, listed);
     if existing.as_deref() != Some(wanted.as_str()) {
         std::fs::create_dir_all(file.parent().context("applications directory")?)?;
         std::fs::write(&file, wanted).with_context(|| format!("cannot write {}", file.display()))?;
@@ -68,10 +76,10 @@ fn ensure_in(data_home: &Path, system: &[PathBuf], exec: &str) -> Result<()> {
 pub fn ensure() -> Result<()> {
     let data_home = data_home().context("cannot locate the data directory")?;
     // An AppImage runs from a temporary mount; point at the image itself.
-    let exec = std::env::var_os("APPIMAGE")
-        .map(PathBuf::from)
-        .map_or_else(std::env::current_exe, Ok)?;
-    ensure_in(&data_home, &system_dirs(), &exec.to_string_lossy())
+    let image = std::env::var_os("APPIMAGE").map(PathBuf::from);
+    let listed = image.is_some();
+    let exec = image.map_or_else(std::env::current_exe, Ok)?;
+    ensure_in(&data_home, &system_dirs(), &exec.to_string_lossy(), listed)
 }
 
 #[cfg(test)]
@@ -86,21 +94,27 @@ mod tests {
         let file = home.join("applications/mihomo-server-desktop.desktop");
         let icon = home.join("mihomo-server-desktop/icon.png");
 
-        ensure_in(&home, std::slice::from_ref(&system), "/tmp/a b/app").unwrap();
+        ensure_in(&home, std::slice::from_ref(&system), "/tmp/a b/app", false).unwrap();
         let text = std::fs::read_to_string(&file).unwrap();
         assert!(text.contains("Exec=\"/tmp/a b/app\"\n") && text.contains("NoDisplay=true\n"));
+        assert!(text.contains("Name=Mihomo Server Desktop\n"));
         assert!(text.contains(&format!("Icon={}\n", icon.display())));
         assert_eq!(std::fs::read(&icon).unwrap(), ICON);
+
+        // An AppImage is listed with the applications.
+        ensure_in(&home, std::slice::from_ref(&system), "/tmp/app.AppImage", true).unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(!text.contains("NoDisplay") && text.contains("Categories=Network;\n"));
 
         // A package's system-wide entry replaces ours.
         std::fs::create_dir_all(system.join("applications")).unwrap();
         std::fs::write(system.join("applications/mihomo-server-desktop.desktop"), "x").unwrap();
-        ensure_in(&home, std::slice::from_ref(&system), "/tmp/app").unwrap();
+        ensure_in(&home, std::slice::from_ref(&system), "/tmp/app", false).unwrap();
         assert!(!file.exists() && !icon.exists());
 
         // An entry the user (or an AppImage integrator) wrote is never touched.
         std::fs::write(&file, "[Desktop Entry]\nName=Mine\n").unwrap();
-        ensure_in(&home, &[], "/tmp/app").unwrap();
+        ensure_in(&home, &[], "/tmp/app", false).unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "[Desktop Entry]\nName=Mine\n");
         std::fs::remove_dir_all(&root).unwrap();
     }
