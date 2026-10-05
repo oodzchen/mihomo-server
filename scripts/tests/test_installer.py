@@ -185,7 +185,13 @@ process_argument() {
         --data-dir) echo "$TEST_DATA" ;;
     esac
 }
-request() { printf '%s' '{"yaml":"allow-lan: false\\nmixed-port: 1089\\nport: 0\\n"}'; }
+request() {
+    case "$1 ${2:-}" in
+        '/api/config ') printf '%s' '{"yaml":"allow-lan: false\\nmixed-port: 1089\\nport: 0\\n"}' ;;
+        '/api/status ') echo '{"config_revision":"rev-1","phase":"running","version":"v1.19.32"}' ;;
+        '/api/commands {"command":"service_version"}') echo '"1.2.3"' ;;
+    esac
+}
 DATA_DIR="$TEST_DATA"
 ENV_FILE="$TEST_DATA/env"
 info
@@ -217,6 +223,12 @@ info
         self.assertEqual(self.info(), "http://127.0.0.1:20030")
         (self.data / "management-token").write_text("invalid&extra=parameter\n")
         self.assertEqual(self.info(), "http://127.0.0.1:20030")
+
+    def test_versions_come_from_the_running_service(self):
+        self.assertEqual(self.info(field="version"), "1.2.3")
+        self.assertEqual(self.info(field="core"), "v1.19.32")
+        self.assertEqual(self.info(field="version", state="inactive"), "unknown")
+        self.assertEqual(self.info(field="core", state="inactive"), "unknown (core not running)")
 
     def test_proxy_port_follows_runtime_config_then_saved_settings(self):
         self.assertEqual(self.info(field="proxy"), "HTTP/SOCKS 127.0.0.1:1089")
