@@ -5041,8 +5041,8 @@ test("service page controls the foreground service and keeps long help in toolti
   });
   await page.goto(`${base}/service#token=${encodeURIComponent(token)}`);
   const navigation = page.getByRole("navigation", { name: "主导航" });
-  expect((await navigation.getByRole("link").allTextContents()).slice(-2)).toEqual(["内核", "服务"]);
   await expect(navigation.getByRole("link", { name: "服务", exact: true })).toHaveAttribute("aria-current", "page");
+  expect((await navigation.getByRole("link").allTextContents()).slice(-2)).toEqual(["内核", "服务"]);
   await expect(page.getByRole("heading", { level: 1, name: "服务" })).toBeVisible();
 
   const control = page.getByRole("region", { name: "服务控制" });
