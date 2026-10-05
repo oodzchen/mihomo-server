@@ -2,17 +2,15 @@
 
 无头运行的 [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev)：不需要桌面环境，以后台服务的形式在 Linux 服务器上运行 [Mihomo](https://github.com/MetaCubeX/mihomo) 内核，从任意浏览器远程管理订阅、节点和配置。
 
-订阅、增强、节点选择等管理逻辑直接取自 Clash Verge Rev，用法与桌面版相近，适合服务器、软路由等无图形界面的设备。
-
 ## 安装
 
-需要 x86_64 Linux、systemd、curl（或 wget）、tar、SHA-256 校验工具，以及 sudo、用户管理工具和 libcap 的 `setcap/getcap`。无需 Python。以普通用户执行，无需安装参数：
+使用以下命令进行安装：
 
 ```sh
 curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash
 ```
 
-脚本下载并校验最新版本，自动通过 sudo 安装到 `/opt/mihomo-server`，为你启动独立的 systemd 用户实例，授权使用 TUN，并启用注销后、重启后继续运行。sudo 可能要求输入密码。安装完成会显示管理地址、代理端口、配置文件和令牌位置，并提供 `mihomo-server` 命令（`/usr/local/bin`，附 man 手册和 bash/zsh 补全）。
+脚本下载并校验最新版本，自动通过 sudo 安装到 `/opt/mihomo-server`，为你启动独立的 systemd 用户实例。安装完成会显示管理地址、代理端口、配置文件和令牌位置，并提供 `mihomo-server` 命令（`/usr/local/bin`，附 man 手册和 bash/zsh 补全）。
 
 程序全系统共享，用户配置和数据各自独立：
 
@@ -24,8 +22,6 @@ curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/in
 | 命令 | `/usr/local/bin/mihomo-server`，`man mihomo-server` |
 
 配置和数据分别遵循 `XDG_CONFIG_HOME`、`XDG_DATA_HOME`。初始化时保存有效路径，之后重启服务无需重新设置环境变量；空值或相对路径使用默认目录。已知的旧用户级安装会保留原数据、启动参数和回退副本，自定义服务单元需要自行迁移。
-
-直接以 root 执行只安装共享程序；通过 sudo 执行时会为 `SUDO_USER` 启动实例。
 
 ## 使用
 
@@ -75,7 +71,7 @@ mihomo-server update                 # 升级程序到最新版本
 
 slot 1–63 的管理端口为 `20000+10N`，代理端口为 `20001+10N`，DNS 端口为 `20002+10N`。订阅中写死的端口自动替换，在设置页显式指定的端口保留。
 
-这里的 TUN 是**整机 TUN**：与 clash-verge 等单机客户端一样，开启后接管本机所有账户（含 root 系统服务）的流量和系统 DNS（systemd-resolved），fake-IP 与 DNS 防污染全部生效；安装时的那次 sudo 就是唯一一次授权，之后开关 TUN 不会再弹出系统授权窗口。整机同一时间只有一个 TUN：`mihomo-tun` 组中谁先开启谁占用，直到他自己关闭（或其服务停止）；其他账户的 TUN 开关会置灰并显示占用者，他们的流量按占用者的规则处理，自己的代理端口照常可用。其他账户无法关闭占用者的 TUN，只有 root 可以，例如 `sudo systemctl --user -M alice@ stop mihomo-server`。
+这里的 TUN 是**整机 TUN**：与 clash-verge 等单机客户端一样，开启后接管本机所有账户（含 root 系统服务）的流量和系统 DNS（systemd-resolved），fake-IP 与 DNS 防污染全部生效；整机同一时间只有一个 TUN：`mihomo-tun` 组中谁先开启谁占用，直到他自己关闭（或其服务停止）；其他账户的 TUN 开关会置灰并显示占用者，他们的流量按占用者的规则处理，自己的代理端口照常可用。其他账户无法关闭占用者的 TUN，只有 root 可以，例如 `sudo systemctl --user -M alice@ stop mihomo-server`。
 
 其他用户需要 TUN 或后台常驻时，由管理员执行：
 
@@ -95,7 +91,7 @@ sudo dnf install ./mihomo-server-desktop-vX.Y.Z-x86_64.rpm     # Fedora/RHEL
 sudo apt install ./mihomo-server-desktop-vX.Y.Z-x86_64.deb     # Debian/Ubuntu
 ```
 
-安装包在 Ubuntu 24.04 上构建，需要 glibc 2.39 及以上，并依赖 WebKitGTK 4.1、libayatana-appindicator 和 polkit。GNOME 需要安装 AppIndicator 扩展才能显示托盘图标；KDE 等桌面原生支持。Fedora 上建议使用 RPM，AppImage 需要 FUSE 2（`fuse-libs`）。
+安装包在 Ubuntu 24.04 上构建，需要 glibc 2.39 及以上，并依赖 WebKitGTK 4.1、libayatana-appindicator 和 polkit。GNOME 需要安装 AppIndicator 扩展才能显示托盘图标；KDE 等桌面原生支持。
 
 ## 远程访问与服务管理
 
