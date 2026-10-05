@@ -1,9 +1,9 @@
 import { SettingsSection } from "./settings-section";
 import { HelpTip } from "./help-tip";
 import type { Draft, Runtime } from "./network-settings";
+import { t, type Language } from "./i18n";
 
 type Hosts = Record<string, string | string[]>;
-const error = "hosts 必须是 JSON 对象：域名对应 IP、域名别名、lan 或非空 IP 字符串列表。";
 function domain(value: string, pattern: boolean): boolean {
   if (!value || value.length > 253) return false;
   const parts = value.split(".");
@@ -23,15 +23,16 @@ function matches(pattern: string, name: string): boolean {
   if (suffix ? labels.length < parts.length || pattern.startsWith(".") && labels.length === parts.length : labels.length !== parts.length) return false;
   return parts.every((p, i) => p === "*" || p === labels[i]);
 }
-export function validateHosts(value: unknown): asserts value is Hosts {
+export function validateHosts(value: unknown, language: Language): asserts value is Hosts {
+  const error = t(language, "hostsSetError");
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(error);
   const entries = Object.entries(value);
-  if (entries.length > 1024) throw new Error("hosts 最多支持 1024 条映射。");
+  if (entries.length > 1024) throw new Error(t(language, "hostsSetTooMany"));
   const keys = new Set<string>();
   const aliases = new Map<string, string>();
   for (const [key, v] of entries) {
     const lower = key.toLowerCase();
-    if (!domain(key, true) || keys.has(lower)) throw new Error("hosts 域名格式无效或存在大小写重复；国际化域名请使用 punycode。");
+    if (!domain(key, true) || keys.has(lower)) throw new Error(t(language, "hostsSetDomain"));
     keys.add(lower);
     if (typeof v === "string") {
       if (v === "lan" || ip(v)) continue;
@@ -43,23 +44,23 @@ export function validateHosts(value: unknown): asserts value is Hosts {
   names.forEach((key, i) => names.forEach((pattern, j) => { if (matches(pattern, aliases.get(key)!)) { edges[i].push(j); incoming[j]++; } }));
   const ready = incoming.flatMap((n, i) => n === 0 ? [i] : []);
   for (let i = 0; i < ready.length; i++) for (const j of edges[ready[i]]) if (--incoming[j] === 0) ready.push(j);
-  if (ready.length !== names.length) throw new Error("hosts 含有可能的域名别名循环。");
+  if (ready.length !== names.length) throw new Error(t(language, "hostsSetCycle"));
 }
 export function hostsDraft(runtime: Runtime): Draft {
   return { "hosts:owned": runtime.hosts == null ? "" : "true", hosts: runtime.hosts == null ? "{}" : JSON.stringify(runtime.hosts, null, 2) };
 }
-export function hostsRuntime(draft: Draft): Runtime {
+export function hostsRuntime(draft: Draft, language: Language): Runtime {
   if (draft["hosts:owned"] !== "true") return {};
   let hosts: unknown;
-  try { hosts = JSON.parse(draft.hosts ?? "{}"); } catch { throw new Error(error); }
-  validateHosts(hosts);
+  try { hosts = JSON.parse(draft.hosts ?? "{}"); } catch { throw new Error(t(language, "hostsSetError")); }
+  validateHosts(hosts, language);
   // Match the backend BTreeMap ordering before full-replacement comparison.
   return { hosts: Object.fromEntries(Object.entries(hosts).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) };
 }
-export function HostsFields({ draft, disabled, change }: { draft: Draft; disabled: boolean; change: (key: string, value: string) => void }) {
-  return <SettingsSection title="hosts 映射"><fieldset className="network-fields" disabled={disabled}>
-    <legend>hosts 映射 <HelpTip>DNS 设置中的两个 hosts 开关可显式启用或禁用。系统 hosts 只控制读取，不修改主机文件；核心仍可能保留内置 localhost。生成结果请在配置页核对，运行效果需通过 DNS 查询验证。</HelpTip></legend>
-    <label><input type="checkbox" checked={draft["hosts:owned"] === "true"} onChange={e => change("hosts:owned", e.target.checked ? "true" : "")} />管理 hosts 映射</label>
-    <label>hosts JSON 映射<textarea aria-label="hosts JSON 映射" rows={6} disabled={draft["hosts:owned"] !== "true"} value={draft.hosts ?? "{}"} onChange={e => change("hosts", e.target.value)} /><HelpTip>不勾选继承；勾选后替换整个映射，{'{}'} 清除配置中的映射。支持通配域名、IPv4/IPv6、域名别名和 lan；IP 列表最多 64 项。需要当前订阅允许 DNS 覆盖。</HelpTip></label>
+export function HostsFields({ draft, disabled, change, language }: { draft: Draft; disabled: boolean; change: (key: string, value: string) => void; language: Language }) {
+  return <SettingsSection title={t(language, "hostsSetTitle")}><fieldset className="network-fields" disabled={disabled}>
+    <legend>{t(language, "hostsSetTitle")} <HelpTip>{t(language, "hostsSetHelp")}</HelpTip></legend>
+    <label><input type="checkbox" checked={draft["hosts:owned"] === "true"} onChange={e => change("hosts:owned", e.target.checked ? "true" : "")} />{t(language, "hostsSetManage")}</label>
+    <label>{t(language, "hostsSetJson")}<textarea aria-label={t(language, "hostsSetJson")} rows={6} disabled={draft["hosts:owned"] !== "true"} value={draft.hosts ?? "{}"} onChange={e => change("hosts", e.target.value)} /><HelpTip>{t(language, "hostsSetJsonHelp")}</HelpTip></label>
   </fieldset></SettingsSection>;
 }

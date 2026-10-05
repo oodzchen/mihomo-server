@@ -1,6 +1,7 @@
 import { SettingsSection } from "./settings-section";
 import { HelpTip } from "./help-tip";
 import type { Draft, Runtime } from "./network-settings";
+import { t, type Language } from "./i18n";
 
 export const AUTHORITY_KEYS = new Set([
   "bind-address",
@@ -52,31 +53,31 @@ function isValidIp(ip: string): boolean {
   });
 }
 
-export function validateAuthority(key: string, value: unknown) {
+export function validateAuthority(key: string, value: unknown, language: Language) {
   if (value == null) return;
   if (key === "bind-address") {
     if (typeof value !== "string" || value.length > 255 || /\s/.test(value)) {
-      throw new Error("绑定地址不能包含空白字符且最多 255 字节。");
+      throw new Error(t(language, "authBindSpace"));
     }
     if (value !== "*" && value !== "" && value.toLowerCase() !== "localhost" && !isValidIp(value)) {
-      throw new Error("绑定地址必须是 '*'、'localhost'、有效 IP 地址或留空。");
+      throw new Error(t(language, "authBindValue"));
     }
   } else if (key === "authentication") {
-    if (!Array.isArray(value)) throw new Error("认证设置必须是列表。");
+    if (!Array.isArray(value)) throw new Error(t(language, "authListType"));
     for (const item of value) {
       if (typeof item !== "string" || !item.includes(":") || !item.split(":")[0].trim()) {
-        throw new Error("认证列表各项格式必须为 'username:password'。");
+        throw new Error(t(language, "authListFormat"));
       }
     }
   } else if (key === "skip-auth-prefixes" || key === "lan-allowed-ips" || key === "lan-disallowed-ips") {
-    if (!Array.isArray(value)) throw new Error(`${key} 必须是 IP/CIDR 列表。`);
+    if (!Array.isArray(value)) throw new Error(t(language, "authCidrList", { key }));
     for (const item of value) {
       if (typeof item !== "string" || !isValidIpOrCidr(item)) {
-        throw new Error(`${key} 中的 '${item}' 不是有效的 IP 或 CIDR 前缀。`);
+        throw new Error(t(language, "authCidrItem", { key, item: String(item) }));
       }
     }
   } else if (key === "inbound-tfo" || key === "inbound-mptcp" || key === "sniffing") {
-    if (typeof value !== "boolean") throw new Error(`${key} 必须是布尔值。`);
+    if (typeof value !== "boolean") throw new Error(t(language, "authBool", { key }));
   }
 }
 
@@ -115,12 +116,12 @@ function parseListDraft(text: string): string[] {
     .filter(Boolean);
 }
 
-export function authorityRuntime(draft: Draft): Runtime {
+export function authorityRuntime(draft: Draft, language: Language): Runtime {
   const runtime: Runtime = {};
 
   if (draft[ownedBind] === "true") {
     const val = (draft["bind-address"] ?? "").trim();
-    validateAuthority("bind-address", val);
+    validateAuthority("bind-address", val, language);
     runtime["bind-address"] = val;
   }
 
@@ -128,7 +129,7 @@ export function authorityRuntime(draft: Draft): Runtime {
     if (draft[ownedKey] === "true") {
       const raw = draft[key] ?? "";
       const list = parseListDraft(raw);
-      validateAuthority(key, list);
+      validateAuthority(key, list, language);
       runtime[key] = list;
     }
   };
@@ -141,7 +142,7 @@ export function authorityRuntime(draft: Draft): Runtime {
   for (const boolKey of ["inbound-tfo", "inbound-mptcp", "sniffing"] as const) {
     const val = draft[boolKey] ?? "";
     if (val !== "") {
-      if (val !== "true" && val !== "false") throw new Error(`${boolKey} 值无效。`);
+      if (val !== "true" && val !== "false") throw new Error(t(language, "authValueInvalid", { key: boolKey }));
       runtime[boolKey] = val === "true";
     }
   }
@@ -153,14 +154,16 @@ export function AuthorityFields({
   draft,
   disabled,
   onChange,
+  language,
 }: {
   draft: Draft;
   disabled: boolean;
   onChange: (key: string, value: string) => void;
+  language: Language;
 }) {
   return (
-    <SettingsSection title="监听与访问控制"><fieldset className="network-fields" disabled={disabled}>
-      <legend>监听与访问控制</legend>
+    <SettingsSection title={t(language, "authTitle")}><fieldset className="network-fields" disabled={disabled}>
+      <legend>{t(language, "authTitle")}</legend>
 
       <label>
         <input
@@ -168,18 +171,18 @@ export function AuthorityFields({
           checked={draft[ownedBind] === "true"}
           onChange={(e) => onChange(ownedBind, e.target.checked ? "true" : "")}
         />
-        管理绑定监听地址
+        {t(language, "authManageBind")}
       </label>
       <label>
-        绑定地址
+        {t(language, "authBind")}
         <input
-          aria-label="绑定地址"
+          aria-label={t(language, "authBind")}
           value={draft["bind-address"] ?? ""}
           disabled={draft[ownedBind] !== "true"}
-          placeholder="*、localhost、127.0.0.1、::1 或留空"
+          placeholder={t(language, "authBindPlaceholder")}
           onChange={(e) => onChange("bind-address", e.target.value)}
         />
-      <HelpTip>勾选后自定义绑定地址或设为 '*'。未勾选时继承订阅或核心默认值。</HelpTip></label>
+      <HelpTip>{t(language, "authBindHelp")}</HelpTip></label>
 
       <label>
         <input
@@ -187,12 +190,12 @@ export function AuthorityFields({
           checked={draft[ownedAuth] === "true"}
           onChange={(e) => onChange(ownedAuth, e.target.checked ? "true" : "")}
         />
-        管理 HTTP/SOCKS 认证<HelpTip>勾选且留空会显式清空订阅认证。</HelpTip>
+        {t(language, "authManageAuth")}<HelpTip>{t(language, "authManageAuthHelp")}</HelpTip>
       </label>
       <label>
-        认证列表 (user:password，每行一条或逗号分隔)
+        {t(language, "authList")}
         <textarea
-          aria-label="入站认证列表"
+          aria-label={t(language, "authListAria")}
           value={draft["authentication"] ?? ""}
           disabled={draft[ownedAuth] !== "true"}
           placeholder="user:password"
@@ -207,12 +210,12 @@ export function AuthorityFields({
           checked={draft[ownedSkip] === "true"}
           onChange={(e) => onChange(ownedSkip, e.target.checked ? "true" : "")}
         />
-        管理跳过认证 IP 前缀<HelpTip>勾选且留空会显式清空。每行一条 IP/CIDR。</HelpTip>
+        {t(language, "authManageSkip")}<HelpTip>{t(language, "authManageSkipHelp")}</HelpTip>
       </label>
       <label>
-        跳过认证 IP/CIDR (每行一条)
+        {t(language, "authSkip")}
         <textarea
-          aria-label="跳过认证 IP 前缀"
+          aria-label={t(language, "authSkipAria")}
           value={draft["skip-auth-prefixes"] ?? ""}
           disabled={draft[ownedSkip] !== "true"}
           placeholder="127.0.0.1/32"
@@ -227,12 +230,12 @@ export function AuthorityFields({
           checked={draft[ownedLanAllowed] === "true"}
           onChange={(e) => onChange(ownedLanAllowed, e.target.checked ? "true" : "")}
         />
-        管理局域网允许访问 IP (lan-allowed-ips)
+        {t(language, "authManageLanAllowed")}
       </label>
       <label>
-        局域网允许访问 IP/CIDR (每行一条)
+        {t(language, "authLanAllowed")}
         <textarea
-          aria-label="局域网允许访问 IP"
+          aria-label={t(language, "authLanAllowedAria")}
           value={draft["lan-allowed-ips"] ?? ""}
           disabled={draft[ownedLanAllowed] !== "true"}
           placeholder="192.168.1.0/24"
@@ -247,12 +250,12 @@ export function AuthorityFields({
           checked={draft[ownedLanDisallowed] === "true"}
           onChange={(e) => onChange(ownedLanDisallowed, e.target.checked ? "true" : "")}
         />
-        管理局域网拒绝访问 IP (lan-disallowed-ips)
+        {t(language, "authManageLanDisallowed")}
       </label>
       <label>
-        局域网拒绝访问 IP/CIDR (每行一条)
+        {t(language, "authLanDisallowed")}
         <textarea
-          aria-label="局域网拒绝访问 IP"
+          aria-label={t(language, "authLanDisallowedAria")}
           value={draft["lan-disallowed-ips"] ?? ""}
           disabled={draft[ownedLanDisallowed] !== "true"}
           placeholder="192.168.1.100/32"
@@ -262,41 +265,41 @@ export function AuthorityFields({
       </label>
 
       <label>
-        入站 TCP Fast Open (inbound-tfo)
+        {t(language, "authTfo")}
         <select
-          aria-label="入站 TCP Fast Open"
+          aria-label={t(language, "authTfoAria")}
           value={draft["inbound-tfo"] ?? ""}
           onChange={(e) => onChange("inbound-tfo", e.target.value)}
         >
-          <option value="">继承</option>
-          <option value="true">启用</option>
-          <option value="false">禁用</option>
+          <option value="">{t(language, "setInherit")}</option>
+          <option value="true">{t(language, "setEnable")}</option>
+          <option value="false">{t(language, "setDisable")}</option>
         </select>
       </label>
 
       <label>
-        入站 Multipath TCP (inbound-mptcp)
+        {t(language, "authMptcp")}
         <select
-          aria-label="入站 Multipath TCP"
+          aria-label={t(language, "authMptcpAria")}
           value={draft["inbound-mptcp"] ?? ""}
           onChange={(e) => onChange("inbound-mptcp", e.target.value)}
         >
-          <option value="">继承</option>
-          <option value="true">启用</option>
-          <option value="false">禁用</option>
+          <option value="">{t(language, "setInherit")}</option>
+          <option value="true">{t(language, "setEnable")}</option>
+          <option value="false">{t(language, "setDisable")}</option>
         </select>
       </label>
 
       <label>
-        域名嗅探 (sniffing)
+        {t(language, "authSniffing")}
         <select
-          aria-label="域名嗅探"
+          aria-label={t(language, "authSniffingAria")}
           value={draft["sniffing"] ?? ""}
           onChange={(e) => onChange("sniffing", e.target.value)}
         >
-          <option value="">继承</option>
-          <option value="true">启用</option>
-          <option value="false">禁用</option>
+          <option value="">{t(language, "setInherit")}</option>
+          <option value="true">{t(language, "setEnable")}</option>
+          <option value="false">{t(language, "setDisable")}</option>
         </select>
       </label>
     </fieldset></SettingsSection>

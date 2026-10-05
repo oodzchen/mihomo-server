@@ -1,8 +1,10 @@
-import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { LanguageContext, t } from "./i18n";
 
 /** Shared help for mouse, keyboard and touch; stays inside the viewport. */
-export function HelpTip({ children, id, label = "帮助" }: { children: ReactNode; id?: string; label?: string }) {
+export function HelpTip({ children, id, label }: { children: ReactNode; id?: string; label?: string }) {
+  const language = useContext(LanguageContext);
   const generated = useId();
   const tooltipId = `${id ?? generated}-tooltip`;
   const [open, setOpen] = useState(false);
@@ -27,7 +29,7 @@ export function HelpTip({ children, id, label = "帮助" }: { children: ReactNod
     return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
   }, [open]);
   return <span className="help-tip" id={id} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-    <button ref={trigger} type="button" className="help-trigger" aria-label={label} aria-describedby={open ? tooltipId : undefined}
+    <button ref={trigger} type="button" className="help-trigger" aria-label={label ?? t(language, "help")} aria-describedby={open ? tooltipId : undefined}
       onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
       onClick={event => { event.preventDefault(); setOpen(true); }} onKeyDown={event => { if (event.key === "Escape") setOpen(false); }}>?</button>
     {open && createPortal(<span ref={popup} id={tooltipId} role="tooltip" className="help-popup" style={position}>{children}</span>, document.body)}

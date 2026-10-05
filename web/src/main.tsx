@@ -13,7 +13,7 @@ import { CoreUpgradePage } from "./core-upgrade";
 import { ServicePage } from "./service";
 import { RulesPage } from "./rules";
 import { LanguagePicker } from "./language-picker";
-import { connectionLabel, phaseLabel, resolveLanguage, savedLanguage, saveLanguage, t, type Language, type MessageKey } from "./i18n";
+import { connectionLabel, LanguageContext, phaseLabel, resolveLanguage, savedLanguage, saveLanguage, t, type Language, type MessageKey } from "./i18n";
 import type { CoreLog, CoreStatus, EventMessage, Preferences, Profiles } from "./types";
 import { describe } from "./format";
 import { Overview } from "./overview";
@@ -118,11 +118,11 @@ function App() {
     document.title = `Mihomo · ${t(language, "serviceManagement")}`;
   }, [language]);
   if (restoring) return null;
-  return session ? (
+  return <LanguageContext.Provider value={language}>{session ? (
     <ToastProvider language={language}><Manager token={session.token} initial={session.status} logout={logout} language={language} changeLanguage={changeLanguage} /></ToastProvider>
   ) : (
     <Login error={loginError} login={login} language={language} changeLanguage={changeLanguage} />
-  );
+  )}</LanguageContext.Provider>;
 }
 
 function Login({

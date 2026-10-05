@@ -361,6 +361,33 @@ test("browser language selection supports traditional chinese zhtw and persists 
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
 });
 
+test("settings page translates every field, option, help and validation message", async ({ page }) => {
+  await loginSettings(page);
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  const editor = page.getByRole("region", { name: "Service settings editor" });
+  await expect(editor.getByRole("form", { name: "Runtime settings form" })).toBeVisible();
+  await page.locator(".settings-group").evaluateAll(nodes => nodes.forEach(node => (node as HTMLDetailsElement).open = true));
+  for (const name of ["DNS settings source", "TUN settings source"]) await editor.getByRole("combobox", { name, exact: true }).selectOption("true");
+  await expect(editor.getByRole("combobox", { name: "DNS enhanced mode", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Version information" })).toBeVisible();
+  const han = /\p{Script=Han}/u;
+  const texts = await page.locator(".settings-layout").evaluate(root => [
+    ...[...root.querySelectorAll("section:not(:has(.language-picker))")].map(node => (node as HTMLElement).innerText),
+    ...[...root.querySelectorAll("option")].filter(node => !node.closest(".language-picker")).map(node => node.textContent ?? ""),
+    ...[...root.querySelectorAll("[aria-label], [placeholder]")].filter(node => !node.closest(".language-picker"))
+      .flatMap(node => [node.getAttribute("aria-label") ?? "", node.getAttribute("placeholder") ?? ""]),
+  ]);
+  // Neither untranslated Chinese nor a raw message key may be left.
+  expect(texts.filter(text => han.test(text) || /\b(set|geoSet|dl|ob|hostsSet|auth|net)[A-Z]\w+/.test(text))).toEqual([]);
+  await page.getByRole("button", { name: "Mixed port help", exact: true }).hover();
+  await expect(page.getByRole("tooltip")).not.toHaveText(han);
+  await page.getByRole("button", { name: "Runtime settings help", exact: true }).hover();
+  await expect(page.getByRole("tooltip")).toContainText("port 0 means disabled");
+  await editor.getByRole("textbox", { name: "Mixed port", exact: true }).fill("70000");
+  await page.getByRole("button", { name: "Save service settings", exact: true }).click();
+  await expect(editor.getByRole("alert")).toHaveText("Mixed port must be an integer from 0–65535, or empty to inherit.");
+});
+
 test("configuration editor translates without losing an unapplied YAML draft", async ({ page }) => {
   await page.goto(`${base}/config`);
   await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");

@@ -1,64 +1,65 @@
 import { SettingsSection } from "./settings-section";
 import { HelpTip } from "./help-tip";
+import { t, type Language, type MessageKey } from "./i18n";
 type Value = number | boolean | string | string[] | Record<string, unknown>;
 export type Runtime = Record<string, Value | Record<string, Value>>;
 export type Draft = Record<string, string>;
 type Field = {
   key: string;
-  label: string;
+  label: MessageKey;
   kind: "bool" | "string" | "list" | "mtu" | "select" | "policy" | "filter";
   options?: string[];
 };
 const schemas: Record<"dns" | "tun", Field[]> = {
   dns: [
-    { key: "enable", label: "DNS 启用", kind: "bool" },
-    { key: "ipv6", label: "DNS IPv6", kind: "bool" },
-    { key: "use-hosts", label: "DNS 使用 hosts", kind: "bool" },
-    { key: "use-system-hosts", label: "DNS 使用系统 hosts", kind: "bool" },
-    { key: "listen", label: "DNS 监听地址", kind: "string" },
+    { key: "enable", label: "netDnsEnable", kind: "bool" },
+    { key: "ipv6", label: "netDnsIpv6", kind: "bool" },
+    { key: "use-hosts", label: "netDnsUseHosts", kind: "bool" },
+    { key: "use-system-hosts", label: "netDnsUseSystemHosts", kind: "bool" },
+    { key: "listen", label: "netDnsListen", kind: "string" },
     {
       key: "enhanced-mode",
-      label: "DNS 增强模式",
+      label: "netDnsEnhancedMode",
       kind: "select",
       options: ["fake-ip", "redir-host"],
     },
     {
       key: "fake-ip-filter-mode",
-      label: "DNS Fake-IP 过滤模式",
+      label: "netDnsFakeIpFilterMode",
       kind: "select",
       options: ["blacklist", "whitelist"],
     },
-    { key: "prefer-h3", label: "DNS 优先 HTTP/3", kind: "bool" },
-    { key: "respect-rules", label: "DNS 遵循代理规则", kind: "bool" },
-    { key: "fake-ip-range", label: "DNS Fake-IP IPv4 范围", kind: "string" },
-    { key: "fake-ip-range6", label: "DNS Fake-IP IPv6 范围", kind: "string" },
-    { key: "default-nameserver", label: "DNS 默认解析服务器", kind: "list" },
-    { key: "nameserver", label: "DNS 解析服务器", kind: "list" },
-    { key: "fallback", label: "DNS 后备解析服务器", kind: "list" },
-    { key: "proxy-server-nameserver", label: "DNS 代理节点解析服务器", kind: "list" },
-    { key: "direct-nameserver", label: "DNS 直连解析服务器", kind: "list" },
-    { key: "direct-nameserver-follow-policy", label: "DNS 直连遵循策略", kind: "bool" },
-    { key: "nameserver-policy", label: "DNS 域名解析策略", kind: "policy" },
-    { key: "proxy-server-nameserver-policy", label: "DNS 代理节点解析策略", kind: "policy" },
-    { key: "fallback-filter", label: "DNS 后备过滤条件", kind: "filter" },
-    { key: "fake-ip-filter", label: "DNS Fake-IP 过滤列表", kind: "list" },
+    { key: "prefer-h3", label: "netDnsPreferH3", kind: "bool" },
+    { key: "respect-rules", label: "netDnsRespectRules", kind: "bool" },
+    { key: "fake-ip-range", label: "netDnsFakeIpRange", kind: "string" },
+    { key: "fake-ip-range6", label: "netDnsFakeIpRange6", kind: "string" },
+    { key: "default-nameserver", label: "netDnsDefaultNameserver", kind: "list" },
+    { key: "nameserver", label: "netDnsNameserver", kind: "list" },
+    { key: "fallback", label: "netDnsFallback", kind: "list" },
+    { key: "proxy-server-nameserver", label: "netDnsProxyServerNameserver", kind: "list" },
+    { key: "direct-nameserver", label: "netDnsDirectNameserver", kind: "list" },
+    { key: "direct-nameserver-follow-policy", label: "netDnsDirectFollowPolicy", kind: "bool" },
+    { key: "nameserver-policy", label: "netDnsNameserverPolicy", kind: "policy" },
+    { key: "proxy-server-nameserver-policy", label: "netDnsProxyServerNameserverPolicy", kind: "policy" },
+    { key: "fallback-filter", label: "netDnsFallbackFilter", kind: "filter" },
+    { key: "fake-ip-filter", label: "netDnsFakeIpFilter", kind: "list" },
   ],
   tun: [
-    { key: "enable", label: "TUN 启用", kind: "bool" },
+    { key: "enable", label: "netTunEnable", kind: "bool" },
     {
       key: "stack",
-      label: "TUN 协议栈",
+      label: "netTunStack",
       kind: "select",
       options: ["gvisor", "system", "mixed"],
     },
-    { key: "device", label: "TUN 设备名称", kind: "string" },
-    { key: "auto-route", label: "TUN 自动路由", kind: "bool" },
-    { key: "auto-redirect", label: "TUN 自动重定向", kind: "bool" },
-    { key: "auto-detect-interface", label: "TUN 自动检测接口", kind: "bool" },
-    { key: "strict-route", label: "TUN 严格路由", kind: "bool" },
-    { key: "mtu", label: "TUN MTU", kind: "mtu" },
-    { key: "route-exclude-address", label: "TUN 排除路由地址", kind: "list" },
-    { key: "dns-hijack", label: "TUN DNS 劫持列表", kind: "list" },
+    { key: "device", label: "netTunDevice", kind: "string" },
+    { key: "auto-route", label: "netTunAutoRoute", kind: "bool" },
+    { key: "auto-redirect", label: "netTunAutoRedirect", kind: "bool" },
+    { key: "auto-detect-interface", label: "netTunAutoDetectInterface", kind: "bool" },
+    { key: "strict-route", label: "netTunStrictRoute", kind: "bool" },
+    { key: "mtu", label: "netTunMtu", kind: "mtu" },
+    { key: "route-exclude-address", label: "netTunRouteExclude", kind: "list" },
+    { key: "dns-hijack", label: "netTunDnsHijack", kind: "list" },
   ],
 };
 
@@ -81,16 +82,14 @@ function validFilter(value: unknown): boolean {
   );
 }
 
-export function validateNetwork(section: "dns" | "tun", value: unknown) {
+export function validateNetwork(section: "dns" | "tun", value: unknown, language: Language) {
   if (value == null) return;
   if (typeof value !== "object" || Array.isArray(value))
-    throw new Error(`服务返回的 ${section} 设置无效。`);
+    throw new Error(t(language, "netSectionInvalid", { section }));
   for (const [key, v] of Object.entries(value)) {
     const f = schemas[section].find((f) => f.key === key);
     if (!f)
-      throw new Error(
-        `服务包含暂不支持的设置 ${section}.${key}，请勿用此编辑器覆盖。`,
-      );
+      throw new Error(t(language, "setUnsupported", { key: `${section}.${key}` }));
     if (v == null) continue;
     const valid =
       f.kind === "bool"
@@ -109,7 +108,7 @@ export function validateNetwork(section: "dns" | "tun", value: unknown) {
             : typeof v === "string" &&
               (f.kind !== "select" || f.options!.includes(v)) &&
               (section !== "tun" || key !== "device" || v.length > 0);
-    if (!valid) throw new Error(`服务返回的${f.label}值无效。`);
+    if (!valid) throw new Error(t(language, "setServiceInvalidValue", { label: t(language, f.label) }));
   }
 }
 export function networkDraft(runtime: Runtime): Draft {
@@ -127,7 +126,7 @@ export function networkDraft(runtime: Runtime): Draft {
   }
   return draft;
 }
-export function networkRuntime(draft: Draft): Runtime {
+export function networkRuntime(draft: Draft, language: Language): Runtime {
   const result: Runtime = {};
   for (const section of ["dns", "tun"] as const) {
     if (draft[section] !== "true") continue;
@@ -147,23 +146,21 @@ export function networkRuntime(draft: Draft): Runtime {
             value[f.key] = parsed as Value;
           } catch {
             throw new Error(
-              f.kind === "list"
-                ? `${f.label}必须是 JSON 字符串列表，例如 ["1.1.1.1"]；留空继承，[] 表示空列表。`
-                : `${f.label}必须是有效的 JSON 对象；留空继承。`,
+              t(language, f.kind === "list" ? "netListError" : "netObjectError", { label: t(language, f.label) }),
             );
           }
         } else if (f.kind === "mtu") {
           if (!/^\d+$/.test(v) || Number(v) < 1 || Number(v) > 65535)
-            throw new Error("TUN MTU 必须是 1–65535 的整数，或留空继承。");
+            throw new Error(t(language, "netMtuError"));
           value[f.key] = Number(v);
         } else {
           const allowed = f.kind === "bool" ? ["true", "false"] : f.options!;
-          if (!allowed.includes(v)) throw new Error(`${f.label}值无效。`);
+          if (!allowed.includes(v)) throw new Error(t(language, "setInvalidValue", { label: t(language, f.label) }));
           value[f.key] = f.kind === "bool" ? v === "true" : v;
         }
       }
     }
-    validateNetwork(section, value);
+    validateNetwork(section, value, language);
     result[section] = value;
   }
   return result;
@@ -173,29 +170,29 @@ export function NetworkFields({
   draft,
   disabled,
   change,
+  language,
 }: {
   draft: Draft;
   disabled: boolean;
   change: (key: string, value: string) => void;
+  language: Language;
 }) {
   return (
     <>
       {(["dns", "tun"] as const).map((section) => (
-        <SettingsSection key={section} title={`${section.toUpperCase()} 设置`}><fieldset className="network-fields" disabled={disabled}>
-          <legend>{section.toUpperCase()} 设置 <HelpTip>
-            {section === "dns"
-              ? "两个 hosts 开关的禁用会显式覆盖；其他 DNS 禁用项、空字符串和空列表仅保存并继承订阅值。DNS 和 hosts 设置需要当前订阅允许 DNS 覆盖。"
-              : "TUN 的禁用和空列表会显式覆盖订阅值。自动重定向仅支持 Linux；实际启用需要服务主机权限和网络条件。"}
+        <SettingsSection key={section} title={t(language, "netSectionTitle", { section: section.toUpperCase() })}><fieldset className="network-fields" disabled={disabled}>
+          <legend>{t(language, "netSectionTitle", { section: section.toUpperCase() })} <HelpTip>
+            {t(language, section === "dns" ? "netDnsHelp" : "netTunHelp")}
           </HelpTip></legend>
           <label>
-            {section.toUpperCase()} 设置来源
+            {t(language, "netSource", { section: section.toUpperCase() })}
             <select
-              aria-label={`${section.toUpperCase()} 设置来源`}
+              aria-label={t(language, "netSource", { section: section.toUpperCase() })}
               value={draft[section] ?? ""}
               onChange={(e) => change(section, e.target.value)}
             >
-              <option value="">继承整个配置段</option>
-              <option value="true">使用本页设置</option>
+              <option value="">{t(language, "netInheritSection")}</option>
+              <option value="true">{t(language, "netUseLocal")}</option>
             </select>
           </label>
           {draft[section] === "true" && (
@@ -206,32 +203,32 @@ export function NetworkFields({
                   <div key={key}>
                     {f.kind === "string" && (
                       <label>
-                        {f.label}来源
+                        {t(language, "netFieldSource", { label: t(language, f.label) })}
                         <select
-                          aria-label={`${f.label}来源`}
+                          aria-label={t(language, "netFieldSource", { label: t(language, f.label) })}
                           value={draft[`${key}.present`] ?? ""}
                           onChange={(e) =>
                             change(`${key}.present`, e.target.value)
                           }
                         >
-                          <option value="">继承</option>
-                          <option value="true">指定值</option>
+                          <option value="">{t(language, "setInherit")}</option>
+                          <option value="true">{t(language, "netSpecified")}</option>
                         </select>
                       </label>
                     )}
                     <label>
-                      {f.label}
+                      {t(language, f.label)}
                       {f.kind === "list" || f.kind === "policy" || f.kind === "filter" ? (
                         <textarea
-                          aria-label={f.label}
+                          aria-label={t(language, f.label)}
                           rows={3}
                           value={draft[key] ?? ""}
-                          placeholder={f.kind === "list" ? "留空继承，或输入 JSON 列表 []" : "留空继承，或输入 JSON 对象 {}"}
+                          placeholder={t(language, f.kind === "list" ? "netListPlaceholder" : "netObjectPlaceholder")}
                           onChange={(e) => change(key, e.target.value)}
                         />
                       ) : f.kind === "string" || f.kind === "mtu" ? (
                         <input
-                          aria-label={f.label}
+                          aria-label={t(language, f.label)}
                           inputMode={f.kind === "mtu" ? "numeric" : undefined}
                           disabled={
                             disabled ||
@@ -239,25 +236,25 @@ export function NetworkFields({
                               draft[`${key}.present`] !== "true")
                           }
                           value={draft[key] ?? ""}
-                          placeholder="留空继承"
+                          placeholder={t(language, "setEmptyInherits")}
                           onChange={(e) => change(key, e.target.value)}
                         />
                       ) : (
                         <select
-                          aria-label={f.label}
+                          aria-label={t(language, f.label)}
                           value={draft[key] ?? ""}
                           onChange={(e) => change(key, e.target.value)}
                         >
-                          <option value="">继承</option>
+                          <option value="">{t(language, "setInherit")}</option>
                           {(f.kind === "bool"
                             ? ["true", "false"]
                             : f.options!
                           ).map((v) => (
                             <option key={v} value={v}>
                               {v === "true"
-                                ? "启用"
+                                ? t(language, "setEnable")
                                 : v === "false"
-                                  ? "禁用"
+                                  ? t(language, "setDisable")
                                   : v}
                             </option>
                           ))}

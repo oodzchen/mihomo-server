@@ -4,14 +4,17 @@ import type { Connection } from "./api";
 import { SettingsReadback } from "./settings-readback";
 import type { CoreStatus } from "./types";
 import type { Runtime, Draft } from "./network-settings";
+import { t, type Language, type MessageKey } from "./i18n";
 
+// Option labels that are message keys are translated; the rest are shown as is.
 const scalars = [
-  { key: "geodata-mode", label: "Geo 数据模式", values: [["true", "DAT"], ["false", "MMDB"]] },
-  { key: "geodata-loader", label: "Geo 加载器", values: [["standard", "standard"], ["memconservative", "memconservative"]] },
-  { key: "geosite-matcher", label: "GeoSite 匹配器", values: [["succinct", "succinct"], ["mph", "mph"]] },
-  { key: "geo-auto-update", label: "Geo 自动更新", values: [["true", "启用"], ["false", "禁用"]] },
+  { key: "geodata-mode", label: "geoSetDataMode", values: [["true", "DAT"], ["false", "MMDB"]] },
+  { key: "geodata-loader", label: "geoSetLoader", values: [["standard", "standard"], ["memconservative", "memconservative"]] },
+  { key: "geosite-matcher", label: "geoSetMatcher", values: [["succinct", "succinct"], ["mph", "mph"]] },
+  { key: "geo-auto-update", label: "geoSetAutoUpdate", values: [["true", "setEnable"], ["false", "setDisable"]] },
 ] as const;
-const urls = [["geoip", "GeoIP 下载地址"], ["geosite", "GeoSite 下载地址"], ["mmdb", "MMDB 下载地址"], ["asn", "ASN 下载地址"]] as const;
+const translated = new Set<string>(["setEnable", "setDisable"]);
+const urls = [["geoip", "geoSetUrlGeoip"], ["geosite", "geoSetUrlGeosite"], ["mmdb", "geoSetUrlMmdb"], ["asn", "geoSetUrlAsn"]] as const;
 export const GEO_KEYS = new Set(["geodata-mode", "geodata-loader", "geosite-matcher", "geo-auto-update", "geo-update-interval", "geox-url"]);
 function validUrl(value: string) {
   if (!value || new TextEncoder().encode(value).length > 8192 || /\s|[\x00-\x1f\x7f-\x9f]/.test(value) || value.includes("#")) return false;
@@ -20,21 +23,21 @@ function validUrl(value: string) {
     return ["http:", "https:"].includes(url.protocol) && !!url.hostname && !url.username && !url.password;
   } catch { return false; }
 }
-export function validateGeo(runtime: Runtime) {
+export function validateGeo(runtime: Runtime, language: Language) {
   for (const f of scalars) {
     const value = runtime[f.key];
     if (value == null) continue;
     const boolean = f.key === "geodata-mode" || f.key === "geo-auto-update";
-    if (boolean ? typeof value !== "boolean" : typeof value !== "string" || !f.values.some(([v]) => v === value)) throw new Error(`${f.label}值无效。`);
+    if (boolean ? typeof value !== "boolean" : typeof value !== "string" || !f.values.some(([v]) => v === value)) throw new Error(t(language, "setInvalidValue", { label: t(language, f.label) }));
   }
   const interval = runtime["geo-update-interval"];
-  if (interval != null && (typeof interval !== "number" || !Number.isInteger(interval) || interval < 1 || interval > 8760)) throw new Error("Geo 更新间隔必须是 1–8760 小时的整数，或留空继承。");
+  if (interval != null && (typeof interval !== "number" || !Number.isInteger(interval) || interval < 1 || interval > 8760)) throw new Error(t(language, "geoSetIntervalError"));
   const value = runtime["geox-url"];
   if (value != null) {
-    if (typeof value !== "object" || Array.isArray(value)) throw new Error("Geo 下载地址设置无效。");
+    if (typeof value !== "object" || Array.isArray(value)) throw new Error(t(language, "geoSetUrlsInvalid"));
     for (const [key, url] of Object.entries(value)) {
-      if (!urls.some(([name]) => name === key)) throw new Error(`不支持的 Geo 下载设置 ${key}，请勿覆盖。`);
-      if (url != null && (typeof url !== "string" || !validUrl(url))) throw new Error("Geo 下载地址必须为 HTTP(S) URL，不能含空白、用户名、密码或片段。");
+      if (!urls.some(([name]) => name === key)) throw new Error(t(language, "geoSetUrlUnsupported", { key }));
+      if (url != null && (typeof url !== "string" || !validUrl(url))) throw new Error(t(language, "geoSetUrlError"));
     }
   }
 }
@@ -45,17 +48,17 @@ export function geoDraft(runtime: Runtime): Draft {
   for (const [key] of urls) result[`geox-url.${key}`] = String((runtime["geox-url"] as Record<string, unknown> | undefined)?.[key] ?? "");
   return result;
 }
-export function geoRuntime(draft: Draft): Runtime {
+export function geoRuntime(draft: Draft, language: Language): Runtime {
   const result: Runtime = {};
   for (const f of scalars) {
     const value = draft[f.key] ?? "";
     if (value === "") continue;
-    if (!f.values.some(([option]) => option === value)) throw new Error(`${f.label}值无效。`);
+    if (!f.values.some(([option]) => option === value)) throw new Error(t(language, "setInvalidValue", { label: t(language, f.label) }));
     result[f.key] = f.key === "geodata-mode" || f.key === "geo-auto-update" ? value === "true" : value;
   }
   const interval = draft["geo-update-interval"] ?? "";
   if (interval !== "") {
-    if (!/^\d+$/.test(interval)) throw new Error("Geo 更新间隔必须是 1–8760 小时的整数，或留空继承。");
+    if (!/^\d+$/.test(interval)) throw new Error(t(language, "geoSetIntervalError"));
     result["geo-update-interval"] = Number(interval);
   }
   if (draft["geox-url"] === "true") {
@@ -63,20 +66,20 @@ export function geoRuntime(draft: Draft): Runtime {
     for (const [key] of urls) if (draft[`geox-url.${key}`]) value[key] = draft[`geox-url.${key}`];
     result["geox-url"] = value;
   }
-  validateGeo(result);
+  validateGeo(result, language);
   return result;
 }
-export function GeoFields({ draft, disabled, change }: { draft: Draft; disabled: boolean; change: (key: string, value: string) => void }) {
-  return <SettingsSection title="Geo 设置"><fieldset className="network-fields" disabled={disabled}>
-    <legend>Geo 设置 <HelpTip>留空或继承时保留订阅值。更新间隔单位为小时；启用自动更新后由 Mihomo 自行下载，不提供服务侧更新回滚。模式切换不保证所需数据库已准备好。</HelpTip></legend>
+export function GeoFields({ draft, disabled, change, language }: { draft: Draft; disabled: boolean; change: (key: string, value: string) => void; language: Language }) {
+  return <SettingsSection title={t(language, "geoSetTitle")}><fieldset className="network-fields" disabled={disabled}>
+    <legend>{t(language, "geoSetTitle")} <HelpTip>{t(language, "geoSetHelp")}</HelpTip></legend>
     <div className="settings-fields">
-      {scalars.map(f => <label key={f.key}>{f.label}<select aria-label={f.label} value={draft[f.key] ?? ""} onChange={event => change(f.key, event.target.value)}>
-        <option value="">继承</option>{f.values.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+      {scalars.map(f => <label key={f.key}>{t(language, f.label)}<select aria-label={t(language, f.label)} value={draft[f.key] ?? ""} onChange={event => change(f.key, event.target.value)}>
+        <option value="">{t(language, "setInherit")}</option>{f.values.map(([v, label]) => <option key={v} value={v}>{translated.has(label) ? t(language, label as MessageKey) : label}</option>)}
       </select></label>)}
-      <label>Geo 更新间隔（小时）<input aria-label="Geo 更新间隔（小时）" inputMode="numeric" placeholder="留空继承" value={draft["geo-update-interval"] ?? ""} onChange={event => change("geo-update-interval", event.target.value)} /></label>
+      <label>{t(language, "geoSetInterval")}<input aria-label={t(language, "geoSetInterval")} inputMode="numeric" placeholder={t(language, "setEmptyInherits")} value={draft["geo-update-interval"] ?? ""} onChange={event => change("geo-update-interval", event.target.value)} /></label>
     </div>
-    <label><input type="checkbox" checked={draft["geox-url"] === "true"} onChange={event => change("geox-url", event.target.checked ? "true" : "")} />管理 Geo 下载地址</label>
-    <div className="settings-fields">{urls.map(([key, label]) => <label key={key}>{label}<input aria-label={label} disabled={draft["geox-url"] !== "true"} placeholder="留空继承此地址" value={draft[`geox-url.${key}`] ?? ""} onChange={event => change(`geox-url.${key}`, event.target.value)} /></label>)}</div>
+    <label><input type="checkbox" checked={draft["geox-url"] === "true"} onChange={event => change("geox-url", event.target.checked ? "true" : "")} />{t(language, "geoSetManageUrls")}</label>
+    <div className="settings-fields">{urls.map(([key, label]) => <label key={key}>{t(language, label)}<input aria-label={t(language, label)} disabled={draft["geox-url"] !== "true"} placeholder={t(language, "geoSetUrlPlaceholder")} value={draft[`geox-url.${key}`] ?? ""} onChange={event => change(`geox-url.${key}`, event.target.value)} /></label>)}</div>
   </fieldset></SettingsSection>;
 }
 
