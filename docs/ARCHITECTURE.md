@@ -229,6 +229,16 @@ instance's preference on the next connection if the instance has none.
 Without either it uses the system locale. An unreadable preferences file is ignored
 (and replaced on the next change) rather than stopping the service.
 
+Update checks are remembered the same way in `<data-dir>/update-checks.json`:
+`core_release`/`alpha_core_release` (latest) and `service_release` record the
+found version with the version installed at that moment, and `update_checks`
+reads them. The `/core` and `/service` pages show one button, `检查更新` /
+"Check for updates", which becomes `更新至 <version>` while a recorded check found
+a version other than the installed one, so the offer survives reloads and
+service restarts. A record whose installed version no longer matches says
+nothing about updates; the next check replaces it. Failing to save a record
+never fails the check itself.
+
 ## Resources, downloads and backups
 
 Geo files and provider caches live below the managed data/resource roots. Their

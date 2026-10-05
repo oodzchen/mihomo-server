@@ -4,6 +4,7 @@ import { describe } from "./format";
 import { HelpTip } from "./help-tip";
 import { t, type Language } from "./i18n";
 import { useToast, type ToastOperation } from "./toast";
+import type { UpdateChecks } from "./types";
 
 type ServiceInfo = {
   version: string;
@@ -42,7 +43,7 @@ export function ServicePage({
 }) {
   const notify = useToast();
   const [info, setInfo] = useState<ServiceInfo>();
-  const [latest, setLatest] = useState<string>();
+  const [check, setCheck] = useState<UpdateChecks["service"]>(null);
   const [checking, setChecking] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [operation, setOperation] = useState<Operation>();
@@ -62,6 +63,17 @@ export function ServicePage({
       });
     return () => controller.abort();
   }, [token, connection, refresh, logout, language]);
+
+  useEffect(() => {
+    if (connection !== "connected") return;
+    const controller = new AbortController();
+    command<UpdateChecks>(token, "update_checks", {}, controller.signal)
+      .then((checks) => setCheck(checks.service))
+      .catch(() => {
+        // Without a record the page simply offers a new check.
+      });
+    return () => controller.abort();
+  }, [token, connection]);
 
   const running = info?.upgrade.state === "activating";
   useEffect(() => {
@@ -133,10 +145,13 @@ export function ServicePage({
     }
   }
 
-  async function check() {
+  async function checkRelease() {
+    if (!info) return;
     setChecking(true);
     try {
-      setLatest(await command<string>(token, "service_release"));
+      const latest = await command<string>(token, "service_release");
+      // The service records the same check for later visits.
+      setCheck({ installed: info.release, latest });
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) logout(t(language, "expiredToken"));
       else notify(describe(error), "error");
@@ -148,7 +163,11 @@ export function ServicePage({
   const connected = connection === "connected";
   const idle = connected && !busy && !operation;
   const upgrade = info?.upgrade;
-  const upToDate = latest !== undefined && latest === info?.release;
+  // A check taken before this program changed says nothing about it,
+  // unless it found exactly the release installed since.
+  const release = info?.release ?? null;
+  const known = info && check && (check.installed === release || check.latest === release) ? check : undefined;
+  const available = known && known.installed === release && known.latest !== release ? known.latest : undefined;
   // Logs in through the fragment, which browsers never send to the server.
   const dashboard = `${location.origin}/#token=${encodeURIComponent(token)}`;
   return (
@@ -219,7 +238,13 @@ export function ServicePage({
           </div>
           <div>
             <dt>{t(language, "serviceLatest")}</dt>
-            <dd className="mono">{latest ?? t(language, "serviceNotChecked")}</dd>
+            <dd className="mono">
+              {!known
+                ? t(language, "serviceNotChecked")
+                : known.latest === release
+                ? t(language, "updateLatestCurrent", { version: known.latest })
+                : known.latest}
+            </dd>
           </div>
           <div>
             <dt>{t(language, "serviceUpgradeState")}</dt>
@@ -249,17 +274,20 @@ export function ServicePage({
           </pre>
         </details>
         <div className="actions">
-          <button type="button" disabled={!idle || checking} onClick={() => void check()}>
-            {t(language, "serviceCheck")}
-          </button>
-          <button
-            type="button"
-            className="primary"
-            disabled={!idle || !upgrade?.available || running || upToDate}
-            onClick={() => void start("upgrade", t(language, "serviceUpgradeConfirm"), t(language, "serviceUpgradeStarted"))}
-          >
-            {upToDate ? t(language, "serviceUpToDate", { version: latest }) : t(language, "serviceUpgrade")}
-          </button>
+          {available ? (
+            <button
+              type="button"
+              className="primary"
+              disabled={!idle || !upgrade?.available || running}
+              onClick={() => void start("upgrade", t(language, "serviceUpgradeConfirm"), t(language, "serviceUpgradeStarted"))}
+            >
+              {t(language, "updateTo", { version: available })}
+            </button>
+          ) : (
+            <button type="button" disabled={!idle || checking || !info} onClick={() => void checkRelease()}>
+              {t(language, "updateCheck")}
+            </button>
+          )}
         </div>
       </section>
 

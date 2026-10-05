@@ -3,6 +3,7 @@ mod assets;
 pub mod auth;
 pub mod http;
 pub mod preferences;
+pub mod update_checks;
 mod websocket;
 
 use crate::core_manager::{CoreManager, CorePhase};
@@ -19,8 +20,10 @@ pub enum ManagementCommand {
     ServiceVersion {},
     /// This program: version, release, systemd unit and update unit state.
     ServiceInfo {},
-    /// Latest published mihomo-server release tag.
+    /// Latest published mihomo-server release tag (recorded as a check).
     ServiceRelease {},
+    /// The latest recorded core and service update checks.
+    UpdateChecks {},
     /// Stop or restart this service (not the core) after answering.
     StopService {},
     RestartService {},
@@ -260,6 +263,7 @@ pub struct Management {
     manager: CoreManager,
     authentication: Authentication,
     preferences: preferences::PreferenceStore,
+    update_checks: update_checks::UpdateCheckStore,
 }
 
 impl Management {
@@ -269,12 +273,48 @@ impl Management {
             manager,
             authentication,
             preferences: preferences::PreferenceStore::in_memory(),
+            update_checks: update_checks::UpdateCheckStore::in_memory(),
         }
     }
 
     pub fn with_preferences(mut self, preferences: preferences::PreferenceStore) -> Self {
         self.preferences = preferences;
         self
+    }
+
+    pub fn with_update_checks(mut self, update_checks: update_checks::UpdateCheckStore) -> Self {
+        self.update_checks = update_checks;
+        self
+    }
+
+    /// Records a check for the latest release against the installed core.
+    /// The answer stands even when the record cannot be kept.
+    async fn checked_core_release(
+        &self,
+        version: Option<String>,
+        channel: update_checks::CoreChannel,
+    ) -> Result<crate::core_release::CoreRelease> {
+        let latest = version.is_none();
+        let installed = if latest {
+            self.manager.installed_core_version().await.ok()
+        } else {
+            None
+        };
+        let release = match channel {
+            update_checks::CoreChannel::Stable => self.manager.core_release(version).await?,
+            update_checks::CoreChannel::Alpha => self.manager.alpha_core_release(version).await?,
+        };
+        if let Some(installed) = installed {
+            let check = update_checks::CoreCheck {
+                channel,
+                installed,
+                latest: release.version.clone(),
+            };
+            if let Err(error) = self.update_checks.record_core(check).await {
+                eprintln!("cannot record core update check: {error:#}");
+            }
+        }
+        Ok(release)
     }
 
     pub fn authorize(&self, credentials: RequestCredentials<'_>) -> Result<()> {
@@ -301,15 +341,17 @@ impl Management {
                 enabled,
                 confirmation,
             } => serde_json::to_value(self.manager.set_profile_dns(uid, enabled, confirmation).await?)?,
-            ManagementCommand::CoreRelease { version } => {
-                serde_json::to_value(self.manager.core_release(version).await?)?
-            }
+            ManagementCommand::CoreRelease { version } => serde_json::to_value(
+                self.checked_core_release(version, update_checks::CoreChannel::Stable)
+                    .await?,
+            )?,
             ManagementCommand::PrepareCoreUpgrade { version } => {
                 serde_json::to_value(self.manager.prepare_core_upgrade(version).await?)?
             }
-            ManagementCommand::AlphaCoreRelease { version } => {
-                serde_json::to_value(self.manager.alpha_core_release(version).await?)?
-            }
+            ManagementCommand::AlphaCoreRelease { version } => serde_json::to_value(
+                self.checked_core_release(version, update_checks::CoreChannel::Alpha)
+                    .await?,
+            )?,
             ManagementCommand::PrepareAlphaCoreUpgrade { version } => {
                 serde_json::to_value(self.manager.prepare_alpha_core_upgrade(version).await?)?
             }
@@ -348,7 +390,18 @@ impl Management {
             ManagementCommand::ServiceInfo {} => {
                 serde_json::to_value(tokio::task::spawn_blocking(crate::service_control::info).await?)?
             }
-            ManagementCommand::ServiceRelease {} => serde_json::to_value(self.manager.latest_service_release().await?)?,
+            ManagementCommand::ServiceRelease {} => {
+                let latest = self.manager.latest_service_release().await?;
+                let check = update_checks::ServiceCheck {
+                    installed: crate::cli::system::installed_release(),
+                    latest: latest.clone(),
+                };
+                if let Err(error) = self.update_checks.record_service(check).await {
+                    eprintln!("cannot record service update check: {error:#}");
+                }
+                serde_json::to_value(latest)?
+            }
+            ManagementCommand::UpdateChecks {} => serde_json::to_value(self.update_checks.get().await)?,
             ManagementCommand::StopService {} => {
                 tokio::task::spawn_blocking(|| crate::service_control::schedule(crate::service_control::Action::Stop))
                     .await??;

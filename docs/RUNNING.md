@@ -2041,10 +2041,10 @@ after download. Once admitted to the actor, switching continues after browser
 disconnect; queued switching can be skipped if its caller has already gone away.
 Shutdown cancels network work and uses the existing switch rollback/reaping path.
 
-The page disables duplicate actions, confirms force reinstall, clears obsolete
-results before retry, refreshes installed information after success or failure,
-and rereads it after reconnection/navigation. Upgrade failure remains visible;
-refresh installation information and retry after addressing the reported error.
+The page disables duplicate actions, clears obsolete results before retry,
+refreshes installed information after success or failure, and rereads it after
+reconnection/navigation. Upgrade failure remains visible; retry after addressing
+the reported error.
 An unmanaged `--mihomo` service shows that online upgrading requires a bundle.
 
 This increment supports stable Linux x86_64 ordinary managed executables, including
@@ -2212,13 +2212,23 @@ core and receipt; forced reinstall performs fresh validation and replacement.
 Running/stopped semantics, rollback, cancellation and receipt recovery apply to
 both channels. Switching back to stable uses `upgrade_clash_core`.
 
-On `/core`, choose `稳定版` or `Alpha` under `升级通道`, then check, upgrade or
-force reinstall. Force prompts name the chosen channel. Switching channels clears
-old query/results, and a request locks the selector. Readback always reports the
-actual installed core, even when it differs from the selected upgrade channel.
-A new page session defaults to stable; the choice does not rewrite settings.
-Reconnect and `刷新安装信息` recheck installed version/receipt. Failed upgrades
-can be retried; `未知（需要修复）` remains upgradeable in either channel.
+On `/core`, choose `稳定版` or `Alpha` under `升级通道`. The panel has a single
+button: `检查更新` until a check finds a version other than the installed one,
+then `更新至 <version>`, which upgrades through that channel (never forced). A
+check belongs to its channel, and a request locks the selector. Readback always
+reports the actual installed core, even when it differs from the selected
+upgrade channel. A new page session starts on the channel of the recorded check
+(stable without one); the choice does not rewrite settings. Reconnecting rechecks
+installed version/receipt. Failed upgrades can be retried; a check from
+`未知（需要修复）` always offers the update, which repairs it.
+
+`core_release`/`alpha_core_release` without `version`, and `service_release`,
+record their answer together with the version installed at that moment in
+`<data-dir>/update-checks.json`; `{"command":"update_checks"}` reads it back as
+`{"core":{"channel","installed","latest"}|null,"service":{"installed","latest"}|null}`.
+The `/core` and `/service` pages offer a recorded update after reloads and
+service restarts, as long as the recorded installed version is still the
+installed one. Forced reinstalls remain available through the API and CLI.
 
 Browser regressions accept `MIHOMO_TEST_ALPHA_BINARY` pointing to a verified Alpha
 executable, together with `MIHOMO_TEST_BUNDLE`. Without that explicit local fixture,

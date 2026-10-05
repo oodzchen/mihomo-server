@@ -3,7 +3,7 @@
 //! affect the core or its configuration.
 use crate::secure_fs::{create_private, sync_directory};
 use anyhow::{Context as _, Result, ensure};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     fs,
     io::{Read as _, Write as _},
@@ -48,7 +48,7 @@ impl PreferenceStore {
     /// An unreadable or invalid file is reported and replaced on the next
     /// change: a presentation preference must never keep the service down.
     pub fn load(path: PathBuf) -> Self {
-        let preferences = match read(&path) {
+        let preferences = match read_json(&path, "preferences") {
             Ok(preferences) => preferences,
             Err(error) => {
                 eprintln!("ignoring preferences {}: {error:#}", path.display());
@@ -83,40 +83,41 @@ impl PreferenceStore {
         if let Some(path) = &self.path {
             let path = path.clone();
             let saved = next.clone();
-            tokio::task::spawn_blocking(move || write(&path, &saved)).await??;
+            tokio::task::spawn_blocking(move || write_json(&path, &saved, "preferences")).await??;
         }
         self.current.send_replace(next.clone());
         Ok(next)
     }
 }
 
-fn read(path: &Path) -> Result<Preferences> {
+/// A small private JSON state file; a missing one is the default value.
+pub(super) fn read_json<T: DeserializeOwned + Default>(path: &Path, name: &str) -> Result<T> {
     let file = match fs::File::open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Preferences::default()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(T::default()),
         Err(error) => return Err(error.into()),
     };
     ensure!(
         !fs::symlink_metadata(path)?.file_type().is_symlink(),
-        "preferences must not be a symlink"
+        "{name} must not be a symlink"
     );
     let mut text = String::new();
     file.take(MAX_BYTES + 1).read_to_string(&mut text)?;
-    ensure!(text.len() as u64 <= MAX_BYTES, "preferences exceed {MAX_BYTES} bytes");
-    serde_json::from_str(&text).context("invalid preferences")
+    ensure!(text.len() as u64 <= MAX_BYTES, "{name} exceed {MAX_BYTES} bytes");
+    serde_json::from_str(&text).with_context(|| format!("invalid {name}"))
 }
 
 /// Atomic replacement: a private temporary file renamed over the old one.
-fn write(path: &Path, preferences: &Preferences) -> Result<()> {
-    let directory = path.parent().context("preferences directory")?;
+pub(super) fn write_json<T: Serialize>(path: &Path, value: &T, name: &str) -> Result<()> {
+    let directory = path.parent().with_context(|| format!("{name} directory"))?;
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
     let temp = path.with_extension(format!("json.{nanos}.tmp"));
     let result = (|| -> Result<()> {
-        let mut file = create_private(&temp).context("create preferences file")?;
-        file.write_all(serde_json::to_string_pretty(preferences)?.as_bytes())?;
+        let mut file = create_private(&temp).with_context(|| format!("create {name} file"))?;
+        file.write_all(serde_json::to_string_pretty(value)?.as_bytes())?;
         file.write_all(b"\n")?;
         file.sync_all()?;
         fs::rename(&temp, path)?;
