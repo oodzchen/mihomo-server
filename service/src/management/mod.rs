@@ -98,6 +98,7 @@ pub enum ManagementCommand {
         timeout: Option<u32>,
     },
     GeoSettings {},
+    UpdateGeo {},
     ConnectionSettings {},
     #[cfg(unix)]
     GeoSeed {
@@ -473,6 +474,10 @@ impl Management {
                 serde_json::to_value(self.manager.connection_settings().await?)?
             }
             ManagementCommand::GeoSettings {} => serde_json::to_value(self.manager.geo_settings().await?)?,
+            ManagementCommand::UpdateGeo {} => {
+                self.manager.update_geo().await?;
+                serde_json::json!({})
+            }
             ManagementCommand::Resources {} => serde_json::to_value(self.manager.resource_inventory().await?)?,
             ManagementCommand::Rules {} => serde_json::to_value(self.manager.rules().await?)?,
             ManagementCommand::RuleProviders {} => serde_json::to_value(self.manager.rule_providers().await?)?,

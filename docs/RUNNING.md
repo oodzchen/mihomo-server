@@ -2595,11 +2595,32 @@ changes/core automatic updates require a fresh check. Controlled Geo download an
 upload remain pending; stopped-core bundle replacement follows below.
 
 
+## Update Geo data
+
+The **Geo / Provider 资源** panel has one **更新数据** button. It sends:
+
+```json
+{"command":"update_geo"}
+```
+
+The service asks the running core to refresh its Geo databases through Mihomo's
+`POST /upgrade/geo`, the same call Clash Verge Rev uses. The core downloads only
+the databases its rules use (for example `geoip.metadb` for `GEOIP` rules in
+MMDB mode), from the `geox-url` sources or Mihomo's defaults when none are set,
+through its own routing, and reloads them without restarting. The command
+needs a running core and returns `{}`; a download error from the core is
+returned as the command error and leaves the old file in place. Files the rules
+never use are not downloaded, so the inventory can list them as missing.
+
+The per-file commands below (`geo_seed`/`install_geo_seed`,
+`geo_online_info`/`update_geo_online`) remain API-only. They need bundle seeds
+or an explicit `geox-url` leaf and are no longer offered in the Web panel.
+
 ## Install a pinned Geo bundle file while the core is stopped
 
 Bundles may declare optional Geo seeds as described in
 [Geo deployment inputs](DEPLOYMENT.md#include-existing-geo-files-for-first-use-initialization).
-The resource page can inspect and explicitly install their MMDB and DAT entries. Bootstrap
+The `geo_seed`/`install_geo_seed` commands inspect and explicitly install their MMDB and DAT entries. Bootstrap
 continues to preserve existing files; deploying a newer bundle alone does not
 overwrite them. Restart the service to load a changed manifest's new pins.
 
@@ -2664,8 +2685,6 @@ The same `geo_seed` and `install_geo_seed` commands above accept `geoip.dat` and
 Then send `install_geo_seed` with `name: "geosite.dat"`, the inspected
 `expected_current_sha256` (or JSON null), `expected_seed_sha256` and
 `accept_metadata_only: false`. Reinspect after any ambiguous or failed result.
-The Web resource panel offers the same read/install buttons; the MMDB-only checkbox
-is hidden for DAT.
 
 DAT installation requires a pinned, nonempty, known-schema candidate with a CN
 group, no empty groups or unknown fields, and group identifiers representable in
@@ -2754,12 +2773,8 @@ interrupts proxy traffic; rule-level classification still needs separate checks.
 Failure or an ambiguous browser response requires a new inspection. The fixed
 Geo staging namespace recovers unpublished candidates at startup.
 
-The **Geo / Provider 资源** panel offers source inspection and stopped/running-core
-online update controls, including an optional digest field, explicit route selector
-and certificate exception checkbox. No source URL or query token is rendered there.
-Existing bundle and read-only validation actions remain
-separate. Real-core validation uses local download fixtures; existing `data` node/
-Geo files are tested through private copies and are never downloaded over.
+Real-core validation uses local download fixtures; existing `data` node/Geo
+files are tested through private copies and are never downloaded over.
 
 ## GeoIP/GeoSite DAT validation and compatibility diagnostics
 
@@ -2812,9 +2827,7 @@ The **Geo / Provider 资源** panel adds **校验 geoip.dat** and **校验 geosi
 for available files, shows structural/unknown-field status, counts, CN absence,
 compatibility limits and the fingerprint. Failed checks, refresh, lifecycle/revision
 changes and disconnect clear stale outcomes; retry is available. Existing MMDB
-checks and stopped-core MMDB installation keep their behavior. Pinned stopped-core
-DAT installation and stopped/running-core online updates are described above;
-P2 provider actions remain pending.
+checks keep their behavior.
 
 An opt-in real-core check uses generated DAT fixtures (including CN), disabled
 external downloads and local HTTP proxy endpoints. It verifies exact/suffix/keyword/

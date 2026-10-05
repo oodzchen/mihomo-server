@@ -11,6 +11,17 @@ impl CoreManager {
         .await
     }
 
+    /// Let the running core refresh the Geo databases its rules use, from its
+    /// own `geox-url` sources (Mihomo defaults when unset) and through its own
+    /// routing, the way Clash Verge Rev does. The core reloads them in place.
+    pub async fn update_geo(&self) -> Result<()> {
+        ensure!(self.status().phase == CorePhase::Running, "core is not running");
+        timeout(Duration::from_secs(120), self.client.upgrade_geo())
+            .await
+            .map_err(|_| anyhow::anyhow!("Geo data update timed out"))?
+            .context("failed to update Geo data")
+    }
+
     #[cfg(unix)]
     pub async fn geo_seed_info(&self, name: String) -> Result<crate::geo::update::SeedInfo> {
         ensure!(!*self.shutdown.borrow(), "service is shutting down");

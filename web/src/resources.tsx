@@ -2,8 +2,6 @@ import { HelpTip } from "./help-tip";
 import { useToast } from "./toast";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, command, type Connection } from "./api";
-import { GeoSeedAction } from "./geo_seed";
-import { GeoOnlineAction } from "./geo_online";
 import { t, type Language, type MessageKey } from "./i18n";
 import type { CoreStatus } from "./types";
 
@@ -99,6 +97,21 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [operating, setOperating] = useState<string>();
+  const [geoUpdating, setGeoUpdating] = useState(false);
+
+  async function updateGeo() {
+    setGeoUpdating(true);
+    try {
+      await command(token, "update_geo");
+      setNotice(t(language, "geoUpdated"), "success");
+      setRefresh(v => v + 1);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) logout(t(language, "expiredToken"));
+      else setNotice(t(language, "geoUpdateFailed", { message: err instanceof Error ? err.message : String(err) }), "error");
+    } finally {
+      setGeoUpdating(false);
+    }
+  }
 
   async function updateProvider(section: string, name: string) {
     setOperating(name);
@@ -200,7 +213,7 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
   function rows(items: Resource[]) {
     return <ul className="resource-list">{items.map(item => <li key={`${item.section}:${item.name}`}>
       <strong>{item.name}</strong> · {item.section === "proxy-providers" ? t(language, "resourceSectionProxy") : item.section === "rule-providers" ? t(language, "resourceSectionRule") : t(language, "resourceSectionGeo")}
-      <p>{(labelKeys[item.state] ? t(language, labelKeys[item.state]) : t(language, "resourceStateUnknown"))}{item.bytes !== null ? t(language, "resourceBytes", { bytes: item.bytes }) : ""}{item.provider_type ? ` · ${item.provider_type}` : ""}</p>
+      <p>{(labelKeys[item.state] ? t(language, labelKeys[item.state]) : t(language, "resourceStateUnknown"))}{item.bytes != null ? t(language, "resourceBytes", { bytes: item.bytes }) : ""}{item.provider_type ? ` · ${item.provider_type}` : ""}</p>
       {modifiedLabel(language, item.modified_unix_seconds) && <p>{modifiedLabel(language, item.modified_unix_seconds)}</p>}
       {item.freshness && item.state === "available" && item.freshness !== "indeterminate" && (
         <p className={freshnessKeys[item.freshness]?.className || "hint"}>
@@ -210,8 +223,6 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
       {item.path && <code>{item.path}</code>}
       {item.section === "geo" && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && item.state === "available" && <button type="button" disabled={!!checking} onClick={() => void validate(item.name)}>{t(language, "resourceValidate", { name: item.name })}</button>}
       {item.section === "geo" && checks[item.name] && <p role={checks[item.name].error ? "alert" : "status"} className={checks[item.name].error ? "alert" : "resource-check"}>{checks[item.name].message}</p>}
-      {item.section === "geo" && value?.bundle_dir && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && <GeoSeedAction name={item.name} token={token} status={status} connection={connection} logout={logout} language={language} installed={message => { setNotice(message); setRefresh(previous => previous + 1); }} />}
-      {item.section === "geo" && ["Country.mmdb", "ASN.mmdb", "geoip.metadb", "geoip.dat", "geosite.dat"].includes(item.name) && <GeoOnlineAction name={item.name} token={token} status={status} connection={connection} logout={logout} language={language} installed={message => { setNotice(message); setRefresh(previous => previous + 1); }} />}
       {item.section === "proxy-providers" && status.phase === "running" && (
         <div className="actions" style={{ marginTop: "0.5rem" }}>
           <button
@@ -258,7 +269,11 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
         <p>{t(language, "resourceCoreEffective")}{!value.geo_update.core_running ? t(language, "resourceCoreNotRunning") : value.geo_update.readback_error ? t(language, "resourceReadFailedRetry") : value.geo_update.effective_enabled === null ? t(language, "resourceCoreNotReported") : enabledLabel(language, value.geo_update.effective_enabled)} · {t(language, "resourceUpdateInterval")}{value.geo_update.core_running && !value.geo_update.readback_error ? intervalLabel(language, value.geo_update.effective_interval_hours) : t(language, "resourceUnconfirmed")}</p>
         {value.geo_update.mismatch && <p className="alert">{t(language, "resourcePolicyMismatch")}</p>}
       </> : <p className="muted">{t(language, "resourcePolicyUnavailable")}</p>}
-      <h3>{t(language, "resourceGeoFiles")}</h3>{rows(value.geo)}
+      <div className="panel-title">
+        <h3>{t(language, "resourceGeoFiles")}</h3>
+        <button type="button" disabled={geoUpdating || status.phase !== "running"} title={status.phase !== "running" ? t(language, "geoUpdateNeedsCore") : undefined} onClick={() => void updateGeo()}>{geoUpdating ? t(language, "geoUpdating") : t(language, "geoUpdate")}</button>
+      </div>
+      {rows(value.geo)}
       <h3>{t(language, "resourceProviderFiles")}</h3>{value.providers.length ? rows(value.providers) : <p className="muted">{t(language, "resourceNoProviders")}</p>}
     </>}
   </section>;
