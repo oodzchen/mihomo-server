@@ -117,7 +117,7 @@ const EN: Strings = Strings {
     profiles: "Subscriptions",
     open_dashboard: "Open dashboard",
     autostart: "Start at login",
-    quit: "Quit",
+    quit: "Quit client",
     timeout: "timeout",
 };
 
@@ -151,7 +151,7 @@ const ZH: Strings = Strings {
     profiles: "订阅",
     open_dashboard: "打开管理程序",
     autostart: "登录时启动",
-    quit: "退出",
+    quit: "退出客户端",
     timeout: "超时",
 };
 
@@ -185,7 +185,7 @@ const ZHTW: Strings = Strings {
     profiles: "訂閱",
     open_dashboard: "開啟管理程式",
     autostart: "登入時啟動",
-    quit: "結束",
+    quit: "結束用戶端",
     timeout: "逾時",
 };
 
