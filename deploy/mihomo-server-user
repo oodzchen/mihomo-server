@@ -175,7 +175,7 @@ wait_ready() {
         if ! systemctl --user is-active --quiet "$UNIT"; then break; fi
         sleep 0.5
     done
-    journalctl --user -u "$UNIT" -o cat -n 20 --no-pager >&2 || true
+    current_log | tail -n 20 >&2 || true
     die "$UNIT failed to reach a running core and authenticated API; check configuration and port conflicts"
 }
 info() {

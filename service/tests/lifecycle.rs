@@ -120,6 +120,10 @@ async fn switching_listener_type_on_the_same_port_recovers_and_occupied_ports_ro
             .await
             .unwrap_err();
         assert!(format!("{error:#}").contains("listener mismatch"), "{error:#}");
+        assert!(
+            format!("{error:#}").contains(&format!("(pid {})", std::process::id())),
+            "{error:#}"
+        );
         assert_eq!(manager.status().phase, CorePhase::Running);
         assert_eq!(manager.status().config_revision, before);
         assert_eq!(manager.client().get_base_config().await?.port, port);

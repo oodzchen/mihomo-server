@@ -1,5 +1,5 @@
 //! Safe proxy connection summary and verification of core-reported listeners.
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail, ensure};
 use mihomo_client::models::BaseConfig;
 use serde_json::{Value, json};
 use serde_yaml_ng::Mapping;
@@ -21,12 +21,93 @@ pub(crate) fn ports(core: &BaseConfig) -> [(&'static str, u16); 5] {
 pub(crate) fn verify_ports(config: &Mapping, core: &BaseConfig) -> Result<()> {
     for (field, actual) in ports(core) {
         let configured = config.get(field).and_then(|value| value.as_u64()).unwrap_or(0);
-        ensure!(
-            configured == u64::from(actual),
-            "{field} listener mismatch: configured {configured}, core reports {actual}; check port conflicts"
-        );
+        if configured == u64::from(actual) {
+            continue;
+        }
+        let hint = u16::try_from(configured)
+            .ok()
+            .filter(|_| actual == 0)
+            .and_then(listener_owner)
+            .map_or_else(
+                || "check port conflicts".to_owned(),
+                |owner| format!("port {configured} is already in use by {owner}"),
+            );
+        bail!("{field} listener mismatch: configured {configured}, core reports {actual}; {hint}");
     }
     Ok(())
+}
+
+/// Describes the process listening on a TCP port, so a failed bind names its
+/// cause. Sockets of other users' processes are listed but not attributable.
+#[cfg(target_os = "linux")]
+fn listener_owner(port: u16) -> Option<String> {
+    let inodes: Vec<String> = ["/proc/net/tcp", "/proc/net/tcp6"]
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .flat_map(|table| listening_inodes(&table, port))
+        .collect();
+    if inodes.is_empty() {
+        return None;
+    }
+    let owner = std::fs::read_dir("/proc").ok()?.flatten().find_map(|entry| {
+        let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
+        let fds = std::fs::read_dir(entry.path().join("fd")).ok()?;
+        fds.flatten()
+            .filter_map(|fd| std::fs::read_link(fd.path()).ok())
+            .any(|target| {
+                let target = target.to_string_lossy();
+                inodes.iter().any(|inode| target == format!("socket:[{inode}]"))
+            })
+            .then(|| {
+                let name = std::fs::read_to_string(entry.path().join("comm")).unwrap_or_default();
+                format!("{} (pid {pid})", name.trim())
+            })
+    });
+    Some(owner.unwrap_or_else(|| "another process".into()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn listener_owner(_port: u16) -> Option<String> {
+    None
+}
+
+/// Socket inodes of `/proc/net/tcp{,6}` rows listening on `port`.
+#[cfg(target_os = "linux")]
+fn listening_inodes(table: &str, port: u16) -> Vec<String> {
+    const LISTEN: &str = "0A";
+    table
+        .lines()
+        .skip(1)
+        .filter_map(|row| {
+            let fields: Vec<_> = row.split_whitespace().collect();
+            let local_port = fields.get(1)?.rsplit_once(':')?.1;
+            (u16::from_str_radix(local_port, 16).ok()? == port && *fields.get(3)? == LISTEN)
+                .then(|| fields.get(9).map(|inode| (*inode).to_owned()))?
+        })
+        .collect()
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn listening_inodes_match_only_listeners_on_the_port() {
+        let table = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:1ED2 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 111 1 0 100 0 0 10 0
+   1: 0100007F:1ED2 0100007F:9C40 01 00000000:00000000 00:00000000 00000000  1000        0 222 1 0 20 4 30 10 -1
+   2: 00000000:1ED3 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 333 1 0 100 0 0 10 0";
+        assert_eq!(listening_inodes(table, 7890), ["111"]);
+        assert!(listening_inodes(table, 7892).is_empty());
+    }
+
+    #[test]
+    fn listener_owner_names_this_process() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let owner = listener_owner(port).unwrap();
+        assert!(owner.ends_with(&format!("(pid {})", std::process::id())), "{owner}");
+    }
 }
 
 pub(crate) async fn inspect(manager: &CoreManager) -> Result<Value> {
