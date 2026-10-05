@@ -104,9 +104,10 @@ export function ServicePage({
   }, [info]);
 
   const log = info?.upgrade.log;
-  useLayoutEffect(() => {
+  const follow = () => {
     if (output.current) output.current.scrollTop = output.current.scrollHeight;
-  }, [log]);
+  };
+  useLayoutEffect(follow, [log]);
 
   async function start(kind: Operation, confirmation: string, working: string) {
     if (pending.current || !window.confirm(confirmation)) return;
@@ -148,6 +149,8 @@ export function ServicePage({
   const idle = connected && !busy && !operation;
   const upgrade = info?.upgrade;
   const upToDate = latest !== undefined && latest === info?.release;
+  // Logs in through the fragment, which browsers never send to the server.
+  const dashboard = `${location.origin}/#token=${encodeURIComponent(token)}`;
   return (
     <>
       <section className="panel" aria-label={t(language, "serviceControl")}>
@@ -182,7 +185,7 @@ export function ServicePage({
             </dd>
           </div>
         </dl>
-        <div className="actions">
+        <div className="actions service-controls">
           <button
             type="button"
             disabled={!idle || !info?.unit}
@@ -236,11 +239,15 @@ export function ServicePage({
             </dd>
           </div>
         </dl>
-        <pre ref={output} className="service-log" aria-label={t(language, "serviceUpgradeOutput")}>
-          {!upgrade || upgrade.available
-            ? log?.length ? log.join("\n") : t(language, "serviceUpgradeNoOutput")
-            : t(language, "serviceUpgradeOutputUnavailable")}
-        </pre>
+        {/* Collapsed by default; only the user's own click changes its height. */}
+        <details className="service-output" onToggle={follow}>
+          <summary>{t(language, "serviceUpgradeOutput")}</summary>
+          <pre ref={output} className="service-log" aria-label={t(language, "serviceUpgradeOutput")}>
+            {!upgrade || upgrade.available
+              ? log?.length ? log.join("\n") : t(language, "serviceUpgradeNoOutput")
+              : t(language, "serviceUpgradeOutputUnavailable")}
+          </pre>
+        </details>
         <div className="actions">
           <button type="button" disabled={!idle || checking} onClick={() => void check()}>
             {t(language, "serviceCheck")}
@@ -255,6 +262,14 @@ export function ServicePage({
           </button>
         </div>
       </section>
+
+      <p className="service-address">
+        <span>{t(language, "serviceWebAddress")}</span>
+        <a href={dashboard} target="_blank" rel="noopener noreferrer" className="mono">
+          {location.origin}/
+        </a>
+        <HelpTip label={t(language, "serviceWebAddress")}>{t(language, "serviceWebAddressHint")}</HelpTip>
+      </p>
     </>
   );
 }

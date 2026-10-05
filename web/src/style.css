@@ -1424,7 +1424,13 @@ dd {
 .help-popup > span { display: block; }
 .help-popup > span + span { margin-top: 6px; }
 /* Fixed height, so new output never moves the page. */
-.service-log { height: 140px; margin: 12px 0 0; padding: 10px 12px; overflow: auto; border-radius: 6px; background: #18181b; color: #e4e4e7; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.service-log { height: 140px; margin: 8px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid #e4e4e7; border-radius: 6px; background: #f4f4f5; color: #3f3f46; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.service-output { margin-top: 12px; }
+.service-output > summary { width: fit-content; color: #52525b; font-size: 12px; cursor: pointer; }
+.service-output > summary:hover { color: #18181b; }
+.service-output + .actions, .service-controls { margin-top: 18px; }
+.service-address { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0; color: #52525b; font-size: 13px; }
+.service-address a { text-decoration: underline; overflow-wrap: anywhere; }
 
 /* Start at login: one switch per program. */
 .autostart-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; font-size: 13px; }

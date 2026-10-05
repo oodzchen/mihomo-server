@@ -5056,12 +5056,24 @@ test("service page controls the foreground service and keeps long help in toolti
   const upgrade = page.getByRole("region", { name: "服务升级" });
   await expect(upgrade.getByText("非共享安装", { exact: true })).toBeVisible();
   await expect(upgrade.getByText("不可用", { exact: true })).toBeVisible();
+  await expect(upgrade.getByLabel("升级输出")).toBeHidden();
   await expect(upgrade.getByLabel("升级输出")).toHaveText("需要共享安装才能在此升级。");
   await expect(upgrade.getByRole("button", { name: "升级至最新版" })).toBeDisabled();
   await expectHelp(page, "服务升级", "升级由系统更新单元以管理员权限完成");
   await expectHelp(page, "不可用", "请在终端运行 mihomo-server update 升级一次。");
   await upgrade.getByRole("button", { name: "检查更新" }).click();
   await expect(upgrade.locator("div").filter({ hasText: "最新版本" }).locator("dd")).toHaveText("v9.9.9");
+
+  // The management address logs a browser straight in through the fragment.
+  const address = page.getByRole("link", { name: `${base}/` });
+  await expect(page.getByText("网页管理地址：")).toBeVisible();
+  await expect(address).toHaveAttribute("href", `${base}/#token=${encodeURIComponent(token)}`);
+  await expect(address).toHaveAttribute("target", "_blank");
+  await expectHelp(page, "网页管理地址：", "链接附带当前登录令牌");
+  const [opened] = await Promise.all([page.context().waitForEvent("page"), address.click()]);
+  await expect(opened.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+  expect(opened.url()).not.toContain("token");
+  await opened.close();
 
   // A dismissed confirmation stops nothing; reloading keeps the page.
   page.once("dialog", dialog => dialog.dismiss());
@@ -5114,6 +5126,12 @@ test("service restart and upgrade report progress without moving the page", asyn
   const output = upgrade.getByLabel("升级输出");
   await expect(control.getByText("mihomo-server.service", { exact: true })).toBeVisible();
   await expect(output).toHaveText("暂无升级输出");
+  // Collapsed by default, and the buttons keep a clear gap below the output.
+  await expect(output).toBeHidden();
+  await upgrade.getByText("升级输出", { exact: true }).click();
+  await expect(output).toBeVisible();
+  const outputBox = (await output.boundingBox())!, buttonsBox = (await upgrade.locator(".actions").boundingBox())!;
+  expect(buttonsBox.y - (outputBox.y + outputBox.height)).toBeGreaterThanOrEqual(16);
 
   page.once("dialog", dialog => dialog.accept());
   await control.getByRole("button", { name: "重启服务" }).click();

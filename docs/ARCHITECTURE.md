@@ -171,7 +171,9 @@ they change or once a minute. Of the WebSocket feeds it uses only
 `/api/streams/preferences`, never `/api/events`, which carries every core log
 line. The management window loads the service origin directly and
 logs in through the URL fragment, so the browser policy (same origin, no CORS)
-is unchanged. That window may call only the client's own start-at-login commands
+is unchanged. It navigates only within that origin; a `target="_blank"` link
+to the same origin (the Service page's tokenized management address) goes to
+the system browser through `xdg-open`, and no other new window opens. That window may call only the client's own start-at-login commands
 (`client_autostart`, `set_client_autostart`, an XDG autostart entry that runs
 `mihomo-server-desktop --hidden`), through a capability added at runtime for
 exactly the service origin it opened. Only the bundled status page may call the

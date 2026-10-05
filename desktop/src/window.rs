@@ -9,6 +9,7 @@ use std::{
 };
 use tauri::{
     AppHandle, Manager as _, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent, ipc::CapabilityBuilder,
+    webview::NewWindowResponse,
 };
 
 const TITLE: &str = "Mihomo Server";
@@ -54,6 +55,21 @@ fn grant_dashboard(app: &AppHandle, origin: &str) {
             granted.insert(origin.to_owned());
         }
         Err(error) => eprintln!("cannot grant the dashboard its commands: {error}"),
+    }
+}
+
+/// Whether a link the management page opens in a new window may go to the
+/// system browser: only pages of the instance it was loaded from.
+fn opens_externally(url: &Url, origin: &str) -> bool {
+    matches!(url.scheme(), "http" | "https") && url.origin().ascii_serialization() == origin
+}
+
+/// Hand URL to the desktop's default browser (the page's "open in browser" link).
+fn open_in_browser(url: &Url) {
+    match std::process::Command::new("xdg-open").arg(url.as_str()).spawn() {
+        // Reap it; xdg-open returns once the browser has the URL.
+        Ok(mut child) => drop(std::thread::spawn(move || child.wait())),
+        Err(error) => eprintln!("cannot open the browser: {error}"),
     }
 }
 
@@ -104,6 +120,7 @@ pub fn open_dashboard(app: &AppHandle) {
     };
     grant_dashboard(app, &origin);
     let allowed = origin.clone();
+    let external = origin.clone();
     let built = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
         .title(TITLE)
         .inner_size(1280.0, 860.0)
@@ -114,6 +131,13 @@ pub fn open_dashboard(app: &AppHandle) {
         // Let the page's own file inputs receive dropped files.
         .disable_drag_drop_handler()
         .on_navigation(move |url| url.origin().ascii_serialization() == allowed)
+        // target="_blank" links open in the browser, never in a client window.
+        .on_new_window(move |url, _| {
+            if opens_externally(&url, &external) {
+                open_in_browser(&url);
+            }
+            NewWindowResponse::Deny
+        })
         .build();
     match built {
         Ok(window) => {
@@ -150,6 +174,20 @@ mod tests {
         assert!(is_bundled(&Url::parse("http://tauri.localhost/index.html").unwrap()));
         assert!(!is_bundled(&Url::parse("http://127.0.0.1:9090/").unwrap()));
         assert!(!is_bundled(&Url::parse("http://tauri.localhost.example/").unwrap()));
+    }
+    #[test]
+    fn only_the_instance_own_pages_open_in_the_browser() {
+        let origin = "http://127.0.0.1:9090";
+        assert!(opens_externally(
+            &Url::parse("http://127.0.0.1:9090/#token=ab").unwrap(),
+            origin
+        ));
+        assert!(!opens_externally(
+            &Url::parse("http://127.0.0.1:9091/").unwrap(),
+            origin
+        ));
+        assert!(!opens_externally(&Url::parse("https://example.com/").unwrap(), origin));
+        assert!(!opens_externally(&Url::parse("file:///etc/passwd").unwrap(), origin));
     }
     #[test]
     fn dashboard_receives_the_desktop_build_version() {
