@@ -57,7 +57,7 @@ fn usage_help_and_version_follow_utility_conventions() -> Result<()> {
     let version = run(&["--version"])?;
     assert_eq!(
         text(&version.stdout).trim(),
-        concat!("mihomo-server ", env!("CARGO_PKG_VERSION"))
+        format!("mihomo-server {}", mihomo_server::VERSION)
     );
 
     // The service keeps its own options, behind `serve`.

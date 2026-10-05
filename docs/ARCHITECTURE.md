@@ -195,6 +195,11 @@ download bar without a terminal and updates that line in place on each carriage
 return, and the installer streams the user activation step line by line instead of
 printing it once it has finished.
 
+Release builds of both the service and the client report the release tag as
+their version: CI sets `MIHOMO_SERVER_VERSION` / `MIHOMO_DESKTOP_VERSION` to the
+tag without its `v` when building, checks `--version` against it, and local
+builds fall back to the Cargo package version.
+
 The client keeps three things apart: itself (versioned on its own), the
 systemd service (`mihomo-server`, started, stopped and restarted through the
 `mihomo-server-user` helper like the command line does) and the Mihomo core
@@ -206,7 +211,9 @@ API's `status` reports the core. The tray uses tray-icon's StatusNotifierItem
 (`ksni`) backend instead of Tauri's default libappindicator, which reports no
 clicks and shows no tooltip: a left click opens the management window (or the
 status page), the menu is on right click, and its header is a single line of
-service state. Details go to the tooltip, and failures are also sent as desktop
+service state. Its last two items restart and quit the client; restarting runs
+the binary on disk again (the AppImage path for an AppImage) after releasing the
+single-instance name, so an upgraded package takes effect at once. Details go to the tooltip, and failures are also sent as desktop
 notifications (freedesktop D-Bus).
 
 Browser operations use independent readback after mutations. Realtime feeds can

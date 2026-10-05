@@ -386,7 +386,7 @@ impl Management {
                 serde_json::to_value(self.manager.upgrade_alpha_core(force).await?)?
             }
             ManagementCommand::Status {} => serde_json::to_value(self.manager.status())?,
-            ManagementCommand::ServiceVersion {} => serde_json::to_value(env!("CARGO_PKG_VERSION"))?,
+            ManagementCommand::ServiceVersion {} => serde_json::to_value(crate::VERSION)?,
             // systemctl runs off the async workers.
             ManagementCommand::ServiceInfo {} => {
                 serde_json::to_value(tokio::task::spawn_blocking(crate::service_control::info).await?)?

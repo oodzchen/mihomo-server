@@ -71,7 +71,7 @@ fn yes() -> Arg {
 
 pub fn command() -> Command {
     Command::new("mihomo-server")
-        .version(env!("CARGO_PKG_VERSION"))
+        .version(crate::VERSION)
         .about("Control your headless Mihomo instance")
         .arg_required_else_help(true)
         .subcommand_required(true)

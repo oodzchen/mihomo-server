@@ -64,7 +64,7 @@ fn isolation(_: &ArgMatches) -> Result<(Isolation, Option<std::convert::Infallib
 async fn run(arguments: Vec<OsString>) -> Result<()> {
     let arguments = Command::new("mihomo-server")
         .bin_name("mihomo-server serve")
-        .version(env!("CARGO_PKG_VERSION"))
+        .version(mihomo_server::VERSION)
         .about("Headless Mihomo supervisor with an authenticated management API")
         .arg(
             Arg::new("resource-dir")

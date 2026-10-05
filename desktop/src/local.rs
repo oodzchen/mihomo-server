@@ -279,7 +279,7 @@ fn redact(proxy: &str) -> String {
 /// Without a temporary proxy the environment's proxy settings apply.
 fn http_client(proxy: Option<&str>, timeout: Duration) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder()
-        .user_agent(concat!("mihomo-server-desktop/", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("mihomo-server-desktop/{}", crate::VERSION))
         .connect_timeout(Duration::from_secs(20))
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::limited(5));

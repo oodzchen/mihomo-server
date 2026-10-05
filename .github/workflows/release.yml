@@ -51,6 +51,8 @@ jobs:
           # Where `mihomo-server update` fetches the installer from.
           MIHOMO_SERVER_REPOSITORY: ${{ github.repository }}
         run: |
+          # Release builds report the tag as their version, like the desktop client.
+          export MIHOMO_SERVER_VERSION="${GITHUB_REF_NAME#v}"
           python3 scripts/package_bundle.py --build \
             --target "$TARGET" \
             --mihomo .core/verge-mihomo \
@@ -61,6 +63,8 @@ jobs:
       - name: Smoke test bundle binary
         run: |
           dist/mihomo-server-$GITHUB_REF_NAME-$TARGET/bin/mihomo-server --help >/dev/null
+          version=$(dist/mihomo-server-$GITHUB_REF_NAME-$TARGET/bin/mihomo-server --version)
+          test "$version" = "mihomo-server ${GITHUB_REF_NAME#v}" || { echo "Version $version does not match $GITHUB_REF_NAME"; exit 1; }
           dist/mihomo-server-$GITHUB_REF_NAME-$TARGET/bin/mihomo-server serve --help >/dev/null
           echo "Binary runs on this glibc version."
 
@@ -124,7 +128,8 @@ jobs:
       - name: Smoke test and collect packages
         run: |
           bundle=desktop/target/release/bundle
-          desktop/target/release/mihomo-server-desktop --version
+          version=$(desktop/target/release/mihomo-server-desktop --version)
+          test "$version" = "mihomo-server-desktop ${GITHUB_REF_NAME#v}" || { echo "Version $version does not match $GITHUB_REF_NAME"; exit 1; }
           deb=$(ls "$bundle"/deb/*.deb); rpm=$(ls "$bundle"/rpm/*.rpm); image=$(ls "$bundle"/appimage/*.AppImage)
           dpkg-deb -I "$deb" >/dev/null
           (cd "$(mktemp -d)" && "$OLDPWD/$image" --appimage-extract >/dev/null && test -x squashfs-root/usr/bin/mihomo-server-desktop)

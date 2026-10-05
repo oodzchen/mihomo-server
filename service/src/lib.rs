@@ -25,5 +25,11 @@ pub mod tun_exec;
 pub mod tun_lock;
 mod validation;
 
+/// Release builds take the version from the tag.
+pub const VERSION: &str = match option_env!("MIHOMO_SERVER_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 pub use clash_verge_i18n as i18n;
 pub use clash_verge_signal as signal;

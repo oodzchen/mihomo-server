@@ -227,7 +227,7 @@ pub(crate) mod export {
         let manifest = BackupManifest {
             schema_version: 1,
             source: "mihomo-server".into(),
-            service_version: env!("CARGO_PKG_VERSION").into(),
+            service_version: crate::VERSION.into(),
             created_at,
             active_profile: snapshot.active_profile,
             runtime_revision: snapshot.runtime_revision,

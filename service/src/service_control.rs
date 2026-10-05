@@ -70,7 +70,7 @@ pub fn info() -> ServiceInfo {
     }
     let unit = unit();
     ServiceInfo {
-        version: env!("CARGO_PKG_VERSION"),
+        version: crate::VERSION,
         release,
         autostart: unit.as_ref().and_then(enablement),
         unit: unit.map(|unit| unit.name),

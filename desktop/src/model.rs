@@ -23,6 +23,7 @@ pub enum Action {
     RestartService,
     OpenServicePage,
     OpenDashboard,
+    RestartClient,
     Quit,
 }
 
@@ -434,6 +435,7 @@ pub fn derive(snapshot: &Snapshot, strings: &Strings) -> MenuModel {
         Service::Detecting => {}
     }
     entries.push(Entry::Separator);
+    entries.push(item(strings.restart_client, Some(Action::RestartClient)));
     entries.push(item(strings.quit, Some(Action::Quit)));
     MenuModel {
         entries,
@@ -745,5 +747,22 @@ mod tests {
             strings(),
         );
         assert_ne!(before.shape(), global.shape());
+    }
+
+    #[test]
+    fn restart_client_sits_right_above_quit_in_every_state() {
+        for service in [
+            Service::Detecting,
+            Service::NotInstalled,
+            Service::Inactive,
+            Service::Running(Box::new(running("rule", false))),
+        ] {
+            let model = derive(&snapshot(service), strings());
+            let tail: Vec<_> = model.entries.iter().rev().take(2).collect();
+            assert!(matches!(tail[0], Entry::Item { label, action: Some(Action::Quit), .. } if label == "Quit client"));
+            assert!(
+                matches!(tail[1], Entry::Item { label, enabled: true, action: Some(Action::RestartClient) } if label == "Restart client")
+            );
+        }
     }
 }

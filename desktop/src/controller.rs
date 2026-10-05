@@ -473,6 +473,9 @@ async fn run_command(controller: &Controller, action: Option<Action>) -> Result<
 pub fn dispatch(app: &AppHandle, action: Action) {
     match action {
         Action::Quit => app.exit(0),
+        // Starts the binary on disk again, so an upgraded package takes effect;
+        // unlike `restart`, this releases the single-instance name first.
+        Action::RestartClient => app.request_restart(),
         Action::OpenDashboard => window::open_dashboard(app),
         Action::OpenServicePage => window::open_service_page(app),
         Action::StartService => {
@@ -517,6 +520,7 @@ mod tests {
             "service lifecycle is not an API command"
         );
         assert_eq!(command(&Action::Quit), None);
+        assert_eq!(command(&Action::RestartClient), None);
     }
 
     #[test]

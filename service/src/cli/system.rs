@@ -68,7 +68,7 @@ fn client_builder(redirects: bool) -> Result<reqwest::ClientBuilder> {
     let builder = reqwest::Client::builder()
         .tls_backend_rustls()
         .min_tls_version(reqwest::tls::Version::TLS_1_2)
-        .user_agent(concat!("mihomo-server/", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("mihomo-server/{}", crate::VERSION))
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(120))
         .redirect(if redirects {
