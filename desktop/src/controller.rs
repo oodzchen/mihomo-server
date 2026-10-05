@@ -1,7 +1,6 @@
 //! Client state shared by the tray, the windows and the status page: the
 //! connection to the local instance, the polled snapshot and running tasks.
 use crate::{
-    autostart,
     i18n::Language,
     local::{self, Detected, Log},
     model::{self, Action, Live, MenuModel, Service, Snapshot, Task},
@@ -82,7 +81,6 @@ impl Controller {
             service: inner.service.clone(),
             task: inner.task,
             last_error: inner.last_error.clone(),
-            autostart: autostart::enabled(),
         }
     }
 
@@ -415,16 +413,6 @@ pub fn dispatch(app: &AppHandle, action: Action) {
         Action::Quit => app.exit(0),
         Action::OpenDashboard => window::open_dashboard(app),
         Action::OpenServicePage => window::open_service_page(app),
-        Action::Autostart(enabled) => {
-            if let Err(error) = autostart::set(enabled) {
-                let controller = controller(app);
-                let reason = short(&error);
-                controller.lock().last_error = Some(reason.clone());
-                let summary = controller.language().strings().failed;
-                tauri::async_runtime::spawn(async move { notify::failure(summary, &reason).await });
-            }
-            publish(app);
-        }
         Action::StartService => {
             start_task(app, Task::Starting, None);
         }

@@ -1,9 +1,15 @@
 //! Two windows with different trust. `main` shows the service's own
-//! management page and is granted no capability; `setup` is the bundled
-//! status page and is the only window allowed to call the app's commands.
+//! management page and may call only the client's start-at-login commands,
+//! granted for that page's origin; `setup` is the bundled status page and the
+//! only window allowed to call the other commands.
 use crate::{VERSION, controller::Controller};
-use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager as _, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, Mutex},
+};
+use tauri::{
+    AppHandle, Manager as _, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent, ipc::CapabilityBuilder,
+};
 
 const TITLE: &str = "Mihomo Server";
 
@@ -20,6 +26,35 @@ fn reveal(window: &WebviewWindow) {
 /// The status page's own origin (custom protocol, or its http form).
 fn is_bundled(url: &Url) -> bool {
     url.scheme() == "tauri" || (matches!(url.scheme(), "http" | "https") && url.host_str() == Some("tauri.localhost"))
+}
+
+/// Origins already granted the dashboard capability (capabilities cannot be removed).
+#[derive(Default)]
+pub struct Granted(Mutex<BTreeSet<String>>);
+
+fn dashboard_capability(index: usize, origin: &str) -> CapabilityBuilder {
+    CapabilityBuilder::new(format!("dashboard-{index}"))
+        .remote(format!("{}/*", origin.trim_end_matches('/')))
+        .local(false)
+        .window("main")
+        .permission("allow-client-autostart")
+        .permission("allow-set-client-autostart")
+}
+
+/// Let the management page loaded from ORIGIN, and nothing else, read and
+/// change the client's start at login.
+fn grant_dashboard(app: &AppHandle, origin: &str) {
+    let granted = app.state::<Granted>();
+    let mut granted = granted.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if granted.contains(origin) {
+        return;
+    }
+    match app.add_capability(dashboard_capability(granted.len(), origin)) {
+        Ok(()) => {
+            granted.insert(origin.to_owned());
+        }
+        Err(error) => eprintln!("cannot grant the dashboard its commands: {error}"),
+    }
 }
 
 fn desktop_version_script() -> String {
@@ -67,13 +102,14 @@ pub fn open_dashboard(app: &AppHandle) {
     let Ok(url) = Url::parse(&format!("{origin}/#token={}", connection.token)) else {
         return;
     };
+    grant_dashboard(app, &origin);
     let allowed = origin.clone();
     let built = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
         .title(TITLE)
         .inner_size(1280.0, 860.0)
         .min_inner_size(760.0, 520.0)
-        // The remote management page has no desktop IPC capability. Expose
-        // only this immutable build value so it can identify the host client.
+        // Besides the start-at-login commands, expose only this immutable
+        // build value so the page can identify the host client.
         .initialization_script(desktop_version_script())
         // Let the page's own file inputs receive dropped files.
         .disable_drag_drop_handler()
@@ -120,5 +156,22 @@ mod tests {
         let script = desktop_version_script();
         assert!(script.contains("__MIHOMO_DESKTOP_VERSION__"));
         assert!(script.contains(&serde_json::to_string(VERSION).unwrap()));
+    }
+    #[test]
+    fn dashboard_may_only_use_start_at_login_from_its_origin() {
+        use tauri::{ipc::RuntimeCapability as _, utils::acl::capability::CapabilityFile};
+        let CapabilityFile::Capability(capability) = dashboard_capability(0, "http://127.0.0.1:9090").build() else {
+            panic!("one capability");
+        };
+        assert!(!capability.local);
+        assert_eq!(capability.windows, ["main"]);
+        let remote = capability.remote.expect("remote origin");
+        assert_eq!(remote.urls, ["http://127.0.0.1:9090/*"]);
+        let permissions: Vec<String> = capability
+            .permissions
+            .iter()
+            .map(|permission| permission.identifier().get().to_owned())
+            .collect();
+        assert_eq!(permissions, ["allow-client-autostart", "allow-set-client-autostart"]);
     }
 }

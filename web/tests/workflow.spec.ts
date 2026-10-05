@@ -5150,3 +5150,68 @@ test("service restart and upgrade report progress without moving the page", asyn
   await expect(output).toHaveText("error: checksum mismatch");
   await page.unroute("**/api/commands");
 });
+
+test("settings start at login separates the service unit from the desktop client", async ({ page, browser }) => {
+  await loginSettings(page);
+  const panel = page.getByRole("region", { name: "登录时启动" });
+  const service = panel.getByRole("switch", { name: "服务端登录时启动" });
+  // A foreground service has no unit to enable; browsers never see the client switch.
+  await expect(service).toBeDisabled();
+  await expect(service).toHaveAttribute("aria-checked", "false");
+  await expectHelp(page, "服务端登录时启动", "当前服务是手动启动的（例如在终端中直接运行）");
+  await expectHelp(page, "登录时启动", "客户端默认不随登录启动");
+  await expect(panel.getByRole("switch", { name: "客户端登录时启动" })).toHaveCount(0);
+  const response = await fetch(`${base}/api/commands`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ command: "set_service_autostart", enabled: true }),
+  });
+  expect(response.ok).toBe(false);
+  expect(JSON.stringify(await response.json())).toContain("started directly");
+
+  const desktop = await browser.newContext();
+  await desktop.addInitScript(() => {
+    const calls: unknown[] = [];
+    let client = false;
+    Object.defineProperty(window, "__MIHOMO_DESKTOP_VERSION__", { value: "0.1.0-desktop-test" });
+    Object.defineProperty(window, "__desktopCalls", { value: calls });
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      value: {
+        invoke: async (command: string, args?: { enabled: boolean }) => {
+          calls.push([command, args ?? null]);
+          if (command === "set_client_autostart") client = args!.enabled;
+          return client;
+        },
+      },
+    });
+  });
+  try {
+    const desktopPage = await desktop.newPage();
+    let serviceAutostart = true;
+    await desktopPage.route("**/api/commands", async route => {
+      const body = route.request().postDataJSON();
+      if (body?.command === "service_info")
+        await route.fulfill({ json: { version: "0.2.0", release: "v0.2.0", unit: "mihomo-server.service", autostart: serviceAutostart, upgrade: { available: true, state: "inactive", result: "success", log: [] } } });
+      else if (body?.command === "set_service_autostart") {
+        serviceAutostart = body.enabled;
+        await route.fulfill({ json: serviceAutostart });
+      } else await route.continue();
+    });
+    await desktopPage.goto(`${base}/settings#token=${encodeURIComponent(token)}`);
+    const desktopPanel = desktopPage.getByRole("region", { name: "登录时启动" });
+    const serviceSwitch = desktopPanel.getByRole("switch", { name: "服务端登录时启动" });
+    const clientSwitch = desktopPanel.getByRole("switch", { name: "客户端登录时启动" });
+    await expect(serviceSwitch).toHaveAttribute("aria-checked", "true");
+    await expect(clientSwitch).toHaveAttribute("aria-checked", "false");
+    await serviceSwitch.click();
+    await expect(serviceSwitch).toHaveAttribute("aria-checked", "false");
+    expect(serviceAutostart).toBe(false);
+    await clientSwitch.click();
+    await expect(clientSwitch).toHaveAttribute("aria-checked", "true");
+    expect(await desktopPage.evaluate(() => (window as unknown as { __desktopCalls: unknown[] }).__desktopCalls)).toEqual([
+      ["client_autostart", null],
+      ["set_client_autostart", { enabled: true }],
+    ]);
+  } finally {
+    await desktop.close();
+  }
+});

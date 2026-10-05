@@ -1,4 +1,6 @@
-//! "Start at login" as an XDG autostart entry that launches into the tray.
+//! The client's "start at login": an XDG autostart entry that launches this
+//! client (`mihomo-server-desktop`, or its AppImage) into the tray. The
+//! service starts on its own as a systemd user unit.
 use anyhow::{Context as _, Result};
 use std::path::PathBuf;
 
@@ -34,7 +36,7 @@ pub fn quote(argument: &str) -> String {
 
 fn entry(executable: &str) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Mihomo Server\nExec={} --hidden\nIcon=mihomo-server-desktop\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+        "[Desktop Entry]\nType=Application\nName=Mihomo Server Desktop\nComment=mihomo-server desktop client (tray)\nExec={} --hidden\nIcon=mihomo-server-desktop\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
         quote(executable)
     )
 }

@@ -82,7 +82,6 @@ pub struct Strings {
     pub more_nodes: &'static str,
     pub profiles: &'static str,
     pub open_dashboard: &'static str,
-    pub autostart: &'static str,
     pub quit: &'static str,
     pub timeout: &'static str,
 }
@@ -116,7 +115,6 @@ const EN: Strings = Strings {
     more_nodes: "{count} more in the dashboard…",
     profiles: "Subscriptions",
     open_dashboard: "Open dashboard",
-    autostart: "Start at login",
     quit: "Quit client",
     timeout: "timeout",
 };
@@ -150,7 +148,6 @@ const ZH: Strings = Strings {
     more_nodes: "另有 {count} 个节点，请在管理程序中查看…",
     profiles: "订阅",
     open_dashboard: "打开管理程序",
-    autostart: "登录时启动",
     quit: "退出客户端",
     timeout: "超时",
 };
@@ -184,7 +181,6 @@ const ZHTW: Strings = Strings {
     more_nodes: "另有 {count} 個節點，請在管理程式中查看…",
     profiles: "訂閱",
     open_dashboard: "開啟管理程式",
-    autostart: "登入時啟動",
     quit: "結束用戶端",
     timeout: "逾時",
 };

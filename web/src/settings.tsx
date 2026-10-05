@@ -17,6 +17,7 @@ import { OUTBOUND_KEYS, OutboundFields, outboundDraft, outboundRuntime, validate
 import { DOWNLOAD_KEYS, DownloadFields, downloadDraft, downloadRuntime, validateDownload } from "./download-settings";
 import { HostsFields, hostsDraft, hostsRuntime, validateHosts } from "./hosts-settings";
 import { ResourcesPanel } from "./resources";
+import { AutostartPanel } from "./autostart";
 import {
   AUTHORITY_KEYS,
   AuthorityFields,
@@ -530,6 +531,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
             <LanguagePicker language={language} changeLanguage={changeLanguage} />
           </section>
         )}
+        <AutostartPanel token={token} language={language} connection={connection} logout={logout} />
         <details className="settings-details"><summary>资源与数据库</summary>
         <ResourcesPanel token={token} status={status} connection={connection} logout={logout} language={language} />
         </details>

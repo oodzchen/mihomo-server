@@ -1,4 +1,6 @@
-//! Commands of the bundled status page (see `capabilities/setup.json`).
+//! Commands of the bundled status page (see `capabilities/setup.json`), and
+//! the only two the management page may call (see `window::grant_dashboard`).
+use crate::autostart;
 use crate::controller::{self, Controller};
 use crate::model::{Service, Task};
 use crate::window;
@@ -55,6 +57,19 @@ pub async fn restart_service(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn open_dashboard(app: AppHandle) {
     window::open_dashboard(&app);
+}
+
+/// Whether this client starts (into the tray) at login.
+#[tauri::command]
+pub fn client_autostart() -> bool {
+    autostart::enabled()
+}
+
+/// Returns the state read back after the change.
+#[tauri::command]
+pub fn set_client_autostart(enabled: bool) -> Result<bool, String> {
+    autostart::set(enabled).map_err(|error| format!("{error:#}"))?;
+    Ok(autostart::enabled())
 }
 
 /// A refusal is also written to the output panel, where the page shows errors.

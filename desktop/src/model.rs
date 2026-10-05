@@ -23,7 +23,6 @@ pub enum Action {
     RestartService,
     OpenServicePage,
     OpenDashboard,
-    Autostart(bool),
     Quit,
 }
 
@@ -151,7 +150,6 @@ pub struct Snapshot {
     pub service: Service,
     pub task: Task,
     pub last_error: Option<String>,
-    pub autostart: bool,
 }
 
 impl Live {
@@ -436,12 +434,6 @@ pub fn derive(snapshot: &Snapshot, strings: &Strings) -> MenuModel {
         Service::Detecting => {}
     }
     entries.push(Entry::Separator);
-    entries.push(check(
-        strings.autostart,
-        snapshot.autostart,
-        true,
-        Action::Autostart(!snapshot.autostart),
-    ));
     entries.push(item(strings.quit, Some(Action::Quit)));
     MenuModel {
         entries,
@@ -495,7 +487,6 @@ mod tests {
             service,
             task: Task::Idle,
             last_error: None,
-            autostart: false,
         }
     }
 

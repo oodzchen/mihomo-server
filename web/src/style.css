@@ -1402,13 +1402,13 @@ dd {
 
 /* Always-visible TUN control, shared by overview and the settings entry. */
 .tun-controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.tun-switch { width: 48px; height: 28px; flex-shrink: 0; padding: 3px; border: 0; border-radius: 20px; background: #a1a1aa; transition: background 0.15s; }
-.tun-switch span { display: block; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0002; transition: transform 0.15s; }
-.tun-switch[aria-checked="true"] { background: #10b981; }
-.tun-switch[aria-checked="true"] span { transform: translateX(20px); }
-.tun-switch:hover:not(:disabled) { background: #71717a; }
-.tun-switch[aria-checked="true"]:hover:not(:disabled) { background: #059669; }
-.tun-switch:focus-visible { outline: 2px solid #10b981; outline-offset: 3px; }
+.tun-switch, .switch { width: 48px; height: 28px; flex-shrink: 0; padding: 3px; border: 0; border-radius: 20px; background: #a1a1aa; transition: background 0.15s; }
+.tun-switch span, .switch span { display: block; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0002; transition: transform 0.15s; }
+.tun-switch[aria-checked="true"], .switch[aria-checked="true"] { background: #10b981; }
+.tun-switch[aria-checked="true"] span, .switch[aria-checked="true"] span { transform: translateX(20px); }
+.tun-switch:hover:not(:disabled), .switch:hover:not(:disabled) { background: #71717a; }
+.tun-switch[aria-checked="true"]:hover:not(:disabled), .switch[aria-checked="true"]:hover:not(:disabled) { background: #059669; }
+.tun-switch:focus-visible, .switch:focus-visible { outline: 2px solid #10b981; outline-offset: 3px; }
 .tun-control .alert { margin: 10px 0 0; }
 .settings-layout > .tun-control { margin-bottom: 0; }
 
@@ -1425,3 +1425,7 @@ dd {
 .help-popup > span + span { margin-top: 6px; }
 /* Fixed height, so new output never moves the page. */
 .service-log { height: 140px; margin: 12px 0 0; padding: 10px 12px; overflow: auto; border-radius: 6px; background: #18181b; color: #e4e4e7; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Start at login: one switch per program. */
+.autostart-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; font-size: 13px; }
+.autostart-row + .autostart-row { border-top: 1px solid #f4f4f5; }

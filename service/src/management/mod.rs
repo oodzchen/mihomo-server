@@ -26,6 +26,10 @@ pub enum ManagementCommand {
     RestartService {},
     /// Start the shared installation's update unit.
     UpgradeService {},
+    /// Enable or disable this service's systemd unit (start at login).
+    SetServiceAutostart {
+        enabled: bool,
+    },
     CoreRelease {
         version: Option<String>,
     },
@@ -357,6 +361,9 @@ impl Management {
                 .await??;
                 serde_json::json!({ "action": "restart" })
             }
+            ManagementCommand::SetServiceAutostart { enabled } => serde_json::to_value(
+                tokio::task::spawn_blocking(move || crate::service_control::set_autostart(enabled)).await??,
+            )?,
             ManagementCommand::UpgradeService {} => {
                 tokio::task::spawn_blocking(crate::service_control::upgrade).await??;
                 serde_json::json!({ "unit": crate::service_control::UPDATE_UNIT })

@@ -171,9 +171,16 @@ they change or once a minute. Of the WebSocket feeds it uses only
 `/api/streams/preferences`, never `/api/events`, which carries every core log
 line. The management window loads the service origin directly and
 logs in through the URL fragment, so the browser policy (same origin, no CORS)
-is unchanged. That window holds no Tauri capability. Only the bundled status page
-may call the app's commands (detect, install, start, open), which the capability
-ACL enforces per window and origin. Installation runs the published installer,
+is unchanged. That window may call only the client's own start-at-login commands
+(`client_autostart`, `set_client_autostart`, an XDG autostart entry that runs
+`mihomo-server-desktop --hidden`), through a capability added at runtime for
+exactly the service origin it opened. Only the bundled status page may call the
+other commands (detect, install, start, open), which the capability ACL enforces
+per window and origin. The Web settings page shows the client switch only when
+the client identifies itself (`__MIHOMO_DESKTOP_VERSION__`); the service switch
+enables or disables the service's own systemd unit (`set_service_autostart`)
+without stopping it, and is unavailable for transient units or a directly
+started service. Installation runs the published installer,
 whose root step uses polkit (`MIHOMO_INSTALL_ELEVATE=pkexec`) instead of a
 terminal sudo prompt.
 

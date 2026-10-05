@@ -62,12 +62,15 @@ fn main() {
         .manage(controller)
         .manage(tray::TrayState::default())
         .manage(window::WindowState::default())
+        .manage(window::Granted::default())
         .invoke_handler(tauri::generate_handler![
             commands::local_state,
             commands::install_service,
             commands::start_service,
             commands::restart_service,
-            commands::open_dashboard
+            commands::open_dashboard,
+            commands::client_autostart,
+            commands::set_client_autostart
         ])
         .setup(move |app| {
             // Before any window maps: the compositor reads the entry for its icon.

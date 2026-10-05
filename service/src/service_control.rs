@@ -23,6 +23,10 @@ pub struct ServiceInfo {
     pub release: Option<String>,
     /// The systemd unit running this service; `None` when started directly.
     pub unit: Option<String>,
+    /// The unit is enabled (started with its manager, i.e. at login, or at
+    /// boot with lingering); `None` when it cannot be enabled (transient,
+    /// static, no unit).
+    pub autostart: Option<bool>,
     pub upgrade: UpgradeState,
 }
 
@@ -64,11 +68,49 @@ pub fn info() -> ServiceInfo {
     if upgrade.available {
         upgrade.log = tail(Path::new(UPDATE_LOG));
     }
+    let unit = unit();
     ServiceInfo {
         version: env!("CARGO_PKG_VERSION"),
         release,
-        unit: unit().map(|unit| unit.name),
+        autostart: unit.as_ref().and_then(enablement),
+        unit: unit.map(|unit| unit.name),
         upgrade,
+    }
+}
+
+/// Enable or disable this service's unit; the running service is unaffected.
+pub fn set_autostart(enabled: bool) -> Result<bool> {
+    let unit = unit().context("this service was started directly, not by systemd; it has no start at login")?;
+    ensure!(
+        enablement(&unit).is_some(),
+        "{} cannot be enabled or disabled (it is transient or has no [Install] section)",
+        unit.name
+    );
+    let mut arguments = unit.scope().to_vec();
+    arguments.extend([
+        "--no-ask-password",
+        if enabled { "enable" } else { "disable" },
+        unit.name.as_str(),
+    ]);
+    systemctl(&arguments)?;
+    enablement(&unit).context("cannot read back the unit's enablement")
+}
+
+fn enablement(unit: &Unit) -> Option<bool> {
+    let output = Command::new("systemctl")
+        .args(unit.scope())
+        .args(["is-enabled", unit.name.as_str()])
+        .output()
+        .ok()?;
+    // is-enabled exits non-zero for every state but enabled; the state is on stdout.
+    parse_enablement(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_enablement(state: &str) -> Option<bool> {
+    match state.trim() {
+        "enabled" | "enabled-runtime" => Some(true),
+        "disabled" => Some(false),
+        _ => None,
     }
 }
 
@@ -267,6 +309,15 @@ mod tests {
             None
         );
         assert_eq!(unit_from_cgroup("1:name=systemd:/x.service\n"), None);
+    }
+
+    #[test]
+    fn only_installable_units_report_autostart() {
+        assert_eq!(parse_enablement("enabled\n"), Some(true));
+        assert_eq!(parse_enablement("disabled\n"), Some(false));
+        for state in ["transient", "static", "generated", "linked", "masked", "not-found", ""] {
+            assert_eq!(parse_enablement(state), None, "{state}");
+        }
     }
 
     #[test]
