@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ApiError, command, type Connection } from "./api";
+import { ApiError, command, loadedServedBuild, type Connection } from "./api";
 import { describe } from "./format";
 import { HelpTip } from "./help-tip";
 import { t, type Language } from "./i18n";
@@ -21,12 +21,47 @@ type Pending = {
   seen: boolean;
   release: string | null;
   started: number;
+  /** When a resumed upgrade had already been reported. */
+  finished?: number;
 };
 
 /** An update unit not seen running by then has finished (or never ran). */
 const UPGRADE_START_GRACE = 10_000;
 /** A restart or stop not observed by then did not happen as requested. */
 const ACTION_TIMEOUT = 60_000;
+/** An upgrade the page follows; it reloads when the service comes back upgraded. */
+const UPGRADE_KEY = "mihomo.serviceUpgrade";
+/** A remembered upgrade older than this is not resumed. */
+const UPGRADE_RESUME_LIMIT = 30 * 60_000;
+/** A finished upgrade is reported again when the page reloads to the
+ * upgraded service's new build this soon after it. */
+const UPGRADE_REPORT_LIMIT = 30_000;
+
+type RememberedUpgrade = { release: string | null; started: number; finished?: number };
+
+function rememberUpgrade(upgrade?: RememberedUpgrade) {
+  try {
+    if (upgrade) window.sessionStorage.setItem(UPGRADE_KEY, JSON.stringify(upgrade));
+    else window.sessionStorage.removeItem(UPGRADE_KEY);
+  } catch { /* Private browser storage can be unavailable. */ }
+}
+
+function rememberedUpgrade(): RememberedUpgrade | undefined {
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(UPGRADE_KEY) ?? "null");
+    const now = Date.now();
+    if (
+      typeof value?.started === "number" && now - value.started < UPGRADE_RESUME_LIMIT &&
+      (typeof value.finished !== "number" || (loadedServedBuild && now - value.finished < UPGRADE_REPORT_LIMIT))
+    )
+      return {
+        release: typeof value.release === "string" ? value.release : null,
+        started: value.started,
+        finished: typeof value.finished === "number" ? value.finished : undefined,
+      };
+  } catch { /* Unreadable: nothing to resume. */ }
+  return undefined;
+}
 
 export function ServicePage({
   token,
@@ -50,7 +85,19 @@ export function ServicePage({
   const pending = useRef<Pending>(undefined);
   const output = useRef<HTMLPreElement>(null);
 
-  useEffect(() => () => pending.current?.toast.dismiss(), []);
+  useEffect(() => {
+    // Resume an upgrade followed before the page reloaded to its new build.
+    const resumed = rememberedUpgrade();
+    if (resumed && !pending.current) {
+      const toast = notify.loading(t(language, "serviceUpgradeStarted"));
+      pending.current = { toast, dropped: true, seen: false, ...resumed };
+      setOperation("upgrade");
+    }
+    return () => {
+      pending.current?.toast.dismiss();
+      rememberUpgrade();
+    };
+  }, []);
 
   useEffect(() => {
     if (connection !== "connected") return;
@@ -83,8 +130,14 @@ export function ServicePage({
   }, [connection, operation, running]);
 
   function settle(message: string, kind?: "error") {
-    pending.current?.toast.finish(message, kind);
+    const current = pending.current;
+    current?.toast.finish(message, kind);
     pending.current = undefined;
+    // The service may come back with a new page build right after an upgrade
+    // and reload this page, which then reports the same result again.
+    rememberUpgrade(
+      operation === "upgrade" && current ? { release: current.release, started: current.started, finished: current.finished ?? Date.now() } : undefined,
+    );
     setOperation(undefined);
   }
 
@@ -127,6 +180,7 @@ export function ServicePage({
     const current: Pending = { toast, dropped: false, seen: false, release: info?.release ?? null, started: Date.now() };
     pending.current = current;
     setOperation(kind);
+    if (kind === "upgrade") rememberUpgrade({ release: current.release, started: current.started });
     if (kind !== "upgrade")
       window.setTimeout(() => {
         if (pending.current === current) settle(t(language, "serviceActionTimeout"), "error");
@@ -137,6 +191,7 @@ export function ServicePage({
       if (error instanceof ApiError && error.status === 401) {
         toast.dismiss();
         pending.current = undefined;
+        rememberUpgrade();
         setOperation(undefined);
         logout(t(language, "expiredToken"));
         return;

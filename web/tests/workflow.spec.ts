@@ -5127,10 +5127,24 @@ test("service restart and upgrade report progress without moving the page", asyn
   expect(await upgrade.locator(".actions").boundingBox()).toEqual(actions);
   expect(await output.evaluate(element => element.scrollTop + element.clientHeight >= element.scrollHeight - 1)).toBe(true);
 
-  // The installer restarts the service, which comes back upgraded.
-  info = { ...info, version: "0.3.0", release: "v0.3.0", upgrade: { ...info.upgrade, state: "inactive", log: [...info.upgrade.log, "System install complete"] } };
+  // The installer restarts the service, which comes back serving a new page
+  // build: the page reloads to it (as the desktop client cannot refresh) and
+  // keeps following the upgrade until the update unit finishes.
+  await page.route(`${base}/`, async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: (await response.text()).replace(/\/assets\/index-[\w-]+\.js/, "/assets/index-next.js") });
+  });
+  await page.evaluate(() => Object.defineProperty(window, "__previousBuild", { value: true }));
+  info = { ...info, version: "0.3.0", release: "v0.3.0" };
+  const reloaded = page.waitForEvent("load");
   disconnect();
+  await reloaded;
+  expect(await page.evaluate(() => "__previousBuild" in window)).toBe(false);
+  await expect(page.locator(".toast").filter({ hasText: "正在升级服务…" })).toBeVisible();
+  await expect(upgrade.getByText("升级中…", { exact: true })).toBeVisible();
+  info = { ...info, upgrade: { ...info.upgrade, state: "inactive", log: [...info.upgrade.log, "System install complete"] } };
   await expect(page.locator(".toast").filter({ hasText: "已升级至 v0.3.0" })).toBeVisible();
+  await page.unroute(`${base}/`);
   await expect(upgrade.locator(".actions button")).toHaveText(["检查更新"]);
   await expect(upgrade.locator("div").filter({ hasText: "最新版本" }).locator("dd")).toHaveText("v0.3.0（已是最新）");
   await expect(control.locator("div").filter({ hasText: "服务版本" }).locator("dd")).toHaveText("0.3.0");

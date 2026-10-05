@@ -52,6 +52,40 @@ export async function command<T>(
   return body as T;
 }
 
+/** The built files a page loads; Vite names them by content hash. */
+function buildSignature(page: Document) {
+  return [...page.querySelectorAll('script[type="module"][src], link[rel="stylesheet"][href]')]
+    .map((element) => element.getAttribute("src") ?? element.getAttribute("href"))
+    .join("\n");
+}
+
+/** Whether the service now serves another build of this page (it was upgraded). */
+export async function servedBuildChanged(signal?: AbortSignal) {
+  const response = await fetch("/", { headers: { Accept: "text/html" }, cache: "no-store", signal });
+  if (!response.ok) return false;
+  const served = buildSignature(new DOMParser().parseFromString(await response.text(), "text/html"));
+  return served !== "" && served !== buildSignature(document);
+}
+
+const BUILD_RELOAD_KEY = "mihomo.buildReload";
+
+/** Whether this page load is `reloadToServedBuild`'s, read once at startup. */
+export const loadedServedBuild = (() => {
+  try {
+    const reloaded = window.sessionStorage.getItem(BUILD_RELOAD_KEY) !== null;
+    window.sessionStorage.removeItem(BUILD_RELOAD_KEY);
+    return reloaded;
+  } catch {
+    return false;
+  }
+})();
+
+export function reloadToServedBuild() {
+  try { window.sessionStorage.setItem(BUILD_RELOAD_KEY, "1"); }
+  catch { /* Private browser storage can be unavailable. */ }
+  window.location.reload();
+}
+
 /** One owned socket and reconnect timer; teardown cancels both, including pending auth. */
 export function subscribe(
   token: string,

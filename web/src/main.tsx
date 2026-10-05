@@ -7,7 +7,7 @@ import {
   type FormEvent,
   type MouseEvent,
 } from "react";
-import { ApiError, command, subscribe, type Connection, type Perform } from "./api";
+import { ApiError, command, reloadToServedBuild, servedBuildChanged, subscribe, type Connection, type Perform } from "./api";
 import { SettingsPage, type SettingsPageHandle } from "./settings";
 import { CoreUpgradePage } from "./core-upgrade";
 import { ServicePage } from "./service";
@@ -298,6 +298,26 @@ function Manager({
       window.removeEventListener("popstate", popstate);
     };
   }, [token, logout, adoptPreferences]);
+  // A service that comes back upgraded serves new page files: load them, as a
+  // browser refresh would (the desktop client has none), but never over
+  // unsaved settings edits.
+  const [stale, setStale] = useState(false);
+  const dropped = useRef(false);
+  useEffect(() => {
+    if (connection === "reconnecting") dropped.current = true;
+    if (connection !== "connected" || !dropped.current) return;
+    dropped.current = false;
+    const controller = new AbortController();
+    servedBuildChanged(controller.signal)
+      .then((changed) => changed && setStale(true))
+      .catch(() => {
+        // Unreadable now; the next reconnect checks again.
+      });
+    return () => controller.abort();
+  }, [connection]);
+  useEffect(() => {
+    if (stale && !settingsEditor.dirty) reloadToServedBuild();
+  }, [stale, settingsEditor.dirty]);
   useEffect(() => {
     if (!settingsEditor.dirty) return;
     const beforeUnload = (event: BeforeUnloadEvent) => {

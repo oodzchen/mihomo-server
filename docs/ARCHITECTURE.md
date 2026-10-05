@@ -154,6 +154,14 @@ world-readable `/var/lib/mihomo-server/update.log`. The latest tag is read
 through the same managed/system/direct routes as core releases, but the unit
 itself downloads directly as root.
 
+Every open page (the desktop client's dashboard window included, which has no
+refresh of its own) compares, on each WebSocket reconnect, the hashed script and
+stylesheet names in a fresh `/` with its own, and reloads when they differ, so a
+service that came back upgraded never runs an old page against a new API. The
+reload waits while the settings editor has unsaved edits. An upgrade the
+Service page was following is kept in `sessionStorage` and resumed after the
+reload, which also reports a result that settled just before it.
+
 The `mihomo-server` command is a second client of the same authenticated command
 API, with no private path into the service. It locates the invoking user's
 instance from the systemd unit's main process (listener, public origin and data
