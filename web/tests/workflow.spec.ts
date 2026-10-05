@@ -4658,6 +4658,32 @@ test("settings help, stacked dismissible toasts and centered responsive content"
   await settingsApi("set_settings", { runtime: original.runtime });
 });
 
+test("core update check uses button state without a loading toast", async ({ page }) => {
+  let finishCheck!: () => void;
+  const heldCheck = new Promise<void>(resolve => { finishCheck = resolve; });
+  await page.route("**/api/commands", async route => {
+    const { command } = route.request().postDataJSON();
+    if (command === "installed_core_version") return route.fulfill({ json: "v1.18.0" });
+    if (command === "core_installation") return route.fulfill({ json: { version: "v1.18.0", stage_id: "fixture" } });
+    if (command === "core_release") {
+      await heldCheck;
+      return route.fulfill({ json: { version: "v1.19.0", bytes: 1, target: "fixture" } });
+    }
+    return route.continue();
+  });
+  await page.goto(`${base}/core#token=${encodeURIComponent(token)}`);
+  const panel = page.getByRole("region", { name: "稳定版内核升级" });
+  const check = panel.getByRole("button", { name: "检查稳定版更新", exact: true });
+  await expect(check).toBeEnabled();
+  await check.click();
+  await expect(check).toBeDisabled();
+  await expect(page.locator(".toast")).toHaveCount(0);
+  finishCheck();
+  await expect(panel.locator("dd").nth(1)).toHaveText("v1.19.0");
+  await expect(check).toBeEnabled();
+  await expect(page.locator(".toast")).toHaveCount(0);
+});
+
 test("core upgrade reuses its operation toast for success and failure", async ({ page }) => {
   let fail = false;
   await page.route("**/api/commands", async route => {

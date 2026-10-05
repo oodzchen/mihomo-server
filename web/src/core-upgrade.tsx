@@ -1,6 +1,7 @@
 import { useToast } from "./toast";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, command, type Perform, type Connection } from "./api";
+import { describe } from "./format";
 import { phaseLabel, t, type Language } from "./i18n";
 import type { CoreStatus } from "./types";
 import { HelpTip } from "./help-tip";
@@ -102,8 +103,15 @@ export function CoreUpgradePage({
     try {
       if (force === undefined) {
         setLatest(undefined);
-        const value = await perform<Release>(channel === "alpha" ? "alpha_core_release" : "core_release");
-        if (alive.current && value) setLatest(value);
+        try {
+          const value = await command<Release>(token, channel === "alpha" ? "alpha_core_release" : "core_release");
+          if (alive.current) setLatest(value);
+        } catch (error) {
+          if (!alive.current) return;
+          if (error instanceof ApiError && error.status === 401)
+            logout(t(language, "expiredToken"));
+          else notify(describe(error), "error");
+        }
       } else {
         const toast = notify.loading(t(language, "coreUpgradeWorking"));
         const value = await perform<Report>(channel === "alpha" ? "upgrade_alpha_core" : "upgrade_clash_core", { force }, { notify: false, toast });
