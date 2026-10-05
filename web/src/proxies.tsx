@@ -257,7 +257,7 @@ export function ProxyPage({
                   toggleGroup(name, defaultCollapsed);
                 }}
                 aria-expanded={!isCollapsed}
-                aria-label={`${name} ${isCollapsed ? "展开" : "折叠"}`}
+                aria-label={t(language, isCollapsed ? "groupExpand" : "groupCollapse", { name })}
               >
                 <span className={`group-toggle-icon ${isCollapsed ? "" : "expanded"}`}>▶</span>
                 <div>

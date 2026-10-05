@@ -406,7 +406,7 @@ function Manager({
     (item) => item.uid === status.active_profile,
   );
   const title = t(language, pages.find(([path]) => route === path)?.[1] || "overview");
-  const colon = language === "en" ? ": " : "：";
+  const colon = t(language, "colon");
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -469,16 +469,16 @@ function Manager({
         <div className="feedback" aria-live="polite">
           {status.error && (
             <p className="alert">
-              {status.phase === "failed" ? t(language, "coreError") : t(language, "operationError")}：
+              {status.phase === "failed" ? t(language, "coreError") : t(language, "operationError")}{colon}
               {status.error}
             </p>
           )}
           {status.selection_error && (
-            <p className="alert">{t(language, "selectionRestore")}：{status.selection_error}</p>
+            <p className="alert">{t(language, "selectionRestore")}{colon}{status.selection_error}</p>
           )}
           {status.selection_pending?.length > 0 && (
             <p className="info">
-              {t(language, "restoringNodes")}：{status.selection_pending.join("、")}
+              {t(language, "restoringNodes")}{colon}{status.selection_pending.join(t(language, "listSeparator"))}
             </p>
           )}
         </div>

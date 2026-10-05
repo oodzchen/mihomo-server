@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, command, type Connection } from "./api";
+import { t, type Language, type MessageKey } from "./i18n";
 import type { CoreStatus } from "./types";
 
 type ConnectionValues = {
@@ -23,20 +24,26 @@ export type Access = {
   tun_holder?: TunHolder | null;
 };
 export type TunHolder = { uid: number; name: string; self: boolean };
-const labels: Record<string, string> = {
-  "mixed-port": "混合（HTTP / SOCKS）",
-  port: "HTTP",
-  "socks-port": "SOCKS",
-  "redir-port": "重定向",
-  "tproxy-port": "透明代理",
+// Protocol names stay untranslated.
+const labels: Record<string, MessageKey | { name: string }> = {
+  "mixed-port": "paMixed",
+  port: { name: "HTTP" },
+  "socks-port": { name: "SOCKS" },
+  "redir-port": "paRedir",
+  "tproxy-port": "paTproxy",
 };
+const modeKeys: Record<string, MessageKey> = { rule: "setModeRule", global: "setModeGlobal", direct: "setModeDirect" };
 
-export function useProxyAccess({ token, status, connection, logout }: {
+export function useProxyAccess({ token, status, connection, logout, language }: {
   token: string;
   status: CoreStatus;
   connection: Connection;
   logout: (reason?: string) => void;
+  language: Language;
 }) {
+  // Read at sign-out only, so a language switch does not restart polling.
+  const languageRef = useRef(language);
+  languageRef.current = language;
   const [value, setValue] = useState<Access>();
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
@@ -56,7 +63,7 @@ export function useProxyAccess({ token, status, connection, logout }: {
       } catch (error) {
         if (!active) return;
         setValue(undefined);
-        if (error instanceof ApiError && error.status === 401) logout("认证失效，请重新输入令牌。");
+        if (error instanceof ApiError && error.status === 401) logout(t(languageRef.current, "expiredToken"));
         else setError(error instanceof Error ? error.message : String(error));
       } finally { pending = undefined; }
     };
@@ -76,9 +83,12 @@ export function ProxyAccessPanel(props: {
   connection: Connection;
   logout: (reason?: string) => void;
   access: ProxyAccessState;
+  language: Language;
 }) {
   const { value, error, refresh } = props.access;
-  const { connection } = props;
+  const { connection, language } = props;
+  const label = (key: string) => { const entry = labels[key]; return typeof entry === "string" ? t(language, entry) : entry?.name ?? key; };
+  const onOff = (enabled: boolean | undefined) => t(language, enabled ? "setEnable" : "setDisable");
 
   const live = value?.reported;
   const current = live || value?.configured;
@@ -90,43 +100,43 @@ export function ProxyAccessPanel(props: {
   const localHost = ["*", "0.0.0.0", "::", "[::]", "localhost"].includes(binding) ? "127.0.0.1" : binding;
   const address = (port: number) => `${localHost.includes(":") && !localHost.startsWith("[") ? `[${localHost}]` : localHost}:${port}`;
   return (
-    <section className="panel proxy-access" aria-label="代理连接信息">
+    <section className="panel proxy-access" aria-label={t(language, "paTitle")}>
       <div className="panel-title">
-        <h2>代理连接信息</h2>
-        <button type="button" onClick={refresh} disabled={connection !== "connected"}>刷新连接信息</button>
+        <h2>{t(language, "paTitle")}</h2>
+        <button type="button" onClick={refresh} disabled={connection !== "connected"}>{t(language, "paRefresh")}</button>
       </div>
-      {connection !== "connected" ? <p className="info">服务连接中断，连接信息待重新核对。</p> : error ? <p className="alert" role="alert">读取连接信息失败：{error}</p> : !value ? <p className="muted">正在读取连接信息…</p> : <>
-        {!value.has_config && <p className="info">尚无运行配置，导入并使用订阅后显示配置端口。</p>}
-        {!value.running && <p className="info">内核未运行，下方配置端口当前不可用。</p>}
-        {value.core_error && <p className="alert" role="alert">无法读取内核实际端口：{value.core_error}。暂不能确认代理入口。</p>}
-        {mismatch && <p className="alert" role="alert">配置端口与内核实际端口不一致，可能存在端口占用或加载失败。请查看日志并检查端口设置。</p>}
+      {connection !== "connected" ? <p className="info">{t(language, "paDisconnected")}</p> : error ? <p className="alert" role="alert">{t(language, "paReadFailed", { error })}</p> : !value ? <p className="muted">{t(language, "paReading")}</p> : <>
+        {!value.has_config && <p className="info">{t(language, "paNoConfig")}</p>}
+        {!value.running && <p className="info">{t(language, "paCoreStopped")}</p>}
+        {value.core_error && <p className="alert" role="alert">{t(language, "paCoreError", { error: value.core_error })}</p>}
+        {mismatch && <p className="alert" role="alert">{t(language, "paMismatch")}</p>}
         <div className="proxy-ports-scroll">
           <table className="proxy-ports">
-            <thead><tr><th>代理类型</th><th>配置端口</th><th>内核实际端口</th><th>设置来源</th></tr></thead>
+            <thead><tr><th>{t(language, "paType")}</th><th>{t(language, "paConfigured")}</th><th>{t(language, "paActual")}</th><th>{t(language, "paSource")}</th></tr></thead>
             <tbody>{value.ports.map(port => <tr key={port.key}>
-              <th scope="row">{labels[port.key]}</th>
-              <td>{value.has_config ? port.configured || "禁用" : "—"}</td>
-              <td className={port.actual !== null && port.actual !== port.configured ? "port-mismatch" : ""}>{port.actual === null ? "未确认" : port.actual || "未监听"}</td>
-              <td>{port.setting === null ? "继承订阅 / 配置" : `服务设置：${port.setting || "禁用"}`}</td>
+              <th scope="row">{label(port.key)}</th>
+              <td>{value.has_config ? port.configured || t(language, "paDisabled") : "—"}</td>
+              <td className={port.actual !== null && port.actual !== port.configured ? "port-mismatch" : ""}>{port.actual === null ? t(language, "paUnconfirmed") : port.actual || t(language, "paNotListening")}</td>
+              <td>{port.setting === null ? t(language, "paInherited") : t(language, "paServiceSetting", { port: port.setting || t(language, "paDisabled") })}</td>
             </tr>)}</tbody>
           </table>
         </div>
         <dl className="proxy-details">
-          <div><dt>监听地址{live ? "（内核报告）" : "（配置）"}</dt><dd className="mono">{binding}</dd></div>
-          <div><dt>局域网访问</dt><dd>{current?.allow_lan ? "允许" : "仅本机"}</dd></div>
-          <div><dt>代理模式</dt><dd>{{ rule: "规则", global: "全局", direct: "直连" }[current?.mode.toLowerCase() || ""] || current?.mode}</dd></div>
-          <div><dt>IPv6</dt><dd>{current?.ipv6 ? "启用" : "禁用"}</dd></div>
-          <div><dt>DNS / TUN（配置）</dt><dd>DNS {value.dns_enabled ? "启用" : "禁用"} · TUN {value.tun_enabled ? "启用" : "禁用"}</dd></div>
+          <div><dt>{t(language, live ? "paListenReported" : "paListenConfigured")}</dt><dd className="mono">{binding}</dd></div>
+          <div><dt>{t(language, "paLan")}</dt><dd>{t(language, current?.allow_lan ? "paLanAllowed" : "paLanLocal")}</dd></div>
+          <div><dt>{t(language, "setMode")}</dt><dd>{modeKeys[current?.mode.toLowerCase() || ""] ? t(language, modeKeys[current!.mode.toLowerCase()]) : current?.mode}</dd></div>
+          <div><dt>IPv6</dt><dd>{onOff(current?.ipv6)}</dd></div>
+          <div><dt>{t(language, "paDnsTun")}</dt><dd>DNS {onOff(value.dns_enabled)} · TUN {onOff(value.tun_enabled)}</dd></div>
         </dl>
-        {live && <div className="proxy-browser-settings" aria-label="浏览器代理填写参考">
-          <strong>浏览器与服务在同一台机器时</strong>
-          <p>HTTP / HTTPS 代理：<code>{http ? address(http) : "当前没有可用端口"}</code></p>
-          <p>SOCKS v5 代理：<code>{socks ? address(socks) : "当前没有可用端口"}</code></p>
-          {socks > 0 && <p className="hint">使用 SOCKS v5 时，可勾选 Firefox 的「使用 SOCKS v5 时代理 DNS」。</p>}
-          {value.authentication_required && <p className="info">此代理要求认证，请使用订阅配置中的代理用户名和密码。</p>}
+        {live && <div className="proxy-browser-settings" aria-label={t(language, "paBrowserAria")}>
+          <strong>{t(language, "paBrowserTitle")}</strong>
+          <p>{t(language, "paHttpProxy")}<code>{http ? address(http) : t(language, "paNoPort")}</code></p>
+          <p>{t(language, "paSocksProxy")}<code>{socks ? address(socks) : t(language, "paNoPort")}</code></p>
+          {socks > 0 && <p className="hint">{t(language, "paSocksDnsHint")}</p>}
+          {value.authentication_required && <p className="info">{t(language, "paAuthRequired")}</p>}
         </div>}
-        <p className="hint">其他设备连接时填写服务主机的 IP，并开启局域网访问；* 是监听范围，不能直接填作代理地址。9090 是管理页面端口。</p>
-        <p className="hint">端口来自内核报告，每 5 秒更新；不代表所选节点可以访问外网。未保存的设置草稿不影响此处显示。</p>
+        <p className="hint">{t(language, "paOtherDevices")}</p>
+        <p className="hint">{t(language, "paReportedHint")}</p>
       </>}
     </section>
   );

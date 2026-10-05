@@ -20,7 +20,7 @@ const TEXT = {
     failed_starting: "The service did not start. See the output below.",
     failed_stopping: "The service did not stop. See the output below.",
     failed_restarting: "The service did not restart. See the output below.",
-    show: "Show output", hide: "Hide output", empty: "No output yet.",
+    show: "Show output", hide: "Hide output", empty: "No output yet.", output: "Output",
     settings: "Settings", back: "Back", language: "Interface language",
     language_hint: "Applies everywhere: the management page and the tray menu switch too.",
     language_failed: "The language did not change: {detail}",
@@ -49,7 +49,7 @@ const TEXT = {
     failed_starting: "服务启动失败，详情请查看下方输出",
     failed_stopping: "服务停止失败，详情请查看下方输出",
     failed_restarting: "服务重启失败，详情请查看下方输出",
-    show: "显示输出", hide: "收起输出", empty: "暂无输出",
+    show: "显示输出", hide: "收起输出", empty: "暂无输出", output: "输出",
     settings: "设置", back: "返回", language: "界面语言",
     language_hint: "全局生效，管理界面和托盘菜单同步切换",
     language_failed: "语言未能修改：{detail}",
@@ -78,7 +78,7 @@ const TEXT = {
     failed_starting: "服務啟動失敗，詳情請查看下方輸出",
     failed_stopping: "服務停止失敗，詳情請查看下方輸出",
     failed_restarting: "服務重新啟動失敗，詳情請查看下方輸出",
-    show: "顯示輸出", hide: "收起輸出", empty: "尚無輸出",
+    show: "顯示輸出", hide: "收起輸出", empty: "尚無輸出", output: "輸出",
     settings: "設定", back: "返回", language: "介面語言",
     language_hint: "全域生效，管理介面和系統匣選單同步切換",
     language_failed: "語言未能修改：{detail}",
@@ -131,6 +131,7 @@ function render(state) {
 
   const log = $("log"), joined = state.log.join("\n");
   log.dataset.empty = text.empty;
+  log.setAttribute("aria-label", text.output);
   if (joined !== lastLog) {
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
     log.textContent = joined;

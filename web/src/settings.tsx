@@ -243,7 +243,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   desktopVersion,
   onEditorStateChange,
 }, ref) {
-  const access = useProxyAccess({ token, status, connection, logout });
+  const access = useProxyAccess({ token, status, connection, logout, language });
   const [saved, setSaved] = useState<Settings>();
   const [draft, setDraft] = useState<Draft>({});
   const [working, setWorking] = useState(false),

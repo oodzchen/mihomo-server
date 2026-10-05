@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, command, type Connection, type Perform } from "./api";
 import { HelpTip } from "./help-tip";
-import { phaseLabel, type Language } from "./i18n";
+import { phaseLabel, t, type Language } from "./i18n";
 import type { Access, ProxyAccessState } from "./proxy-access";
 import { useToast } from "./toast";
 import type { CoreStatus } from "./types";
@@ -20,7 +20,7 @@ export function TunControl({ token, language, status, connection, access, busy, 
   } : language === "zhtw" ? {
     title: "TUN 模式", on: "已開啟", off: "已關閉", unknown: "未確認", working: "正在套用…",
     help: "透過虛擬網卡接管流量。點擊開關立即儲存並套用，保留其他 TUN 進階參數。",
-    stopped: "目前為已儲存設定，內核啟動後生效。", blocked: "請先套用或修正尚未生效的設定，再變更 TUN。",
+    stopped: "目前為已儲存設定，核心啟動後生效。", blocked: "請先套用或修正尚未生效的設定，再變更 TUN。",
     failed: "TUN 狀態尚未確認，請查看錯誤後重試。", verified: "TUN", expired: "認證失效，請重新登入。",
     held: "整機 TUN 正由 {name} 使用，你的流量目前按其規則處理；對方關閉後你才能開啟。",
   } : {
@@ -68,7 +68,7 @@ export function TunControl({ token, language, status, connection, access, busy, 
       if (!alive.current) return;
       if (saved.runtime.tun?.enable !== enabled || observed.tun_enabled !== enabled ||
         observed.running && observed.reported?.tun_enabled !== enabled) throw new Error(text.failed);
-      toast.finish(`${text.verified}：${enabled ? text.on : text.off}`, result === undefined ? "info" : "success");
+      toast.finish(`${text.verified}${t(language, "colon")}${enabled ? text.on : text.off}`, result === undefined ? "info" : "success");
     } catch (cause) {
       if (!alive.current) return;
       if (cause instanceof ApiError && cause.status === 401) logout(text.expired);

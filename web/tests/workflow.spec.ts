@@ -361,6 +361,19 @@ test("browser language selection supports traditional chinese zhtw and persists 
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
 });
 
+// Visible text, option labels, aria-labels and placeholders in an English UI that are
+// still Chinese or a raw message key (a whole camelCase word, so paths and IDs do not count);
+// the language picker names each language natively.
+async function untranslated(root: import("@playwright/test").Locator) {
+  const texts = await root.evaluate(root => [
+    ...[...root.querySelectorAll("section, header, aside, nav, main > *")].filter(node => !node.querySelector(".language-picker")).map(node => (node as HTMLElement).innerText),
+    ...[...root.querySelectorAll("option")].filter(node => !node.closest(".language-picker")).map(node => node.textContent ?? ""),
+    ...[...root.querySelectorAll("[aria-label], [placeholder], [title]")].filter(node => !node.closest(".language-picker"))
+      .flatMap(node => ["aria-label", "placeholder", "title"].map(name => node.getAttribute(name) ?? "")),
+  ]);
+  return [...new Set(texts.flatMap(text => text.split("\n")))].filter(text => /\p{Script=Han}/u.test(text) || /(^|\s)[a-z]+[A-Z][A-Za-z]*(?=$|[\s.,:;)])/.test(text));
+}
+
 test("settings page translates every field, option, help and validation message", async ({ page }) => {
   await loginSettings(page);
   await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
@@ -371,14 +384,7 @@ test("settings page translates every field, option, help and validation message"
   await expect(editor.getByRole("combobox", { name: "DNS enhanced mode", exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Version information" })).toBeVisible();
   const han = /\p{Script=Han}/u;
-  const texts = await page.locator(".settings-layout").evaluate(root => [
-    ...[...root.querySelectorAll("section:not(:has(.language-picker))")].map(node => (node as HTMLElement).innerText),
-    ...[...root.querySelectorAll("option")].filter(node => !node.closest(".language-picker")).map(node => node.textContent ?? ""),
-    ...[...root.querySelectorAll("[aria-label], [placeholder]")].filter(node => !node.closest(".language-picker"))
-      .flatMap(node => [node.getAttribute("aria-label") ?? "", node.getAttribute("placeholder") ?? ""]),
-  ]);
-  // Neither untranslated Chinese nor a raw message key may be left.
-  expect(texts.filter(text => han.test(text) || /\b(set|geoSet|dl|ob|hostsSet|auth|net)[A-Z]\w+/.test(text))).toEqual([]);
+  expect(await untranslated(page.locator(".settings-layout"))).toEqual([]);
   await page.getByRole("button", { name: "Mixed port help", exact: true }).hover();
   await expect(page.getByRole("tooltip")).not.toHaveText(han);
   await page.getByRole("button", { name: "Runtime settings help", exact: true }).hover();
@@ -386,6 +392,20 @@ test("settings page translates every field, option, help and validation message"
   await editor.getByRole("textbox", { name: "Mixed port", exact: true }).fill("70000");
   await page.getByRole("button", { name: "Save service settings", exact: true }).click();
   await expect(editor.getByRole("alert")).toHaveText("Mixed port must be an integer from 0–65535, or empty to inherit.");
+});
+
+test("every page is fully translated in English", async ({ page }) => {
+  await page.goto(`${base}/#token=${encodeURIComponent(token)}`);
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  const navigation = page.getByRole("navigation", { name: "Main navigation" });
+  for (const name of ["Overview", "Proxies", "Profiles", "Configuration", "Rules", "Logs", "Settings", "Core", "Service"]) {
+    await navigation.getByRole("link", { name, exact: true }).click();
+    await expect(page.locator("h1")).toHaveText(name);
+    // Let panels finish their first read so loaded states are checked too.
+    await expect(page.locator(".muted", { hasText: /^(Reading|Loading)/ })).toHaveCount(0);
+    await page.locator("details").evaluateAll(nodes => nodes.forEach(node => (node as HTMLDetailsElement).open = true));
+    expect({ page: name, untranslated: await untranslated(page.locator("body")) }).toEqual({ page: name, untranslated: [] });
+  }
 });
 
 test("configuration editor translates without losing an unapplied YAML draft", async ({ page }) => {

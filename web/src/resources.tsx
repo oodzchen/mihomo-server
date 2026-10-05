@@ -80,7 +80,7 @@ function modifiedLabel(language: Language, seconds?: number | null) {
       : elapsedMinutes >= 60
         ? t(language, "resourceModifiedHoursAgo", { count: Math.floor(elapsedMinutes / 60) })
         : t(language, "resourceModifiedMinutesAgo", { count: elapsedMinutes });
-  return `${t(language, "resourceModifiedPrefix")}${date.toLocaleString(language === "en" ? "en-US" : "zh-CN", { hour12: false })}（${age}）`;
+  return `${t(language, "resourceModifiedPrefix")}${date.toLocaleString(language === "en" ? "en-US" : language === "zhtw" ? "zh-TW" : "zh-CN", { hour12: false })}${t(language, "parenthetical", { text: age })}`;
 }
 
 export function ResourcesPanel({ token, status, connection, logout, language = "zh" }: {
@@ -123,7 +123,7 @@ export function ResourcesPanel({ token, status, connection, logout, language = "
     setOperating(name);
     try {
       await command(token, "healthcheck_proxy_provider", { name });
-      setNotice(`${t(language, "proxyProviderHealthcheck")}${language === "en" ? ": " : "："}${name}`);
+      setNotice(`${t(language, "proxyProviderHealthcheck")}${t(language, "colon")}${name}`);
       setRefresh(v => v + 1);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) logout(t(language, "expiredToken"));

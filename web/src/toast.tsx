@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { Language } from "./i18n";
+import { t, type Language } from "./i18n";
 
 export type ToastKind = "success" | "info" | "error";
 export type ToastOperation = {
@@ -58,14 +58,14 @@ export function ToastProvider({ children, language }: { children: ReactNode; lan
   }, []);
   return <ToastContext.Provider value={notify}>
     {children}
-    <div className="toast-stack" aria-label={language === "en" ? "Notifications" : "通知"}>
+    <div className="toast-stack" aria-label={t(language, "notifications")}>
       {toasts.map(toast => <div key={toast.id} data-toast-id={toast.id} className={`toast toast-${toast.kind}`}>
         <span className="toast-icon" aria-hidden="true">{toast.kind === "loading" ? <span className="toast-spinner" /> : toast.kind === "success" ? "✓" : toast.kind === "error" ? "!" : "i"}</span>
         <div className="toast-content" role={toast.kind === "error" || toast.detail ? "alert" : "status"}>
           <span>{toast.message}</span>
           {toast.detail && toast.detail !== toast.message && <small className="toast-detail">{toast.detail}</small>}
         </div>
-        {toast.kind !== "loading" && <button type="button" className="toast-close" aria-label={`${language === "en" ? "Dismiss" : language === "zhtw" ? "關閉" : "关闭"} ${toast.message}`} onClick={() => dismiss(toast.id)}>×</button>}
+        {toast.kind !== "loading" && <button type="button" className="toast-close" aria-label={t(language, "dismissNotification", { message: toast.message })} onClick={() => dismiss(toast.id)}>×</button>}
       </div>)}
     </div>
   </ToastContext.Provider>;

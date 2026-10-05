@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, command, type Connection, type Perform } from "./api";
 import { HelpTip } from "./help-tip";
-import { phaseLabel, type Language } from "./i18n";
+import { phaseLabel, t, type Language } from "./i18n";
 import type { Access, ProxyAccessState } from "./proxy-access";
 import { useToast } from "./toast";
 import type { CoreStatus } from "./types";
@@ -24,7 +24,7 @@ export function ProxyModeControl({ token, language, status, connection, access, 
   } : language === "zhtw" ? {
     title: "代理模式", direct: "直連", rule: "規則", global: "全域", unknown: "未確認", working: "正在套用…",
     help: "直連不經代理；規則按設定分流；全域使用 GLOBAL 群組。點擊立即儲存並套用，保留其他設定。",
-    stopped: "目前為已儲存模式，內核啟動後生效。", verified: "代理模式", failed: "代理模式尚未確認，請查看錯誤後重試。", expired: "認證失效，請重新登入。",
+    stopped: "目前為已儲存模式，核心啟動後生效。", verified: "代理模式", failed: "代理模式尚未確認，請查看錯誤後重試。", expired: "認證失效，請重新登入。",
   } : {
     title: "代理模式", direct: "直连", rule: "规则", global: "全局", unknown: "未确认", working: "正在应用…",
     help: "直连不经代理；规则按配置分流；全局使用 GLOBAL 分组。点击立即保存并应用，保留其他设置。",
@@ -58,7 +58,7 @@ export function ProxyModeControl({ token, language, status, connection, access, 
       if (!alive.current) return;
       if (saved.runtime.mode !== mode || validMode(observed.configured.mode) !== mode ||
         observed.running && validMode(observed.reported?.mode) !== mode) throw new Error(text.failed);
-      toast.finish(`${text.verified}：${text[mode]}`, result === undefined ? "info" : "success");
+      toast.finish(`${text.verified}${t(language, "colon")}${text[mode]}`, result === undefined ? "info" : "success");
     } catch (cause) {
       if (!alive.current) return;
       if (cause instanceof ApiError && cause.status === 401) logout(text.expired);

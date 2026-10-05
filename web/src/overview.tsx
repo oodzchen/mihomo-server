@@ -61,14 +61,14 @@ export function Overview({
   const traffic = useFeed<{ up: number; down: number }>(token, "traffic"),
     memory = useFeed<{ inuse: number }>(token, "memory"),
     connections = useFeed<{ count: number }>(token, "connections_count");
-  const access = useProxyAccess({ token, status, connection, logout });
+  const access = useProxyAccess({ token, status, connection, logout, language });
   return (
     <>
       <div className="runtime-cards">
         <ProxyModeControl token={token} language={language} status={status} connection={connection} access={access} busy={busy} perform={perform} logout={logout}
           extra={<a href="/settings" onClick={event => navigate(event, "/settings")}>{t(language, "settings")}</a>} />
         <TunControl token={token} language={language} status={status} connection={connection} access={access} busy={busy} perform={perform} logout={logout}
-          extra={<a href="/settings" onClick={event => navigate(event, "/settings")}>{language === "en" ? "Advanced settings" : language === "zhtw" ? "進階設定" : "高级设置"}</a>} />
+          extra={<a href="/settings" onClick={event => navigate(event, "/settings")}>{t(language, "advancedSettings")}</a>} />
       </div>
       <div className="metrics">
         <div>
@@ -96,6 +96,7 @@ export function Overview({
       </div>
       <ProxyAccessPanel
         access={access}
+        language={language}
         token={token}
         status={status}
         connection={connection}
