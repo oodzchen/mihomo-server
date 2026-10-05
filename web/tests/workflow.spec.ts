@@ -5065,11 +5065,11 @@ test("service page controls the foreground service and keeps long help in toolti
   await expect(upgrade.locator("div").filter({ hasText: "最新版本" }).locator("dd")).toHaveText("v9.9.9");
 
   // The management address logs a browser straight in through the fragment.
-  const address = page.getByRole("link", { name: `${base}/` });
+  const address = page.getByRole("link", { name: `${base}/#token=${encodeURIComponent(token)}`, exact: true });
   await expect(page.getByText("网页管理地址：")).toBeVisible();
   await expect(address).toHaveAttribute("href", `${base}/#token=${encodeURIComponent(token)}`);
   await expect(address).toHaveAttribute("target", "_blank");
-  await expectHelp(page, "网页管理地址：", "链接附带当前登录令牌");
+  await expectHelp(page, "网页管理地址：", "链接含登录令牌，请妥善保管，勿分享给他人。");
   const [opened] = await Promise.all([page.context().waitForEvent("page"), address.click()]);
   await expect(opened.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
   expect(opened.url()).not.toContain("token");

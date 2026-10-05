@@ -266,7 +266,7 @@ export function ServicePage({
       <p className="service-address">
         <span>{t(language, "serviceWebAddress")}</span>
         <a href={dashboard} target="_blank" rel="noopener noreferrer" className="mono">
-          {location.origin}/
+          {dashboard}
         </a>
         <HelpTip label={t(language, "serviceWebAddress")}>{t(language, "serviceWebAddressHint")}</HelpTip>
       </p>
