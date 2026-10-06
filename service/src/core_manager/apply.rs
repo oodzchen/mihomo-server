@@ -118,14 +118,31 @@ impl Actor {
             }
             if was_running {
                 live_attempted = true;
-                if let Err(error) = self.reload(&candidate).await {
+                let tun_active = self.tun_live.load(std::sync::atomic::Ordering::Relaxed);
+                let tun_candidate = read_config(&candidate).await.is_ok_and(|c| {
+                    c.get("tun")
+                        .and_then(|t| t.get("enable"))
+                        .and_then(serde_yaml_ng::Value::as_bool)
+                        == Some(true)
+                });
+                // On Linux, Mihomo's TUN listener cannot hot-reload an existing TUN interface
+                // without getting EBUSY ("device or resource busy") because the existing interface
+                // is already open. Cleanly restarting the core avoids the reload timeout and rebinds
+                // TUN immediately in <300ms.
+                let reload_result = if tun_active && tun_candidate {
+                    Err(anyhow::anyhow!("TUN is active; restarting process to avoid device busy conflict"))
+                } else {
+                    self.reload(&candidate).await
+                };
+
+                if let Err(error) = reload_result {
                     ensure!(
                         !*self.shutdown.borrow(),
                         "application cancelled during shutdown: {error:#}"
                     );
                     self.logs.append(
                         "manager",
-                        format!("reload failed; restarting with candidate: {error:#}"),
+                        format!("restarting with candidate: {error:#}"),
                     );
                     self.publish(CorePhase::Stopping, None);
                     self.stop_process().await?;

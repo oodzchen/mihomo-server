@@ -539,7 +539,7 @@ impl Directory {
         let binary = self.0.join("validator.py");
         std::fs::write(
             &binary,
-            "#!/usr/bin/python3\nimport sys\nsys.exit(0 if '-t' in sys.argv else 1)\n",
+            "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '-t' in sys.argv else 1)\n",
         )?;
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700))?;
         CoreManager::spawn(CoreOptions::new(binary, self.0.clone(), self.0.join("missing.yaml")))

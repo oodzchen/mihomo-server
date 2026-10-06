@@ -40,7 +40,7 @@ impl Directory {
         )?;
         fs::write(
             p.join("validator.py"),
-            "#!/usr/bin/python3\nimport sys\nsys.exit(0 if '-t' in sys.argv else 1)\n",
+            "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '-t' in sys.argv else 1)\n",
         )?;
         fs::set_permissions(p.join("validator.py"), fs::Permissions::from_mode(0o700))?;
         Ok(Self(p))
@@ -221,7 +221,7 @@ async fn restore_rehearsal_enforces_archived_authority_and_requires_fresh_provid
             let mut profile_dns = serde_json::Map::new(); profile_dns.insert(uid, json!({"enabled":true}));
             files.insert("settings.yaml".into(), serde_yaml_ng::to_string(&json!({"schema_version":1,"runtime":{"mixed-port":12345,"allow-lan":false,"tun":{"enable":false},"dns":{"enable":true,"nameserver":["1.1.1.1"]}},"profile_dns":profile_dns})).unwrap().into_bytes());
         })?;
-        let script = format!("#!/usr/bin/python3\nimport sys,pathlib\np=pathlib.Path(sys.argv[sys.argv.index('-f')+1])\nif p.name=='regenerated.yaml': pathlib.Path({:?}).write_bytes(p.read_bytes())\nsys.exit(0)\n", dir.0.join("regenerated-seen.yaml").to_str().unwrap());
+        let script = format!("#!/usr/bin/env python3\nimport sys,pathlib\np=pathlib.Path(sys.argv[sys.argv.index('-f')+1])\nif p.name=='regenerated.yaml': pathlib.Path({:?}).write_bytes(p.read_bytes())\nsys.exit(0)\n", dir.0.join("regenerated-seen.yaml").to_str().unwrap());
         fs::write(dir.0.join("validator.py"), script)?;
         let before = manager.settings().await?;
         let report = restore_report(&app, &token, archive).await?;
@@ -260,8 +260,8 @@ async fn restore_probe_and_script_failures_are_sanitized_and_release_backup_admi
                 }
             })?;
             inspection_report(&app, &token, archive.clone()).await?;
-            let validator = if case == "probe" { b"#!/usr/bin/python3\nimport sys\nprint('PRIVATE_DIAGNOSTIC /tmp/private')\nsys.exit(1)\n".to_vec() }
-                else if case == "probe-mutation" { b"#!/usr/bin/python3\nimport sys,pathlib\np=pathlib.Path(sys.argv[sys.argv.index('-f')+1]);p.write_text('changed')\n".to_vec() } else { original.clone() };
+            let validator = if case == "probe" { b"#!/usr/bin/env python3\nimport sys\nprint('PRIVATE_DIAGNOSTIC /tmp/private')\nsys.exit(1)\n".to_vec() }
+                else if case == "probe-mutation" { b"#!/usr/bin/env python3\nimport sys,pathlib\np=pathlib.Path(sys.argv[sys.argv.index('-f')+1]);p.write_text('changed')\n".to_vec() } else { original.clone() };
             fs::write(dir.0.join("validator.py"), validator)?;
             let response = tokio::time::timeout(Duration::from_secs(3), app.clone().oneshot(restore_request(&token, archive))).await??;
             assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY, "{case}");
@@ -290,7 +290,7 @@ async fn restore_disconnect_http_close_and_manager_shutdown_reap_probes_and_remo
             let result = async {
             let download = manager.export_backup().await?; let bytes = download.bytes.clone(); drop(download);
             let marker = dir.0.join("probe.json");
-            fs::write(dir.0.join("validator.py"), format!("#!/usr/bin/python3\nimport sys,time,pathlib,json,os\npathlib.Path({:?}).write_text(json.dumps({{'pid':os.getpid(),'config':sys.argv[sys.argv.index('-f')+1],'data':sys.argv[sys.argv.index('-d')+1]}}))\ntime.sleep(60)\n", marker.to_str().unwrap()))?;
+            fs::write(dir.0.join("validator.py"), format!("#!/usr/bin/env python3\nimport sys,time,pathlib,json,os\npathlib.Path({:?}).write_text(json.dumps({{'pid':os.getpid(),'config':sys.argv[sys.argv.index('-f')+1],'data':sys.argv[sys.argv.index('-d')+1]}}))\ntime.sleep(60)\n", marker.to_str().unwrap()))?;
             let request = if route == "restore" {apply_restore_request(&token,bytes,"archived")} else {restore_request(&token,bytes)};
             let upload = tokio::spawn(app.oneshot(request));
             let probe: serde_json::Value = tokio::time::timeout(Duration::from_secs(3), async { loop { if let Ok(data) = fs::read(&marker) && let Ok(probe) = serde_json::from_slice::<serde_json::Value>(&data) { break probe; } tokio::time::sleep(Duration::from_millis(10)).await; } }).await?;
@@ -1190,9 +1190,9 @@ async fn restore_failure_and_private_source_mutation_leave_publication_unchanged
         let before=json!(manager.profiles());let settings=manager.settings().await?;let revision=manager.status().config_revision;
         for fault in ["probe-reject","source-mutation","publication-write"] {
             let script=match fault {
-                "probe-reject"=>"#!/usr/bin/python3\nimport sys\nprint('PRIVATE_RESTORE_FAILURE')\nsys.exit(1)\n".into(),
-                "source-mutation"=>"#!/usr/bin/python3\nimport pathlib,sys\np=pathlib.Path(sys.argv[sys.argv.index('-f')+1]).parent\nif (p/'profiles.yaml').exists(): (p/'profiles.yaml').write_text('items: []\\ncurrent: null\\n')\nsys.exit(0)\n".into(),
-                "publication-write"=>format!("#!/usr/bin/python3\nimport os,sys\nos.chmod({:?},0o500)\nsys.exit(0)\n",dir.0.join("profiles").to_str().unwrap()),
+                "probe-reject"=>"#!/usr/bin/env python3\nimport sys\nprint('PRIVATE_RESTORE_FAILURE')\nsys.exit(1)\n".into(),
+                "source-mutation"=>"#!/usr/bin/env python3\nimport pathlib,sys\np=pathlib.Path(sys.argv[sys.argv.index('-f')+1]).parent\nif (p/'profiles.yaml').exists(): (p/'profiles.yaml').write_text('items: []\\ncurrent: null\\n')\nsys.exit(0)\n".into(),
+                "publication-write"=>format!("#!/usr/bin/env python3\nimport os,sys\nos.chmod({:?},0o500)\nsys.exit(0)\n",dir.0.join("profiles").to_str().unwrap()),
                 _=>unreachable!(),
             };
             fs::write(dir.0.join("validator.py"),script)?;
@@ -1249,7 +1249,7 @@ async fn committed_restore_reports_private_cleanup_failure_without_undoing_publi
         manager.select_profile(item.uid.unwrap().to_string()).await?;
         let download=manager.export_backup().await?;let bytes=download.bytes.clone();drop(download);
         let before=manager.status().config_revision;
-        fs::write(dir.0.join("validator.py"),format!("#!/usr/bin/python3\nimport pathlib,sys,os\np=pathlib.Path(sys.argv[sys.argv.index('-f')+1])\nif p.name=='regenerated.yaml':\n pathlib.Path({:?}).write_text(str(p.parent))\n os.chmod(p.parent,0o500)\nsys.exit(0)\n",marker.to_str().unwrap()))?;
+        fs::write(dir.0.join("validator.py"),format!("#!/usr/bin/env python3\nimport pathlib,sys,os\np=pathlib.Path(sys.argv[sys.argv.index('-f')+1])\nif p.name=='regenerated.yaml':\n pathlib.Path({:?}).write_text(str(p.parent))\n os.chmod(p.parent,0o500)\nsys.exit(0)\n",marker.to_str().unwrap()))?;
         let receipt=apply_restore_report(&app,&token,bytes,"regenerated").await?;
         assert!(receipt.committed && receipt.cleanup_pending);
         assert_ne!(manager.status().config_revision,before);
@@ -1500,7 +1500,7 @@ async fn killed_service_restore_candidate_is_cleaned_on_restart_without_changing
     fs::write(
         dir.0.join("validator.py"),
         format!(
-            "#!/usr/bin/python3\nimport sys,time,pathlib,json,os\npathlib.Path({:?}).write_text(json.dumps({{'pid':os.getpid(),'candidate':str(pathlib.Path(sys.argv[sys.argv.index('-f')+1]).parent)}}))\ntime.sleep(60)\n",
+            "#!/usr/bin/env python3\nimport sys,time,pathlib,json,os\npathlib.Path({:?}).write_text(json.dumps({{'pid':os.getpid(),'candidate':str(pathlib.Path(sys.argv[sys.argv.index('-f')+1]).parent)}}))\ntime.sleep(60)\n",
             marker.to_str().unwrap()
         ),
     )?;

@@ -95,7 +95,7 @@ async fn disconnected_staging_caller_keeps_actor_admission_until_shutdown_drains
     fs::create_dir_all(dir.0.join("resources/core"))?;
     let pid_path = dir.0.join("validator-pid");
     let script = format!(
-        "#!/usr/bin/python3\nimport os,time\nopen({:?},'w').write(str(os.getpid()))\ntime.sleep(60)\n",
+        "#!/usr/bin/env python3\nimport os,time\nopen({:?},'w').write(str(os.getpid()))\ntime.sleep(60)\n",
         pid_path.to_str().unwrap()
     );
     let binary = dir.0.join("resources/core/verge-mihomo");

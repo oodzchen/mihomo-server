@@ -46,7 +46,7 @@ impl Directory {
         let binary = self.0.join("validator.py");
         fs::write(
             &binary,
-            "#!/usr/bin/python3\nimport sys\nsys.exit(0 if '-t' in sys.argv else 1)\n",
+            "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '-t' in sys.argv else 1)\n",
         )?;
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))?;
         Ok(CoreOptions::new(binary, self.0.clone(), self.0.join("missing.yaml")))

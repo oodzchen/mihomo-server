@@ -54,7 +54,7 @@ impl Directory {
         let path = self.0.join("validator.py");
         fs::write(
             &path,
-            "#!/usr/bin/python3\nimport sys\nsys.exit(0 if '-t' in sys.argv else 1)\n",
+            "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '-t' in sys.argv else 1)\n",
         )?;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
         Ok(path)

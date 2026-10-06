@@ -32,7 +32,7 @@ async fn provider_candidate_policy_preserves_sources_and_rejects_unsafe_edits_be
     let manager = directory.manager()?;
     std::fs::write(
         directory.0.join("validator.py"),
-        "#!/usr/bin/python3\nimport sys,pathlib\nif '-t' not in sys.argv: sys.exit(1)\np=pathlib.Path(sys.argv[sys.argv.index('-d')+1])\n(p/'probe-marker').write_text('probe')\nsys.exit(1 if 'reject-validator' in pathlib.Path(sys.argv[sys.argv.index('-f')+1]).read_text() else 0)\n",
+        "#!/usr/bin/env python3\nimport sys,pathlib\nif '-t' not in sys.argv: sys.exit(1)\np=pathlib.Path(sys.argv[sys.argv.index('-d')+1])\n(p/'probe-marker').write_text('probe')\nsys.exit(1 if 'reject-validator' in pathlib.Path(sys.argv[sys.argv.index('-f')+1]).read_text() else 0)\n",
     )?;
     let app = router(HttpState::new(Management::new(
         manager.clone(),
@@ -702,7 +702,7 @@ impl Directory {
         let validator = self.0.join("validator.py");
         std::fs::write(
             &validator,
-            "#!/usr/bin/python3\nimport sys\nsys.exit(0 if '-t' in sys.argv else 1)\n",
+            "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '-t' in sys.argv else 1)\n",
         )?;
         std::fs::set_permissions(&validator, std::fs::Permissions::from_mode(0o700))?;
         let mut options = CoreOptions::new(validator, self.0.clone(), self.0.join("missing.yaml"));

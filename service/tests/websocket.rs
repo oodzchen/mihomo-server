@@ -55,7 +55,7 @@ impl Server {
             let path = directory.0.join("validator.py");
             std::fs::write(
                 &path,
-                "#!/usr/bin/python3\nimport sys\nsys.exit(0 if '-t' in sys.argv else 1)\n",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '-t' in sys.argv else 1)\n",
             )?;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))?;
             path

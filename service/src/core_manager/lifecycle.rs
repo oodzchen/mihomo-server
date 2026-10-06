@@ -204,7 +204,7 @@ impl Actor {
     pub(super) async fn verify_proxy_ports(&mut self, path: &Path) -> Result<()> {
         // Mihomo brings TUN up asynchronously after its API is ready (it may wait
         // for the default interface), so an expected TUN is polled before failing.
-        const TUN_SETTLE: Duration = Duration::from_secs(15);
+        const TUN_SETTLE: Duration = Duration::from_secs(4);
         let config = read_config(path).await?;
         let tun_expected = config
             .get("tun")
@@ -225,7 +225,7 @@ impl Actor {
                 Err(_) if tun_expected && Instant::now() < deadline => {}
                 Ok(()) if tun_expected => {
                     self.tun_live.store(true, std::sync::atomic::Ordering::Relaxed);
-                    return self.await_system_dns(&core.tun.device, deadline).await;
+                    return self.await_system_dns(&core.tun.device).await;
                 }
                 Ok(()) => {
                     self.tun_live.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -252,12 +252,12 @@ impl Actor {
     /// calls have pointed systemd-resolved at it; report the toggle after that.
     /// Hosts without systemd-resolved have nothing to wait for. A resolver that
     /// never accepts the link (no polkit rule) keeps the TUN and logs why.
-    async fn await_system_dns(&mut self, device: &str, deadline: Instant) -> Result<()> {
+    async fn await_system_dns(&mut self, device: &str) -> Result<()> {
         #[cfg(target_os = "linux")]
         if self.options.isolation.map(|isolation| isolation.tun_scope())
             == Some(headless_core::enhance::isolation::TunScope::System)
         {
-            let deadline = deadline.max(Instant::now() + Duration::from_secs(5));
+            let deadline = Instant::now() + Duration::from_millis(500);
             loop {
                 match crate::native_tun::resolved_link_dns(device).await {
                     None | Some(true) => return Ok(()),
@@ -281,7 +281,7 @@ impl Actor {
             }
         }
         #[cfg(not(target_os = "linux"))]
-        let _ = (device, deadline);
+        let _ = device;
         Ok(())
     }
 

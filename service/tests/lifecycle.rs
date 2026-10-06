@@ -531,7 +531,7 @@ async fn validation_timeout_and_shutdown_reap_the_validator_without_committing()
         let directory = Directory::new().await?;
         let config = directory.config("rule").await?;
         let binary = directory.0.join("validator.py");
-        tokio::fs::write(&binary, "#!/usr/bin/python3\nimport sys,os,time,signal\nfrom pathlib import Path\nassert '-t' in sys.argv\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nPath(sys.argv[sys.argv.index('-d')+1]+'/validator.pid').write_text(str(os.getpid()))\nwhile True: time.sleep(1)\n").await?;
+        tokio::fs::write(&binary, "#!/usr/bin/env python3\nimport sys,os,time,signal\nfrom pathlib import Path\nassert '-t' in sys.argv\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nPath(sys.argv[sys.argv.index('-d')+1]+'/validator.pid').write_text(str(os.getpid()))\nwhile True: time.sleep(1)\n").await?;
         tokio::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).await?;
         let mut options = CoreOptions::new(binary, directory.0.clone(), config);
         options.policy.validation_timeout = if cancel {
@@ -640,7 +640,7 @@ async fn validation_rejects_fatal_output_and_drains_both_pipes_with_bounded_capt
         let directory = Directory::new().await?;
         let config = directory.config("rule").await?;
         let binary = directory.0.join("invalid-validator.py");
-        tokio::fs::write(&binary, format!("#!/usr/bin/python3\n{body}\n")).await?;
+        tokio::fs::write(&binary, format!("#!/usr/bin/env python3\n{body}\n")).await?;
         tokio::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).await?;
         let manager = CoreManager::spawn(CoreOptions::new(binary, directory.0.clone(), config))?;
         let result = manager.start().await;
@@ -658,7 +658,7 @@ async fn shutdown_interrupts_readiness_and_forces_an_unresponsive_child_to_exit(
     let directory = Directory::new().await?;
     let config = directory.config("rule").await?;
     let binary = directory.0.join("unresponsive.py");
-    tokio::fs::write(&binary, "#!/usr/bin/python3\nimport signal,time,sys\nif '-t' in sys.argv: sys.exit(0)\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nfor i in range(300): print('fixture log', i, flush=True)\nprint('fixture ready', flush=True)\nwhile True: time.sleep(1)\n").await?;
+    tokio::fs::write(&binary, "#!/usr/bin/env python3\nimport signal,time,sys\nif '-t' in sys.argv: sys.exit(0)\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nfor i in range(300): print('fixture log', i, flush=True)\nprint('fixture ready', flush=True)\nwhile True: time.sleep(1)\n").await?;
     tokio::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).await?;
     let mut options = CoreOptions::new(binary, directory.0.clone(), config);
     options.policy.readiness_attempts = 100;

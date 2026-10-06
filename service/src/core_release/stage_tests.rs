@@ -163,7 +163,7 @@ async fn version_probe_bounds_output_rejects_failures_and_reaps_on_timeout_and_s
         "print('x'*70000)",
         "import sys;sys.stderr.write('x'*70000);print('Mihomo Meta v1.2.3')",
     ] {
-        fs::write(&script, format!("#!/usr/bin/python3\n{body}\n"))?;
+        fs::write(&script, format!("#!/usr/bin/env python3\n{body}\n"))?;
         fs::set_permissions(&script, fs::Permissions::from_mode(0o700))?;
         let error = crate::validation::probe_version(&script, &mut rx, Duration::from_secs(2))
             .await
@@ -173,7 +173,7 @@ async fn version_probe_bounds_output_rejects_failures_and_reaps_on_timeout_and_s
     fs::write(
         &script,
         format!(
-            "#!/usr/bin/python3\nimport os,time\nopen({:?},'w').write(str(os.getpid()))\ntime.sleep(60)\n",
+            "#!/usr/bin/env python3\nimport os,time\nopen({:?},'w').write(str(os.getpid()))\ntime.sleep(60)\n",
             dir.0.join("pid").to_str().unwrap()
         ),
     )?;

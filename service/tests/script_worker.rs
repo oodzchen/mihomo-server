@@ -75,7 +75,7 @@ async fn cancelled_worker_is_killed_reaped_and_does_not_hold_pipe_tasks() -> Res
     std::fs::create_dir_all(&directory)?;
     let result=async{
         let binary=directory.join("worker.py");let pid_path=directory.join("pid");
-        std::fs::write(&binary,format!("#!/usr/bin/python3\nimport os,time,pathlib\npathlib.Path({:?}).write_text(str(os.getpid()))\nwhile True: time.sleep(1)\n",pid_path.to_str().unwrap()))?;std::fs::set_permissions(&binary,std::fs::Permissions::from_mode(0o700))?;
+        std::fs::write(&binary,format!("#!/usr/bin/env python3\nimport os,time,pathlib\npathlib.Path({:?}).write_text(str(os.getpid()))\nwhile True: time.sleep(1)\n",pid_path.to_str().unwrap()))?;std::fs::set_permissions(&binary,std::fs::Permissions::from_mode(0o700))?;
         let(cancel,mut shutdown)=watch::channel(false);let task=tokio::spawn(async move{execute(&binary,request("function main(c) { return c; }")?,&mut shutdown,Duration::from_secs(5)).await});
         tokio::time::timeout(Duration::from_secs(2),async{while !pid_path.is_file(){tokio::time::sleep(Duration::from_millis(10)).await;}}).await?;
         let pid=std::fs::read_to_string(pid_path)?.parse::<i32>()?;cancel.send_replace(true);assert!(format!("{:#}",task.await?.unwrap_err()).contains("cancelled"));

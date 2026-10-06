@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """Owned test process for deterministic reload/restart failure injection."""
 import http.server
 import json
