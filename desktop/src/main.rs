@@ -37,6 +37,17 @@ select a service outside systemd; MIHOMO_SERVER_INSTALLER replaces the
 published installer with a path or URL.";
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("GIO_USE_PROXY_RESOLVER").is_none() {
+        // SAFETY: Called at the very entry of main before any threads or GIO modules initialize.
+        // Prevents desktop proxy resolvers (e.g. KDE kioslaverc or GNOME dconf) from hijacking
+        // loopback requests to the local management API (127.0.0.1:9090), which would cause
+        // WebKitGTK to abort navigation with "Operation was cancelled".
+        unsafe {
+            std::env::set_var("GIO_USE_PROXY_RESOLVER", "dummy");
+        }
+    }
+
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     if arguments
         .iter()
