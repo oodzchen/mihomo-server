@@ -139,7 +139,6 @@ pub(crate) fn available() -> Option<PathBuf> {
     None
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

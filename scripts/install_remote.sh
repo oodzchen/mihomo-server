@@ -229,8 +229,7 @@ update_unit() {
         systemctl daemon-reload 2>/dev/null || true
         return
     fi
-    if is_nixos || [ ! -w "${unit%/*}" ]; then
-        echo "==> Skipping system update unit on NixOS / read-only systemd" >&2
+    if is_nixos; then
         return
     fi
     mkdir -p "${unit%/*}"
@@ -316,36 +315,34 @@ install_shared() {
     update_unit install
     ln -sfn "releases/$(basename "$release")" "$root/.current.new"
     mv -T "$root/.current.new" "$root/current"
-    if [ -d /etc/systemd/user ] && [ -w /etc/systemd/user ]; then
-        install -m 644 "$release/mihomo-server.service" /etc/systemd/user/mihomo-server.service
-    else
-        # On NixOS or systems where /etc/systemd/user is read-only
+    if is_nixos; then
         if [ -n "$caller" ]; then
             mkdir -p "$config_home/systemd/user"
             install -m 644 "$release/mihomo-server.service" "$config_home/systemd/user/mihomo-server.service"
             chown -R "$caller:" "$config_home/systemd"
         fi
+    else
+        mkdir -p /etc/systemd/user
+        install -m 644 "$release/mihomo-server.service" /etc/systemd/user/mihomo-server.service
     fi
 
-    # Global links in /usr/local/bin if writable
-    if mkdir -p /usr/local/bin 2>/dev/null && [ -w /usr/local/bin ]; then
-        ln -sfn "$root/current/mihomo-server-user" /usr/local/bin/mihomo-server-user 2>/dev/null || true
-        local file link
-        for file in bin/mihomo-server share/man/man1/mihomo-server.1 \
-            share/bash-completion/completions/mihomo-server share/zsh/site-functions/_mihomo-server; do
-            [ -f "$release/share/man/man1/mihomo-server.1" ] || break
-            link=/usr/local/$file
-            if [ -e "$link" ] && [ ! -L "$link" ]; then
-                echo "warning: keeping existing $link; mihomo-server is at $root/current/$file" >&2
-                continue
-            fi
-            mkdir -p "$(dirname "$link")" 2>/dev/null || true
-            ln -sfn "$root/current/$file" "$link" 2>/dev/null || true
-        done
-    fi
+    mkdir -p /usr/local/bin
+    ln -sfn "$root/current/mihomo-server-user" /usr/local/bin/mihomo-server-user
+    local file link
+    for file in bin/mihomo-server share/man/man1/mihomo-server.1 \
+        share/bash-completion/completions/mihomo-server share/zsh/site-functions/_mihomo-server; do
+        [ -f "$release/share/man/man1/mihomo-server.1" ] || break
+        link=/usr/local/$file
+        if [ -e "$link" ] && [ ! -L "$link" ]; then
+            echo "warning: keeping existing $link; mihomo-server is at $root/current/$file" >&2
+            continue
+        fi
+        mkdir -p "$(dirname "$link")"
+        ln -sfn "$root/current/$file" "$link"
+    done
 
     # User-level links in caller's ~/.local/bin (crucial on NixOS where ~/.local/bin is in PATH by default)
-    if [ -n "$caller" ] && [ -d "$home" ]; then
+    if is_nixos && [ -n "$caller" ] && [ -d "$home" ]; then
         mkdir -p "$home/.local/bin"
         ln -sfn "$root/current/mihomo-server-user" "$home/.local/bin/mihomo-server-user"
         ln -sfn "$root/current/bin/mihomo-server" "$home/.local/bin/mihomo-server"
@@ -373,10 +370,12 @@ install_shared() {
         # The output is shown as it is produced (on the inherited stderr; reopening
         # /dev/stderr would truncate a log file) and also kept for the TUN check.
         echo "==> starting the mihomo-server instance of $caller"
+        local helper=/usr/local/bin/mihomo-server-user
+        [ -x "$helper" ] || helper="$root/current/mihomo-server-user"
         output=$(runuser -u "$caller" -- env HOME="$home" XDG_RUNTIME_DIR="/run/user/$uid" \
             XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
             bash -euo pipefail -c "$(declare -f die activate_user); activate_user \"\$@\"" \
-            bash "$home" "$config_home" "$root/current/mihomo-server-user" \
+            bash "$home" "$config_home" "$helper" \
             | while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "$line" >&2; printf '%s\n' "$line"; done) \
             || die 'installation did not produce a usable user instance'
         grep -q '^tun: *available ' <<< "$output" || die 'TUN authorization did not take effect'
@@ -439,11 +438,13 @@ uninstall_shared() {
         # user configuration: kept for a reinstall unless purging.
         link="$home/.config/systemd/user/default.target.wants/mihomo-server.service"
         if [ -L "$link" ]; then runuser -u "$user" -- rm -f -- "$link"; fi
-        user_unit="$home/.config/systemd/user/mihomo-server.service"
-        if [ -f "$user_unit" ]; then rm -f "$user_unit"; fi
-        for user_bin in "$home/.local/bin/mihomo-server" "$home/.local/bin/mihomo-server-user"; do
-            if [ -L "$user_bin" ] && [[ "$(readlink "$user_bin")" = /opt/mihomo-server/* ]]; then rm -f "$user_bin"; fi
-        done
+        if is_nixos; then
+            user_unit="$home/.config/systemd/user/mihomo-server.service"
+            if [ -f "$user_unit" ]; then rm -f "$user_unit"; fi
+            for user_bin in "$home/.local/bin/mihomo-server" "$home/.local/bin/mihomo-server-user"; do
+                if [ -L "$user_bin" ] && [[ "$(readlink "$user_bin")" = /opt/mihomo-server/* ]]; then rm -f "$user_bin"; fi
+            done
+        fi
         if [ "$purge" = 1 ] && { [ -d "$home/.local/share/mihomo-server" ] || [ -d "$home/.config/mihomo-server" ] \
             || [ -f "$home/.config/systemd/user/mihomo-server.service.d/10-mihomo-paths.conf" ] \
             || [ -n "$(find /var/lib/mihomo-server/slots -maxdepth 1 -type f -uid "$uid" 2>/dev/null)" ]; }; then

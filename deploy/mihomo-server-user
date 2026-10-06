@@ -25,6 +25,9 @@ Subscriptions, nodes, mode and TUN: see mihomo-server --help.
 HELP
 }
 die() { echo "error: $*" >&2; exit 1; }
+is_nixos() {
+    [ -f /etc/NIXOS ] || ( [ -f /etc/os-release ] && grep -qi "^ID=nixos" /etc/os-release )
+}
 
 manager_config_home() {
     # Run inside the manager's environment, which may differ from this terminal.
@@ -250,7 +253,7 @@ enable() {
     manager_config_home >/dev/null || die 'cannot connect to your systemd user manager'
     save_paths
     systemctl --user daemon-reload
-    if [ "$(systemctl --user show -p LoadState --value "$UNIT")" != loaded ]; then
+    if is_nixos && [ "$(systemctl --user show -p LoadState --value "$UNIT")" != loaded ]; then
         local self_dir
         self_dir="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]:-$0}")")"
         if [ -f "$self_dir/mihomo-server.service" ]; then
@@ -279,9 +282,11 @@ purge() {
     if n=$(slot); then rm -f "$SLOT_DIR/$n"; fi
     rm -rf -- "$owned_data"
     rm -f -- "$ENV_FILE" "$DROPIN"
-    local manager_home
-    manager_home=$(manager_config_home 2>/dev/null) || manager_home="$HOME/.config"
-    rm -f -- "$manager_home/systemd/user/$UNIT.service"
+    if is_nixos; then
+        local manager_home
+        manager_home=$(manager_config_home 2>/dev/null) || manager_home="$HOME/.config"
+        rm -f -- "$manager_home/systemd/user/$UNIT.service"
+    fi
     systemctl --user daemon-reload
     echo 'Removed your instance data, configuration and slot claim'
 }
