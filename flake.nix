@@ -41,6 +41,10 @@
             lockFile = ./desktop/Cargo.lock;
           };
 
+          postUnpack = ''
+            cp -f $sourceRoot/desktop/Cargo.lock $sourceRoot/Cargo.lock
+          '';
+
           buildAndTestSubdir = "desktop";
 
           nativeBuildInputs = with pkgs; [
