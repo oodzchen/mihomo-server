@@ -59,6 +59,7 @@ export function TunControl({ token, language, status, connection, access, busy, 
       // Re-read the settings editor too, so a later full save cannot undo this toggle.
       await onChanged?.();
       if (!alive.current) return;
+      if (result === undefined) throw new Error(text.failed);
       const deadline = Date.now() + 6000;
       let confirmed = false;
       while (Date.now() < deadline && alive.current) {
@@ -84,7 +85,7 @@ export function TunControl({ token, language, status, connection, access, busy, 
       }
       if (!alive.current) return;
       if (!confirmed) throw new Error(text.failed);
-      toast.finish(`${text.verified}${t(language, "colon")}${enabled ? text.on : text.off}`, result === undefined ? "info" : "success");
+      toast.finish(`${text.verified}${t(language, "colon")}${enabled ? text.on : text.off}`, "success");
     } catch (cause) {
       if (!alive.current) return;
       if (cause instanceof ApiError && cause.status === 401) logout(text.expired);
