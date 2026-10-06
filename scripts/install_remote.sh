@@ -64,6 +64,9 @@ verify_bundle() {
         (cd "$bundle" && shasum -a 256 -c checksums.sha256 >/dev/null) || die 'bundle checksum mismatch'
     fi
 }
+is_nixos() {
+    [ -f /etc/NIXOS ] || ( [ -f /etc/os-release ] && grep -qi "^ID=nixos" /etc/os-release )
+}
 each_user_manager() {
     local uid user failed=0
     while read -r uid user _; do
@@ -83,7 +86,7 @@ activate_user() {
     local backup='' was_active='' was_enabled='' env_file="$config_home/mihomo-server/env"
     local env_backup='' old_dropin='' dropin_backup=''
     unit=$(systemctl --user show mihomo-server -p FragmentPath --value)
-    if [ -n "$unit" ] && [[ "$unit" != /etc/systemd/user/* ]]; then
+    if [ -n "$unit" ] && [[ "$unit" != /etc/systemd/user/* ]] && ! grep -q '/opt/mihomo-server/current/launch' "$unit" 2>/dev/null; then
         if [ ! -f "$unit" ] || [ -L "$unit" ]; then die 'legacy unit is not a regular file'; fi
         # Recognize only the installer template. Preserve custom units for review.
         if awk '
@@ -169,10 +172,14 @@ polkit_tun_dns() {
     local pkla=/etc/polkit-1/localauthority/50-local.d/50-mihomo-server-tun.pkla
     local actions='org.freedesktop.resolve1.set-dns-servers org.freedesktop.resolve1.set-domains org.freedesktop.resolve1.set-default-route org.freedesktop.resolve1.revert'
     if [ "$1" = remove ]; then
-        rm -f "$rule" "$pkla"
+        rm -f "$rule" "$pkla" 2>/dev/null || true
         return
     fi
     if [ -d "${rule%/*}" ]; then
+        if [ ! -w "${rule%/*}" ]; then
+            echo "warning: ${rule%/*} is not writable; skipping polkit rule installation" >&2
+            return
+        fi
         cat > "$rule.new" <<RULE
 // Managed by mihomo-server; see polkit_tun_dns in its installer.
 polkit.addRule(function (action, subject) {
@@ -200,6 +207,10 @@ RULE
         rm -f "$pkla"
     # polkit 0.105 (e.g. Ubuntu 22.04) reads only local authority files.
     elif [ -d "${pkla%/*}" ]; then
+        if [ ! -w "${pkla%/*}" ]; then
+            echo "warning: ${pkla%/*} is not writable; skipping polkit pkla installation" >&2
+            return
+        fi
         printf '[mihomo-server TUN DNS]\nIdentity=unix-group:mihomo-tun\nAction=%s\nResultAny=yes\nResultInactive=yes\nResultActive=yes\n' \
             "${actions// /;}" > "$pkla.new"
         chmod 644 "$pkla.new"
@@ -214,8 +225,12 @@ update_unit() {
     local unit=/etc/systemd/system/mihomo-server-update.service
     local rule=/etc/polkit-1/rules.d/50-mihomo-server-update.rules
     if [ "$1" = remove ]; then
-        rm -f "$unit" "$rule"
-        systemctl daemon-reload || true
+        rm -f "$unit" "$rule" 2>/dev/null || true
+        systemctl daemon-reload 2>/dev/null || true
+        return
+    fi
+    if is_nixos || [ ! -w "${unit%/*}" ]; then
+        echo "==> Skipping system update unit on NixOS / read-only systemd" >&2
         return
     fi
     mkdir -p "${unit%/*}"
@@ -301,23 +316,41 @@ install_shared() {
     update_unit install
     ln -sfn "releases/$(basename "$release")" "$root/.current.new"
     mv -T "$root/.current.new" "$root/current"
-    mkdir -p /etc/systemd/user /usr/local/bin
-    install -m 644 "$release/mihomo-server.service" /etc/systemd/user/mihomo-server.service
-    ln -sfn "$root/current/mihomo-server-user" /usr/local/bin/mihomo-server-user
-    # The mihomo-server command, its manual and completions, following the
-    # release through the current link. Never replace a file we did not create.
-    local file link
-    for file in bin/mihomo-server share/man/man1/mihomo-server.1 \
-        share/bash-completion/completions/mihomo-server share/zsh/site-functions/_mihomo-server; do
-        [ -f "$release/share/man/man1/mihomo-server.1" ] || break
-        link=/usr/local/$file
-        if [ -e "$link" ] && [ ! -L "$link" ]; then
-            echo "warning: keeping existing $link; mihomo-server is at $root/current/$file" >&2
-            continue
+    if [ -d /etc/systemd/user ] && [ -w /etc/systemd/user ]; then
+        install -m 644 "$release/mihomo-server.service" /etc/systemd/user/mihomo-server.service
+    else
+        # On NixOS or systems where /etc/systemd/user is read-only
+        if [ -n "$caller" ]; then
+            mkdir -p "$config_home/systemd/user"
+            install -m 644 "$release/mihomo-server.service" "$config_home/systemd/user/mihomo-server.service"
+            chown -R "$caller:" "$config_home/systemd"
         fi
-        mkdir -p "$(dirname "$link")"
-        ln -sfn "$root/current/$file" "$link"
-    done
+    fi
+
+    # Global links in /usr/local/bin if writable
+    if mkdir -p /usr/local/bin 2>/dev/null && [ -w /usr/local/bin ]; then
+        ln -sfn "$root/current/mihomo-server-user" /usr/local/bin/mihomo-server-user 2>/dev/null || true
+        local file link
+        for file in bin/mihomo-server share/man/man1/mihomo-server.1 \
+            share/bash-completion/completions/mihomo-server share/zsh/site-functions/_mihomo-server; do
+            [ -f "$release/share/man/man1/mihomo-server.1" ] || break
+            link=/usr/local/$file
+            if [ -e "$link" ] && [ ! -L "$link" ]; then
+                echo "warning: keeping existing $link; mihomo-server is at $root/current/$file" >&2
+                continue
+            fi
+            mkdir -p "$(dirname "$link")" 2>/dev/null || true
+            ln -sfn "$root/current/$file" "$link" 2>/dev/null || true
+        done
+    fi
+
+    # User-level links in caller's ~/.local/bin (crucial on NixOS where ~/.local/bin is in PATH by default)
+    if [ -n "$caller" ] && [ -d "$home" ]; then
+        mkdir -p "$home/.local/bin"
+        ln -sfn "$root/current/mihomo-server-user" "$home/.local/bin/mihomo-server-user"
+        ln -sfn "$root/current/bin/mihomo-server" "$home/.local/bin/mihomo-server"
+        chown -R "$caller:" "$home/.local/bin"
+    fi
     if command -v restorecon >/dev/null; then
         restorecon -R "$root" "$registry" /etc/systemd/user/mihomo-server.service /usr/local/bin/mihomo-server-user \
             /etc/systemd/system/mihomo-server-update.service \
@@ -343,7 +376,7 @@ install_shared() {
         output=$(runuser -u "$caller" -- env HOME="$home" XDG_RUNTIME_DIR="/run/user/$uid" \
             XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
             bash -euo pipefail -c "$(declare -f die activate_user); activate_user \"\$@\"" \
-            bash "$home" "$config_home" /usr/local/bin/mihomo-server-user \
+            bash "$home" "$config_home" "$root/current/mihomo-server-user" \
             | while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "$line" >&2; printf '%s\n' "$line"; done) \
             || die 'installation did not produce a usable user instance'
         grep -q '^tun: *available ' <<< "$output" || die 'TUN authorization did not take effect'
@@ -364,7 +397,9 @@ install_shared() {
     done
     echo "System install complete: $root/current"
     if [ -z "$caller" ]; then echo 'No non-root caller: users opt in with mihomo-server enable'; fi
-    if [ -L /usr/local/bin/mihomo-server ]; then echo 'Manage your instance with: mihomo-server --help'; fi
+    if [ -L /usr/local/bin/mihomo-server ] || { [ -n "$caller" ] && [ -L "$home/.local/bin/mihomo-server" ]; }; then
+        echo 'Manage your instance with: mihomo-server --help'
+    fi
 }
 # Runs as the instance owner, never root, so only that user's files can be removed.
 purge_user() {
@@ -395,7 +430,7 @@ purge_user() {
     echo "Purged instance data of $(id -un): $data"
 }
 uninstall_shared() {
-    local purge=$1 user uid home link
+    local purge=$1 user uid home link user_unit user_bin
     command -v systemctl >/dev/null || die 'missing systemctl'
     each_user_manager disable --now mihomo-server.service || true
     while IFS=: read -r user _ uid _ _ home _; do
@@ -404,13 +439,18 @@ uninstall_shared() {
         # user configuration: kept for a reinstall unless purging.
         link="$home/.config/systemd/user/default.target.wants/mihomo-server.service"
         if [ -L "$link" ]; then runuser -u "$user" -- rm -f -- "$link"; fi
+        user_unit="$home/.config/systemd/user/mihomo-server.service"
+        if [ -f "$user_unit" ]; then rm -f "$user_unit"; fi
+        for user_bin in "$home/.local/bin/mihomo-server" "$home/.local/bin/mihomo-server-user"; do
+            if [ -L "$user_bin" ] && [[ "$(readlink "$user_bin")" = /opt/mihomo-server/* ]]; then rm -f "$user_bin"; fi
+        done
         if [ "$purge" = 1 ] && { [ -d "$home/.local/share/mihomo-server" ] || [ -d "$home/.config/mihomo-server" ] \
             || [ -f "$home/.config/systemd/user/mihomo-server.service.d/10-mihomo-paths.conf" ] \
             || [ -n "$(find /var/lib/mihomo-server/slots -maxdepth 1 -type f -uid "$uid" 2>/dev/null)" ]; }; then
             runuser -u "$user" -- bash -euo pipefail -c "$(declare -f die purge_user); purge_user \"\$1\"" bash "$home"
         fi
     done < <(getent passwd)
-    rm -f /etc/systemd/user/mihomo-server.service
+    rm -f /etc/systemd/user/mihomo-server.service 2>/dev/null || true
     for link in /usr/local/bin/mihomo-server-user /usr/local/bin/mihomo-server /usr/local/share/man/man1/mihomo-server.1 \
         /usr/local/share/bash-completion/completions/mihomo-server /usr/local/share/zsh/site-functions/_mihomo-server; do
         if [ -L "$link" ] && [[ "$(readlink "$link")" = /opt/mihomo-server/* ]]; then rm -f "$link"; fi
@@ -441,7 +481,7 @@ root_action() {
     else
         # Explicit script functions only, with values passed as argv, never code.
         local definitions
-        definitions=$(declare -f die verify_bundle each_user_manager activate_user polkit_tun_dns update_unit install_shared purge_user uninstall_shared)
+        definitions=$(declare -f die verify_bundle is_nixos each_user_manager activate_user polkit_tun_dns update_unit install_shared purge_user uninstall_shared)
         if [ "${MIHOMO_INSTALL_ELEVATE:-}" = pkexec ]; then
             # Graphical clients have no terminal for sudo; polkit asks instead.
             pkexec "$(command -v bash)" -euo pipefail -c "$definitions"$'\n'"$action \"\$@\"" bash "$@"
@@ -474,7 +514,8 @@ main() {
     done
     if [ "$purge" = 1 ] && [ "$uninstall" = 0 ]; then die '--purge is only valid with --uninstall'; fi
     if [ "$(id -u)" != 0 ]; then caller=$(id -un)
-    elif [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then caller=$SUDO_USER; fi
+    elif [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then caller=$SUDO_USER
+    elif [ -n "${PKEXEC_UID:-}" ]; then caller=$(id -nu "$PKEXEC_UID"); fi
     require_elevation
     if [ "$uninstall" = 1 ]; then root_action uninstall_shared "$purge"; return; fi
     if [ -n "$caller" ]; then

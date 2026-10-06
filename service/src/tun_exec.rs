@@ -112,17 +112,33 @@ fn raise_ambient() -> Result<()> {
 /// The installed launcher beside the running service, when this user may run it.
 pub(crate) fn available() -> Option<PathBuf> {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
-    let path = std::env::current_exe().ok()?.with_file_name(NAME);
-    let metadata = std::fs::symlink_metadata(&path).ok()?;
-    // Root-owned and not writable by others, like the rest of the shared bundle.
-    if !metadata.is_file() || metadata.uid() != 0 || metadata.permissions().mode() & 0o022 != 0 {
-        return None;
+
+    let candidates: [Option<PathBuf>; 3] = [
+        std::env::var_os("MIHOMO_TUN_EXEC").map(PathBuf::from),
+        Some(PathBuf::from("/run/wrappers/bin").join(NAME)),
+        std::env::current_exe().ok().map(|exe| exe.with_file_name(NAME)),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        let Ok(metadata) = std::fs::symlink_metadata(&candidate) else {
+            continue;
+        };
+        // Root-owned and not writable by others, like the rest of the shared bundle.
+        if !metadata.is_file() || metadata.uid() != 0 || metadata.permissions().mode() & 0o022 != 0 {
+            continue;
+        }
+        let Ok(name) = std::ffi::CString::new(candidate.as_os_str().as_encoded_bytes()) else {
+            continue;
+        };
+        // SAFETY: valid C string; access checks this process's credentials.
+        let executable = unsafe { libc::access(name.as_ptr(), libc::X_OK) } == 0;
+        if executable && crate::secure_fs::file_grants_net_admin(&candidate) {
+            return Some(candidate);
+        }
     }
-    let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
-    // SAFETY: valid C string; access checks this process's credentials.
-    let executable = unsafe { libc::access(name.as_ptr(), libc::X_OK) } == 0;
-    (executable && crate::secure_fs::file_grants_net_admin(&path)).then_some(path)
+    None
 }
+
 
 #[cfg(test)]
 mod tests {

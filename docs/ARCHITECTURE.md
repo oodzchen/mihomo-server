@@ -317,8 +317,14 @@ directory lock prevents two supervisors from owning the same state.
 
 Shared installation follows XDG locations for per-user config and data. The
 installer records resolved absolute paths so systemd startup does not depend on
-an interactive shell environment. Upgrades preserve user data and individually
-upgraded cores; uninstall and purge remain distinct operations.
+an interactive shell environment. On immutable distributions such as NixOS where
+`/etc/systemd` is read-only, user-level systemd units (`$XDG_CONFIG_HOME/systemd/user`)
+and user linger are used to guarantee boot persistence, with user-space binary symlinks
+and resilient polkit detection. TUN capability launcher discovery supports explicit
+`MIHOMO_TUN_EXEC`, `/run/wrappers/bin/mihomo-tun-exec` (NixOS `security.wrappers`), and
+co-located bundle binaries. Native Nix Flake and NixOS module definitions are provided.
+Upgrades preserve user data and individually upgraded cores; uninstall and purge remain
+distinct operations.
 
 ## Supported and deferred scope
 

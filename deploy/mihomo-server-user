@@ -250,6 +250,17 @@ enable() {
     manager_config_home >/dev/null || die 'cannot connect to your systemd user manager'
     save_paths
     systemctl --user daemon-reload
+    if [ "$(systemctl --user show -p LoadState --value "$UNIT")" != loaded ]; then
+        local self_dir
+        self_dir="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]:-$0}")")"
+        if [ -f "$self_dir/mihomo-server.service" ]; then
+            local manager_home
+            manager_home=$(manager_config_home 2>/dev/null) || manager_home="$HOME/.config"
+            mkdir -p "$manager_home/systemd/user"
+            install -m 644 "$self_dir/mihomo-server.service" "$manager_home/systemd/user/$UNIT.service"
+            systemctl --user daemon-reload
+        fi
+    fi
     [ "$(systemctl --user show -p LoadState --value "$UNIT")" = loaded ] || die 'shared installation is missing'
     systemctl --user enable "$UNIT" >/dev/null
     systemctl --user restart "$UNIT"
@@ -268,6 +279,9 @@ purge() {
     if n=$(slot); then rm -f "$SLOT_DIR/$n"; fi
     rm -rf -- "$owned_data"
     rm -f -- "$ENV_FILE" "$DROPIN"
+    local manager_home
+    manager_home=$(manager_config_home 2>/dev/null) || manager_home="$HOME/.config"
+    rm -f -- "$manager_home/systemd/user/$UNIT.service"
     systemctl --user daemon-reload
     echo 'Removed your instance data, configuration and slot claim'
 }

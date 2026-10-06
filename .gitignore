@@ -23,6 +23,8 @@ env/
 
 # Application runtime & bundle staging
 /data/
+.core/
+/dist/
 .mihomo-server.lock
 .mihomo-bundle-*/
 
