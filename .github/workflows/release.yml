@@ -138,6 +138,30 @@ jobs:
           cp "$deb" "dist/$base.deb"
           cp "$rpm" "dist/$base.rpm"
           cp "$image" "dist/$base.AppImage"
+
+          # Package raw binary tarball with desktop entry and icons (used by Nix Flake and manual installs)
+          tar_staging="$RUNNER_TEMP/$base"
+          mkdir -p "$tar_staging/bin" \
+            "$tar_staging/share/applications" \
+            "$tar_staging/share/icons/hicolor/scalable/apps" \
+            "$tar_staging/share/icons/hicolor/512x512/apps" \
+            "$tar_staging/share/icons/hicolor/256x256/apps" \
+            "$tar_staging/share/icons/hicolor/128x128/apps" \
+            "$tar_staging/share/icons/hicolor/32x32/apps" \
+            "$tar_staging/share/pixmaps"
+          cp desktop/target/release/mihomo-server-desktop "$tar_staging/bin/"
+          chmod +x "$tar_staging/bin/mihomo-server-desktop"
+          sed -e 's/{{exec}}/mihomo-server-desktop/g' -e 's/{{icon}}/mihomo-server-desktop/g' \
+            desktop/mihomo-server-desktop.desktop > "$tar_staging/share/applications/mihomo-server-desktop.desktop"
+          cp desktop/icons/src/app.svg "$tar_staging/share/icons/hicolor/scalable/apps/mihomo-server-desktop.svg"
+          cp desktop/icons/icon.png "$tar_staging/share/icons/hicolor/512x512/apps/mihomo-server-desktop.png"
+          cp desktop/icons/128x128@2x.png "$tar_staging/share/icons/hicolor/256x256/apps/mihomo-server-desktop.png"
+          cp desktop/icons/128x128.png "$tar_staging/share/icons/hicolor/128x128/apps/mihomo-server-desktop.png"
+          cp desktop/icons/32x32.png "$tar_staging/share/icons/hicolor/32x32/apps/mihomo-server-desktop.png"
+          cp desktop/icons/icon.png "$tar_staging/share/pixmaps/mihomo-server-desktop.png"
+          tar -czf "dist/$base.tar.gz" -C "$RUNNER_TEMP" "$base"
+          (cd "$(mktemp -d)" && tar -xzf "$OLDPWD/dist/$base.tar.gz" && test -x "$base/bin/mihomo-server-desktop")
+
           cd dist
           for file in "$base".*; do sha256sum "$file" > "$file.sha256"; done
           sha256sum -c ./*.sha256

@@ -322,7 +322,7 @@ an interactive shell environment. On immutable distributions such as NixOS where
 and user linger are used to guarantee boot persistence, with user-space binary symlinks
 and resilient polkit detection. TUN capability launcher discovery supports explicit
 `MIHOMO_TUN_EXEC`, `/run/wrappers/bin/mihomo-tun-exec` (NixOS `security.wrappers`), and
-co-located bundle binaries. Native Nix Flake packages (`packages.default`, `packages.desktop`) and NixOS module definitions (`services.mihomo-server`, `programs.mihomo-server-desktop`) are provided.
+co-located bundle binaries. Native Nix Flake packages (`packages.default`, `packages.desktop` which leverages pre-built release binary tarballs with `autoPatchelfHook` on x86_64 to avoid local compilation, with `packages.desktop-source` retained for from-source builds) and NixOS module definitions (`services.mihomo-server`, `programs.mihomo-server-desktop`) are provided.
 Upgrades preserve user data and individually upgraded cores; uninstall and purge remain
 distinct operations.
 

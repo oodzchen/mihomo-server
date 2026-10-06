@@ -10,31 +10,15 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-      in
-      {
-        packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "mihomo-server";
-          version = "0.1.0";
-          src = ./.;
 
-          cargoLock = {
-            lockFile = ./Cargo.lock;
-          };
-
-          buildAndTestSubdir = "service";
-
-          nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [ ];
-
-          postInstall = ''
-            # Provide symlink for tun_exec capability launcher target
-            ln -s $out/bin/mihomo-server $out/bin/mihomo-tun-exec
-          '';
+        desktopRelease = {
+          version = "0.2.9";
+          hash = "sha256-8Qc6XqoyCJ4C0yiO9JrmPrV9y9WRu4zUaJXuupUj+Nk=";
         };
 
-        packages.desktop = pkgs.rustPlatform.buildRustPackage {
+        desktop-source = pkgs.rustPlatform.buildRustPackage {
           pname = "mihomo-server-desktop";
-          version = "0.1.0";
+          version = desktopRelease.version;
           src = ./.;
 
           cargoLock = {
@@ -77,6 +61,64 @@
             install -Dm644 desktop/icons/icon.png $out/share/pixmaps/mihomo-server-desktop.png
           '';
         };
+
+        desktop-bin = pkgs.stdenv.mkDerivation rec {
+          pname = "mihomo-server-desktop";
+          version = desktopRelease.version;
+
+          src = pkgs.fetchurl {
+            url = "https://github.com/oodzchen/mihomo-server/releases/download/v${version}/mihomo-server-desktop-v${version}-x86_64.tar.gz";
+            hash = desktopRelease.hash;
+          };
+
+          nativeBuildInputs = with pkgs; [
+            autoPatchelfHook
+            wrapGAppsHook3
+          ];
+
+          buildInputs = with pkgs; [
+            gtk3
+            webkitgtk_4_1
+            glib
+            glib-networking
+            openssl
+            libayatana-appindicator
+            librsvg
+            xdotool
+          ];
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out
+            cp -r bin share $out/
+            runHook postInstall
+          '';
+        };
+      in
+      {
+        packages.default = pkgs.rustPlatform.buildRustPackage {
+          pname = "mihomo-server";
+          version = "0.1.0";
+          src = ./.;
+
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+          };
+
+          buildAndTestSubdir = "service";
+
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = [ ];
+
+          postInstall = ''
+            # Provide symlink for tun_exec capability launcher target
+            ln -s $out/bin/mihomo-server $out/bin/mihomo-tun-exec
+          '';
+        };
+
+        packages.desktop = if system == "x86_64-linux" then desktop-bin else desktop-source;
+        packages.desktop-bin = desktop-bin;
+        packages.desktop-source = desktop-source;
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
