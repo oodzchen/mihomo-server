@@ -32,6 +32,45 @@
           '';
         };
 
+        packages.desktop = pkgs.rustPlatform.buildRustPackage {
+          pname = "mihomo-server-desktop";
+          version = "0.1.0";
+          src = ./.;
+
+          cargoLock = {
+            lockFile = ./desktop/Cargo.lock;
+          };
+
+          buildAndTestSubdir = "desktop";
+
+          nativeBuildInputs = with pkgs; [
+            pkg-config
+            wrapGAppsHook3
+          ];
+
+          buildInputs = with pkgs; [
+            gtk3
+            webkitgtk_4_1
+            glib
+            glib-networking
+            openssl
+            libayatana-appindicator
+            librsvg
+            xdotool
+          ];
+
+          postInstall = ''
+            install -Dm644 desktop/mihomo-server-desktop.desktop $out/share/applications/mihomo-server-desktop.desktop
+            substituteInPlace $out/share/applications/mihomo-server-desktop.desktop \
+              --replace-fail '{{exec}}' 'mihomo-server-desktop' \
+              --replace-fail '{{icon}}' 'mihomo-server-desktop'
+
+            install -Dm644 desktop/icons/128x128.png $out/share/icons/hicolor/128x128/apps/mihomo-server-desktop.png
+            install -Dm644 desktop/icons/32x32.png $out/share/icons/hicolor/32x32/apps/mihomo-server-desktop.png
+            install -Dm644 desktop/icons/icon.png $out/share/pixmaps/mihomo-server-desktop.png
+          '';
+        };
+
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             rustup
@@ -47,6 +86,7 @@
       nixosModules.default = { config, lib, pkgs, ... }:
         let
           cfg = config.services.mihomo-server;
+          desktopCfg = config.programs.mihomo-server-desktop;
           package = cfg.package;
         in {
           options.services.mihomo-server = {
@@ -85,19 +125,30 @@
             };
           };
 
-          config = lib.mkIf cfg.enable {
-            users.groups.mihomo-tun = {};
-            users.users = lib.mkIf (cfg.user != "root") {
-              ${cfg.user}.extraGroups = lib.mkIf cfg.tun.enable [ "mihomo-tun" ];
-            };
+          options.programs.mihomo-server-desktop = {
+            enable = lib.mkEnableOption "Mihomo Server Desktop client";
 
-            security.wrappers.mihomo-tun-exec = lib.mkIf cfg.tun.enable {
-              source = "${package}/bin/mihomo-tun-exec";
-              capabilities = "cap_net_admin,cap_net_bind_service,cap_net_raw+ep";
-              owner = "root";
-              group = "mihomo-tun";
-              permissions = "0750";
+            package = lib.mkOption {
+              type = lib.types.package;
+              default = self.packages.${pkgs.system}.desktop;
+              description = "The mihomo-server-desktop package to use.";
             };
+          };
+
+          config = lib.mkMerge [
+            (lib.mkIf cfg.enable {
+              users.groups.mihomo-tun = {};
+              users.users = lib.mkIf (cfg.user != "root") {
+                ${cfg.user}.extraGroups = lib.mkIf cfg.tun.enable [ "mihomo-tun" ];
+              };
+
+              security.wrappers.mihomo-tun-exec = lib.mkIf cfg.tun.enable {
+                source = "${package}/bin/mihomo-tun-exec";
+                capabilities = "cap_net_admin,cap_net_bind_service,cap_net_raw+ep";
+                owner = "root";
+                group = "mihomo-tun";
+                permissions = "0750";
+              };
 
             security.polkit.extraConfig = lib.mkIf cfg.tun.enable ''
               polkit.addRule(function (action, subject) {
@@ -144,7 +195,11 @@
                 ];
               };
             };
-          };
-        };
-    };
+          })
+          (lib.mkIf desktopCfg.enable {
+            environment.systemPackages = [ desktopCfg.package ];
+          })
+        ];
+      };
+  };
 }
