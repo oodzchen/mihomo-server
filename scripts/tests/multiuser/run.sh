@@ -36,7 +36,11 @@ env_args=()
 for variable in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY; do
     env_args+=(-e "$variable=")
 done
-"$engine" run -d --name "$name" --privileged --cgroupns=private "${env_args[@]}" "$image" >/dev/null
+nix_store_args=()
+if [ -d /nix/store ]; then
+    nix_store_args+=(-v /nix/store:/nix/store:ro)
+fi
+"$engine" run -d --name "$name" --privileged --cgroupns=private "${env_args[@]}" "${nix_store_args[@]}" "$image" >/dev/null
 cleanup() {
     if [ "${KEEP:-0}" = 1 ]; then
         echo "container kept: $engine exec -it $name bash"

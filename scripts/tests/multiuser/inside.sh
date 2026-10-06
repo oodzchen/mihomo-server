@@ -178,6 +178,12 @@ system_lookup_works() {
     case "$address" in 198.19.*) ;; *) echo "      resolved answered '$address'"; return 1 ;; esac
     fetch "$1" --resolve "www.gstatic.com:443:$address"
 }
+resolved_answers_real_ip() {
+    local address
+    address="$(resolvectl query --legend=no -4 --cache=no www.gstatic.com 2>/dev/null | awk 'NR==1 {print $2}')" || return 1
+    [ -n "$address" ] && case "$address" in 198.19.*) return 1 ;; *) return 0 ;; esac
+    return 1
+}
 core_hash() { sha256sum "$(data_dir "$1")/core/verge-mihomo" | cut -d' ' -f1; }
 # wait_for TRIES COMMAND...: retry every half second.
 wait_for() {
@@ -669,8 +675,7 @@ phase_cleanup() {
     check "alice slot rules removed on stop" test "$(slot_rules "$(slot_of alice)")" = 0
     check "alice now routes directly" routes_direct alice
     check "bob routes directly once alice stops" routes_direct bob
-    check "resolved answers real IPs once alice stops" bash -c \
-        "! resolvectl query --legend=no -4 --cache=no www.gstatic.com | grep -q ' 198\.19\.'"
+    check "resolved answers real IPs once alice stops" wait_for 20 resolved_answers_real_ip
     check "alice keeps her slot after disable" test -n "$(slot_of alice)"
 
     # The bundled installer: no download, run by the installing user via sudo.
