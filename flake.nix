@@ -12,8 +12,8 @@
         pkgs = nixpkgs.legacyPackages.${system};
 
         desktopRelease = {
-          version = "0.2.9";
-          hash = "sha256-8Qc6XqoyCJ4C0yiO9JrmPrV9y9WRu4zUaJXuupUj+Nk=";
+          version = "0.2.10";
+          hash = "sha256-lQ3jgDL+XOM8+0ZhHHfr9X/LFR7QifbX5IHrCuQxMWw=";
         };
 
         desktop-source = pkgs.rustPlatform.buildRustPackage {
