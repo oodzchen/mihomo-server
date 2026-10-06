@@ -69,6 +69,9 @@
               --replace-fail '{{exec}}' 'mihomo-server-desktop' \
               --replace-fail '{{icon}}' 'mihomo-server-desktop'
 
+            install -Dm644 desktop/icons/src/app.svg $out/share/icons/hicolor/scalable/apps/mihomo-server-desktop.svg
+            install -Dm644 desktop/icons/icon.png $out/share/icons/hicolor/512x512/apps/mihomo-server-desktop.png
+            install -Dm644 desktop/icons/128x128@2x.png $out/share/icons/hicolor/256x256/apps/mihomo-server-desktop.png
             install -Dm644 desktop/icons/128x128.png $out/share/icons/hicolor/128x128/apps/mihomo-server-desktop.png
             install -Dm644 desktop/icons/32x32.png $out/share/icons/hicolor/32x32/apps/mihomo-server-desktop.png
             install -Dm644 desktop/icons/icon.png $out/share/pixmaps/mihomo-server-desktop.png
@@ -83,6 +86,14 @@
             nodejs
             python3
             pkg-config
+            gtk3
+            webkitgtk_4_1
+            glib
+            glib-networking
+            openssl
+            libayatana-appindicator
+            librsvg
+            xdotool
           ];
         };
       }

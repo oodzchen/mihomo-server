@@ -85,12 +85,15 @@ pub fn open_service_page(app: &AppHandle) {
         reveal(&window);
         return;
     }
-    let built = WebviewWindowBuilder::new(app, "setup", WebviewUrl::App("index.html".into()))
+    let mut builder = WebviewWindowBuilder::new(app, "setup", WebviewUrl::App("index.html".into()))
         .title(TITLE)
         .inner_size(560.0, 620.0)
         .min_inner_size(420.0, 540.0)
-        .on_navigation(is_bundled)
-        .build();
+        .on_navigation(is_bundled);
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone()).expect("valid default window icon");
+    }
+    let built = builder.build();
     if let Err(error) = built {
         eprintln!("cannot open the status page: {error}");
     }
@@ -121,7 +124,7 @@ pub fn open_dashboard(app: &AppHandle) {
     grant_dashboard(app, &origin);
     let allowed = origin.clone();
     let external = origin.clone();
-    let built = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+    let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
         .title(TITLE)
         .inner_size(1280.0, 860.0)
         .min_inner_size(760.0, 520.0)
@@ -137,8 +140,11 @@ pub fn open_dashboard(app: &AppHandle) {
                 open_in_browser(&url);
             }
             NewWindowResponse::Deny
-        })
-        .build();
+        });
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone()).expect("valid default window icon");
+    }
+    let built = builder.build();
     match built {
         Ok(window) => {
             let hidden = window.clone();

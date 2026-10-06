@@ -59,15 +59,31 @@ export function TunControl({ token, language, status, connection, access, busy, 
       // Re-read the settings editor too, so a later full save cannot undo this toggle.
       await onChanged?.();
       if (!alive.current) return;
-      const controller = new AbortController();
-      request.current = controller;
-      const [saved, observed] = await Promise.all([
-        command<{ runtime: { tun?: { enable?: boolean } } }>(token, "settings", {}, controller.signal),
-        command<Access>(token, "proxy_access", {}, controller.signal),
-      ]);
+      const deadline = Date.now() + 6000;
+      let confirmed = false;
+      while (Date.now() < deadline && alive.current) {
+        const controller = new AbortController();
+        request.current = controller;
+        try {
+          const [saved, observed] = await Promise.all([
+            command<{ runtime: { tun?: { enable?: boolean } } }>(token, "settings", {}, controller.signal),
+            command<Access>(token, "proxy_access", {}, controller.signal),
+          ]);
+          if (!alive.current) return;
+          const settingsMatch = saved.runtime.tun?.enable === enabled;
+          const accessMatch = observed.tun_enabled === enabled;
+          const runtimeMatch = !observed.running || observed.reported?.tun_enabled === enabled;
+          if (settingsMatch && accessMatch && runtimeMatch) {
+            confirmed = true;
+            break;
+          }
+        } catch {
+          // Ignore transient errors while core restarts/reloads
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
       if (!alive.current) return;
-      if (saved.runtime.tun?.enable !== enabled || observed.tun_enabled !== enabled ||
-        observed.running && observed.reported?.tun_enabled !== enabled) throw new Error(text.failed);
+      if (!confirmed) throw new Error(text.failed);
       toast.finish(`${text.verified}${t(language, "colon")}${enabled ? text.on : text.off}`, result === undefined ? "info" : "success");
     } catch (cause) {
       if (!alive.current) return;
