@@ -1241,7 +1241,9 @@ test("browser repairs failed startup, saves selection/config, restores after ser
     .getByLabel("运行配置 YAML")
     .fill(yaml.replace("mode: rule", "mode: direct"));
   await page.getByRole("button", { name: "校验并应用" }).click();
-  await expect(page.getByText("保存成功")).toBeVisible();
+  // Earlier saves' toasts may still be stacked; the editor's own state shows this apply.
+  await expect(page.locator(".panel-title").filter({ hasText: "运行配置" })).toContainText("完整 YAML");
+  await expect(page.getByRole("status").filter({ hasText: "保存成功" }).last()).toBeVisible();
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: /内核/ }).click();
   await page.getByRole("button", { name: "停止内核" }).click();
   await expect(page.locator(".sidebar-status")).toContainText("已停止");
@@ -1369,7 +1371,10 @@ test("proxy delay controls translate without losing the test URL or results", as
   await expect(page.getByLabel("测速链接:")).toHaveValue(url);
   await expect(group.getByRole("button", { name: "测速" })).toBeVisible();
   await expect(group.getByRole("button", { name: "选择 Main / REJECT" }).locator(".delay-badge")).toHaveText("超时");
-  await expect(direct.locator(".delay-badge")).toHaveAttribute("title", "首连 180ms · 复用 84ms");
+  await expect(group.getByRole("button", { name: "选择 Main / DIRECT" }).locator(".delay-badge")).toHaveAttribute(
+    "title",
+    "首连 180ms · 复用 84ms",
+  );
   const groupNodes = await group.locator(".nodes > button .node-name").allTextContents();
   expect(requests).toEqual([
     { names: ["DIRECT"], url },
