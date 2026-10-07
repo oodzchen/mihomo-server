@@ -9,6 +9,7 @@ description = "Desktop window and tray for the local mihomo-server instance"
 
 # Separate workspace: building it needs webkit2gtk, which the service never does.
 [workspace]
+exclude = ["vendor"]
 
 [build-dependencies]
 tauri-build = { version = "2.7.1", default-features = false , features = [] }
@@ -33,6 +34,14 @@ zbus = "5.9"
 # Selects tray-icon's D-Bus StatusNotifierItem backend for Tauri's tray: unlike
 # libappindicator it reports left clicks (Activate) and shows tooltips.
 tray-icon = { version = "0.25", default-features = false, features = ["ksni"] }
+# Hands KDE's XDG activation token for a tray click to GDK (see vendor/ksni),
+# so KWin raises the window instead of only flagging it in the taskbar.
+ksni = { version = "0.3.6", default-features = false }
+gtk = "0.18"
+gdkwayland-sys = "0.18"
+
+[patch.crates-io]
+ksni = { path = "vendor/ksni" }
 
 [profile.release]
 codegen-units = 1

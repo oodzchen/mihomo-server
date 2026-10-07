@@ -2,7 +2,7 @@
 //! patches text, enabled and check states in place. The menu is rebuilt only
 //! when its shape changes (groups, nodes or subscriptions added or removed).
 use crate::{
-    controller,
+    activation, controller,
     model::{Action, Entry, Icon, MenuModel},
     window,
 };
@@ -179,6 +179,7 @@ pub fn create(app: &AppHandle, model: MenuModel) -> tauri::Result<()> {
                 ..
             } = event
             {
+                activation::adopt_tray_token();
                 window::open_preferred(tray.app_handle());
             }
         })

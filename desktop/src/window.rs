@@ -2,7 +2,7 @@
 //! management page and may call only the client's start-at-login commands,
 //! granted for that page's origin; `setup` is the bundled status page and the
 //! only window allowed to call the other commands.
-use crate::{VERSION, controller::Controller};
+use crate::{VERSION, activation, controller::Controller};
 use std::{
     collections::BTreeSet,
     sync::{Arc, Mutex},
@@ -20,8 +20,13 @@ pub struct WindowState(Mutex<Option<String>>);
 
 fn reveal(window: &WebviewWindow) {
     let _ = window.unminimize();
+    let mapping = !window.is_visible().unwrap_or(true);
     let _ = window.show();
-    let _ = window.set_focus();
+    // Mapping presents a tray click's activation token by itself; focusing as
+    // well would ask the compositor for another token it refuses.
+    if !(activation::take_pending() && mapping) {
+        let _ = window.set_focus();
+    }
 }
 
 /// The status page's own origin (custom protocol, or its http form).
@@ -94,6 +99,8 @@ pub fn open_service_page(app: &AppHandle) {
         builder = builder.icon(icon.clone()).expect("valid default window icon");
     }
     let built = builder.build();
+    // A new window presents a pending activation token when it maps.
+    activation::take_pending();
     if let Err(error) = built {
         eprintln!("cannot open the status page: {error}");
     }
@@ -145,6 +152,7 @@ pub fn open_dashboard(app: &AppHandle) {
         builder = builder.icon(icon.clone()).expect("valid default window icon");
     }
     let built = builder.build();
+    activation::take_pending();
     match built {
         Ok(window) => {
             let hidden = window.clone();

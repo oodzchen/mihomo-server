@@ -1,6 +1,7 @@
 //! Desktop window and system tray for this user's local mihomo-server.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod activation;
 mod autostart;
 mod commands;
 mod controller;

@@ -238,7 +238,11 @@ API's `status` reports the core. The tray uses tray-icon's StatusNotifierItem
 (`ksni`) backend instead of Tauri's default libappindicator, which reports no
 clicks and shows no tooltip: a left click opens the management window (or the
 status page), the menu is on right click, and its header is a single line of
-service state. Its last two items restart and quit the client. Restarting returns
+service state. On Wayland that window is raised only with the XDG activation
+token Plasma sends through `ProvideXdgActivationToken` just before the click;
+ksni 0.3.6 lacks the method, so `desktop/vendor/ksni` is a patched copy
+(`[patch.crates-io]`) that stores the token, and the client hands it to GDK
+before showing or focusing the window. Its last two items restart and quit the client. Restarting returns
 from the Tauri event loop after cleanup releases the single-instance name, then
 uses Unix `exec` to keep the application unit's main PID. Nix packages restart
 through the wrapper named by `MIHOMO_DESKTOP_LAUNCHER` on the current PATH.
