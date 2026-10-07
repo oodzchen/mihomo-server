@@ -40,7 +40,11 @@
             exec ${if system == "x86_64-linux" then "${server-bin}/mihomo-server-user" else "mihomo-server-user"} "$@"
             EOF
             chmod +x $out/nix-service-helper
+            # Use one wrapper: nested shell wrappers change GTK's argv[0]
+            # to .mihomo-server-desktop-wrapped_, breaking Wayland icon lookup.
             wrapProgram $out/bin/mihomo-server-desktop \
+              --argv0 mihomo-server-desktop \
+              "''${gappsWrapperArgs[@]}" \
               --set MIHOMO_SERVER_HELPER $out/nix-service-helper \
               --set MIHOMO_SERVER_INSTALLER $out/nix-install-service
           '';
@@ -78,6 +82,7 @@
             xdotool
           ];
 
+          dontWrapGApps = true;
           postFixup = desktopIntegration;
 
           postInstall = ''
@@ -121,6 +126,7 @@
             xdotool
           ];
 
+          dontWrapGApps = true;
           postFixup = desktopIntegration;
 
           installPhase = ''

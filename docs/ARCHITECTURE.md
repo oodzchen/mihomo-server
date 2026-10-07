@@ -351,7 +351,10 @@ independently of the host distribution. Nix-owned CLI update/uninstall and API
 upgrade/autostart changes are refused before invoking the installer or systemctl;
 Web hints occupy existing fields/tooltips. The CLI wrapper also guards old CI
 binaries, and the desktop wrapper selects the packaged helper and blocks the
-installer. New API/Web ownership hints require a release containing that code.
+installer. GTK environment variables and ownership helpers share one desktop
+wrapper with a fixed `mihomo-server-desktop` argv[0], so Wayland can match the
+window to its installed desktop entry and icon. New API/Web ownership hints
+require a release containing that code.
 Script installations (including `/opt` installations on NixOS) retain their
 installer upgrade behavior, except that the installer refuses to install or
 upgrade once the module provides the user unit (`--uninstall` remains). Migration explicitly removes old per-user units,
