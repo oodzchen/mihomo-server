@@ -10,8 +10,6 @@ members = [
     "service",
 ]
 default-members = ["service"]
-# Tauri desktop client: its own workspace, built only where webkit2gtk exists.
-exclude = ["desktop"]
 resolver = "2"
 
 [workspace.package]

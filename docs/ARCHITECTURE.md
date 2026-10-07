@@ -45,11 +45,10 @@ core problems can be repaired through the same interface.
 | --- | --- |
 | `crates/headless-core` | Tauri-independent domain logic: profile/catalog schema, settings authority, enhancement generation, runtime revisions, resource paths, backup models and recovery plans. |
 | `crates/mihomo-client` | Typed Mihomo control API over Unix socket or explicit loopback HTTP, including realtime streams. |
-| `crates/management-client` | Client side of the management API shared by the command line and the desktop client: locating this user's instance from systemd, authenticated commands with typed errors, and pure readings of proxy groups, subscriptions, mode and TUN. |
+| `crates/management-client` | Client side of the management API shared by the command line and the desktop client (a separate repository that pins this crate by release tag): locating this user's instance from systemd, authenticated commands with typed errors, and pure readings of proxy groups, subscriptions, mode and TUN. |
 | `crates/clash-verge-*` | Small reusable upstream components: drafts, admission limiting, locale resources and Unix signal handling. |
 | `service` | Axum management surface, authentication, durable stores, core actor, downloads, resource/core updates, backup/restore, multi-user isolation and shutdown. The same executable is the `mihomo-server` command-line client (`service/src/cli`): `serve` (or a leading service option) runs the service, any other command is a client. |
 | `web` | React browser client. It talks only to the Rust service, keeps session state local and shares the interface language through the instance's preferences. |
-| `desktop` | Optional Tauri 2 desktop client (separate Cargo workspace, own lockfile): a window showing the service's own Web UI, a tray menu for mode/TUN/node/subscription control and the service lifecycle, and detection, installation and start of the local instance. Never required by the service. |
 | `deploy` and `scripts` | Pinned bundle creation, installation, systemd integration, per-user helper and lifecycle checks. |
 
 `headless-core` must remain independent of Axum, React, systemd and process
@@ -184,73 +183,30 @@ reads the token the service wrote. Service lifecycle is delegated to the release
 `mihomo-server-user` helper and program updates/uninstall to the installer, so
 systemd and root actions keep a single implementation.
 
-The desktop client is a third client of the same API and is installed and
-versioned independently of the service. It manages only the invoking user's local
-instance, found the same way as by the command line, and re-reads the token file
-on every connection instead of storing it. Its tray polls `status` and
-`proxy_access`, and re-reads proxies, subscriptions and multi-user facts only when
-they change or once a minute. Of the WebSocket feeds it uses only
-`/api/streams/preferences`, never `/api/events`, which carries every core log
-line. The management window loads the service origin directly and
-logs in through the URL fragment, so the browser policy (same origin, no CORS)
-is unchanged. It navigates only within that origin; a `target="_blank"` link
-to the same origin (the Service page's tokenized management address) goes to
-the system browser through `xdg-open`, and no other new window opens. That window may call only the client's own start-at-login commands
-(`client_autostart`, `set_client_autostart`, an XDG autostart entry that runs
-`mihomo-server-desktop --hidden`), through a capability added at runtime for
-exactly the service origin it opened. Only the bundled status page may call the
-other commands (detect, install, start, open), which the capability ACL enforces
-per window and origin. The Web settings page shows the client switch only when
-the client identifies itself (`__MIHOMO_DESKTOP_VERSION__`); the service switch
-enables or disables the service's own systemd unit (`set_service_autostart`)
-without stopping it, and is unavailable for transient units or a directly
-started service. Installation runs the published installer,
-whose root step uses polkit (`MIHOMO_INSTALL_ELEVATE=pkexec`) instead of a
-terminal sudo prompt. The status page's settings view (gear button) offers the
-interface language and a temporary proxy for installation. The proxy is kept
-in memory only and used only by the install task: for the installer download
-and, through `http(s)_proxy`/`all_proxy`, for the installer's own downloads,
-which all run as the user before the polkit step; its test fetches that same
-installer URL through it. The page's output panel shows the installer's output
-as it is produced: the client sets `MIHOMO_INSTALL_PROGRESS=1` so curl draws its
-download bar without a terminal and updates that line in place on each carriage
-return, and the installer streams the user activation step line by line instead of
-printing it once it has finished.
+The desktop client, [mihomo-server-desktop](https://github.com/oodzchen/mihomo-server-desktop),
+is a third client of the same API, kept in its own repository and installed,
+versioned and released independently of the service. It depends on
+`crates/management-client` through a git dependency pinned to a service release
+tag, so a change to that crate reaches the client only when the client moves its
+pin; keep the crate's public API compatible across releases. Its contract with
+this repository: the management window loads the service origin directly and
+logs in through the URL fragment; it subscribes only to
+`/api/streams/preferences`, never `/api/events`; the Web settings page shows the
+client's own start-at-login switch only when the page runs inside the client
+(`__MIHOMO_DESKTOP_VERSION__`), and calls the client's `client_autostart` /
+`set_client_autostart` commands through Tauri IPC; the service lifecycle goes
+through the release's `mihomo-server-user` helper and installation through the
+published `install.sh` (`MIHOMO_INSTALL_ELEVATE=pkexec`,
+`MIHOMO_INSTALL_PROGRESS=1`). Its internal design is described in that
+repository's `docs/ARCHITECTURE.md`.
 
-Release builds of both the service and the client report the release tag as
-their version: CI sets `MIHOMO_SERVER_VERSION` / `MIHOMO_DESKTOP_VERSION` to the
-tag without its `v` when building, checks `--version` against it, and local
-builds fall back to the Cargo package version.
-The Nix desktop source package also passes its package version through
-`MIHOMO_DESKTOP_VERSION`. Settings reads the service version from `service_info`,
+Release builds of the service report the release tag as their version: CI sets
+`MIHOMO_SERVER_VERSION` to the tag without its `v` when building, checks
+`--version` against it, and local builds fall back to the Cargo package version.
+Settings reads the service version from `service_info`,
 as the Service page does, and refreshes on reconnection and core generation
 changes. Core and service reads complete independently; the desktop version
 comes from the host client's immutable build value, not the service.
-
-The client keeps three things apart: itself (versioned on its own), the
-systemd service (`mihomo-server`, started, stopped and restarted through the
-`mihomo-server-user` helper like the command line does) and the Mihomo core
-the service supervises. The tray manages the first two and proxy settings
-through the API; it never starts or stops the core and never presents the
-core's version or phase as the service's. The service version shown is read
-from the running service binary (`/proc/<MainPID>/exe --version`), since the
-API's `status` reports the core. The tray uses tray-icon's StatusNotifierItem
-(`ksni`) backend instead of Tauri's default libappindicator, which reports no
-clicks and shows no tooltip: a left click opens the management window (or the
-status page), the menu is on right click, and its header is a single line of
-service state. On Wayland that window is raised only with the XDG activation
-token Plasma sends through `ProvideXdgActivationToken` just before the click;
-ksni 0.3.6 lacks the method, so `desktop/vendor/ksni` is a patched copy
-(`[patch.crates-io]`) that stores the token, and the client hands it to GDK
-before showing or focusing the window. Its last two items restart and quit the client. Restarting returns
-from the Tauri event loop after cleanup releases the single-instance name, then
-uses Unix `exec` to keep the application unit's main PID. Nix packages restart
-through the wrapper named by `MIHOMO_DESKTOP_LAUNCHER` on the current PATH.
-The wrapper appends its own bin directory as a fallback for direct `nix run`.
-AppImages use the image path, and ordinary installations use the executable on
-disk. The same launcher is used for autostart, so Nix updates keep the current
-package and its GTK environment. Details go to the tooltip, and failures are
-also sent as desktop notifications (freedesktop D-Bus).
 
 Browser operations use independent readback after mutations. Realtime feeds can
 disconnect and resubscribe without becoming configuration authority.
@@ -352,7 +308,7 @@ Nix integration scripts, and regenerate the resource manifest's core hash after
 fixup. `server-source` is an explicit alternative, building locked Rust and npm
 sources and fetching the pinned core. Source builds inject a version/revision;
 release binaries keep the version embedded by CI. The release workflow advances
-both server and desktop pins on main after assets are published.
+the server pin on main after assets are published.
 
 The NixOS module installs CLI/helper resources, declares systemd **user** units for
 selected normal users, manages lingering, slot directories and the shared TUN
@@ -370,10 +326,8 @@ upgrades stay per-user; a system rollback does not restore mutable core/data.
 independently of the host distribution. Nix-owned CLI update/uninstall and API
 upgrade/autostart changes are refused before invoking the installer or systemctl;
 Web hints occupy existing fields/tooltips. The CLI wrapper also guards old CI
-binaries, and the desktop wrapper selects the packaged helper and blocks the
-installer. GTK environment variables and ownership helpers share one desktop
-wrapper with a fixed `mihomo-server-desktop` argv[0], so Wayland can match the
-window to its installed desktop entry and icon. New API/Web ownership hints
+binaries. The desktop client's own flake writes the same marker beside its
+executable and points its lifecycle helper at this flake's `server-bin`. New API/Web ownership hints
 require a release containing that code.
 Script installations (including `/opt` installations on NixOS) retain their
 installer upgrade behavior, except that the installer refuses to install or
@@ -398,7 +352,7 @@ distinct operations.
 | Stable/Alpha core management and transactional backup/restore | Implemented and verified |
 | Multi-user isolation and first-come system-wide TUN | Implemented and verified |
 | Simplified/traditional Chinese and English browser UI; service locale catalog | Implemented |
-| Linux x86_64 desktop client (local instance; deb/RPM/AppImage/Nix Flake) | Implemented |
+| Linux x86_64 desktop client (local instance; deb/RPM/AppImage/Nix Flake; separate repository) | Implemented |
 | Desktop client management of remote instances | Deferred |
 | aarch64/musl bundles, server deb/RPM and containers | Deferred |
 | Windows service/Named Pipe and native macOS deployment validation | Deferred |

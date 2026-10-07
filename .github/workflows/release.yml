@@ -52,7 +52,7 @@ jobs:
           # Where `mihomo-server update` fetches the installer from.
           MIHOMO_SERVER_REPOSITORY: ${{ github.repository }}
         run: |
-          # Release builds report the tag as their version, like the desktop client.
+          # Release builds report the tag as their version.
           export MIHOMO_SERVER_VERSION="${GITHUB_REF_NAME#v}"
           python3 scripts/package_bundle.py --build \
             --target "$TARGET" \
@@ -96,88 +96,8 @@ jobs:
           compression-level: 0
           retention-days: 1
 
-  build-desktop:
-    name: Build desktop packages
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: ./.github/actions/setup-desktop
-
-      - uses: ./.github/actions/setup-rust
-        with:
-          build-cache: "false"
-
-      # Prebuilt tauri CLI from npm instead of compiling tauri-cli from source.
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-
-      - name: Build deb, rpm and AppImage
-        env:
-          # Where the client downloads the installer from.
-          MIHOMO_SERVER_REPOSITORY: ${{ github.repository }}
-          # linuxdeploy is itself an AppImage; runners have no FUSE.
-          APPIMAGE_EXTRACT_AND_RUN: "1"
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          cd desktop
-          # Same minor as the tauri crate in desktop/Cargo.lock.
-          MIHOMO_DESKTOP_VERSION="$version" npx --yes @tauri-apps/cli@2.12.1 build --bundles deb,rpm,appimage \
-            --config "{\"version\":\"$version\"}"
-
-      - name: Smoke test and collect packages
-        run: |
-          bundle=desktop/target/release/bundle
-          version=$(desktop/target/release/mihomo-server-desktop --version)
-          test "$version" = "mihomo-server-desktop ${GITHUB_REF_NAME#v}" || { echo "Version $version does not match $GITHUB_REF_NAME"; exit 1; }
-          deb=$(ls "$bundle"/deb/*.deb); rpm=$(ls "$bundle"/rpm/*.rpm); image=$(ls "$bundle"/appimage/*.AppImage)
-          dpkg-deb -I "$deb" >/dev/null
-          (cd "$(mktemp -d)" && "$OLDPWD/$image" --appimage-extract >/dev/null && test -x squashfs-root/usr/bin/mihomo-server-desktop)
-          base="mihomo-server-desktop-$GITHUB_REF_NAME-x86_64"
-          mkdir -p dist
-          cp "$deb" "dist/$base.deb"
-          cp "$rpm" "dist/$base.rpm"
-          cp "$image" "dist/$base.AppImage"
-
-          # Package raw binary tarball with desktop entry and icons (used by Nix Flake and manual installs)
-          tar_staging="$RUNNER_TEMP/$base"
-          mkdir -p "$tar_staging/bin" \
-            "$tar_staging/share/applications" \
-            "$tar_staging/share/icons/hicolor/scalable/apps" \
-            "$tar_staging/share/icons/hicolor/512x512/apps" \
-            "$tar_staging/share/icons/hicolor/256x256/apps" \
-            "$tar_staging/share/icons/hicolor/128x128/apps" \
-            "$tar_staging/share/icons/hicolor/32x32/apps" \
-            "$tar_staging/share/pixmaps"
-          cp desktop/target/release/mihomo-server-desktop "$tar_staging/bin/"
-          chmod +x "$tar_staging/bin/mihomo-server-desktop"
-          sed -e 's/{{exec}}/mihomo-server-desktop/g' -e 's/{{icon}}/mihomo-server-desktop/g' \
-            desktop/mihomo-server-desktop.desktop > "$tar_staging/share/applications/mihomo-server-desktop.desktop"
-          cp desktop/icons/src/app.svg "$tar_staging/share/icons/hicolor/scalable/apps/mihomo-server-desktop.svg"
-          cp desktop/icons/icon.png "$tar_staging/share/icons/hicolor/512x512/apps/mihomo-server-desktop.png"
-          cp desktop/icons/128x128@2x.png "$tar_staging/share/icons/hicolor/256x256/apps/mihomo-server-desktop.png"
-          cp desktop/icons/128x128.png "$tar_staging/share/icons/hicolor/128x128/apps/mihomo-server-desktop.png"
-          cp desktop/icons/32x32.png "$tar_staging/share/icons/hicolor/32x32/apps/mihomo-server-desktop.png"
-          cp desktop/icons/icon.png "$tar_staging/share/pixmaps/mihomo-server-desktop.png"
-          tar -czf "dist/$base.tar.gz" -C "$RUNNER_TEMP" "$base"
-          (cd "$(mktemp -d)" && tar -xzf "$OLDPWD/dist/$base.tar.gz" && test -x "$base/bin/mihomo-server-desktop")
-
-          cd dist
-          for file in "$base".*; do sha256sum "$file" > "$file.sha256"; done
-          sha256sum -c ./*.sha256
-
-      - name: Upload desktop packages
-        uses: actions/upload-artifact@v6
-        with:
-          name: desktop-assets
-          path: dist/*
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-
   publish:
-    needs: [test, build-release, build-desktop]
+    needs: [test, build-release]
     name: Publish GitHub Release
     runs-on: ubuntu-24.04
     permissions:
@@ -203,9 +123,8 @@ jobs:
 
       - name: Update flake.nix on main
         run: |
-          tarball="dist/mihomo-server-desktop-$GITHUB_REF_NAME-x86_64.tar.gz"
-          python3 scripts/update_flake_desktop.py --tarball "$tarball" --tag "$GITHUB_REF_NAME" \
-            --server-tarball "dist/mihomo-server-$GITHUB_REF_NAME-x86_64-unknown-linux-gnu.tar.gz"
+          python3 scripts/update_flake.py --tag "$GITHUB_REF_NAME" \
+            --tarball "dist/mihomo-server-$GITHUB_REF_NAME-x86_64-unknown-linux-gnu.tar.gz"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -213,7 +132,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "flake.nix is already up to date."
           else
-            git commit -m "chore(flake): bump server and desktop releases to $GITHUB_REF_NAME"
+            git commit -m "chore(flake): bump server release to $GITHUB_REF_NAME"
             git pull --rebase origin main
             git push origin HEAD:main
           fi

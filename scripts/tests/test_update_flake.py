@@ -2,19 +2,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.update_flake_desktop import compute_sri_hash, update_flake
+from scripts.update_flake import compute_sri_hash, update_flake
 
 
-class TestUpdateFlakeDesktop(unittest.TestCase):
-    def test_server_pin_changes_without_touching_desktop(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "flake.nix"
-            path.write_text('serverRelease = { version = "old"; hash = "old-server"; };\n'
-                            'desktopRelease = { version = "old"; hash = "old-desktop"; };\n')
-            update_flake(path, "0.2.13", "sha256-server", "serverRelease")
-            self.assertIn('serverRelease = { version = "0.2.13"; hash = "sha256-server"; };', path.read_text())
-            self.assertIn('desktopRelease = { version = "old"; hash = "old-desktop"; };', path.read_text())
-
+class TestUpdateFlake(unittest.TestCase):
     def test_compute_sri_hash(self):
         with tempfile.NamedTemporaryFile() as f:
             f.write(b"hello world")
@@ -29,7 +20,7 @@ class TestUpdateFlakeDesktop(unittest.TestCase):
 {
   outputs = { self }: {
     packages.default = ...;
-    desktopRelease = {
+    serverRelease = {
       version = "0.1.0";
       hash = "sha256-oldhasholdhasholdhasholdhasholdhasholdha=";
     };
@@ -45,6 +36,13 @@ class TestUpdateFlakeDesktop(unittest.TestCase):
 
             self.assertIn('version = "0.2.10";', updated)
             self.assertIn('hash = "sha256-newhashnewhashnewhashnewhashnewhashnewha=";', updated)
+
+    def test_update_flake_requires_the_pin(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            flake_file = Path(tmpdir) / "flake.nix"
+            flake_file.write_text("{ }\n", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                update_flake(flake_file, "0.2.10", "sha256-new")
 
 
 if __name__ == "__main__":

@@ -26,7 +26,20 @@ services.mihomo-server = {
   linger = true;      # Start at boot and keep running after logout (default).
   tun.enable = true;  # Authorize these users for the shared system TUN (default).
 };
-programs.mihomo-server-desktop.enable = true; # Optional.
+```
+
+The optional desktop client has its own flake,
+[mihomo-server-desktop](https://github.com/oodzchen/mihomo-server-desktop). Add it
+as a second input that follows this one, include
+`mihomo-server-desktop.nixosModules.default` and set
+`programs.mihomo-server-desktop.enable = true;`:
+
+```nix
+inputs.mihomo-server-desktop = {
+  url = "github:oodzchen/mihomo-server-desktop";
+  inputs.nixpkgs.follows = "nixpkgs";
+  inputs.mihomo-server.follows = "mihomo-server";
+};
 ```
 
 TUN DNS integration requires systemd-resolved (`services.resolved.enable = true`).
@@ -94,9 +107,8 @@ installer refuses to install or upgrade (only `--uninstall` still runs), because
 its per-user unit would shadow the module's. The newer service API/Web explains Nix ownership and refuses
 program upgrades and autostart changes too; those API/Web changes become available
 in the first CI release containing them. The current precompiled pin is v0.2.13.
-Desktop packages select the Nix helper and block installation through the script.
-For older desktop releases, the package maps their "enable and start" request
-to starting the declared instance, without editing autostart.
+The desktop flake's packages select the Nix helper and block installation through
+the script.
 
 Releases up to v0.2.13 also have a listener readiness race: its core API may
 answer before proxy listeners finish binding, causing a startup error reporting

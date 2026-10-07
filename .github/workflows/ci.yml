@@ -69,25 +69,6 @@ jobs:
       - name: Rust lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-  desktop:
-    name: Desktop client
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-desktop
-      - uses: ./.github/actions/setup-rust
-        with:
-          save-cache: ${{ env.SAVE_CACHE }}
-          cache-key: desktop
-          workspaces: desktop -> target
-      # Separate Cargo workspace: the service jobs never need WebKitGTK.
-      - name: Desktop formatting
-        run: cargo fmt --manifest-path desktop/Cargo.toml --check
-      - name: Desktop lint
-        run: cargo clippy --manifest-path desktop/Cargo.toml --all-targets --locked -- -D warnings
-      - name: Desktop tests
-        run: cargo test --manifest-path desktop/Cargo.toml --locked
-
   rust-test:
     name: Rust and packaging tests
     runs-on: ubuntu-24.04

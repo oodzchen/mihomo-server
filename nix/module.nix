@@ -2,7 +2,6 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.mihomo-server;
-  desktop = config.programs.mihomo-server-desktop;
 in {
   imports = [
     (lib.mkRemovedOptionModule [ "services" "mihomo-server" "user" ]
@@ -34,14 +33,6 @@ in {
         type = lib.types.bool;
         default = true;
         description = "Authorize selected users to use the shared system-wide TUN.";
-      };
-    };
-    programs.mihomo-server-desktop = {
-      enable = lib.mkEnableOption "Mihomo Server desktop client";
-      package = lib.mkOption {
-        type = lib.types.package;
-        default = self.packages.${pkgs.stdenv.hostPlatform.system}.desktop;
-        description = "Desktop client package.";
       };
     };
   };
@@ -162,6 +153,5 @@ in {
         '') cfg.users;
       };
     })
-    (lib.mkIf desktop.enable { environment.systemPackages = [ desktop.package ]; })
   ];
 }

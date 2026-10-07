@@ -378,23 +378,11 @@ launcher described above; local-bundle installer overrides are internal to tests
 
 ## Desktop client
 
-`desktop/` is a separate Cargo workspace because it links WebKitGTK, which the
-service never needs. It builds on Linux with the WebKitGTK 4.1, ayatana
-appindicator and librsvg development packages, for example:
-
-```sh
-sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev   # Debian/Ubuntu
-sudo dnf install webkit2gtk4.1-devel libayatana-appindicator-gtk3-devel librsvg2-devel libxdo-devel  # Fedora
-cargo test --manifest-path desktop/Cargo.toml --locked
-cargo install tauri-cli --version 2.12.1 --locked
-(cd desktop && cargo tauri build --bundles deb,rpm,appimage)
-```
-
-Release tags also publish `mihomo-server-desktop-<tag>-x86_64.{deb,rpm,AppImage}`
-with SHA-256 files. `MIHOMO_SERVER_API` and `MIHOMO_SERVER_TOKEN_FILE` point
-a development build at a foreground service, as for the command line.
-`MIHOMO_SERVER_INSTALLER` replaces the published installer with a local path or
-URL.
+The desktop client is developed and released in its own repository,
+[mihomo-server-desktop](https://github.com/oodzchen/mihomo-server-desktop), which
+documents its build dependencies and packages. It pins `crates/management-client`
+to a service release tag. `MIHOMO_SERVER_API` and `MIHOMO_SERVER_TOKEN_FILE`
+point a development build at a foreground service, as for the command line.
 
 ## Validation
 

@@ -90,14 +90,7 @@ sudo loginctl enable-linger 用户名
 
 ### 桌面客户端（可选）
 
-有图形桌面时，可以从[最新 Release 页面](https://github.com/oodzchen/mihomo-server/releases/latest)下载轻量的桌面客户端 `mihomo-server-desktop`（Tauri 2，提供 `.deb`、`.rpm` 和 AppImage）。它独立于服务安装，不装也不影响使用。客户端会自动发现本机当前用户的 mihomo-server 实例，在窗口中打开管理页面并自动登录；本机还没有安装服务时可以在客户端里一键安装（管理员授权通过系统的 polkit 对话框完成），已安装但未运行时也能一键启动。关闭窗口后客户端驻留托盘，左键单击打开管理界面，右键菜单可以切换代理模式、开关 TUN、选择节点并测速、切换订阅，以及启动、停止或重启服务；「退出客户端」只关闭桌面端，服务继续运行。登录时启动和界面语言都在 Web 管理界面的「设置」页中统一调整，托盘菜单会随之切换语言。
-
-```sh
-sudo dnf install ./mihomo-server-desktop-vX.Y.Z-x86_64.rpm     # Fedora/RHEL
-sudo apt install ./mihomo-server-desktop-vX.Y.Z-x86_64.deb     # Debian/Ubuntu
-```
-
-安装包在 Ubuntu 24.04 上构建，需要 glibc 2.39 及以上，并依赖 WebKitGTK 4.1、libayatana-appindicator 和 polkit。GNOME 需要安装 AppIndicator 扩展才能显示托盘图标；KDE 等桌面原生支持。
+有图形桌面时，可以安装轻量的桌面客户端 [mihomo-server-desktop](https://github.com/oodzchen/mihomo-server-desktop)（Tauri 2，提供 `.deb`、`.rpm`、AppImage 和 Nix Flake）。它独立于服务安装和发布，不装也不影响使用：客户端会自动发现本机当前用户的实例，在窗口中打开管理页面，并通过托盘切换代理模式、TUN、节点和订阅，以及管理服务的启停。下载和使用说明见该仓库。
 
 ## 远程访问与服务管理
 
