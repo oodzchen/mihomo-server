@@ -123,6 +123,17 @@ activation. Activation is journaled and rolls back to the previous executable
 when health verification fails. A newer user-managed core is not overwritten by
 the bootstrap core during ordinary service startup.
 
+Node tests (`probe_proxies`, the Web proxy page) do not use the running core's
+delay API, which reuses pooled node sessions and, with `unified-delay`, reports
+only a request over an open connection. The service starts a short-lived,
+unprivileged Mihomo under `<data>/run/` with the committed revision's nodes,
+providers (read from their caches), node resolvers and dialer options, no
+listeners, TUN, rules or persisted state, bound to the default-route interface
+so that it bypasses any TUN. Through it each node gets one cold HTTPS request
+(node DNS, handshake, remote dial and target TLS) and one over the session that
+opened, 16 nodes at a time; a group is tested through its current node. One
+probe runs at a time and its process and directory are removed afterwards.
+
 ## Management and browser boundary
 
 Axum serves the built SPA, authenticated command endpoints, binary backup

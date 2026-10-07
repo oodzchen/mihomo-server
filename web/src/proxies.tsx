@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { command, type Perform } from "./api";
 import { t, type Language } from "./i18n";
-import type { CoreStatus, Proxies, ProxyDelay } from "./types";
+import type { CoreStatus, NodeProbe, Proxies } from "./types";
 import { describe } from "./format";
 
 export function ProxyPage({
@@ -18,10 +18,10 @@ export function ProxyPage({
   perform: Perform;
 }) {
   const [proxies, setProxies] = useState<Proxies>(),
-    [delays, setDelays] = useState<Record<string, number>>({}),
+    [probes, setProbes] = useState<Record<string, NodeProbe>>({}),
     [testingGroup, setTestingGroup] = useState<string | null>(null),
     [testingNode, setTestingNode] = useState<string | null>(null),
-    [testUrl, setTestUrl] = useState("http://www.gstatic.com/generate_204"),
+    [testUrl, setTestUrl] = useState("https://www.gstatic.com/generate_204"),
     [error, setError] = useState(""),
     [revision, refresh] = useState(0),
     [loading, setLoading] = useState(false);
@@ -131,17 +131,23 @@ export function ProxyPage({
     refresh((value) => value + 1);
   }
 
-  async function testGroupDelay(group: string) {
-    if (testingGroup || busy) return;
+  /** Cold and warm full requests through each node, in an isolated core. */
+  async function probe(names: string[]) {
+    const results = await command<Record<string, NodeProbe>>(token, "probe_proxies", {
+      names,
+      url: testUrl,
+      // A node that needs longer for a first request is unusable in practice.
+      timeout: 3000,
+    });
+    setProbes((prev) => ({ ...prev, ...results }));
+  }
+
+  async function testGroupDelay(group: string, nodes: string[]) {
+    if (testingGroup || busy || !nodes.length) return;
     setTestingGroup(group);
     setError("");
     try {
-      const results = await command<Record<string, number>>(token, "delay_group", {
-        group,
-        url: testUrl,
-        timeout: 5000,
-      });
-      setDelays((prev) => ({ ...prev, ...results }));
+      await probe(nodes);
     } catch (e) {
       setError(describe(e));
     } finally {
@@ -154,12 +160,7 @@ export function ProxyPage({
     setTestingNode(node);
     setError("");
     try {
-      const res = await command<ProxyDelay>(token, "delay_proxy", {
-        name: node,
-        url: testUrl,
-        timeout: 5000,
-      });
-      setDelays((prev) => ({ ...prev, [node]: res.delay }));
+      await probe([node]);
     } catch (e) {
       setError(describe(e));
     } finally {
@@ -167,34 +168,38 @@ export function ProxyPage({
     }
   }
 
-  function getNodeDelay(node: string): number | undefined {
-    if (node in delays) {
-      return delays[node];
-    }
-    const history = proxies?.proxies[node]?.history;
-    if (history && history.length > 0) {
-      return history[history.length - 1].delay;
-    }
-    return undefined;
-  }
-
-  function renderDelayBadge(delay: number | undefined, isTesting: boolean) {
+  function renderDelayBadge(node: string, isTesting: boolean) {
     if (isTesting) {
       return <span className="delay-badge delay-testing">{t(language, "proxyDelayTesting")}</span>;
     }
+    const result = probes[node];
+    if (result) {
+      if (!result.cold) {
+        return <span className="delay-badge delay-timeout">{t(language, "proxyDelayTimeout")}</span>;
+      }
+      const title = t(language, "proxyProbeTitle", {
+        cold: result.cold,
+        warm: result.warm || t(language, "proxyDelayTimeout"),
+      });
+      const speed = (value: number, fast: number) =>
+        value < fast ? 0 : value < fast * 2 ? 1 : 2;
+      const level = Math.max(speed(result.cold, 500), result.warm ? speed(result.warm, 250) : 2);
+      return (
+        <span className={`delay-badge ${["delay-fast", "delay-medium", "delay-slow"][level]}`} title={title}>
+          {result.cold} / {result.warm ? `${result.warm}ms` : t(language, "proxyDelayTimeout")}
+        </span>
+      );
+    }
+    // The running core's own health checks (URL-test groups), until tested here.
+    const history = proxies?.proxies[node]?.history;
+    const delay = history?.length ? history[history.length - 1].delay : undefined;
     if (delay === undefined || delay < 0) {
       return <span className="delay-badge delay-untested">{t(language, "proxyDelayUntested")}</span>;
     }
     if (delay === 0 || delay >= 10000) {
       return <span className="delay-badge delay-timeout">{t(language, "proxyDelayTimeout")}</span>;
     }
-    if (delay < 300) {
-      return <span className="delay-badge delay-fast">{delay}ms</span>;
-    }
-    if (delay < 600) {
-      return <span className="delay-badge delay-medium">{delay}ms</span>;
-    }
-    return <span className="delay-badge delay-slow">{delay}ms</span>;
+    return <span className="delay-badge delay-fast">{delay}ms</span>;
   }
 
   return (
@@ -204,6 +209,7 @@ export function ProxyPage({
           <p className="muted">
             {t(language, "proxyHelp")}
           </p>
+          <p className="muted">{t(language, "proxyProbeHelp")}</p>
           <div className="delay-url-bar">
             <label htmlFor="delay-test-url" className="muted" style={{ fontSize: "12px", marginRight: "6px" }}>
               {t(language, "proxyDelayUrl")}
@@ -274,7 +280,7 @@ export function ProxyPage({
                 <button
                   type="button"
                   disabled={busy || loading || testingGroup === name}
-                  onClick={() => void testGroupDelay(name)}
+                  onClick={() => void testGroupDelay(name, group.all ?? [])}
                 >
                   {t(language, testingGroup === name ? "proxyDelayWorking" : "proxyDelayAction")}
                 </button>
@@ -293,7 +299,6 @@ export function ProxyPage({
                 <div className="nodes">
                   {group.all?.map((node) => {
                     const isSelected = (group.fixed || group.now) === node;
-                    const delay = getNodeDelay(node);
                     const isTesting = testingNode === node || testingGroup === name;
                     return (
                       <button
@@ -310,7 +315,7 @@ export function ProxyPage({
                           {node}
                         </span>
                         <div className="node-meta">
-                          {renderDelayBadge(delay, isTesting)}
+                          {renderDelayBadge(node, isTesting)}
                           <span
                             className="node-test-btn"
                             title={t(language, "proxyDelayNodeTitle").replace("{node}", node)}

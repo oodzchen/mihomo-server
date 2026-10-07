@@ -10,6 +10,7 @@ pub mod management;
 pub mod multi_user;
 mod native_tun;
 mod proxy_access;
+pub mod proxy_probe;
 pub mod remote;
 pub mod resource_inventory;
 pub mod resources;

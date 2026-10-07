@@ -147,6 +147,7 @@ pub(super) struct Access {
     scheduler_completion: watch::Receiver<bool>,
     logs: Logs,
     client: Arc<Mihomo>,
+    prober: Arc<crate::proxy_probe::Prober>,
     profiles: watch::Receiver<IProfiles>,
     #[cfg(target_os = "linux")]
     tun_lock: Option<Arc<crate::tun_lock::TunLock>>,
@@ -166,6 +167,7 @@ impl Access {
             scheduler_completion: manager.scheduler_completion.clone(),
             logs: manager.logs.clone(),
             client: Arc::clone(&manager.client),
+            prober: Arc::clone(&manager.prober),
             profiles: manager.profiles.clone(),
             #[cfg(target_os = "linux")]
             tun_lock: manager.tun_lock.clone(),
@@ -185,6 +187,7 @@ impl Access {
             scheduler_completion: self.scheduler_completion.clone(),
             logs: self.logs.clone(),
             client: Arc::clone(&self.client),
+            prober: Arc::clone(&self.prober),
             profiles: self.profiles.clone(),
             #[cfg(target_os = "linux")]
             tun_lock: self.tun_lock.clone(),

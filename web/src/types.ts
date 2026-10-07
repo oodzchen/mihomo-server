@@ -78,6 +78,13 @@ export interface ProxyProviders {
 export interface ProxyDelay {
   delay: number;
 }
+/** Milliseconds of a full request through a node; 0 when it failed. */
+export interface NodeProbe {
+  /** The first request: node DNS, handshake, remote dial and target TLS. */
+  cold: number;
+  /** Each further new connection over the session the first one opened. */
+  warm: number;
+}
 /** Interface preferences this instance shares with all of its clients. */
 export type Preferences = { language?: "zh" | "zhtw" | "en" | null };
 export type EventMessage = {

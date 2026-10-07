@@ -97,6 +97,14 @@ pub enum ManagementCommand {
         #[serde(default)]
         timeout: Option<u32>,
     },
+    /// Cold and warm full-request timings from an isolated core.
+    ProbeProxies {
+        names: Vec<String>,
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default)]
+        timeout: Option<u32>,
+    },
     GeoSettings {},
     UpdateGeo {},
     ConnectionSettings {},
@@ -512,6 +520,9 @@ impl Management {
             }
             ManagementCommand::DelayGroup { group, url, timeout } => {
                 serde_json::to_value(self.manager.delay_group(&group, url.as_deref(), timeout).await?)?
+            }
+            ManagementCommand::ProbeProxies { names, url, timeout } => {
+                serde_json::to_value(self.manager.probe_proxies(&names, url.as_deref(), timeout).await?)?
             }
             ManagementCommand::ProxyAccess {} => crate::proxy_access::inspect(&self.manager).await?,
             ManagementCommand::SetProxyMode { mode } => serde_json::to_value(self.manager.set_proxy_mode(mode).await?)?,

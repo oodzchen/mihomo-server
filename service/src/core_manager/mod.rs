@@ -346,6 +346,7 @@ pub struct CoreManager {
     scheduler_completion: watch::Receiver<bool>,
     logs: Logs,
     client: Arc<Mihomo>,
+    prober: Arc<crate::proxy_probe::Prober>,
     profiles: watch::Receiver<IProfiles>,
     #[cfg(target_os = "linux")]
     tun_lock: Option<Arc<crate::tun_lock::TunLock>>,
@@ -425,6 +426,10 @@ impl CoreManager {
                 .socket_path(&socket)
                 .build()?,
         );
+        let prober = Arc::new(crate::proxy_probe::Prober::new(
+            options.binary.clone(),
+            options.data_dir.clone(),
+        ));
         let (commands, receiver) = mpsc::channel(32);
         let initial = CoreStatus {
             config_revision: store.state().current.map(|revision| revision.file),
@@ -481,6 +486,7 @@ impl CoreManager {
             completion,
             logs,
             client,
+            prober,
             profiles,
             #[cfg(target_os = "linux")]
             tun_lock,
@@ -586,6 +592,61 @@ impl CoreManager {
             .await
             .map_err(|_| anyhow::anyhow!("delay proxy query timed out"))?
             .with_context(|| format!("failed to test delay for proxy '{name}'"))
+    }
+
+    /// Test nodes (or groups, through their current node) in an isolated core,
+    /// cold first and then over the session that request opened.
+    pub async fn probe_proxies(
+        &self,
+        names: &[String],
+        test_url: Option<&str>,
+        timeout_ms: Option<u32>,
+    ) -> Result<std::collections::BTreeMap<String, crate::proxy_probe::NodeProbe>> {
+        ensure!(self.status().phase == CorePhase::Running, "core is not running");
+        ensure!(!names.is_empty(), "no nodes to test");
+        ensure!(
+            names.len() <= crate::proxy_probe::MAX_NODES,
+            "at most {} nodes per test",
+            crate::proxy_probe::MAX_NODES
+        );
+        let url = test_url
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+            .unwrap_or(crate::proxy_probe::DEFAULT_URL);
+        let timeout_ms = timeout_ms.unwrap_or(3000).clamp(100, 30_000);
+        let live = timeout(Duration::from_secs(10), self.client.get_proxies())
+            .await
+            .map_err(|_| anyhow::anyhow!("proxies query timed out"))?
+            .context("failed to query proxies from core")?;
+        // A group is tested through the node it currently uses.
+        let leaf = |name: &str| {
+            let mut current = name.to_owned();
+            for _ in 0..16 {
+                match live.proxies.get(&current).filter(|proxy| proxy.all.is_some()) {
+                    Some(group) => match group.now.as_deref().filter(|now| !now.is_empty()) {
+                        Some(now) => current = now.to_owned(),
+                        None => break,
+                    },
+                    None => break,
+                }
+            }
+            current
+        };
+        let leaves = names.iter().map(|name| (name.clone(), leaf(name))).collect::<Vec<_>>();
+        let mut nodes = leaves.iter().map(|(_, leaf)| leaf.clone()).collect::<Vec<_>>();
+        nodes.sort();
+        nodes.dedup();
+        let runtime = self.runtime_config().await?;
+        let budget = Duration::from_millis(u64::from(timeout_ms) * 3 + 2000)
+            * nodes.len().div_ceil(crate::proxy_probe::PARALLEL).max(1) as u32
+            + Duration::from_secs(15);
+        let results = timeout(budget, self.prober.run(&runtime, &nodes, url, timeout_ms))
+            .await
+            .map_err(|_| anyhow::anyhow!("node test timed out"))??;
+        Ok(leaves
+            .into_iter()
+            .map(|(name, leaf)| (name, results.get(&leaf).copied().unwrap_or_default()))
+            .collect())
     }
 
     pub async fn delay_group(

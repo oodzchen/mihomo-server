@@ -1337,36 +1337,44 @@ test("proxy delay controls translate without losing the test URL or results", as
   await page.goto(`${base}/proxies`);
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务" }).click();
-  const requests: Array<{ command: string; url: string }> = [];
+  const requests: Array<{ names: string[]; url: string }> = [];
   await page.route("**/api/commands", async (route) => {
     const body = route.request().postDataJSON();
-    if (body?.command === "delay_proxy" || body?.command === "delay_group") {
-      requests.push({ command: body.command, url: body.url });
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(body.command === "delay_proxy" ? { delay: 126 } : { DIRECT: 84, REJECT: 0 }),
-      });
+    if (body?.command === "probe_proxies") {
+      requests.push({ names: body.names, url: body.url });
+      const results: Record<string, { cold: number; warm: number }> =
+        body.names.length === 1
+          ? { DIRECT: { cold: 260, warm: 126 } }
+          : { DIRECT: { cold: 180, warm: 84 }, REJECT: { cold: 0, warm: 0 } };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(results) });
     } else {
       await route.continue();
     }
   });
+  const group = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Main", exact: true }) });
+  await expect(group.getByRole("button", { name: "选择 Main / DIRECT" })).toBeVisible();
+  await expect(page.getByLabel("测速链接:")).toHaveValue("https://www.gstatic.com/generate_204");
   const url = "https://delay.example.test/204";
   await page.getByLabel("测速链接:").fill(url);
   await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
   await expect(page.getByLabel("Delay test URL:")).toHaveValue(url);
-  const group = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Main", exact: true }) });
   const direct = group.getByRole("button", { name: "Select Main / DIRECT" });
   await group.locator('.node-test-btn[title="Test DIRECT latency"]').click();
-  await expect(direct.locator(".delay-badge")).toHaveText("126ms");
+  await expect(direct.locator(".delay-badge")).toHaveText("260 / 126ms");
+  await expect(direct.locator(".delay-badge")).toHaveAttribute("title", "First 260ms · reused 126ms");
   await group.getByRole("button", { name: "Test delay" }).click();
-  await expect(direct.locator(".delay-badge")).toHaveText("84ms");
+  await expect(direct.locator(".delay-badge")).toHaveText("180 / 84ms");
   await expect(group.getByRole("button", { name: "Select Main / REJECT" }).locator(".delay-badge")).toHaveText("Timed out");
   await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
   await expect(page.getByLabel("测速链接:")).toHaveValue(url);
   await expect(group.getByRole("button", { name: "测速" })).toBeVisible();
   await expect(group.getByRole("button", { name: "选择 Main / REJECT" }).locator(".delay-badge")).toHaveText("超时");
-  expect(requests).toEqual([{ command: "delay_proxy", url }, { command: "delay_group", url }]);
+  await expect(direct.locator(".delay-badge")).toHaveAttribute("title", "首连 180ms · 复用 84ms");
+  const groupNodes = await group.locator(".nodes > button .node-name").allTextContents();
+  expect(requests).toEqual([
+    { names: ["DIRECT"], url },
+    { names: groupNodes, url },
+  ]);
 });
 
 test.skip("proxy provider controls translate while an update is pending", async ({ page }) => {
