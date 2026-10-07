@@ -20,6 +20,7 @@
           pname = "mihomo-server-desktop";
           version = desktopRelease.version;
           src = ./.;
+          MIHOMO_DESKTOP_VERSION = desktopRelease.version;
 
           cargoLock = {
             lockFile = ./desktop/Cargo.lock;

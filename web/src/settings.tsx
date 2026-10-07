@@ -198,27 +198,31 @@ type SettingsPageProps = {
   onEditorStateChange: (dirty: boolean, busy: boolean) => void;
 };
 
-function VersionInfo({ token, status, desktopVersion, language }: {
+function VersionInfo({ token, status, connection, desktopVersion, language }: {
   token: string;
   status: CoreStatus;
+  connection: Connection;
   desktopVersion?: string;
   language: Language;
 }) {
   const [versions, setVersions] = useState<{ core?: string; service?: string }>({});
   useEffect(() => {
+    setVersions({});
+    if (connection !== "connected") return;
     const controller = new AbortController();
-    Promise.allSettled([
-      command<string | null>(token, "installed_core_version", {}, controller.signal),
-      command<string>(token, "service_version", {}, controller.signal),
-    ]).then(([core, service]) => {
-      if (controller.signal.aborted) return;
-      setVersions({
-        core: core.status === "fulfilled" ? core.value ?? undefined : undefined,
-        service: service.status === "fulfilled" ? service.value : undefined,
-      });
-    });
+    // Publish each result independently: a slow core must not hide the service.
+    void command<string | null>(token, "installed_core_version", {}, controller.signal)
+      .then(core => {
+        if (!controller.signal.aborted)
+          setVersions(current => ({ ...current, core: core ?? undefined }));
+      }).catch(() => {});
+    void command<{ version: string }>(token, "service_info", {}, controller.signal)
+      .then(service => {
+        if (!controller.signal.aborted)
+          setVersions(current => ({ ...current, service: service.version }));
+      }).catch(() => {});
     return () => controller.abort();
-  }, [token]);
+  }, [token, connection, status.generation]);
   return (
     <section className="panel version-info" aria-label={t(language, "setVersionInfo")}>
       <h2>{t(language, "setVersionInfo")}</h2>
@@ -535,7 +539,7 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         <details className="settings-details"><summary>{t(language, "setResources")}</summary>
         <ResourcesPanel token={token} status={status} connection={connection} logout={logout} language={language} />
         </details>
-        <VersionInfo token={token} status={status} desktopVersion={desktopVersion} language={language} />
+        <VersionInfo token={token} status={status} connection={connection} desktopVersion={desktopVersion} language={language} />
       </div>
     </div>
   );

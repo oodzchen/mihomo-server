@@ -5000,6 +5000,58 @@ test("settings uses the compact layout and shows browser-safe version informatio
   }
 });
 
+test("settings reads service versions independently and preserves the host client version", async ({ page }) => {
+  const sockets: import("@playwright/test").WebSocketRoute[] = [];
+  await page.routeWebSocket("**/api/events", socket => {
+    sockets.push(socket);
+    socket.onMessage(message => {
+      if (JSON.parse(String(message)).type === "authenticate") {
+        socket.send(JSON.stringify({ type: "ready" }));
+        socket.send(JSON.stringify({ type: "status", data: { phase: "stopped", generation: 0, selection_pending: [] } }));
+      }
+    });
+  });
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "__MIHOMO_DESKTOP_VERSION__", { value: "0.8.1-client" });
+  });
+  let version = "0.9.2-service";
+  let releaseCore: (() => void) | undefined;
+  const corePending = new Promise<void>(resolve => { releaseCore = resolve; });
+  await page.route("**/api/commands", async route => {
+    const name = route.request().postDataJSON()?.command;
+    if (name === "service_info") {
+      await route.fulfill({ json: { version, release: null, unit: null, upgrade: { available: false, state: "", result: "", log: [] } } });
+    } else if (name === "service_version") {
+      throw new Error("Settings must use the same version source as Service");
+    } else if (name === "installed_core_version") {
+      await corePending;
+      await route.fulfill({ json: "v1.19.0" }).catch(() => {});
+    } else await route.continue();
+  });
+  try {
+    await loginSettings(page);
+    const versions = page.getByRole("region", { name: "版本信息" });
+    const serviceVersion = versions.locator("div").filter({ hasText: "服务端版本" }).locator("dd");
+    await expect(serviceVersion).toHaveText(version);
+    await expect(versions.locator("div").filter({ hasText: "桌面客户端版本" }).locator("dd")).toHaveText("0.8.1-client");
+    releaseCore!();
+    await page.getByRole("navigation").getByRole("link", { name: "服务", exact: true }).click();
+    await expect(page.getByRole("region", { name: "服务控制" }).locator("div").filter({ hasText: "服务版本" }).locator("dd")).toHaveText(version);
+    version = "0.9.3-service";
+    await page.getByRole("navigation").getByRole("link", { name: "设置", exact: true }).click();
+    await expect(serviceVersion).toHaveText(version);
+    version = "0.9.4-service";
+    sockets.splice(0).forEach(socket => void socket.close());
+    await expect(serviceVersion).toHaveText(version);
+    version = "0.9.5-service";
+    sockets.at(-1)!.send(JSON.stringify({ type: "status", data: { phase: "stopped", generation: 1, selection_pending: [] } }));
+    await expect(serviceVersion).toHaveText(version);
+    await expect(versions.locator("div").filter({ hasText: "桌面客户端版本" }).locator("dd")).toHaveText("0.8.1-client");
+  } finally {
+    releaseCore!();
+  }
+});
+
 test("service page controls the foreground service and keeps long help in tooltips", async ({ page }) => {
   await page.route("**/api/commands", async route => {
     if (route.request().postDataJSON()?.command === "service_release") await route.fulfill({ json: "v9.9.9" });

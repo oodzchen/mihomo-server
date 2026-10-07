@@ -207,6 +207,11 @@ Release builds of both the service and the client report the release tag as
 their version: CI sets `MIHOMO_SERVER_VERSION` / `MIHOMO_DESKTOP_VERSION` to the
 tag without its `v` when building, checks `--version` against it, and local
 builds fall back to the Cargo package version.
+The Nix desktop source package also passes its package version through
+`MIHOMO_DESKTOP_VERSION`. Settings reads the service version from `service_info`,
+as the Service page does, and refreshes on reconnection and core generation
+changes. Core and service reads complete independently; the desktop version
+comes from the host client's immutable build value, not the service.
 
 The client keeps three things apart: itself (versioned on its own), the
 systemd service (`mihomo-server`, started, stopped and restarted through the
