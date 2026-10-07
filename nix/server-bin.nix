@@ -1,5 +1,5 @@
 { lib, stdenv, fetchurl, autoPatchelfHook, makeWrapper, python3, bash, coreutils,
-  gnugrep, gnused, gawk, curl, systemd, shadow, release }:
+  gnugrep, gnused, gawk, curl, getent, systemd, release }:
 stdenv.mkDerivation {
   pname = "mihomo-server";
   inherit (release) version;
@@ -19,7 +19,7 @@ stdenv.mkDerivation {
     runHook postInstall
   '';
   postInstall = import ./server-install.nix {
-    inherit lib bash coreutils gnugrep gnused gawk curl systemd shadow;
+    inherit lib bash coreutils gnugrep gnused gawk curl getent systemd;
   };
   postFixup = builtins.readFile ./server-fixup.sh;
   meta = {

@@ -71,6 +71,15 @@ class Installer(unittest.TestCase):
         self.assertNotIn("MUTATED", result.stdout)
         self.assertIn("unsafe bundle", result.stderr)
 
+    def test_nix_owned_host_refuses_install_but_allows_uninstall(self):
+        result = self.run_shell('source "$1"; nix_owned() { return 0; }; root_action() { echo MUTATED; }; main')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("MUTATED", result.stdout)
+        self.assertIn("nixos-rebuild switch", result.stderr)
+        result = self.run_shell('source "$1"; nix_owned() { return 0; }; root_action() { printf "%s\\n" "$@"; }; main --uninstall')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ["uninstall_shared", "0"])
+
     def test_uninstall_needs_no_download_or_bundle(self):
         result = self.run_shell('source "$1"; root_action() { printf "%s\\n" "$@"; }; main --uninstall',
                                 MIHOMO_INSTALL_BUNDLE="/missing")

@@ -67,6 +67,13 @@ verify_bundle() {
 is_nixos() {
     [ -f /etc/NIXOS ] || ( [ -f /etc/os-release ] && grep -qi "^ID=nixos" /etc/os-release )
 }
+# The NixOS module (services.mihomo-server) owns this host's program and unit.
+# An /opt installation would put a user unit in front of the module's.
+nix_owned() {
+    local unit
+    unit=$(readlink -f /etc/systemd/user/mihomo-server.service 2>/dev/null) || return 1
+    [[ "$unit" = /nix/store/* ]]
+}
 each_user_manager() {
     local uid user failed=0
     while read -r uid user _; do
@@ -514,6 +521,9 @@ main() {
         shift
     done
     if [ "$purge" = 1 ] && [ "$uninstall" = 0 ]; then die '--purge is only valid with --uninstall'; fi
+    if [ "$uninstall" = 0 ] && nix_owned; then
+        die 'mihomo-server is managed by the NixOS module here: update the mihomo-server flake input and run nixos-rebuild switch (see docs/NIXOS.md); --uninstall still removes an old /opt installation'
+    fi
     if [ "$(id -u)" != 0 ]; then caller=$(id -un)
     elif [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then caller=$SUDO_USER
     elif [ -n "${PKEXEC_UID:-}" ]; then caller=$(id -nu "$PKEXEC_UID"); fi

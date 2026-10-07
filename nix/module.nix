@@ -72,6 +72,9 @@ in {
         group = "mihomo-tun";
         permissions = "0750";
       };
+      # Same rule as the installer's polkit_tun_dns: each member may point
+      # systemd-resolved only at its own ms<uid> link, never another member's.
+      security.polkit.enable = lib.mkIf cfg.tun.enable true;
       security.polkit.extraConfig = lib.mkIf cfg.tun.enable ''
         polkit.addRule(function (action, subject) {
           var actions = [
@@ -80,11 +83,23 @@ in {
             "org.freedesktop.resolve1.set-default-route",
             "org.freedesktop.resolve1.revert"
           ];
-          if (actions.indexOf(action.id) >= 0 && subject.isInGroup("mihomo-tun")) {
-            var link = action.lookup("interface");
-            if (link && !/^ms[0-9]+$/.test(link)) return polkit.Result.NOT_HANDLED;
+          if (actions.indexOf(action.id) < 0 || !subject.isInGroup("mihomo-tun")) {
+            return polkit.Result.NOT_HANDLED;
+          }
+          // systemd 256+ names the link; older versions name none.
+          var link = action.lookup("interface");
+          if (!link) {
             return polkit.Result.YES;
           }
+          if (!/^ms[0-9]+$/.test(link)) {
+            return polkit.Result.NOT_HANDLED;
+          }
+          try {
+            var uid = polkit.spawn(["${pkgs.coreutils}/bin/id", "-u", subject.user]).trim();
+          } catch (error) {
+            return polkit.Result.NO;
+          }
+          return link === "ms" + uid ? polkit.Result.YES : polkit.Result.NO;
         });
       '';
       systemd.user.services.mihomo-server = {
@@ -111,7 +126,7 @@ in {
         wantedBy = [ "multi-user.target" ];
         after = [ "systemd-tmpfiles-setup.service" "linger-users.service" ];
         restartTriggers = [ cfg.package config.systemd.user.units."mihomo-server.service".unit ];
-        path = [ pkgs.systemd pkgs.coreutils ];
+        path = [ pkgs.systemd pkgs.coreutils pkgs.gnugrep ];
         serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
         # Also runs before this refresh unit is removed/changed: selected users
         # from the old generation must not keep an obsolete service alive.
@@ -122,11 +137,27 @@ in {
             fi
           fi
         '') cfg.users;
-        script = lib.concatMapStringsSep "\n" (user: ''
+        # An instance already running this package (e.g. just started at boot)
+        # is left alone; any other is (re)started on the new definition. A user
+        # unit of the same name elsewhere (an old script installation) shadows
+        # the module's unit, so report it where nixos-rebuild shows failures.
+        script = lib.concatMapStringsSep "\n" (user: let
+          manager = "--machine=${lib.escapeShellArg "${user}@.host"}";
+        in ''
           uid=$(id -u ${lib.escapeShellArg user})
           if [ -S "/run/user/$uid/bus" ]; then
-            systemctl --user --machine=${lib.escapeShellArg "${user}@.host"} daemon-reload
-            systemctl --user --machine=${lib.escapeShellArg "${user}@.host"} restart mihomo-server.service
+            systemctl --user ${manager} daemon-reload
+            fragment=$(systemctl --user ${manager} show mihomo-server.service -p FragmentPath --value)
+            case "$fragment" in
+              /etc/systemd/user/*) ;;
+              *) echo "warning: ${user}'s mihomo-server.service is shadowed by $fragment; move it away (see docs/NIXOS.md, Migrating a script installation)" >&2 ;;
+            esac
+            pid=$(systemctl --user ${manager} show mihomo-server.service -p MainPID --value)
+            if [ "''${pid:-0}" != 0 ] && tr '\0' ' ' 2>/dev/null < "/proc/$pid/cmdline" | grep -qF ${lib.escapeShellArg "${cfg.package}/"}; then
+              echo "${user}: mihomo-server already runs ${cfg.package}"
+            else
+              systemctl --user ${manager} restart mihomo-server.service
+            fi
           fi
         '') cfg.users;
       };

@@ -17,8 +17,8 @@
         };
 
         serverRelease = {
-          version = "0.2.12";
-          hash = "sha256-BfWQHfXZ/dS0Kxg+8Rh2PKkJMNXIdG6eY/yv5+c989U=";
+          version = "0.2.13";
+          hash = "sha256-0SSrjiwL8W1ri3CkEtFvPPQesnO67pvKvveB79xHdCE=";
         };
 
         server-bin = pkgs.callPackage ./nix/server-bin.nix { release = serverRelease; };
@@ -144,6 +144,7 @@
 
         checks = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
           module = import ./nix/tests.nix { inherit self nixpkgs pkgs; };
+          vm = import ./nix/vm-test.nix { inherit self pkgs; };
         };
 
         devShells.default = pkgs.mkShell {

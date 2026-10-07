@@ -1,6 +1,6 @@
 { lib, rustPlatform, buildNpmPackage, importNpmLock, fetchurl, gzip,
   makeWrapper, python3, bash, coreutils, gnugrep, gnused, gawk, curl, systemd,
-  shadow, version }:
+  getent, version }:
 let
   pin = builtins.fromJSON (builtins.readFile ../deploy/core-pin.json);
   coreArchive = fetchurl {
@@ -46,7 +46,7 @@ in rustPlatform.buildRustPackage {
     {"schema_version":1,"target":"x86_64-unknown-linux-gnu","core":{"version":"${pin.version}","sha256":"${pin.sha256}"},"licenses":{"primary":"LICENSE","inventory":"LICENSES.txt"}}
     EOF
   '' + import ./server-install.nix {
-    inherit lib bash coreutils gnugrep gnused gawk curl systemd shadow;
+    inherit lib bash coreutils gnugrep gnused gawk curl getent systemd;
   };
   postFixup = builtins.readFile ./server-fixup.sh;
   meta = {

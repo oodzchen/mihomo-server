@@ -337,9 +337,12 @@ both server and desktop pins on main after assets are published.
 The NixOS module installs CLI/helper resources, declares systemd **user** units for
 selected normal users, manages lingering, slot directories and the shared TUN
 lock with tmpfiles, and grants TUN/DNS access through `security.wrappers` and
-polkit. It does not grant access to the installer update unit. A system refresh
-unit reloads running user managers and restarts declared instances when the
-package or unit changes, including rollback. Each instance retains its XDG data,
+the installer's polkit rule (each member's own `ms<uid>` link only). It does not
+grant access to the installer update unit. Wrapped scripts put `/run/wrappers/bin`
+first, so the launcher's group re-entry uses NixOS's setuid `sg`. A system refresh
+unit reloads running user managers and restarts declared instances not already
+running the package when the package or unit changes, including rollback, and
+reports a user unit that shadows the module's. Each instance retains its XDG data,
 settings and token. Autostart belongs to the NixOS `users` option. Runtime core
 upgrades stay per-user; a system rollback does not restore mutable core/data.
 
@@ -350,7 +353,8 @@ Web hints occupy existing fields/tooltips. The CLI wrapper also guards old CI
 binaries, and the desktop wrapper selects the packaged helper and blocks the
 installer. New API/Web ownership hints require a release containing that code.
 Script installations (including `/opt` installations on NixOS) retain their
-installer upgrade behavior. Migration explicitly removes old per-user units,
+installer upgrade behavior, except that the installer refuses to install or
+upgrade once the module provides the user unit (`--uninstall` remains). Migration explicitly removes old per-user units,
 drop-ins and command links that would shadow Nix units or binaries; it never
 silently deletes user state. See [NIXOS.md](NIXOS.md).
 

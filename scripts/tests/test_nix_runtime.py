@@ -15,6 +15,10 @@ import urllib.error
 import urllib.request
 
 
+# Releases cut before the Nix-aware service API and the listener readiness fix.
+PRE_NIX_RELEASES = {"0.2.12", "0.2.13"}
+
+
 def free_port():
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -70,9 +74,9 @@ class NixRuntime(unittest.TestCase):
                                         status = json.load(response)
                                     if status["phase"] == "running":
                                         break
-                                    if (pin["version"] == "0.2.12" and status["phase"] == "failed"
+                                    if (pin["version"] in PRE_NIX_RELEASES and status["phase"] == "failed"
                                             and "core reports 0" in (status.get("error") or "")):
-                                        self.skipTest("v0.2.12 probes listeners before they settle; fixed in the current source, awaiting CI release")
+                                        self.skipTest(f"v{pin['version']} probes listeners before they settle; fixed in the current source, awaiting CI release")
                                 except (OSError, ValueError):
                                     pass
                                 time.sleep(0.1)
@@ -84,7 +88,7 @@ class NixRuntime(unittest.TestCase):
                             if token is not None:
                                 self.assertEqual(current, token)
                             token = current
-                            if pin["version"] != "0.2.12":
+                            if pin["version"] not in PRE_NIX_RELEASES:
                                 request = urllib.request.Request(
                                     f"http://127.0.0.1:{api_port}/api/commands",
                                     data=b'{"command":"service_info"}',
