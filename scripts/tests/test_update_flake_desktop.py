@@ -6,6 +6,15 @@ from scripts.update_flake_desktop import compute_sri_hash, update_flake
 
 
 class TestUpdateFlakeDesktop(unittest.TestCase):
+    def test_server_pin_changes_without_touching_desktop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "flake.nix"
+            path.write_text('serverRelease = { version = "old"; hash = "old-server"; };\n'
+                            'desktopRelease = { version = "old"; hash = "old-desktop"; };\n')
+            update_flake(path, "0.2.13", "sha256-server", "serverRelease")
+            self.assertIn('serverRelease = { version = "0.2.13"; hash = "sha256-server"; };', path.read_text())
+            self.assertIn('desktopRelease = { version = "old"; hash = "old-desktop"; };', path.read_text())
+
     def test_compute_sri_hash(self):
         with tempfile.NamedTemporaryFile() as f:
             f.write(b"hello world")

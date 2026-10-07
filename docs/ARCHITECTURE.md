@@ -107,6 +107,9 @@ The core actor is the sole owner of the Mihomo child. Its externally visible
 phases are `stopped`, `starting`, `running`, `stopping`, `recovering`, `failed`
 and `shutdown`. It drains child output into a bounded log stream, probes
 readiness, reaps every child, and limits automatic recovery attempts.
+Proxy listeners can settle after the core API becomes ready. The actor polls
+listener/TUN readback for up to four seconds before accepting startup or a reload;
+persistent port conflicts still fail and preserve the last committed runtime.
 
 Valid configuration changes prefer Mihomo hot reload. The actor falls back to a
 restart where required and verifies the resulting process, controller and proxy
@@ -322,12 +325,39 @@ directory lock prevents two supervisors from owning the same state.
 
 Shared installation follows XDG locations for per-user config and data. The
 installer records resolved absolute paths so systemd startup does not depend on
-an interactive shell environment. On immutable distributions such as NixOS where
-`/etc/systemd` is read-only, user-level systemd units (`$XDG_CONFIG_HOME/systemd/user`)
-and user linger are used to guarantee boot persistence, with user-space binary symlinks
-and resilient polkit detection. TUN capability launcher discovery supports explicit
-`MIHOMO_TUN_EXEC`, `/run/wrappers/bin/mihomo-tun-exec` (NixOS `security.wrappers`), and
-co-located bundle binaries. Native Nix Flake packages (`packages.default`, `packages.desktop` which leverages pre-built release binary tarballs with `autoPatchelfHook` on x86_64 to avoid local compilation, with `packages.desktop-source` retained for from-source builds) and NixOS module definitions (`services.mihomo-server`, `programs.mihomo-server-desktop`) are provided.
+an interactive shell environment. Native NixOS installation uses immutable CI release bundles in `/nix/store`.
+`packages.default`/`server-bin` fetch a version/hash-pinned x86_64 Linux release,
+verify its published checksums, patch ELF interpreters/shebangs, add the current
+Nix integration scripts, and regenerate the resource manifest's core hash after
+fixup. `server-source` is an explicit alternative, building locked Rust and npm
+sources and fetching the pinned core. Source builds inject a version/revision;
+release binaries keep the version embedded by CI. The release workflow advances
+both server and desktop pins on main after assets are published.
+
+The NixOS module installs CLI/helper resources, declares systemd **user** units for
+selected normal users, manages lingering, slot directories and the shared TUN
+lock with tmpfiles, and grants TUN/DNS access through `security.wrappers` and
+polkit. It does not grant access to the installer update unit. A system refresh
+unit reloads running user managers and restarts declared instances when the
+package or unit changes, including rollback. Each instance retains its XDG data,
+settings and token. Autostart belongs to the NixOS `users` option. Runtime core
+upgrades stay per-user; a system rollback does not restore mutable core/data.
+
+`nix-installation.json` beside the executable identifies package ownership,
+independently of the host distribution. Nix-owned CLI update/uninstall and API
+upgrade/autostart changes are refused before invoking the installer or systemctl;
+Web hints occupy existing fields/tooltips. The CLI wrapper also guards old CI
+binaries, and the desktop wrapper selects the packaged helper and blocks the
+installer. New API/Web ownership hints require a release containing that code.
+Script installations (including `/opt` installations on NixOS) retain their
+installer upgrade behavior. Migration explicitly removes old per-user units,
+drop-ins and command links that would shadow Nix units or binaries; it never
+silently deletes user state. See [NIXOS.md](NIXOS.md).
+
+TUN capability launcher discovery supports explicit `MIHOMO_TUN_EXEC`,
+`/run/wrappers/bin/mihomo-tun-exec` (NixOS `security.wrappers`), and co-located
+bundle binaries. The capable executable is an unwrapped copy, so capability
+execution never passes through a shell wrapper.
 Upgrades preserve user data and individually upgraded cores; uninstall and purge remain
 distinct operations.
 

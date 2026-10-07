@@ -8,6 +8,9 @@ bundle. It serves the Web build and owns one independent Mihomo child. The first
 bundle supports `x86_64-unknown-linux-gnu`; other targets and containers remain
 pending. No Node/Vite, Python, download or second service is needed at runtime.
 
+Native NixOS installation and migration are documented in [NIXOS.md](NIXOS.md).
+The Nix default consumes CI binaries; local source compilation is opt-in.
+
 ## Prepare a pinned bundle
 
 Use an existing core obtained from the upstream release or pinned build resources.

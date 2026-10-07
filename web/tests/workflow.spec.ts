@@ -5213,6 +5213,29 @@ test("service restart and upgrade report progress without moving the page", asyn
   await page.unroute("**/api/commands");
 });
 
+test("Nix ownership keeps program upgrades and autostart declarative without moving the page", async ({ page }) => {
+  await page.route("**/api/commands", async route => {
+    if (route.request().postDataJSON()?.command === "service_info")
+      await route.fulfill({ json: {
+        version: "0.2.13", installation: "nix", release: null, unit: "mihomo-server.service", autostart: null,
+        upgrade: { available: false, state: "", result: "", log: [] },
+      } });
+    else await route.continue();
+  });
+  await page.goto(`${base}/service#token=${encodeURIComponent(token)}`);
+  const upgrade = page.getByRole("region", { name: "服务升级" });
+  await expect(upgrade.getByText("由 NixOS 管理", { exact: true })).toBeVisible();
+  await expect(upgrade.getByRole("button", { name: "检查更新" })).toBeDisabled();
+  const before = await upgrade.boundingBox();
+  await expect(upgrade.getByLabel("升级输出")).toBeHidden();
+  await expectHelp(page, "不可用", "在系统 flake 中更新 mihomo-server 输入");
+  expect(await upgrade.boundingBox()).toEqual(before);
+  await loginSettings(page);
+  const panel = page.getByRole("region", { name: "登录时启动" });
+  await expect(panel.getByRole("switch", { name: "服务端登录时启动" })).toBeDisabled();
+  await expectHelp(page, "服务端登录时启动", "services.mihomo-server.users");
+});
+
 test("settings start at login separates the service unit from the desktop client", async ({ page, browser }) => {
   await loginSettings(page);
   const panel = page.getByRole("region", { name: "登录时启动" });

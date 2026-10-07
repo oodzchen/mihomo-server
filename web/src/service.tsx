@@ -8,6 +8,7 @@ import type { UpdateChecks } from "./types";
 
 type ServiceInfo = {
   version: string;
+  installation?: "nix" | "installer" | "standalone";
   release: string | null;
   unit: string | null;
   upgrade: { available: boolean; state: string; result: string; log: string[] };
@@ -222,7 +223,8 @@ export function ServicePage({
   // unless it found exactly the release installed since.
   const release = info?.release ?? null;
   const known = info && check && (check.installed === release || check.latest === release) ? check : undefined;
-  const available = known && known.installed === release && known.latest !== release ? known.latest : undefined;
+  const nix = info?.installation === "nix";
+  const available = !nix && known && known.installed === release && known.latest !== release ? known.latest : undefined;
   // Logs in through the fragment, which browsers never send to the server.
   const dashboard = `${location.origin}/#token=${encodeURIComponent(token)}`;
   return (
@@ -281,14 +283,14 @@ export function ServicePage({
         <div className="panel-title">
           <h2 className="setting-heading">
             {t(language, "serviceUpgradeTitle")}
-            <HelpTip label={t(language, "serviceUpgradeTitle")}>{t(language, "serviceUpgradeHelp")}</HelpTip>
+            <HelpTip label={t(language, "serviceUpgradeTitle")}>{t(language, nix ? "serviceNixUpdateHint" : "serviceUpgradeHelp")}</HelpTip>
           </h2>
         </div>
         <dl className="proxy-details">
           <div>
             <dt>{t(language, "serviceRelease")}</dt>
             <dd className="mono">
-              {!info ? t(language, "serviceReading") : info.release ?? t(language, "serviceReleaseNone")}
+              {!info ? t(language, "serviceReading") : (nix ? info.version : info.release) ?? t(language, "serviceReleaseNone")}
             </dd>
           </div>
           <div>
@@ -307,9 +309,9 @@ export function ServicePage({
               {!upgrade ? t(language, "serviceReading")
                 : !upgrade.available ? (
                   <>
-                    <span>{t(language, "serviceUpgradeUnavailable")}</span>
+                    <span>{t(language, nix ? "serviceNixManaged" : "serviceUpgradeUnavailable")}</span>
                     <HelpTip label={t(language, "serviceUpgradeUnavailable")}>
-                      {t(language, "serviceUpgradeUnavailableHint")}
+                      {t(language, nix ? "serviceNixUpdateHint" : "serviceUpgradeUnavailableHint")}
                     </HelpTip>
                   </>
                 )
@@ -325,7 +327,7 @@ export function ServicePage({
           <pre ref={output} className="service-log" aria-label={t(language, "serviceUpgradeOutput")}>
             {!upgrade || upgrade.available
               ? log?.length ? log.join("\n") : t(language, "serviceUpgradeNoOutput")
-              : t(language, "serviceUpgradeOutputUnavailable")}
+              : t(language, nix ? "serviceNixUpdateHint" : "serviceUpgradeOutputUnavailable")}
           </pre>
         </details>
         <div className="actions">
@@ -339,7 +341,7 @@ export function ServicePage({
               {t(language, "updateTo", { version: available })}
             </button>
           ) : (
-            <button type="button" disabled={!idle || checking || !info} onClick={() => void checkRelease()}>
+            <button type="button" disabled={!idle || checking || !info || nix} onClick={() => void checkRelease()}>
               {t(language, "updateCheck")}
             </button>
           )}

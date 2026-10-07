@@ -203,7 +203,8 @@ jobs:
       - name: Update flake.nix on main
         run: |
           tarball="dist/mihomo-server-desktop-$GITHUB_REF_NAME-x86_64.tar.gz"
-          python3 scripts/update_flake_desktop.py --tarball "$tarball" --tag "$GITHUB_REF_NAME"
+          python3 scripts/update_flake_desktop.py --tarball "$tarball" --tag "$GITHUB_REF_NAME" \
+            --server-tarball "dist/mihomo-server-$GITHUB_REF_NAME-x86_64-unknown-linux-gnu.tar.gz"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -211,7 +212,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "flake.nix is already up to date."
           else
-            git commit -m "chore(flake): bump desktopRelease to $GITHUB_REF_NAME"
+            git commit -m "chore(flake): bump server and desktop releases to $GITHUB_REF_NAME"
             git pull --rebase origin main
             git push origin HEAD:main
           fi

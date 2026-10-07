@@ -150,6 +150,11 @@ async fn run_installer(prefer_local: bool, arguments: &[&str]) -> Result<i32> {
 }
 
 pub async fn update(force: bool) -> Result<i32> {
+    anyhow::ensure!(
+        !management_client::installation::nix_managed(),
+        "{}",
+        management_client::installation::NIX_UPDATE_HINT
+    );
     let installed = installed_release();
     if std::env::var_os("MIHOMO_SERVER_INSTALLER").is_none() {
         match latest_release().await {
@@ -168,6 +173,11 @@ pub async fn update(force: bool) -> Result<i32> {
 }
 
 pub async fn uninstall(purge: bool) -> Result<i32> {
+    anyhow::ensure!(
+        !management_client::installation::nix_managed(),
+        "{}",
+        management_client::installation::NIX_UPDATE_HINT
+    );
     let mut arguments = vec!["--uninstall"];
     if purge {
         arguments.push("--purge");

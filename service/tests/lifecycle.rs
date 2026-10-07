@@ -90,6 +90,30 @@ async fn wait_state(manager: &CoreManager, predicate: impl Fn(&CoreStatus) -> bo
 
 #[tokio::test]
 #[ignore = "requires real Mihomo and local TCP/Unix sockets"]
+async fn repeated_start_waits_for_proxy_listeners_after_api_readiness() -> Result<()> {
+    let directory = Directory::new().await?;
+    let reserved = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let port = reserved.local_addr()?.port();
+    drop(reserved);
+    let config = directory.0.join("bootstrap.yaml");
+    tokio::fs::write(&config, format!("mixed-port: {port}\nmode: direct\nallow-lan: false\n")).await?;
+    let manager = CoreManager::spawn(directory.options(config)?)?;
+    let result = async {
+        for _ in 0..6 {
+            manager.start().await?;
+            assert_eq!(manager.client().get_base_config().await?.mixed_port, port);
+            tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
+            manager.stop().await?;
+        }
+        Ok(())
+    }
+    .await;
+    manager.shutdown().await?;
+    result
+}
+
+#[tokio::test]
+#[ignore = "requires real Mihomo and local TCP/Unix sockets"]
 async fn switching_listener_type_on_the_same_port_recovers_and_occupied_ports_roll_back() -> Result<()> {
     let directory = Directory::new().await?;
     let reserved = tokio::net::TcpListener::bind("127.0.0.1:0").await?;

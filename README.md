@@ -23,6 +23,12 @@ curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/in
 
 配置和数据分别遵循 `XDG_CONFIG_HOME`、`XDG_DATA_HOME`。初始化时保存有效路径，之后重启服务无需重新设置环境变量；空值或相对路径使用默认目录。已知的旧用户级安装会保留原数据、启动参数和回退副本，自定义服务单元需要自行迁移。
 
+### NixOS
+
+NixOS 可以通过系统 flake 安装后台和桌面端。默认后台包使用 CI 发布的
+x86_64 Linux 预编译产物，系统切换时只下载、解包和适配路径，不编译 Rust 或前端。
+配置及迁移步骤见 [NixOS 部署说明](docs/NIXOS.md)。
+
 ## 使用
 
 首个用户（slot 0）的默认管理地址是 `http://127.0.0.1:9090`，HTTP/SOCKS 混合代理为 `127.0.0.1:7890`，DNS 监听为 `127.0.0.1:1053`。已有程序占用默认端口时，脚本会报告冲突；通过用户配置或设置页调整后重新启动。

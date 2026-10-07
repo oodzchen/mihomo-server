@@ -6,6 +6,11 @@ umask 077
 UNIT=mihomo-server
 SLOT_DIR=/var/lib/mihomo-server/slots
 
+# The Nix package owns its unit and startup policy. /opt installations on
+# NixOS still use the normal installer workflow.
+SELF_DIR=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]:-$0}")")
+nix_managed() { [ -f "$SELF_DIR/nix-installation.json" ]; }
+
 usage() {
     cat <<'HELP'
 Usage: mihomo-server-user [COMMAND]
@@ -190,7 +195,11 @@ info() {
     local state n tun line detail proxy manage token
     state=$(systemctl --user is-active "$UNIT" 2>/dev/null || true)
     if ! n=$(slot); then
-        echo "service:   $state (run: mihomo-server enable)"
+        if nix_managed; then
+            echo "service:   $state (run: mihomo-server start; users are selected in NixOS configuration)"
+        else
+            echo "service:   $state (run: mihomo-server enable)"
+        fi
         echo "config:    $ENV_FILE"
         return
     fi
@@ -249,6 +258,7 @@ data:      ${TOKEN_FILE%/management-token}
 DETAILS
 }
 enable() {
+    if nix_managed; then die 'Autostart is managed by services.mihomo-server.users; use mihomo-server start to start the declared instance'; fi
     [ $# = 0 ] || die 'enable takes no options; edit your env file instead'
     manager_config_home >/dev/null || die 'cannot connect to your systemd user manager'
     save_paths
@@ -273,6 +283,9 @@ enable() {
 }
 purge() {
     if [ "${1:-}" != --yes ] || [ $# != 1 ]; then die 'purge deletes your data; use purge --yes'; fi
+    if nix_managed; then
+        die 'Remove this user from services.mihomo-server.users and switch the system before deleting instance data'
+    fi
     endpoint || true
     local owned_data=${TOKEN_FILE:-$DATA_DIR/management-token}
     owned_data=${owned_data%/management-token}
@@ -282,7 +295,7 @@ purge() {
     if n=$(slot); then rm -f "$SLOT_DIR/$n"; fi
     rm -rf -- "$owned_data"
     rm -f -- "$ENV_FILE" "$DROPIN"
-    if is_nixos; then
+    if is_nixos && ! nix_managed; then
         local manager_home
         manager_home=$(manager_config_home 2>/dev/null) || manager_home="$HOME/.config"
         rm -f -- "$manager_home/systemd/user/$UNIT.service"
@@ -304,11 +317,13 @@ case "$command" in
     logs) if [ $# = 0 ]; then set -- -f; fi; exec journalctl --user -u "$UNIT" "$@" ;;
     start)
         # Record the effective XDG paths once, as enable does, without enabling.
-        if [ ! -f "$DROPIN" ]; then save_paths; systemctl --user daemon-reload; fi
+        if ! nix_managed && [ ! -f "$DROPIN" ]; then save_paths; systemctl --user daemon-reload; fi
         systemctl --user start "$UNIT"; wait_ready; info ;;
     stop) systemctl --user stop "$UNIT"; echo 'Stopped; start again with: mihomo-server start' ;;
     restart) systemctl --user restart "$UNIT"; wait_ready; info ;;
-    disable) systemctl --user disable --now "$UNIT"; echo 'Disabled; data kept' ;;
+    disable)
+        if nix_managed; then die 'Autostart is managed by services.mihomo-server.users; use mihomo-server stop to stop the instance'; fi
+        systemctl --user disable --now "$UNIT"; echo 'Disabled; data kept' ;;
     purge) purge "$@" ;;
     *) die "unknown command: $command (see --help)" ;;
 esac

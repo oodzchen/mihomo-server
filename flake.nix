@@ -16,6 +16,35 @@
           hash = "sha256-gQIMqNRBTC36B2vXISfuDFQM4g8HpDf0JxsQPiLKPWY=";
         };
 
+        serverRelease = {
+          version = "0.2.12";
+          hash = "sha256-BfWQHfXZ/dS0Kxg+8Rh2PKkJMNXIdG6eY/yv5+c989U=";
+        };
+
+        server-bin = pkgs.callPackage ./nix/server-bin.nix { release = serverRelease; };
+        server-source = pkgs.callPackage ./nix/server-source.nix {
+          version = "${serverRelease.version}-dev.${self.shortRev or "dirty"}";
+        };
+
+        desktopIntegration = ''
+            echo '{"kind":"nix"}' > $out/nix-installation.json
+            cat > $out/nix-install-service <<'EOF'
+            #!${pkgs.runtimeShell}
+            echo 'Enable services.mihomo-server and select services.mihomo-server.users in NixOS, then run nixos-rebuild switch.' >&2
+            exit 1
+            EOF
+            chmod +x $out/nix-install-service
+            cat > $out/nix-service-helper <<'EOF'
+            #!${pkgs.runtimeShell}
+            if [ "''${1:-}" = enable ]; then shift; set -- start "$@"; fi
+            exec ${if system == "x86_64-linux" then "${server-bin}/mihomo-server-user" else "mihomo-server-user"} "$@"
+            EOF
+            chmod +x $out/nix-service-helper
+            wrapProgram $out/bin/mihomo-server-desktop \
+              --set MIHOMO_SERVER_HELPER $out/nix-service-helper \
+              --set MIHOMO_SERVER_INSTALLER $out/nix-install-service
+          '';
+
         desktop-source = pkgs.rustPlatform.buildRustPackage {
           pname = "mihomo-server-desktop";
           version = desktopRelease.version;
@@ -35,6 +64,7 @@
           nativeBuildInputs = with pkgs; [
             pkg-config
             wrapGAppsHook3
+            makeWrapper
           ];
 
           buildInputs = with pkgs; [
@@ -47,6 +77,8 @@
             librsvg
             xdotool
           ];
+
+          postFixup = desktopIntegration;
 
           postInstall = ''
             install -Dm644 desktop/mihomo-server-desktop.desktop $out/share/applications/mihomo-server-desktop.desktop
@@ -75,6 +107,7 @@
           nativeBuildInputs = with pkgs; [
             autoPatchelfHook
             wrapGAppsHook3
+            makeWrapper
           ];
 
           buildInputs = with pkgs; [
@@ -88,6 +121,8 @@
             xdotool
           ];
 
+          postFixup = desktopIntegration;
+
           installPhase = ''
             runHook preInstall
             mkdir -p $out
@@ -97,35 +132,27 @@
         };
       in
       {
-        packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "mihomo-server";
-          version = "0.1.0";
-          src = ./.;
-
-          cargoLock = {
-            lockFile = ./Cargo.lock;
-          };
-
-          buildAndTestSubdir = "service";
-
-          nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [ ];
-
-          postInstall = ''
-            # Provide symlink for tun_exec capability launcher target
-            ln -s $out/bin/mihomo-server $out/bin/mihomo-tun-exec
-          '';
+        packages = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          default = server-bin;
+          server-bin = server-bin;
+          server-source = server-source;
+        } // {
+          desktop = if system == "x86_64-linux" then desktop-bin else desktop-source;
+          desktop-bin = desktop-bin;
+          desktop-source = desktop-source;
         };
 
-        packages.desktop = if system == "x86_64-linux" then desktop-bin else desktop-source;
-        packages.desktop-bin = desktop-bin;
-        packages.desktop-source = desktop-source;
+        checks = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          module = import ./nix/tests.nix { inherit self nixpkgs pkgs; };
+        };
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            rustup
             cargo
             rustc
+            rustfmt
+            clippy
+            rustup
             nodejs
             python3
             pkg-config
@@ -141,123 +168,6 @@
         };
       }
     ) // {
-      nixosModules.default = { config, lib, pkgs, ... }:
-        let
-          cfg = config.services.mihomo-server;
-          desktopCfg = config.programs.mihomo-server-desktop;
-          package = cfg.package;
-        in {
-          options.services.mihomo-server = {
-            enable = lib.mkEnableOption "Headless Mihomo management service";
-
-            package = lib.mkOption {
-              type = lib.types.package;
-              default = self.packages.${pkgs.system}.default;
-              description = "The mihomo-server package to use.";
-            };
-
-            user = lib.mkOption {
-              type = lib.types.str;
-              default = "root";
-              description = "User to run the mihomo-server service under.";
-            };
-
-            dataDir = lib.mkOption {
-              type = lib.types.str;
-              default = "/var/lib/mihomo-server";
-              description = "Path to the service data directory.";
-            };
-
-            listen = lib.mkOption {
-              type = lib.types.str;
-              default = "127.0.0.1:9090";
-              description = "Management address to listen on.";
-            };
-
-            tun = {
-              enable = lib.mkOption {
-                type = lib.types.bool;
-                default = true;
-                description = "Enable TUN mode permissions and polkit rules.";
-              };
-            };
-          };
-
-          options.programs.mihomo-server-desktop = {
-            enable = lib.mkEnableOption "Mihomo Server Desktop client";
-
-            package = lib.mkOption {
-              type = lib.types.package;
-              default = self.packages.${pkgs.system}.desktop;
-              description = "The mihomo-server-desktop package to use.";
-            };
-          };
-
-          config = lib.mkMerge [
-            (lib.mkIf cfg.enable {
-              users.groups.mihomo-tun = {};
-              users.users = lib.mkIf (cfg.user != "root") {
-                ${cfg.user}.extraGroups = lib.mkIf cfg.tun.enable [ "mihomo-tun" ];
-              };
-
-              security.wrappers.mihomo-tun-exec = lib.mkIf cfg.tun.enable {
-                source = "${package}/bin/mihomo-tun-exec";
-                capabilities = "cap_net_admin,cap_net_bind_service,cap_net_raw+ep";
-                owner = "root";
-                group = "mihomo-tun";
-                permissions = "0750";
-              };
-
-            security.polkit.extraConfig = lib.mkIf cfg.tun.enable ''
-              polkit.addRule(function (action, subject) {
-                var actions = [
-                  "org.freedesktop.resolve1.set-dns-servers",
-                  "org.freedesktop.resolve1.set-domains",
-                  "org.freedesktop.resolve1.set-default-route",
-                  "org.freedesktop.resolve1.revert"
-                ];
-                if (actions.indexOf(action.id) >= 0 && subject.isInGroup("mihomo-tun")) {
-                  var link = action.lookup("interface");
-                  if (!link) return polkit.Result.YES;
-                  if (!/^ms[0-9]+$/.test(link)) return polkit.Result.NOT_HANDLED;
-                  return polkit.Result.YES;
-                }
-              });
-            '';
-
-            systemd.services.mihomo-server = {
-              description = "Headless Mihomo management service";
-              after = [ "network.target" ];
-              wantedBy = [ "multi-user.target" ];
-
-              serviceConfig = {
-                Type = "simple";
-                User = cfg.user;
-                Group = if cfg.tun.enable then "mihomo-tun" else null;
-                ExecStart = "${package}/bin/mihomo-server serve --data-dir ${cfg.dataDir} --listen ${cfg.listen}";
-                Restart = "on-failure";
-                RestartSec = 3;
-                KillSignal = "SIGTERM";
-                KillMode = "mixed";
-                TimeoutStopSec = 30;
-                UMask = "0077";
-                AmbientCapabilities = lib.mkIf cfg.tun.enable [
-                  "CAP_NET_ADMIN"
-                  "CAP_NET_BIND_SERVICE"
-                  "CAP_NET_RAW"
-                ];
-                CapabilityBoundingSet = lib.mkIf cfg.tun.enable [
-                  "CAP_NET_ADMIN"
-                  "CAP_NET_BIND_SERVICE"
-                  "CAP_NET_RAW"
-                ];
-              };
-            };
-          })
-          (lib.mkIf desktopCfg.enable {
-            environment.systemPackages = [ desktopCfg.package ];
-          })
-        ];
-      };
-  };
+      nixosModules.default = import ./nix/module.nix { inherit self; };
+    };
 }

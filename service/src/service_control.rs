@@ -19,6 +19,7 @@ const LOG_BYTES: u64 = 16 * 1024;
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct ServiceInfo {
     pub version: &'static str,
+    pub installation: &'static str,
     /// Release directory this program runs from; `None` outside the shared installation.
     pub release: Option<String>,
     /// The systemd unit running this service; `None` when started directly.
@@ -58,9 +59,10 @@ impl Action {
 }
 
 pub fn info() -> ServiceInfo {
+    let nix = management_client::installation::nix_managed();
     let release = crate::cli::system::installed_release();
     let mut upgrade = UpgradeState::default();
-    if let Some(properties) = show(UPDATE_UNIT) {
+    if let Some(properties) = (!nix).then(|| show(UPDATE_UNIT)).flatten() {
         upgrade.available = release.is_some() && property(&properties, "LoadState") == Some("loaded");
         upgrade.state = property(&properties, "ActiveState").unwrap_or_default().to_owned();
         upgrade.result = property(&properties, "Result").unwrap_or_default().to_owned();
@@ -71,8 +73,15 @@ pub fn info() -> ServiceInfo {
     let unit = unit();
     ServiceInfo {
         version: crate::VERSION,
+        installation: if nix {
+            "nix"
+        } else if release.is_some() {
+            "installer"
+        } else {
+            "standalone"
+        },
         release,
-        autostart: unit.as_ref().and_then(enablement),
+        autostart: if nix { None } else { unit.as_ref().and_then(enablement) },
         unit: unit.map(|unit| unit.name),
         upgrade,
     }
@@ -80,6 +89,10 @@ pub fn info() -> ServiceInfo {
 
 /// Enable or disable this service's unit; the running service is unaffected.
 pub fn set_autostart(enabled: bool) -> Result<bool> {
+    ensure!(
+        !management_client::installation::nix_managed(),
+        "Autostart is managed by services.mihomo-server.users in the NixOS configuration."
+    );
     let unit = unit().context("this service was started directly, not by systemd; it has no start at login")?;
     ensure!(
         enablement(&unit).is_some(),
@@ -147,6 +160,11 @@ pub fn schedule(action: Action) -> Result<()> {
 
 /// Start the update unit; progress is read back through [`info`].
 pub fn upgrade() -> Result<()> {
+    ensure!(
+        !management_client::installation::nix_managed(),
+        "{}",
+        management_client::installation::NIX_UPDATE_HINT
+    );
     ensure!(
         crate::cli::system::installed_release().is_some(),
         "upgrades need the shared installation; this program does not run from it"

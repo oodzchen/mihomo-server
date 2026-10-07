@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update flake.nix desktopRelease version and hash from a desktop tarball."""
+"""Update the pinned desktop and optional server CI releases in flake.nix."""
 
 import argparse
 import base64
@@ -14,9 +14,11 @@ def compute_sri_hash(filepath: Path) -> str:
     return "sha256-" + base64.b64encode(digest).decode()
 
 
-def update_flake(flake_path: Path, version: str, sri_hash: str) -> None:
+def update_flake(flake_path: Path, version: str, sri_hash: str, release: str = "desktopRelease") -> None:
     content = flake_path.read_text(encoding="utf-8")
-    pattern = r'(desktopRelease\s*=\s*\{\s*version\s*=\s*)"[^"]+"(;\s*hash\s*=\s*)"[^"]+"(;\s*\};)'
+    if release not in {"desktopRelease", "serverRelease"}:
+        raise ValueError("Unknown release block")
+    pattern = r'(' + release + r'\s*=\s*\{\s*version\s*=\s*)"[^"]+"(;\s*hash\s*=\s*)"[^"]+"(;\s*\};)'
     replacement = f'\\g<1>"{version}"\\g<2>"{sri_hash}"\\g<3>'
 
     new_content, count = re.subn(pattern, replacement, content)
@@ -29,7 +31,7 @@ def update_flake(flake_path: Path, version: str, sri_hash: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Update flake.nix with desktop release tarball hash"
+        description="Update flake.nix with CI release versions and tarball hashes"
     )
     parser.add_argument(
         "--tarball", required=True, type=Path, help="Path to desktop tar.gz archive"
@@ -44,10 +46,13 @@ def main() -> None:
         help="Path to flake.nix (default: flake.nix)",
     )
 
+    parser.add_argument("--server-tarball", type=Path, help="Also update the precompiled server release")
     args = parser.parse_args()
     version = args.tag.removeprefix("v")
     sri_hash = compute_sri_hash(args.tarball)
     update_flake(args.flake, version, sri_hash)
+    if args.server_tarball:
+        update_flake(args.flake, version, compute_sri_hash(args.server_tarball), "serverRelease")
     print(f"Updated {args.flake} desktopRelease: version={version}, hash={sri_hash}")
 
 

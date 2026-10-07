@@ -44,6 +44,11 @@ fn environment(name: &str) -> Option<String> {
 fn helper() -> PathBuf {
     environment("MIHOMO_SERVER_HELPER")
         .map(PathBuf::from)
+        .or_else(|| {
+            std::env::split_paths(&std::env::var_os("PATH")?)
+                .map(|path| path.join("mihomo-server-user"))
+                .find(|path| path.is_file())
+        })
         .unwrap_or_else(|| Path::new(INSTALL_ROOT).join("mihomo-server-user"))
 }
 
@@ -122,6 +127,11 @@ pub fn read_token(endpoint: &Endpoint) -> Result<String> {
 /// installed `mihomo-server-user` helper, which owns the systemd side.
 pub async fn run_helper(verb: &str, log: &Log) -> Result<()> {
     let helper = helper();
+    let verb = if verb == "enable" && management_client::installation::nix_managed() {
+        "start"
+    } else {
+        verb
+    };
     log.push(format!("$ {} {verb}", helper.display()));
     let mut command = Command::new(&helper);
     command.arg(verb);
@@ -363,6 +373,10 @@ async fn download_installer(url: &str, directory: &Path, proxy: Option<&str>) ->
 /// instead). Its root step asks for authorization through polkit.
 /// PROXY is the status page's temporary proxy for the downloads.
 pub async fn install(log: &Log, proxy: Option<&str>) -> Result<()> {
+    ensure!(
+        !management_client::installation::nix_managed(),
+        "Enable services.mihomo-server and select your user in the NixOS configuration, then run nixos-rebuild switch."
+    );
     install_from(&installer_source(), log, proxy).await
 }
 

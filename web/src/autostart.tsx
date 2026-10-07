@@ -49,6 +49,7 @@ export function AutostartPanel({ token, language, connection, logout }: {
 }) {
   const notify = useToast();
   const desktop = window.__MIHOMO_DESKTOP_VERSION__ ? window.__TAURI_INTERNALS__ : undefined;
+  const [nix, setNix] = useState(false);
   const [service, setService] = useState<Switch>();
   const [client, setClient] = useState<Switch>();
   const [working, setWorking] = useState<"service" | "client">();
@@ -56,8 +57,8 @@ export function AutostartPanel({ token, language, connection, logout }: {
   useEffect(() => {
     if (connection !== "connected") return;
     const controller = new AbortController();
-    command<{ autostart: boolean | null }>(token, "service_info", {}, controller.signal)
-      .then(info => setService(info.autostart))
+    command<{ autostart: boolean | null; installation?: string }>(token, "service_info", {}, controller.signal)
+      .then(info => { setService(info.autostart); setNix(info.installation === "nix"); })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         if (error instanceof ApiError && error.status === 401) logout(t(language, "expiredToken"));
@@ -98,7 +99,7 @@ export function AutostartPanel({ token, language, connection, logout }: {
         label={t(language, "autostartService")}
         value={service}
         working={working === "service" || connection !== "connected"}
-        hint={t(language, "autostartServiceUnavailable")}
+        hint={t(language, nix ? "autostartNixManaged" : "autostartServiceUnavailable")}
         onChange={enabled => void change("service", enabled)}
       />
       {desktop && (

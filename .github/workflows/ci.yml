@@ -24,6 +24,19 @@ env:
 # Pinned runners: ubuntu-latest migrates to Ubuntu 26.04 from 2026-10-19; a
 # newer glibc would raise the minimum distro requirement for released bundles.
 jobs:
+  nix:
+    name: Nix package and NixOS module
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+      - name: Build the precompiled package and check the NixOS module
+        run: nix build .#server-bin .#checks.x86_64-linux.module --no-link
+      - name: Verify Web, core, proxy and restart without installing a host service
+        run: |
+          package=$(nix build .#server-bin --no-link --print-out-paths)
+          MIHOMO_TEST_NIX_PACKAGE="$package" python3 -m unittest scripts.tests.test_nix_runtime -v
+
   shellcheck:
     name: Shellcheck scripts
     runs-on: ubuntu-24.04
@@ -80,6 +93,12 @@ jobs:
         env:
           MIHOMO_TEST_BINARY: ${{ github.workspace }}/.core/verge-mihomo
         run: cargo test --workspace --locked -- --test-threads=1
+      - name: Verify listener readiness and real port conflict rollback
+        env:
+          MIHOMO_TEST_BINARY: ${{ github.workspace }}/.core/verge-mihomo
+        run: |
+          cargo test -p mihomo-server --test lifecycle repeated_start --locked -- --ignored --test-threads=1
+          cargo test -p mihomo-server --test lifecycle switching_listener --locked -- --ignored --test-threads=1
       # No MIHOMO_TEST_BINARY here: the systemd lifecycle test needs the
       # git-ignored ./data profiles and must stay skipped on CI.
       - name: Python packaging/installer tests

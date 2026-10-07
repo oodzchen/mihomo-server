@@ -202,16 +202,16 @@ impl Actor {
     }
 
     pub(super) async fn verify_proxy_ports(&mut self, path: &Path) -> Result<()> {
-        // Mihomo brings TUN up asynchronously after its API is ready (it may wait
-        // for the default interface), so an expected TUN is polled before failing.
-        const TUN_SETTLE: Duration = Duration::from_secs(4);
+        // The API can answer before proxy listeners or TUN have finished
+        // starting. Poll both, while still rejecting a persistent bind failure.
+        const LISTENER_SETTLE: Duration = Duration::from_secs(4);
         let config = read_config(path).await?;
         let tun_expected = config
             .get("tun")
             .and_then(|tun| tun.get("enable"))
             .and_then(serde_yaml_ng::Value::as_bool)
             == Some(true);
-        let deadline = Instant::now() + TUN_SETTLE;
+        let deadline = Instant::now() + LISTENER_SETTLE;
         loop {
             let core = tokio::select! {
                 biased;
@@ -220,9 +220,10 @@ impl Actor {
                     result.context("listener verification timed out")??
                 }
             };
-            crate::proxy_access::verify_ports(&config, &core)?;
-            match crate::native_tun::verify(&config, &core) {
-                Err(_) if tun_expected && Instant::now() < deadline => {}
+            let verified = crate::proxy_access::verify_ports(&config, &core)
+                .and_then(|()| crate::native_tun::verify(&config, &core));
+            match verified {
+                Err(_) if Instant::now() < deadline => {}
                 Ok(()) if tun_expected => {
                     self.tun_live.store(true, std::sync::atomic::Ordering::Relaxed);
                     return self.await_system_dns(&core.tun.device).await;
@@ -237,12 +238,12 @@ impl Actor {
             if let Some(process) = self.process.as_mut() {
                 ensure!(
                     process.child.try_wait()?.is_none(),
-                    "Mihomo exited while TUN was starting"
+                    "Mihomo exited while listeners were starting"
                 );
             }
             tokio::select! {
                 biased;
-                _ = closing(&mut self.shutdown) => bail!("TUN verification cancelled during shutdown"),
+                _ = closing(&mut self.shutdown) => bail!("listener verification cancelled during shutdown"),
                 _ = sleep(Duration::from_millis(250)) => {}
             }
         }
