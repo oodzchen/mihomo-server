@@ -45,10 +45,7 @@ pub fn set(enabled: bool) -> Result<()> {
             _ => Ok(()),
         };
     }
-    // An AppImage runs from a temporary mount; start the image itself.
-    let executable = std::env::var_os("APPIMAGE")
-        .map(PathBuf::from)
-        .map_or_else(std::env::current_exe, Ok)?;
+    let executable = crate::relaunch::executable()?;
     std::fs::create_dir_all(path.parent().context("autostart directory")?)?;
     std::fs::write(&path, entry(&executable.to_string_lossy()))
         .with_context(|| format!("cannot write {}", path.display()))

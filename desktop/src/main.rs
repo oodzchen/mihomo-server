@@ -9,6 +9,7 @@ mod integration;
 mod local;
 mod model;
 mod notify;
+mod relaunch;
 mod settings;
 mod tray;
 mod window;
@@ -66,7 +67,7 @@ fn main() {
     let hidden = arguments.iter().any(|argument| argument == "--hidden");
     let controller = Arc::new(Controller::new(i18n::Language::system(), settings::Store::user()));
     let initial = controller.model();
-    tauri::Builder::default()
+    let exit_code = tauri::Builder::default()
         // Must be registered first: a second launch only focuses this one.
         .plugin(tauri_plugin_single_instance::init(|app, _arguments, _cwd| {
             window::open_preferred(app);
@@ -100,10 +101,22 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("failed to start the desktop client")
-        .run(|_app, event| {
+        .run_return(|_app, event| {
             // Closing the last window keeps the tray running; Quit exits.
             if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
                 api.prevent_exit();
             }
         });
+    if exit_code == relaunch::EXIT_CODE {
+        if let Err(error) = relaunch::restart() {
+            eprintln!("cannot restart the desktop client: {error}");
+            tauri::async_runtime::block_on(notify::failure(
+                "Mihomo Server",
+                &format!("Cannot restart the desktop client: {error}"),
+            ));
+            std::process::exit(1);
+        }
+        return;
+    }
+    std::process::exit(exit_code);
 }

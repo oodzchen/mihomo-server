@@ -45,6 +45,8 @@
             wrapProgram $out/bin/mihomo-server-desktop \
               --argv0 mihomo-server-desktop \
               "''${gappsWrapperArgs[@]}" \
+              --set MIHOMO_DESKTOP_LAUNCHER mihomo-server-desktop \
+              --suffix PATH : $out/bin \
               --set MIHOMO_SERVER_HELPER $out/nix-service-helper \
               --set MIHOMO_SERVER_INSTALLER $out/nix-install-service
           '';

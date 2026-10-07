@@ -227,10 +227,15 @@ API's `status` reports the core. The tray uses tray-icon's StatusNotifierItem
 (`ksni`) backend instead of Tauri's default libappindicator, which reports no
 clicks and shows no tooltip: a left click opens the management window (or the
 status page), the menu is on right click, and its header is a single line of
-service state. Its last two items restart and quit the client; restarting runs
-the binary on disk again (the AppImage path for an AppImage) after releasing the
-single-instance name, so an upgraded package takes effect at once. Details go to the tooltip, and failures are also sent as desktop
-notifications (freedesktop D-Bus).
+service state. Its last two items restart and quit the client. Restarting returns
+from the Tauri event loop after cleanup releases the single-instance name, then
+uses Unix `exec` to keep the application unit's main PID. Nix packages restart
+through the wrapper named by `MIHOMO_DESKTOP_LAUNCHER` on the current PATH.
+The wrapper appends its own bin directory as a fallback for direct `nix run`.
+AppImages use the image path, and ordinary installations use the executable on
+disk. The same launcher is used for autostart, so Nix updates keep the current
+package and its GTK environment. Details go to the tooltip, and failures are
+also sent as desktop notifications (freedesktop D-Bus).
 
 Browser operations use independent readback after mutations. Realtime feeds can
 disconnect and resubscribe without becoming configuration authority.
