@@ -126,7 +126,7 @@ pub fn open_dashboard(app: &AppHandle) {
     let external = origin.clone();
     let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
         .title(TITLE)
-        .inner_size(1280.0, 860.0)
+        .inner_size(853.0, 573.0)
         .min_inner_size(760.0, 520.0)
         // Besides the start-at-login commands, expose only this immutable
         // build value so the page can identify the host client.

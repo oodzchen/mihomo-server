@@ -461,6 +461,40 @@ test("profile list switches language while keeping deletion confirmation", async
   expect(after.generation).toBe(before.generation);
 });
 
+test("profile cards tile across the full-width list before global enhancements", async ({ page }) => {
+  const yaml = "proxies: []\nmode: direct\n";
+  const first = await settingsApi("import_profile", { name: "LayoutOne", yaml });
+  const second = await settingsApi("import_profile", { name: "LayoutTwo", yaml });
+  try {
+    await page.goto(`${base}/profiles#token=${encodeURIComponent(token)}`);
+    const layout = page.locator(".profile-layout");
+    const list = page.locator(".profile-list");
+    const global = page.getByRole("region", { name: "全局增强" });
+    const cards = list.locator("article.profile").filter({ hasText: /Layout(One|Two)/ });
+    await expect(cards).toHaveCount(2);
+
+    const [layoutBox, listBox, globalBox, firstCard, secondCard] = await Promise.all([
+      layout.boundingBox(),
+      list.boundingBox(),
+      global.boundingBox(),
+      cards.nth(0).boundingBox(),
+      cards.nth(1).boundingBox(),
+    ]);
+    expect(layoutBox).not.toBeNull();
+    expect(listBox).not.toBeNull();
+    expect(globalBox).not.toBeNull();
+    expect(firstCard).not.toBeNull();
+    expect(secondCard).not.toBeNull();
+    expect(Math.abs(listBox!.width - layoutBox!.width)).toBeLessThan(2);
+    expect(globalBox!.y).toBeGreaterThanOrEqual(listBox!.y + listBox!.height);
+    expect(Math.abs(firstCard!.y - secondCard!.y)).toBeLessThan(2);
+    expect(secondCard!.x).toBeGreaterThan(firstCard!.x + firstCard!.width - 2);
+  } finally {
+    await settingsApi("delete_profile", { uid: first.uid });
+    await settingsApi("delete_profile", { uid: second.uid });
+  }
+});
+
 test("subscription import forms translate without losing drafts or changing imports", async ({ page }) => {
   await page.goto(`${base}/profiles`);
   await page.getByLabel("管理令牌").fill(token);

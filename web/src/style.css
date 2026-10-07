@@ -947,6 +947,23 @@ dd {
   flex-wrap: wrap;
 }
 
+.profile-list {
+  grid-column: 1 / -1;
+}
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 12px;
+}
+.profile-grid .profile {
+  margin-bottom: 0;
+}
+.profile-empty {
+  grid-column: 1 / -1;
+  padding: 28px 0;
+  text-align: center;
+}
+
 .global-enhancements {
   grid-column: 1 / -1;
   margin-bottom: 0;

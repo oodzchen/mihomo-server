@@ -582,9 +582,8 @@ export function ProfilePage({
     }
   }
   return (
-    <div className="two-column">
-      <GlobalEnhancements language={language} status={status} busy={busy} perform={perform} />
-      <section className="panel">
+    <div className="two-column profile-layout">
+      <section className="panel profile-list">
         <div className="panel-title">
           <div>
             <h2>{t(language, "profileListTitle")}</h2>
@@ -613,32 +612,35 @@ export function ProfilePage({
             </button>
           </div>
         </div>
-        {!baseProfiles?.length && (
-          <div style={{ textAlign: "center", padding: "28px 0" }}>
-            <p className="empty">{t(language, "profileEmpty")}</p>
-          </div>
-        )}
-        {baseProfiles?.map((item) => (
-          <ProfileCardItem
-            key={item.uid}
-            item={item}
-            language={language}
-            status={status}
-            busy={busy}
-            rawEditing={rawEditing}
-            deleting={deleting}
-            perform={perform}
-            onEdit={() => setEditing(item)}
-            onRawEdit={() => setRawEditing(item.uid)}
-            onMerge={() => void openMerge(item)}
-            onSequence={() => void openSequence(item)}
-            onScript={() => void openScript(item)}
-            onDeleteStart={() => setDeleting(item.uid)}
-            onDeleteCancel={() => setDeleting(null)}
-            onDeleteConfirm={() => void remove(item)}
-          />
-        ))}
+        <div className="profile-grid">
+          {!baseProfiles?.length && (
+            <div className="profile-empty">
+              <p className="empty">{t(language, "profileEmpty")}</p>
+            </div>
+          )}
+          {baseProfiles?.map((item) => (
+            <ProfileCardItem
+              key={item.uid}
+              item={item}
+              language={language}
+              status={status}
+              busy={busy}
+              rawEditing={rawEditing}
+              deleting={deleting}
+              perform={perform}
+              onEdit={() => setEditing(item)}
+              onRawEdit={() => setRawEditing(item.uid)}
+              onMerge={() => void openMerge(item)}
+              onSequence={() => void openSequence(item)}
+              onScript={() => void openScript(item)}
+              onDeleteStart={() => setDeleting(item.uid)}
+              onDeleteCancel={() => setDeleting(null)}
+              onDeleteConfirm={() => void remove(item)}
+            />
+          ))}
+        </div>
       </section>
+      <GlobalEnhancements language={language} status={status} busy={busy} perform={perform} />
       {rawEditing &&
         profiles.items?.some((item) => item.uid === rawEditing) && (
           <RawEditor
