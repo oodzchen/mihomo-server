@@ -18,13 +18,24 @@ fn select_launcher(
         .map_or_else(current, Ok)
 }
 
+/// Linux reports a running binary that a package upgrade replaced as
+/// "<path> (deleted)"; relaunch the replacement installed at that path.
+fn replaced(path: PathBuf) -> PathBuf {
+    if path.exists() {
+        return path;
+    }
+    path.to_str()
+        .and_then(|text| text.strip_suffix(" (deleted)"))
+        .map_or(path.clone(), PathBuf::from)
+}
+
 /// AppImages use the image, Nix packages use their wrapper via PATH, and
 /// ordinary installations use the executable on disk.
 pub fn executable() -> io::Result<PathBuf> {
     select_launcher(
         std::env::var_os("APPIMAGE"),
         std::env::var_os("MIHOMO_DESKTOP_LAUNCHER"),
-        std::env::current_exe,
+        || std::env::current_exe().map(replaced),
     )
 }
 
@@ -68,6 +79,19 @@ mod tests {
             select_launcher(None, None, || Ok(PathBuf::from("/usr/bin/mihomo-server-desktop"))).unwrap(),
             PathBuf::from("/usr/bin/mihomo-server-desktop")
         );
+    }
+
+    #[test]
+    fn upgraded_binary_relaunches_its_replacement() {
+        let dir = std::env::temp_dir().join(format!("mihomo-relaunch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let installed = dir.join("mihomo-server-desktop");
+        std::fs::write(&installed, "").unwrap();
+        let reported = PathBuf::from(format!("{} (deleted)", installed.display()));
+        assert_eq!(replaced(reported), installed);
+        // An existing path is used as is.
+        assert_eq!(replaced(installed.clone()), installed);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[cfg(unix)]
