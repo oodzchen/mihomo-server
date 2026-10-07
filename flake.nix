@@ -12,13 +12,13 @@
         pkgs = nixpkgs.legacyPackages.${system};
 
         desktopRelease = {
-          version = "0.2.19";
-          hash = "sha256-sLOGLR8Vi5U7Lej0p1lAUCqnICRAIai5/2X2ma/FK0Y=";
+          version = "0.2.20";
+          hash = "sha256-XWaWA26AmO5EKMA2IhjXh1OF+4ua4eZK6TyGr9HPL2U=";
         };
 
         serverRelease = {
-          version = "0.2.19";
-          hash = "sha256-FPX9zta8Oox+yTdkQ84Z1w++Dj7Cg00iTaMLwnufJLw=";
+          version = "0.2.20";
+          hash = "sha256-FIyWbnwTdW6GdtisIzX/SPyv0enPlASVixZuzFN4KfE=";
         };
 
         server-bin = pkgs.callPackage ./nix/server-bin.nix { release = serverRelease; };
