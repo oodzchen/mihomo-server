@@ -5130,9 +5130,12 @@ test("service page controls the foreground service and keeps long help in toolti
   expect(opened.url()).not.toContain("token");
   await opened.close();
 
-  // A dismissed confirmation stops nothing; reloading keeps the page.
-  page.once("dialog", dialog => dialog.dismiss());
+  // A dismissed in-page confirmation stops nothing; reloading keeps the page.
   await control.getByRole("button", { name: "停止服务" }).click();
+  const stopDialog = page.getByRole("dialog", { name: "停止服务" });
+  await expect(stopDialog).toContainText("内核和本页面都将停止工作");
+  await stopDialog.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(stopDialog).toHaveCount(0);
   await page.reload();
   await expect(control.getByRole("button", { name: "停止服务" })).toBeEnabled();
   expect((await settingsApi("service_info")).unit).toBeNull();
@@ -5194,15 +5197,15 @@ test("service restart and upgrade report progress without moving the page", asyn
   const outputBox = (await output.boundingBox())!, buttonsBox = (await upgrade.locator(".actions").boundingBox())!;
   expect(buttonsBox.y - (outputBox.y + outputBox.height)).toBeGreaterThanOrEqual(16);
 
-  page.once("dialog", dialog => dialog.accept());
   await control.getByRole("button", { name: "重启服务" }).click();
+  await page.getByRole("dialog", { name: "重启服务" }).getByRole("button", { name: "重启服务" }).click();
   await expect(page.locator(".toast").filter({ hasText: "服务已重启" })).toBeVisible();
 
   await upgrade.getByRole("button", { name: "检查更新" }).click();
   await expect(upgrade.locator("div").filter({ hasText: "最新版本" }).locator("dd")).toHaveText("v0.3.0");
   const actions = await upgrade.locator(".actions").boundingBox();
-  page.once("dialog", dialog => dialog.accept());
   await upgrade.getByRole("button", { name: "更新至 v0.3.0" }).click();
+  await page.getByRole("dialog", { name: "服务升级" }).getByRole("button", { name: "更新至 v0.3.0" }).click();
   await expect(upgrade.getByText("升级中…", { exact: true })).toBeVisible();
   await expect(output).toContainText("downloading mihomo-server-v0.3.0");
   info = { ...info, upgrade: { ...info.upgrade, log: Array.from({ length: 40 }, (_, index) => `line ${index}`) } };
@@ -5238,8 +5241,8 @@ test("service restart and upgrade report progress without moving the page", asyn
   // The recorded check outlives the page: the update is offered without checking again.
   await page.reload();
   await expect(upgrade.locator(".actions button")).toHaveText(["更新至 v0.3.0"]);
-  page.once("dialog", dialog => dialog.accept());
   await upgrade.getByRole("button", { name: "更新至 v0.3.0" }).click();
+  await page.getByRole("dialog", { name: "服务升级" }).getByRole("button", { name: "更新至 v0.3.0" }).click();
   await expect(page.locator(".toast").filter({ hasText: "升级失败，详见升级输出" })).toBeVisible();
   await expect(upgrade.getByText("上次升级失败", { exact: true })).toBeVisible();
   await expect(output).toHaveText("error: checksum mismatch");

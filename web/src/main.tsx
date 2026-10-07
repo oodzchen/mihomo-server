@@ -337,15 +337,6 @@ function Manager({
   useEffect(() => {
     if (stale && !settingsEditor.dirty) reloadToServedBuild();
   }, [stale, settingsEditor.dirty]);
-  useEffect(() => {
-    if (!settingsEditor.dirty) return;
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", beforeUnload);
-    return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [settingsEditor.dirty]);
   const perform: Perform = async <T,>(
     name: string,
     fields: Record<string, unknown> = {},

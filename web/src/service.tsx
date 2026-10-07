@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, command, loadedServedBuild, type Connection } from "./api";
+import { ConfirmDialog } from "./confirm-dialog";
 import { describe } from "./format";
 import { HelpTip } from "./help-tip";
 import { t, type Language } from "./i18n";
@@ -83,6 +84,7 @@ export function ServicePage({
   const [checking, setChecking] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [operation, setOperation] = useState<Operation>();
+  const [confirmation, setConfirmation] = useState<Operation>();
   const pending = useRef<Pending>(undefined);
   const output = useRef<HTMLPreElement>(null);
 
@@ -175,8 +177,9 @@ export function ServicePage({
   };
   useLayoutEffect(follow, [log]);
 
-  async function start(kind: Operation, confirmation: string, working: string) {
-    if (pending.current || !window.confirm(confirmation)) return;
+  async function start(kind: Operation, working: string) {
+    if (pending.current) return;
+    setConfirmation(undefined);
     const toast = notify.loading(working);
     const current: Pending = { toast, dropped: false, seen: false, release: info?.release ?? null, started: Date.now() };
     pending.current = current;
@@ -225,6 +228,28 @@ export function ServicePage({
   const known = info && check && (check.installed === release || check.latest === release) ? check : undefined;
   const nix = info?.installation === "nix";
   const available = !nix && known && known.installed === release && known.latest !== release ? known.latest : undefined;
+  const confirmationCopy = confirmation ? {
+    restart: {
+      title: t(language, "restartService"),
+      confirm: t(language, "restartService"),
+      message: t(language, "serviceConfirmRestart"),
+      working: t(language, "serviceRestarting"),
+    },
+    stop: {
+      title: t(language, "stopService"),
+      confirm: t(language, "stopService"),
+      message: t(language, "serviceConfirmStop"),
+      working: t(language, "serviceStopping"),
+    },
+    upgrade: {
+      title: t(language, "serviceUpgradeTitle"),
+      confirm: available
+        ? t(language, "updateTo", { version: available })
+        : t(language, "serviceUpgradeTitle"),
+      message: t(language, "serviceUpgradeConfirm"),
+      working: t(language, "serviceUpgradeStarted"),
+    },
+  }[confirmation] : undefined;
   // Logs in through the fragment, which browsers never send to the server.
   const dashboard = `${location.origin}/#token=${encodeURIComponent(token)}`;
   return (
@@ -265,14 +290,14 @@ export function ServicePage({
           <button
             type="button"
             disabled={!idle || !info?.unit}
-            onClick={() => void start("restart", t(language, "serviceConfirmRestart"), t(language, "serviceRestarting"))}
+            onClick={() => setConfirmation("restart")}
           >
             {t(language, "restartService")}
           </button>
           <button
             type="button"
             disabled={!idle || !info}
-            onClick={() => void start("stop", t(language, "serviceConfirmStop"), t(language, "serviceStopping"))}
+            onClick={() => setConfirmation("stop")}
           >
             {t(language, "stopService")}
           </button>
@@ -336,7 +361,7 @@ export function ServicePage({
               type="button"
               className="primary"
               disabled={!idle || !upgrade?.available || running}
-              onClick={() => void start("upgrade", t(language, "serviceUpgradeConfirm"), t(language, "serviceUpgradeStarted"))}
+              onClick={() => setConfirmation("upgrade")}
             >
               {t(language, "updateTo", { version: available })}
             </button>
@@ -355,6 +380,18 @@ export function ServicePage({
         </a>
         <HelpTip label={t(language, "serviceWebAddress")}>{t(language, "serviceWebAddressHint")}</HelpTip>
       </p>
+      {confirmation && confirmationCopy && (
+        <ConfirmDialog
+          title={confirmationCopy.title}
+          confirmLabel={confirmationCopy.confirm}
+          cancelLabel={t(language, "cancel")}
+          confirmDisabled={!idle}
+          onCancel={() => setConfirmation(undefined)}
+          onConfirm={() => void start(confirmation, confirmationCopy.working)}
+        >
+          {confirmationCopy.message}
+        </ConfirmDialog>
+      )}
     </>
   );
 }
