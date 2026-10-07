@@ -33,10 +33,11 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # Tag-scoped caches are unreachable from later tags and main only holds
+      # debug artifacts, so a release build always starts cold: skip the restore.
       - uses: ./.github/actions/setup-rust
         with:
-          save-cache: "false"
-          cache-key: release
+          build-cache: "false"
 
       - uses: ./.github/actions/setup-core
 
@@ -105,13 +106,12 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
-          save-cache: "false"
-          cache-key: desktop-release
-          workspaces: desktop -> target
+          build-cache: "false"
 
-      - name: Install tauri-cli
-        # Same minor as the tauri crate in desktop/Cargo.lock.
-        run: cargo install tauri-cli --version 2.12.1 --locked
+      # Prebuilt tauri CLI from npm instead of compiling tauri-cli from source.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
 
       - name: Build deb, rpm and AppImage
         env:
@@ -122,7 +122,8 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           cd desktop
-          MIHOMO_DESKTOP_VERSION="$version" cargo tauri build --bundles deb,rpm,appimage \
+          # Same minor as the tauri crate in desktop/Cargo.lock.
+          MIHOMO_DESKTOP_VERSION="$version" npx --yes @tauri-apps/cli@2.12.1 build --bundles deb,rpm,appimage \
             --config "{\"version\":\"$version\"}"
 
       - name: Smoke test and collect packages

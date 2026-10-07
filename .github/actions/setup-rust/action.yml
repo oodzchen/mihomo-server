@@ -10,6 +10,9 @@ inputs:
   workspaces:
     description: rust-cache workspaces ("<dir> -> <target dir>").
     default: ". -> target"
+  build-cache:
+    description: Whether to restore the cargo build cache at all.
+    default: "true"
 runs:
   using: composite
   steps:
@@ -23,6 +26,7 @@ runs:
       shell: bash
       run: cargo --version
     - uses: Swatinem/rust-cache@v2
+      if: inputs.build-cache == 'true'
       with:
         save-if: ${{ inputs.save-cache }}
         key: ${{ inputs.cache-key }}
