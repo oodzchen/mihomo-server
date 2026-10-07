@@ -214,3 +214,35 @@ fn enabled_tun_sniffs_pure_ip_connections() -> Result<()> {
     assert!(!config.contains_key("sniffer"));
     Ok(())
 }
+
+#[test]
+fn servers_naming_the_subscription_listener_follow_it() -> Result<()> {
+    let subscription = "dns: {enable: true, listen: 127.0.0.1:7874, nameserver: ['https://doh.example/dns-query'], \
+                        proxy-server-nameserver: ['udp://127.0.0.1:7874']}";
+    let isolation = Isolation::new(1001, 3)?;
+    let (config, changed) = isolation.apply(mapping(subscription)?, &RuntimeSettings::default());
+    assert_eq!(config["dns"]["listen"].as_str(), Some("127.0.0.1:20032"));
+    assert_eq!(
+        config["dns"]["proxy-server-nameserver"][0].as_str(),
+        Some("udp://127.0.0.1:20032")
+    );
+    assert!(changed.iter().any(|item| item == "dns.proxy-server-nameserver"));
+    let (again, changed) = isolation.apply(config.clone(), &RuntimeSettings::default());
+    assert_eq!(again, config);
+    assert!(changed.is_empty(), "{changed:?}");
+
+    // A listener chosen on the settings page takes the references along too.
+    let runtime = RuntimeSettings {
+        dns: Some(DnsSettings {
+            listen: Some("127.0.0.1:5353".into()),
+            ..DnsSettings::default()
+        }),
+        ..RuntimeSettings::default()
+    };
+    let (config, _) = isolation.apply(runtime.enforce(mapping(subscription)?)?, &runtime);
+    assert_eq!(
+        config["dns"]["proxy-server-nameserver"][0].as_str(),
+        Some("udp://127.0.0.1:5353")
+    );
+    Ok(())
+}

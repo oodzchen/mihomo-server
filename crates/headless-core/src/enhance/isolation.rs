@@ -12,7 +12,7 @@ use std::net::Ipv4Addr;
 use anyhow::{Result, ensure};
 use serde_yaml_ng::{Mapping, Value};
 
-use crate::config::settings::RuntimeSettings;
+use crate::config::{dns::retarget_own_listener, settings::RuntimeSettings};
 
 /// Number of users one host can serve.
 pub const SLOTS: u16 = 64;
@@ -166,7 +166,12 @@ impl Isolation {
                     .and_then(Value::as_str)
                     .is_some_and(|v| !v.trim().is_empty())
             {
+                let previous = dns.get("listen").and_then(Value::as_str).map(str::to_owned);
                 set(&mut dns, "listen", self.dns_listen().into(), &mut changed, "dns.listen");
+                // Servers that named the subscription's listener follow it.
+                if let Some(previous) = previous.filter(|previous| *previous != self.dns_listen()) {
+                    changed.extend(retarget_own_listener(&mut dns, &previous, &self.dns_listen()));
+                }
             }
             set(
                 &mut dns,

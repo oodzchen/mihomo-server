@@ -337,7 +337,16 @@ impl RuntimeSettings {
                     merged.extend(filter.as_mapping().context("invalid fallback filter mapping")?.clone());
                     nested.insert("fallback-filter".into(), merged.into());
                 }
+                let listen = |dns: &Mapping| dns.get("listen").and_then(|v| v.as_str()).map(str::to_owned);
+                let previous = listen(&nested);
                 nested.extend(owned);
+                // Servers that named the subscription's listener follow the chosen one.
+                if section == "dns"
+                    && let (Some(previous), Some(current)) = (previous, listen(&nested))
+                    && previous != current
+                {
+                    super::dns::retarget_own_listener(&mut nested, &previous, &current);
+                }
                 config.insert(section.into(), nested.into());
             }
         }

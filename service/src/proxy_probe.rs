@@ -9,6 +9,7 @@
 //! requests show what every further new connection costs.
 use anyhow::{Context as _, Result, bail, ensure};
 use futures_util::{StreamExt as _, stream};
+use headless_core::config::dns::is_own_listener;
 use mihomo_client::{Builder, Mihomo, models::Protocol};
 use serde::Serialize;
 use serde_yaml_ng::{Mapping, Value};
@@ -270,6 +271,10 @@ fn probe_dns(runtime: &Mapping) -> Option<Mapping> {
     if dns.get("enable").and_then(Value::as_bool) == Some(false) {
         return None;
     }
+    // The probe has no DNS listener: servers that name the running core's
+    // listener are replaced by the upstreams that listener answers from.
+    let listen = dns.get("listen").and_then(Value::as_str).unwrap_or_default();
+    let own = |server: &str| is_own_listener(server, listen);
     let servers = |key: &str| {
         dns.get(key)
             .and_then(Value::as_sequence)
@@ -278,15 +283,36 @@ fn probe_dns(runtime: &Mapping) -> Option<Mapping> {
                     .iter()
                     .filter_map(Value::as_str)
                     .filter(|server| !server.contains('#'))
-                    .map(|server| Value::from(server.to_owned()))
+                    .map(str::to_owned)
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default()
     };
-    let defaults = servers("default-nameserver");
-    let mut nameservers = servers("proxy-server-nameserver");
+    let upstreams = servers("nameserver")
+        .into_iter()
+        .filter(|server| !own(server))
+        .collect::<Vec<_>>();
+    let resolve = |servers: Vec<String>| {
+        let mut resolved = Vec::<Value>::new();
+        for server in servers {
+            let replacement = if own(&server) { upstreams.clone() } else { vec![server] };
+            for server in replacement {
+                let server = Value::from(server);
+                if !resolved.contains(&server) {
+                    resolved.push(server);
+                }
+            }
+        }
+        resolved
+    };
+    let defaults = servers("default-nameserver")
+        .into_iter()
+        .filter(|server| !own(server))
+        .map(Value::from)
+        .collect::<Vec<_>>();
+    let mut nameservers = resolve(servers("proxy-server-nameserver"));
     if nameservers.is_empty() {
-        nameservers = servers("nameserver");
+        nameservers = resolve(servers("nameserver"));
     }
     if nameservers.is_empty() {
         nameservers = defaults.clone();
@@ -447,6 +473,27 @@ mod tests {
         )
         .unwrap();
         assert!(!disabled.contains_key("dns") && !disabled.contains_key("interface-name"));
+    }
+
+    #[test]
+    fn node_resolution_through_the_core_listener_uses_its_upstreams() {
+        let runtime = yaml(
+            "dns: {listen: 127.0.0.1:1053, default-nameserver: [223.5.5.5, '127.0.0.1:1053'], \
+             nameserver: ['https://doh.example/dns-query', 'udp://127.0.0.1:1053'], \
+             proxy-server-nameserver: ['udp://127.0.0.1:1053', 'https://doh.example/dns-query', 1.1.1.1]}",
+        );
+        let probe = probe_config(&runtime, Path::new("/data"), None).unwrap();
+        assert_eq!(
+            probe["dns"]["default-nameserver"],
+            Value::from(vec![Value::from("223.5.5.5")])
+        );
+        assert_eq!(
+            probe["dns"]["nameserver"],
+            Value::from(vec![
+                Value::from("https://doh.example/dns-query"),
+                Value::from("1.1.1.1")
+            ])
+        );
     }
 
     #[test]
