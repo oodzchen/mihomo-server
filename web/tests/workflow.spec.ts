@@ -371,7 +371,9 @@ async function untranslated(root: import("@playwright/test").Locator) {
     ...[...root.querySelectorAll("[aria-label], [placeholder], [title]")].filter(node => !node.closest(".language-picker"))
       .flatMap(node => ["aria-label", "placeholder", "title"].map(name => node.getAttribute(name) ?? "")),
   ]);
-  return [...new Set(texts.flatMap(text => text.split("\n")))].filter(text => /\p{Script=Han}/u.test(text) || /(^|\s)[a-z]+[A-Z][A-Za-z]*(?=$|[\s.,:;)])/.test(text));
+  // Brand names spelled in camel case are not raw message keys.
+  const brands = /\biPlayer\b/g;
+  return [...new Set(texts.flatMap(text => text.split("\n")))].filter(text => /\p{Script=Han}/u.test(text) || /(^|\s)[a-z]+[A-Z][A-Za-z]*(?=$|[\s.,:;)])/.test(text.replace(brands, "")));
 }
 
 test("settings page translates every field, option, help and validation message", async ({ page }) => {
@@ -398,7 +400,7 @@ test("every page is fully translated in English", async ({ page }) => {
   await page.goto(`${base}/#token=${encodeURIComponent(token)}`);
   await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
   const navigation = page.getByRole("navigation", { name: "Main navigation" });
-  for (const name of ["Overview", "Proxies", "Profiles", "Configuration", "Rules", "Logs", "Settings", "Core", "Service"]) {
+  for (const name of ["Overview", "Proxies", "Unlock tests", "Profiles", "Configuration", "Rules", "Logs", "Settings", "Core", "Service"]) {
     await navigation.getByRole("link", { name, exact: true }).click();
     await expect(page.locator("h1")).toHaveText(name);
     // Let panels finish their first read so loaded states are checked too.

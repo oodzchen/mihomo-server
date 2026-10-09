@@ -133,6 +133,22 @@ so that it bypasses any TUN. Through it each node gets one cold HTTPS request
 opened, 16 nodes at a time; a group is tested through its current node. One
 probe runs at a time and its process and directory are removed afterwards.
 
+Unlock tests (`unlock_services`, `unlock_test`, the Web unlock page) answer a
+different question: what a service sees when an application uses the proxy.
+So they deliberately do not use an isolated core. The service sends each
+check's requests as an HTTP client of the running core's own mixed (else HTTP)
+listener, at its bound address or loopback, with the first configured proxy
+user when authentication is set. Every request therefore follows the active
+rules, groups and DIRECT routes exactly as application traffic does. The
+catalog and the detection logic (IP location databases, Google's and other
+platforms' placement, streaming, AI and store checks) live in
+`service/src/unlock.rs`. Each command runs one service's check under a
+whole-check timeout and returns a verdict, the region the service reports, a
+reason code and untranslated details. The page runs a bounded number at once
+and keeps the results across navigation. AI services that look the same to
+anonymous clients everywhere are judged from the region they see against the
+regions they exclude.
+
 ## Management and browser boundary
 
 Axum serves the built SPA, authenticated command endpoints, binary backup
@@ -348,6 +364,7 @@ distinct operations.
 | --- | --- |
 | Linux x86_64 service, Web management and systemd installation | Implemented and verified |
 | Profiles, enhancements, settings, rules/providers, selection and delay tests | Implemented and verified |
+| Region-restriction (unlock) and IP location tests through the core's listener | Implemented |
 | Resource inventory, Geo/provider lifecycle and live readback | Implemented and verified |
 | Stable/Alpha core management and transactional backup/restore | Implemented and verified |
 | Multi-user isolation and first-come system-wide TUN | Implemented and verified |
@@ -358,7 +375,7 @@ distinct operations.
 | Windows service/Named Pipe and native macOS deployment validation | Deferred |
 | SOCKS/PAC subscription download routes and full connection dashboard | Deferred |
 | Backup automation, WebDAV and backup UI | Deferred |
-| Media-unlock and other desktop features beyond the client above | Deferred |
+| Other desktop features beyond the client above | Deferred |
 
 The original design rationale is retained in [../headless.md](../headless.md), but
 that document may describe planned or historical boundaries. This file is the

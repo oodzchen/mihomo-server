@@ -1428,3 +1428,35 @@ dd {
 /* Start at login: one switch per program. */
 .autostart-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; font-size: 13px; }
 .autostart-row + .autostart-row { border-top: 1px solid #f4f4f5; }
+
+/* Unlock tests: fixed columns, so results arriving never shift the rows. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.unlock-panel .panel-title { flex-wrap: wrap; align-items: flex-start; }
+.unlock-panel .panel-title > div:first-child { flex: 1 1 320px; min-width: 0; }
+.unlock-summary { font-size: 12px; white-space: nowrap; }
+.unlock-table-scroll { overflow-x: auto; }
+.unlock-table { width: 100%; min-width: 760px; table-layout: fixed; border-collapse: collapse; text-align: left; font-size: 12px; }
+.unlock-table th, .unlock-table td { padding: 7px 10px; border-bottom: 1px solid #f4f4f5; height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.unlock-table th { font-weight: 600; color: #71717a; background: #fafafa; }
+.unlock-table tbody tr:last-child td { border-bottom: none; }
+.unlock-col-service { width: 170px; }
+.unlock-col-status { width: 92px; }
+.unlock-col-region { width: 150px; }
+.unlock-col-ip { width: 150px; }
+.unlock-col-time { width: 84px; }
+.unlock-col-action { width: 60px; }
+.unlock-name { font-weight: 500; color: #18181b; }
+.unlock-status { display: inline-block; min-width: 56px; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 500; text-align: center; border: 1px solid #e4e4e7; background: #f4f4f5; color: #71717a; }
+.unlock-yes { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+.unlock-partial { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+.unlock-no { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.unlock-error { background: #fafafa; color: #52525b; border-color: #d4d4d8; }
+.unlock-testing { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.unlock-ip { font-size: 11px; color: #3f3f46; }
+.unlock-detail { color: #3f3f46; }
+.unlock-error-text { color: #b91c1c; }
+.unlock-time { color: #71717a; font-variant-numeric: tabular-nums; }
+.unlock-table td:last-child { overflow: visible; text-overflow: clip; text-align: right; }
+.unlock-run-all { flex-shrink: 0; white-space: nowrap; min-width: 168px; }
+@media (max-width: 600px) { .unlock-header { flex-wrap: wrap; } .unlock-run-all { width: 100%; } }
+.unlock-table .unlock-retest { padding: 2px 8px; min-height: 0; font-size: 12px; line-height: 1.4; }

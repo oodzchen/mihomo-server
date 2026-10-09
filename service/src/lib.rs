@@ -24,6 +24,7 @@ pub mod shutdown;
 pub mod tun_exec;
 #[cfg(target_os = "linux")]
 pub mod tun_lock;
+pub mod unlock;
 mod validation;
 
 /// Release builds take the version from the tag.

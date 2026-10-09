@@ -20,6 +20,7 @@ import { Overview, useFeed } from "./overview";
 import { ProfilePage } from "./profiles";
 import { ConfigPage } from "./config";
 import { ProxyPage } from "./proxies";
+import { UnlockPage } from "./unlock";
 import { LogPage } from "./logs";
 import { ToastProvider, useToast } from "./toast";
 import "./style.css";
@@ -27,6 +28,7 @@ import "./style.css";
 const pages: [string, MessageKey][] = [
   ["/", "overview"],
   ["/proxies", "proxies"],
+  ["/unlock", "unlock"],
   ["/profiles", "profiles"],
   ["/config", "config"],
   ["/rules", "rules"],
@@ -533,6 +535,8 @@ function Manager({
             busy={busy}
             perform={perform}
           />
+        ) : route === "/unlock" ? (
+          <UnlockPage token={token} language={language} status={status} logout={logout} />
         ) : route === "/rules" ? (
           <RulesPage
             token={token}

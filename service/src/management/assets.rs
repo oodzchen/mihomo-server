@@ -63,7 +63,15 @@ pub(super) async fn serve(State(state): State<HttpState>, request: Request) -> R
     }
     let navigation = matches!(
         decoded.as_ref(),
-        "/" | "/profiles" | "/config" | "/proxies" | "/rules" | "/logs" | "/settings" | "/core" | "/service"
+        "/" | "/profiles"
+            | "/config"
+            | "/proxies"
+            | "/unlock"
+            | "/rules"
+            | "/logs"
+            | "/settings"
+            | "/core"
+            | "/service"
     );
     let accepts_html = headers
         .get(header::ACCEPT)
