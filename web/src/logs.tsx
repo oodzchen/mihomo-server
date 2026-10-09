@@ -39,7 +39,7 @@ export function LogPage({
           <h2>{t(language, "logsTitle")}</h2>
           <p className="muted">{t(language, "logsSubtitle")}</p>
         </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <div className="log-tools">
           <input
             aria-label={t(language, "logsFilterAria")}
             placeholder={t(language, "logsFilterPlaceholder")}
@@ -51,7 +51,7 @@ export function LogPage({
               {t(language, "logsClearFilter")}
             </button>
           )}
-          <button className="quiet" disabled={!logs.length} onClick={clear}>
+          <button disabled={!logs.length} onClick={clear}>
             {t(language, "logsClear")}
           </button>
         </div>
