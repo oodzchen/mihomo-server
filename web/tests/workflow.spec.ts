@@ -1529,6 +1529,11 @@ test("rule provider inventory and update controls translate while an update is p
 });
 
 test("logs page controls and empty/filter states translate across language changes", async ({ page }) => {
+  let pushLog: (message: string) => void = () => { throw new Error("socket not ready"); };
+  await page.routeWebSocket("**/api/events", socket => {
+    socket.connectToServer();
+    pushLog = message => socket.send(JSON.stringify({ type: "log", data: { stream: "stdout", message } }));
+  });
   await page.goto(`${base}/logs`);
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务" }).click();
@@ -1549,8 +1554,16 @@ test("logs page controls and empty/filter states translate across language chang
   await expect(page.getByText("No matching log entries found.")).toBeVisible();
   await page.getByRole("combobox", { name: "Interface language" }).selectOption("zh");
   await expect(page.getByText("没有找到匹配的日志。")).toBeVisible();
-  await page.getByRole("button", { name: "清除" }).click();
+  await page.getByRole("button", { name: "清除筛选" }).click();
   await expect(page.getByRole("log")).toContainText("time=");
+  // Clearing empties the output; entries that arrive afterwards still stream in.
+  const clear = page.getByRole("button", { name: "清除", exact: true });
+  await clear.click();
+  await expect(page.getByRole("log")).toHaveText("暂无日志。内核启动后，输出会显示在这里。");
+  await expect(clear).toBeDisabled();
+  pushLog("fresh entry after clearing");
+  await expect(page.getByRole("log")).toHaveText(/^stdout\s*fresh entry after clearing$/);
+  await expect(clear).toBeEnabled();
 });
 
 test("core upgrade page controls and channels translate across language changes", async ({ page }) => {

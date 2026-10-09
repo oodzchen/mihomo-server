@@ -542,7 +542,7 @@ function Manager({
             perform={perform}
           />
         ) : route === "/logs" ? (
-          <LogPage logs={logs} language={language} />
+          <LogPage logs={logs} language={language} clear={() => setLogs([])} />
         ) : route === "/core" ? (
           <CoreUpgradePage
             token={token}

@@ -19,7 +19,15 @@ export function LogLines({ logs, language }: { logs: CoreLog[]; language: Langua
   );
 }
 
-export function LogPage({ logs, language }: { logs: CoreLog[]; language: Language }) {
+export function LogPage({
+  logs,
+  language,
+  clear,
+}: {
+  logs: CoreLog[];
+  language: Language;
+  clear: () => void;
+}) {
   const [filter, setFilter] = useState("");
   const filtered = logs.filter((log) =>
     log.message.toLowerCase().includes(filter.toLowerCase()),
@@ -40,9 +48,12 @@ export function LogPage({ logs, language }: { logs: CoreLog[]; language: Languag
           />
           {filter && (
             <button className="quiet" onClick={() => setFilter("")}>
-              {t(language, "logsClear")}
+              {t(language, "logsClearFilter")}
             </button>
           )}
+          <button className="quiet" disabled={!logs.length} onClick={clear}>
+            {t(language, "logsClear")}
+          </button>
         </div>
       </div>
       {logs.length > 0 && !filtered.length ? (
