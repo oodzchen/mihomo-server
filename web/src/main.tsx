@@ -536,7 +536,7 @@ function Manager({
             perform={perform}
           />
         ) : route === "/unlock" ? (
-          <UnlockPage token={token} language={language} status={status} logout={logout} />
+          <UnlockPage token={token} language={language} status={status} profiles={profiles} logout={logout} />
         ) : route === "/rules" ? (
           <RulesPage
             token={token}

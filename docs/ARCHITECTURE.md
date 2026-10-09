@@ -145,7 +145,9 @@ platforms' placement, streaming, AI and store checks) live in
 `service/src/unlock.rs`. Each command runs one service's check under a
 whole-check timeout and returns a verdict, the region the service reports, a
 reason code and untranslated details. The page runs a bounded number at once
-and keeps the results across navigation. AI services that look the same to
+and keeps the results across navigation until the routing they were taken with
+changes: a different active subscription, committed revision or saved node
+selection clears them and discards tests still in flight. AI services that look the same to
 anonymous clients everywhere are judged from the region they see against the
 regions they exclude.
 

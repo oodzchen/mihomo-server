@@ -1,9 +1,9 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
 import { ApiError, command } from "./api";
 import { describe } from "./format";
 import { t, type Language, type MessageKey } from "./i18n";
 import { useToast } from "./toast";
-import type { CoreStatus } from "./types";
+import type { CoreStatus, Profiles } from "./types";
 
 type Category = "location" | "streaming" | "ai" | "other";
 type UnlockService = { id: string; name: string; category: Category };
@@ -54,6 +54,10 @@ let runToken = "";
 let onUnauthorized: (() => void) | undefined;
 /** The last catalog read, shown at once when the page is opened again. */
 let lastCatalog: Catalog | undefined;
+/** The subscription, configuration and node choices the results were taken
+ * with; tests started before they changed are discarded on arrival. */
+let routingKey: string | undefined;
+let epoch = 0;
 
 function update(change: (current: State) => Partial<State>) {
   state = { ...state, ...change(state) };
@@ -63,6 +67,17 @@ function update(change: (current: State) => Partial<State>) {
 function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => { listeners.delete(listener); };
+}
+
+/** Results describe one routing; forget them once it changes. */
+function adoptRouting(key: string) {
+  if (routingKey === key) return;
+  const first = routingKey === undefined;
+  routingKey = key;
+  if (first) return;
+  epoch++;
+  queue = [];
+  update(() => ({ results: {}, queued: new Set(), testing: new Set() }));
 }
 
 function enqueue(token: string, ids: string[]) {
@@ -77,6 +92,7 @@ function enqueue(token: string, ids: string[]) {
 function pump() {
   while (active < PARALLEL && queue.length) {
     const id = queue.shift()!;
+    const started = epoch;
     active++;
     update(current => {
       const queued = new Set(current.queued);
@@ -94,7 +110,7 @@ function pump() {
       })
       .then(outcome => {
         active--;
-        update(current => {
+        if (started === epoch) update(current => {
           const testing = new Set(current.testing);
           testing.delete(id);
           return { testing, results: { ...current.results, [id]: outcome } };
@@ -118,17 +134,28 @@ export function UnlockPage({
   token,
   language,
   status,
+  profiles,
   logout,
 }: {
   token: string;
   language: Language;
   status: CoreStatus;
+  profiles: Profiles;
   logout: (reason?: string) => void;
 }) {
   const notify = useToast();
   const [catalog, setCatalog] = useState(lastCatalog);
   const current = useSyncExternalStore(subscribe, () => state);
   const running = status.phase === "running";
+  // Switching subscription or node (saved per subscription) changes where
+  // requests go. Before paint, so stale results never show.
+  const selected = profiles.items?.find(item => item.uid === status.active_profile)?.selected;
+  const routing = profiles.items === undefined
+    ? undefined
+    : JSON.stringify([status.active_profile ?? null, status.config_revision ?? null, selected ?? []]);
+  useLayoutEffect(() => {
+    if (routing !== undefined) adoptRouting(routing);
+  }, [routing]);
   useEffect(() => {
     onUnauthorized = () => logout(t(language, "expiredToken"));
     return () => { onUnauthorized = undefined; };
