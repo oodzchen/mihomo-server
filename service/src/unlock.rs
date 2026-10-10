@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
 use crate::core_manager::{CoreManager, CorePhase};
+use crate::http3::{self, Relay};
 
 const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
@@ -23,6 +24,8 @@ const GOOGLE_CONSENT: &str =
 /// One request; a check makes at most a few, and is cut off as a whole after `CHECK_TIMEOUT`.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const CHECK_TIMEOUT: Duration = Duration::from_secs(25);
+/// One HTTP/3 request; a node that drops UDP never answers.
+const QUIC_TIMEOUT: Duration = Duration::from_secs(4);
 /// Pages are read up to this size; the markers checked are in the first part.
 const BODY_LIMIT: usize = 4 << 20;
 
@@ -193,7 +196,7 @@ pub async fn test(manager: &CoreManager, id: &str, node: Option<&str>) -> Result
         .with_context(|| format!("unknown service '{id}'"))?;
     let exit = resolve(manager, node).await?;
     let core = manager.test_exit(&exit.node).await?;
-    let http = Http::new(core.proxy.clone())?;
+    let http = Http::new(core.proxy.clone(), Some(core.relay.clone()))?;
     Ok(http.run(service).await)
 }
 
@@ -254,6 +257,8 @@ struct Http {
     follow: Client,
     /// Returns redirects, for checks that read where a service sends visitors.
     manual: Client,
+    /// The same exit's UDP relay, for HTTP/3.
+    relay: Option<Relay>,
 }
 
 struct Page {
@@ -292,7 +297,7 @@ impl Page {
 }
 
 impl Http {
-    fn new(proxy: reqwest::Proxy) -> Result<Self> {
+    fn new(proxy: reqwest::Proxy, relay: Option<Relay>) -> Result<Self> {
         let build = |policy| {
             let mut headers = header::HeaderMap::new();
             headers.insert(
@@ -314,6 +319,7 @@ impl Http {
         Ok(Self {
             follow: build(redirect::Policy::limited(10))?,
             manual: build(redirect::Policy::none())?,
+            relay,
         })
     }
 
@@ -380,6 +386,27 @@ impl Http {
             cookies,
             body: String::from_utf8_lossy(&body).into_owned(),
         })
+    }
+
+    /// A JSON POST from a page on `origin`; over HTTP/3 when `quic`.
+    async fn post_json(&self, url: &str, origin: &'static str, body: &Value, quic: bool) -> Result<Value> {
+        if !quic {
+            return Self::send(self.follow.post(url).header(header::ORIGIN, origin).json(body))
+                .await?
+                .json();
+        }
+        let relay = self.relay.as_ref().context("no UDP relay to test HTTP/3 through")?;
+        let request = http::Request::post(url)
+            .header(header::USER_AGENT, USER_AGENT)
+            .header(header::ACCEPT_LANGUAGE, "en-US,en;q=0.9")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ORIGIN, origin)
+            .body(serde_json::to_vec(body)?.into())?;
+        let response = tokio::time::timeout(QUIC_TIMEOUT, http3::send(relay, request))
+            .await
+            .map_err(|_| anyhow::anyhow!("HTTP/3 request timed out"))??;
+        serde_json::from_slice(&response.body)
+            .with_context(|| format!("unexpected response (HTTP {}, not JSON)", response.status.as_u16()))
     }
 
     async fn page(&self, url: &str) -> Result<Page> {
@@ -976,34 +1003,52 @@ async fn dmm(http: &Http) -> Result<Finding> {
 /// DMM TV gates twice: the site sends visitors whose address it calls foreign
 /// to its "not available in your region" page, and the player refuses them.
 /// Neither tells the region, so none is reported.
+///
+/// Browsers move to HTTP/3 after the first response advertises it, and DMM
+/// refuses over HTTP/3 addresses it accepts over HTTP/2: the first visit
+/// works and a reload is turned away. Its HTTP/3 answer decides, unless the
+/// node carries no UDP; browsers then stay on HTTP/2.
 async fn dmm_tv(http: &Http) -> Result<Finding> {
+    if http.relay.is_some() {
+        // Some nodes lose about half the QUIC handshakes; the rest finish quickly.
+        let attempts = (0..4).map(|_| Box::pin(dmm_tv_over(http, true)));
+        if let Ok((finding, _)) = futures_util::future::select_ok(attempts).await {
+            return Ok(finding);
+        }
+    }
+    dmm_tv_over(http, false).await
+}
+
+async fn dmm_tv_over(http: &Http, quic: bool) -> Result<Finding> {
+    const ORIGIN: &str = "https://tv.dmm.com";
     // The query the site runs on every page before it redirects.
-    let client = Http::send(
-        http.follow
-            .post("https://api.tv.dmm.com/graphql")
-            .header(header::ORIGIN, "https://tv.dmm.com")
-            .json(&json!({
+    let client = http
+        .post_json(
+            "https://api.tv.dmm.com/graphql",
+            ORIGIN,
+            &json!({
                 "operationName": "FetchClient", "variables": {},
                 "query": "query FetchClient { client { isForeignAccess } }"
-            })),
-    )
-    .await?
-    .json()?;
+            }),
+            quic,
+        )
+        .await?;
     match client["data"]["client"]["isForeignAccess"].as_bool() {
         Some(true) => return Ok(Finding::no(None, Some(Note::RegionUnsupported))),
         Some(false) => {}
         None => bail!("unexpected response (no isForeignAccess)"),
     }
-    let data = Http::send(
-        http.follow
-            .post("https://api.beacon.dmm.com/v1/streaming/start")
-            .json(&json!({
+    let data = http
+        .post_json(
+            "https://api.beacon.dmm.com/v1/streaming/start",
+            ORIGIN,
+            &json!({
                 "player_name": "dmmtv_browser", "player_version": "0.0.0", "content_type_detail": "VOD_SVOD",
                 "content_id": "11uvjcm4fw2wdu7drtd1epnvz", "purchase_product_id": null
-            })),
-    )
-    .await?
-    .json()?;
+            }),
+            quic,
+        )
+        .await?;
     match data["block_status"].as_str() {
         // Not logged in, but past the region check.
         Some("UNAUTHORIZED") => Ok(Finding::yes(None)),
@@ -1213,14 +1258,19 @@ mod tests {
         assert_eq!(finding.note, Some(Note::RegionUnsupported));
     }
 
-    /// Runs every check through `MIHOMO_TEST_UNLOCK_PROXY` (an HTTP proxy URL)
-    /// and prints the outcomes.
+    /// Runs every check through `MIHOMO_TEST_UNLOCK_PROXY` (an HTTP proxy URL),
+    /// HTTP/3 through `MIHOMO_TEST_UNLOCK_SOCKS` (a SOCKS5 `host:port` without
+    /// login) when set, and prints the outcomes.
     #[tokio::test]
     #[ignore = "needs network access through MIHOMO_TEST_UNLOCK_PROXY"]
     async fn live_checks_through_a_proxy() {
         let proxy = std::env::var("MIHOMO_TEST_UNLOCK_PROXY").expect("MIHOMO_TEST_UNLOCK_PROXY");
         let only = std::env::var("MIHOMO_TEST_UNLOCK_ONLY").ok();
-        let http = Http::new(reqwest::Proxy::all(proxy).unwrap()).unwrap();
+        let relay = std::env::var("MIHOMO_TEST_UNLOCK_SOCKS").ok().map(|address| Relay {
+            address: address.parse().expect("MIHOMO_TEST_UNLOCK_SOCKS"),
+            credentials: None,
+        });
+        let http = Http::new(reqwest::Proxy::all(proxy).unwrap(), relay).unwrap();
         let services = SERVICES.iter().filter(|service| {
             only.as_deref()
                 .is_none_or(|only| only.split(',').any(|id| id == service.id))

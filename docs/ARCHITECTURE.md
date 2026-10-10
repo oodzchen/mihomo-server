@@ -143,7 +143,13 @@ service starts, and reuses while tests continue, an isolated core with the same
 nodes, providers, resolvers and dialer options, bound to the default-route
 interface, in global mode with `GLOBAL` set to that node and a mixed listener
 on a random loopback port that requires a random password (loopback is shared
-with every local user). Checks are HTTP clients of that listener. At most two
+with every local user). Checks are HTTP clients of that listener. Services that
+answer QUIC clients differently (DMM TV refuses over HTTP/3 what it accepts over
+HTTP/2, and browsers switch to HTTP/3 after the first response advertises it)
+are also asked over HTTP/3: `service/src/http3.rs` carries QUIC through the
+same listener's authenticated SOCKS5 UDP relay, racing a few handshakes since
+some nodes lose many; a node without UDP falls back to the HTTP/2 answer, as a
+browser would. At most two
 such cores run at once; one unused for a minute is stopped and its directory
 removed. The catalog and the detection logic (IP location databases, Google's
 and other platforms' placement, streaming, AI and store checks) live in

@@ -5,6 +5,7 @@ pub mod core_manager;
 pub mod core_release;
 pub mod core_upgrade;
 pub mod geo;
+mod http3;
 pub mod management;
 #[cfg(target_os = "linux")]
 pub mod multi_user;
