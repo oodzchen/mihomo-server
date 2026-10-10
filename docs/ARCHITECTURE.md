@@ -144,9 +144,9 @@ nodes, providers, resolvers and dialer options, bound to the default-route
 interface, in global mode with `GLOBAL` set to that node and a mixed listener
 on a random loopback port that requires a random password (loopback is shared
 with every local user). Checks are HTTP clients of that listener. Services that
-answer QUIC clients differently (DMM TV refuses over HTTP/3 what it accepts over
-HTTP/2, and browsers switch to HTTP/3 after the first response advertises it)
-are also asked over HTTP/3: `service/src/http3.rs` carries QUIC through the
+answer QUIC clients differently (DMM TV and Abema refuse over HTTP/3 what they
+accept over HTTP/2, and browsers switch to HTTP/3 after the first response
+advertises it) are also asked over HTTP/3: `service/src/http3.rs` carries QUIC through the
 same listener's authenticated SOCKS5 UDP relay, racing a few handshakes since
 some nodes lose many; a node without UDP falls back to the HTTP/2 answer, as a
 browser would. At most two
@@ -159,8 +159,12 @@ reason code and untranslated details. The page runs a bounded number at once
 and keeps the results across navigation until the node they were taken with
 changes: a different active subscription, committed revision, chosen node or,
 when following the current exit, node selection clears them and discards tests
-still in flight. AI services that look the same to anonymous clients everywhere
-are judged from the region they see against the regions they exclude.
+still in flight. A service is listed only when an anonymous request reaches the
+gate it applies to everyone: each check reads that gate's own answer (a refusal
+page or redirect, a playback or session API), never a region matched against a
+list of supported regions. Services that decide only after sign-in (Gemini, AI
+Studio) or whose anonymous pages look the same everywhere (Hulu, Paramount+,
+Peacock, TikTok, Copilot, Grok, Perplexity) are not tested.
 
 ## Management and browser boundary
 

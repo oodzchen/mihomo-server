@@ -6,11 +6,18 @@
 //! results describe that node alone: neither the active rules, which may send a
 //! service to another group or DIRECT, nor the host's own proxying change them.
 //! Each check is one small, independent test; the page runs several at once.
+//!
+//! A check reads the answer of the gate the service itself applies (a refusal
+//! page or redirect, a playback or session API), as a browser would meet it,
+//! never a region matched against a list. Services whose gate an anonymous
+//! request cannot reach are not listed.
 use anyhow::{Context as _, Result, bail, ensure};
+use bytes::Bytes;
 use mihomo_client::models::ClashMode;
 use reqwest::{Client, RequestBuilder, StatusCode, Url, header, redirect};
 use serde::Serialize;
 use serde_json::{Value, json};
+use std::future::Future;
 use std::time::{Duration, Instant};
 
 use crate::core_manager::{CoreManager, CorePhase};
@@ -28,11 +35,6 @@ const CHECK_TIMEOUT: Duration = Duration::from_secs(25);
 const QUIC_TIMEOUT: Duration = Duration::from_secs(4);
 /// Pages are read up to this size; the markers checked are in the first part.
 const BODY_LIMIT: usize = 4 << 20;
-
-/// Regions under broad sanctions or service bans: no tested service serves them.
-const SANCTIONED: &[&str] = &["CN", "RU", "BY", "IR", "KP", "SY", "CU"];
-/// OpenAI, Anthropic and Google's Gemini/AI Studio also exclude Hong Kong and Macau.
-const AI_RESTRICTED: &[&str] = &["CN", "HK", "MO", "RU", "BY", "IR", "KP", "SY", "CU"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,13 +71,9 @@ pub const SERVICES: &[Service] = &[
     service("youtube_premium", "YouTube Premium", Category::Streaming),
     service("prime_video", "Amazon Prime Video", Category::Streaming),
     service("hbo_max", "HBO Max", Category::Streaming),
-    service("hulu", "Hulu", Category::Streaming),
-    service("paramount_plus", "Paramount+", Category::Streaming),
-    service("peacock", "Peacock", Category::Streaming),
     service("dazn", "DAZN", Category::Streaming),
     service("bbc_iplayer", "BBC iPlayer", Category::Streaming),
     service("spotify", "Spotify", Category::Streaming),
-    service("tiktok", "TikTok", Category::Streaming),
     service("dmm", "DMM", Category::Streaming),
     service("dmm_tv", "DMM TV", Category::Streaming),
     service("abema", "AbemaTV", Category::Streaming),
@@ -84,11 +82,6 @@ pub const SERVICES: &[Service] = &[
     service("bilibili_tw", "Bilibili TW", Category::Streaming),
     service("chatgpt", "ChatGPT", Category::Ai),
     service("claude", "Claude", Category::Ai),
-    service("gemini", "Gemini", Category::Ai),
-    service("ai_studio", "Google AI Studio", Category::Ai),
-    service("copilot", "Microsoft Copilot", Category::Ai),
-    service("grok", "Grok", Category::Ai),
-    service("perplexity", "Perplexity", Category::Ai),
     service("steam", "Steam", Category::Other),
 ];
 
@@ -150,15 +143,6 @@ impl Finding {
             region,
             note,
             ..Self::default()
-        }
-    }
-
-    /// Served unless the region is one the service excludes.
-    fn unless_in(region: String, excluded: &[&str]) -> Self {
-        if excluded.contains(&region.as_str()) {
-            Self::no(Some(region), Some(Note::RegionUnsupported))
-        } else {
-            Self::yes(Some(region))
         }
     }
 
@@ -395,18 +379,57 @@ impl Http {
                 .await?
                 .json();
         }
-        let relay = self.relay.as_ref().context("no UDP relay to test HTTP/3 through")?;
         let request = http::Request::post(url)
-            .header(header::USER_AGENT, USER_AGENT)
-            .header(header::ACCEPT_LANGUAGE, "en-US,en;q=0.9")
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::ORIGIN, origin)
             .body(serde_json::to_vec(body)?.into())?;
-        let response = tokio::time::timeout(QUIC_TIMEOUT, http3::send(relay, request))
-            .await
-            .map_err(|_| anyhow::anyhow!("HTTP/3 request timed out"))??;
+        let response = self.quic(request).await?;
         serde_json::from_slice(&response.body)
             .with_context(|| format!("unexpected response (HTTP {}, not JSON)", response.status.as_u16()))
+    }
+
+    /// A GET's status and body; over HTTP/3 when `quic`.
+    async fn fetch(&self, url: &str, quic: bool) -> Result<(StatusCode, String)> {
+        if !quic {
+            let page = self.page(url).await?;
+            return Ok((page.status, page.body));
+        }
+        let response = self.quic(http::Request::get(url).body(Bytes::new())?).await?;
+        Ok((response.status, String::from_utf8_lossy(&response.body).into_owned()))
+    }
+
+    /// One request over HTTP/3 through the exit's UDP relay, with the
+    /// headers every check sends.
+    async fn quic(&self, mut request: http::Request<Bytes>) -> Result<http3::Response> {
+        let relay = self.relay.as_ref().context("no UDP relay to test HTTP/3 through")?;
+        let headers = request.headers_mut();
+        headers.insert(header::USER_AGENT, header::HeaderValue::from_static(USER_AGENT));
+        headers.insert(
+            header::ACCEPT_LANGUAGE,
+            header::HeaderValue::from_static("en-US,en;q=0.9"),
+        );
+        tokio::time::timeout(QUIC_TIMEOUT, http3::send(relay, request))
+            .await
+            .map_err(|_| anyhow::anyhow!("HTTP/3 request timed out"))?
+    }
+
+    /// A check as a browser ends up running it. Browsers move to HTTP/3 once a
+    /// response advertises it, and some services refuse over HTTP/3 what they
+    /// serve over TCP, so the HTTP/3 answer decides when the node carries
+    /// QUIC; without UDP through the node browsers stay on TCP.
+    async fn as_browser<F, Fut>(&self, check: F) -> Result<Finding>
+    where
+        F: Fn(bool) -> Fut,
+        Fut: Future<Output = Result<Finding>>,
+    {
+        if self.relay.is_some() {
+            // Some nodes lose about half the QUIC handshakes; the rest finish quickly.
+            let attempts = (0..4).map(|_| Box::pin(check(true)));
+            if let Ok((finding, _)) = futures_util::future::select_ok(attempts).await {
+                return Ok(finding);
+            }
+        }
+        check(false).await
     }
 
     async fn page(&self, url: &str) -> Result<Page> {
@@ -499,31 +522,6 @@ fn place(city: Option<String>, region: Option<String>, network: Option<String>) 
     join(&[join(&[city, region], ", "), network], " · ")
 }
 
-const ISO3: &str = concat!(
-    "ABWAWAFGAFAGOAOAIAAIALAAXALBALANDADAREAEARGARARMAMASMASATAAQATFTFATGAGAUSAUAUTATAZEAZBDIBIBELBEBENBJ",
-    "BESBQBFABFBGDBDBGRBGBHRBHBHSBSBIHBABLMBLBLRBYBLZBZBMUBMBOLBOBRABRBRBBBBRNBNBTNBTBVTBVBWABWCAFCFCANCA",
-    "CCKCCCHECHCHLCLCHNCNCIVCICMRCMCODCDCOGCGCOKCKCOLCOCOMKMCPVCVCRICRCUBCUCUWCWCXRCXCYMKYCYPCYCZECZDEUDE",
-    "DJIDJDMADMDNKDKDOMDODZADZECUECEGYEGERIERESHEHESPESESTEEETHETFINFIFJIFJFLKFKFRAFRFROFOFSMFMGABGAGBRGB",
-    "GEOGEGGYGGGHAGHGIBGIGINGNGLPGPGMBGMGNBGWGNQGQGRCGRGRDGDGRLGLGTMGTGUFGFGUMGUGUYGYHKGHKHMDHMHNDHNHRVHR",
-    "HTIHTHUNHUIDNIDIMNIMINDINIOTIOIRLIEIRNIRIRQIQISLISISRILITAITJAMJMJEYJEJORJOJPNJPKAZKZKENKEKGZKGKHMKH",
-    "KIRKIKNAKNKORKRKWTKWLAOLALBNLBLBRLRLBYLYLCALCLIELILKALKLSOLSLTULTLUXLULVALVMACMOMAFMFMARMAMCOMCMDAMD",
-    "MDGMGMDVMVMEXMXMHLMHMKDMKMLIMLMLTMTMMRMMMNEMEMNGMNMNPMPMOZMZMRTMRMSRMSMTQMQMUSMUMWIMWMYSMYMYTYTNAMNA",
-    "NCLNCNERNENFKNFNGANGNICNINIUNUNLDNLNORNONPLNPNRUNRNZLNZOMNOMPAKPKPANPAPCNPNPERPEPHLPHPLWPWPNGPGPOLPL",
-    "PRIPRPRKKPPRTPTPRYPYPSEPSPYFPFQATQAREUREROURORUSRURWARWSAUSASDNSDSENSNSGPSGSGSGSSHNSHSJMSJSLBSBSLESL",
-    "SLVSVSMRSMSOMSOSPMPMSRBRSSSDSSSTPSTSURSRSVKSKSVNSISWESESWZSZSXMSXSYCSCSYRSYTCATCTCDTDTGOTGTHATHTJKTJ",
-    "TKLTKTKMTMTLSTLTONTOTTOTTTUNTNTURTRTUVTVTWNTWTZATZUGAUGUKRUAUMIUMURYUYUSAUSUZBUZVATVAVCTVCVENVEVGBVG",
-    "VIRVIVNMVNVUTVUWLFWFWSMWSYEMYEZAFZAZMBZMZWEZW",
-);
-
-/// ISO 3166-1 alpha-3 to alpha-2.
-fn alpha2(alpha3: &str) -> Option<String> {
-    let (entries, _) = ISO3.as_bytes().as_chunks::<5>();
-    entries
-        .iter()
-        .find(|entry| entry[..3] == *alpha3.as_bytes())
-        .map(|entry| String::from_utf8_lossy(&entry[3..]).into_owned())
-}
-
 async fn check(http: &Http, id: &str) -> Result<Finding> {
     match id {
         "cloudflare" => cloudflare(http).await,
@@ -539,13 +537,9 @@ async fn check(http: &Http, id: &str) -> Result<Finding> {
         "youtube_premium" => youtube_premium(http).await,
         "prime_video" => prime_video(http).await,
         "hbo_max" => hbo_max(http).await,
-        "hulu" => hulu(http).await,
-        "paramount_plus" => paramount_plus(http).await,
-        "peacock" => peacock(http).await,
         "dazn" => dazn(http).await,
         "bbc_iplayer" => bbc_iplayer(http).await,
         "spotify" => spotify(http).await,
-        "tiktok" => tiktok(http).await,
         "dmm" => dmm(http).await,
         "dmm_tv" => dmm_tv(http).await,
         "abema" => abema(http).await,
@@ -554,11 +548,6 @@ async fn check(http: &Http, id: &str) -> Result<Finding> {
         "bilibili_tw" => bilibili(http, 50762638, 100279344, 268176).await,
         "chatgpt" => chatgpt(http).await,
         "claude" => claude(http).await,
-        "gemini" => gemini(http).await,
-        "ai_studio" => ai_studio(http).await,
-        "copilot" => traced(http, "copilot.microsoft.com", SANCTIONED).await,
-        "grok" => traced(http, "grok.com", SANCTIONED).await,
-        "perplexity" => traced(http, "www.perplexity.ai", SANCTIONED).await,
         "steam" => steam(http).await,
         _ => bail!("unknown service '{id}'"),
     }
@@ -800,7 +789,7 @@ async fn youtube_premium(http: &Http) -> Result<Finding> {
 
 async fn prime_video(http: &Http) -> Result<Finding> {
     let page = http.page("https://www.primevideo.com/").await?;
-    if page.body.contains("isServiceRestricted\":true") {
+    if page.url.path().contains("servicerestricted") || page.body.contains("isServiceRestricted\":true") {
         return Ok(Finding::no(None, Some(Note::RegionUnsupported)));
     }
     match quoted_after(&page.body, "\"currentTerritory\":\"").and_then(country) {
@@ -868,48 +857,6 @@ async fn hbo_max(http: &Http) -> Result<Finding> {
     })
 }
 
-/// Hulu (US) sends visitors elsewhere to Disney+.
-async fn hulu(http: &Http) -> Result<Finding> {
-    let page = Http::send(http.manual.get("https://www.hulu.com/welcome")).await?;
-    match page.status {
-        StatusCode::OK => Ok(Finding::yes(Some("US".into()))),
-        status if status.is_redirection() => Ok(Finding::no(None, Some(Note::RegionUnsupported))),
-        StatusCode::FORBIDDEN => Ok(Finding::no(None, Some(Note::ProxyDetected))),
-        _ => page.unexpected(),
-    }
-}
-
-/// Paramount+ serves its US site at the root and redirects other markets.
-async fn paramount_plus(http: &Http) -> Result<Finding> {
-    let page = Http::send(http.manual.get("https://www.paramountplus.com/")).await?;
-    if page.status == StatusCode::OK {
-        return Ok(Finding::yes(Some("US".into())));
-    }
-    let Some(location) = page.location.as_deref().filter(|_| page.status.is_redirection()) else {
-        return page.unexpected();
-    };
-    let path = Url::parse(location)
-        .or_else(|_| page.url.join(location))
-        .map(|url| url.path().to_owned())
-        .unwrap_or_default();
-    let segment = path.trim_matches('/').split('/').next().unwrap_or_default();
-    match country(segment) {
-        Some(region) => Ok(Finding::yes(Some(region))),
-        None => Ok(Finding::no(None, Some(Note::RegionUnsupported))),
-    }
-}
-
-async fn peacock(http: &Http) -> Result<Finding> {
-    let page = http.page("https://www.peacocktv.com/").await?;
-    if page.url.path().contains("unavailable") {
-        Ok(Finding::no(None, Some(Note::RegionUnsupported)))
-    } else if page.status.is_success() {
-        Ok(Finding::yes(Some("US".into())))
-    } else {
-        page.unexpected()
-    }
-}
-
 async fn dazn(http: &Http) -> Result<Finding> {
     let page = Http::send(
         http.follow
@@ -950,6 +897,9 @@ async fn bbc_iplayer(http: &Http) -> Result<Finding> {
 async fn spotify(http: &Http) -> Result<Finding> {
     let page = Http::send(http.manual.get("https://www.spotify.com/signup")).await?;
     let location = page.location.as_deref().unwrap_or_default();
+    if location.contains("why-not-available") {
+        return Ok(Finding::no(None, Some(Note::RegionUnsupported)));
+    }
     let path = page
         .url
         .join(location)
@@ -957,31 +907,7 @@ async fn spotify(http: &Http) -> Result<Finding> {
         .unwrap_or_default();
     let segment = path.trim_matches('/').split('/').next().unwrap_or_default();
     match segment.split('-').next().and_then(country) {
-        Some(region) => Ok(Finding::unless_in(region, SANCTIONED)),
-        None if page.status.is_redirection() || page.status.is_success() => Ok(Finding::no(None, None)),
-        None => page.unexpected(),
-    }
-}
-
-async fn tiktok(http: &Http) -> Result<Finding> {
-    let page = http.page("https://www.tiktok.com/explore").await?;
-    let mut region = None;
-    let mut rest = page.body.as_str();
-    while let Some(start) = rest.find("\"region\":\"") {
-        rest = &rest[start + 10..];
-        if let Some(code) = rest
-            .get(..3)
-            .filter(|code| code.ends_with('"'))
-            .and_then(|code| country(&code[..2]))
-        {
-            region = Some(code);
-            break;
-        }
-    }
-    match region {
-        // Withdrawn from Hong Kong, banned in India and the mainland runs Douyin.
-        Some(region) => Ok(Finding::unless_in(region, &["CN", "HK", "IN"])),
-        None if page.status.is_success() => Ok(Finding::no(None, None)),
+        Some(region) => Ok(Finding::yes(Some(region))),
         None => page.unexpected(),
     }
 }
@@ -1002,21 +928,10 @@ async fn dmm(http: &Http) -> Result<Finding> {
 
 /// DMM TV gates twice: the site sends visitors whose address it calls foreign
 /// to its "not available in your region" page, and the player refuses them.
-/// Neither tells the region, so none is reported.
-///
-/// Browsers move to HTTP/3 after the first response advertises it, and DMM
-/// refuses over HTTP/3 addresses it accepts over HTTP/2: the first visit
-/// works and a reload is turned away. Its HTTP/3 answer decides, unless the
-/// node carries no UDP; browsers then stay on HTTP/2.
+/// Neither tells the region, so none is reported. DMM accepts over HTTP/2
+/// addresses it refuses over HTTP/3: the first visit works, a reload does not.
 async fn dmm_tv(http: &Http) -> Result<Finding> {
-    if http.relay.is_some() {
-        // Some nodes lose about half the QUIC handshakes; the rest finish quickly.
-        let attempts = (0..4).map(|_| Box::pin(dmm_tv_over(http, true)));
-        if let Ok((finding, _)) = futures_util::future::select_ok(attempts).await {
-            return Ok(finding);
-        }
-    }
-    dmm_tv_over(http, false).await
+    http.as_browser(|quic| dmm_tv_over(http, quic)).await
 }
 
 async fn dmm_tv_over(http: &Http, quic: bool) -> Result<Finding> {
@@ -1058,16 +973,28 @@ async fn dmm_tv_over(http: &Http, quic: bool) -> Result<Finding> {
     }
 }
 
+/// Abema places addresses over HTTP/2 that it calls anonymous over HTTP/3.
 async fn abema(http: &Http) -> Result<Finding> {
-    let page = http.page("https://api.abema.io/v1/ip/check?device=android").await?;
-    if page.body.contains("anonymous_ip") {
+    http.as_browser(|quic| abema_over(http, quic)).await
+}
+
+async fn abema_over(http: &Http, quic: bool) -> Result<Finding> {
+    let (status, body) = http
+        .fetch("https://api.abema.io/v1/ip/check?device=android", quic)
+        .await?;
+    if body.contains("anonymous_ip") {
         return Ok(Finding::no(None, Some(Note::ProxyDetected)));
     }
-    match string(&page.json()?, "isoCountryCode").as_deref().and_then(country) {
+    if body.contains("blocked_location") {
+        return Ok(Finding::no(None, Some(Note::RegionUnsupported)));
+    }
+    let data: Value = serde_json::from_str(&body)
+        .with_context(|| format!("unexpected response (HTTP {}, not JSON)", status.as_u16()))?;
+    match string(&data, "isoCountryCode").as_deref().and_then(country) {
         Some(region) if region == "JP" => Ok(Finding::yes(Some(region))),
         // Abroad only the free international lineup is offered.
         Some(region) => Ok(Finding::of(Verdict::Partial, Some(region), Some(Note::Overseas))),
-        None => page.unexpected(),
+        None => bail!("unexpected response (HTTP {}, no region)", status.as_u16()),
     }
 }
 
@@ -1122,7 +1049,7 @@ async fn chatgpt(http: &Http) -> Result<Finding> {
     let mut finding = if compliance.body.contains("unsupported_country") {
         Finding::no(Some(trace.loc), Some(Note::RegionUnsupported))
     } else {
-        Finding::unless_in(trace.loc, AI_RESTRICTED)
+        Finding::yes(Some(trace.loc))
     };
     if finding.verdict == Some(Verdict::Yes) {
         let app = http.page("https://ios.chat.openai.com/").await?;
@@ -1146,50 +1073,11 @@ async fn claude(http: &Http) -> Result<Finding> {
     {
         Finding::no(Some(trace.loc), Some(Note::RegionUnsupported))
     } else {
-        Finding::unless_in(trace.loc, AI_RESTRICTED)
+        Finding::yes(Some(trace.loc))
     };
     Ok(Finding {
         ip: Some(trace.ip),
         ..finding
-    })
-}
-
-/// The region Gemini's page is served for (ISO alpha-3 in its bootstrap data).
-async fn gemini_region(http: &Http) -> Result<String> {
-    let page = Http::send(
-        http.get("https://gemini.google.com/")
-            .header(header::COOKIE, GOOGLE_CONSENT),
-    )
-    .await?;
-    let start = page.body.find(",2,1,200,\"").map(|start| start + 10);
-    match start.and_then(|start| page.body.get(start..start + 3)).and_then(alpha2) {
-        Some(region) => Ok(region),
-        None => page.unexpected(),
-    }
-}
-
-async fn gemini(http: &Http) -> Result<Finding> {
-    Ok(Finding::unless_in(gemini_region(http).await?, AI_RESTRICTED))
-}
-
-async fn ai_studio(http: &Http) -> Result<Finding> {
-    let page = Http::send(http.manual.get("https://aistudio.google.com/")).await?;
-    let location = page.location.as_deref().unwrap_or_default();
-    if location.contains("available-regions") || location.contains("unsupported") {
-        return Ok(Finding::no(None, Some(Note::RegionUnsupported)));
-    }
-    if !(page.status.is_success() || page.status.is_redirection()) {
-        return page.unexpected();
-    }
-    Ok(Finding::unless_in(gemini_region(http).await?, AI_RESTRICTED))
-}
-
-/// A Cloudflare-fronted service judged by the region it sees.
-async fn traced(http: &Http, host: &str, excluded: &[&str]) -> Result<Finding> {
-    let trace = http.trace(host).await?;
-    Ok(Finding {
-        ip: Some(trace.ip),
-        ..Finding::unless_in(trace.loc, excluded)
     })
 }
 
@@ -1226,16 +1114,6 @@ mod tests {
     }
 
     #[test]
-    fn alpha3_codes_map_to_alpha2() {
-        assert_eq!(alpha2("USA").as_deref(), Some("US"));
-        assert_eq!(alpha2("HKG").as_deref(), Some("HK"));
-        assert_eq!(alpha2("DEU").as_deref(), Some("DE"));
-        assert_eq!(alpha2("ZWE").as_deref(), Some("ZW"));
-        assert_eq!(alpha2("XXX"), None);
-        assert_eq!(ISO3.len() % 5, 0);
-    }
-
-    #[test]
     fn helpers_read_markers_and_places() {
         assert_eq!(country(" de "), Some("DE".into()));
         assert_eq!(country("DEU"), None);
@@ -1253,9 +1131,6 @@ mod tests {
             body: String::new(),
         };
         assert_eq!(page.cookie_header(), "b=2; a=3");
-        let finding = Finding::unless_in("HK".into(), AI_RESTRICTED);
-        assert_eq!(finding.verdict, Some(Verdict::No));
-        assert_eq!(finding.note, Some(Note::RegionUnsupported));
     }
 
     /// Runs every check through `MIHOMO_TEST_UNLOCK_PROXY` (an HTTP proxy URL),
