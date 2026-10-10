@@ -959,7 +959,8 @@ async fn tiktok(http: &Http) -> Result<Finding> {
     }
 }
 
-/// Visitors from abroad get DMM's international (English) edition.
+/// Visitors from abroad get DMM's international (English) edition. DMM does not
+/// say which region it placed the address in, so none is reported.
 async fn dmm(http: &Http) -> Result<Finding> {
     let page = http.page("https://www.dmm.co.jp/top/").await?;
     if !page.status.is_success() {
@@ -968,11 +969,31 @@ async fn dmm(http: &Http) -> Result<Finding> {
     if page.url.path().starts_with("/en/") || page.body.contains("not-available-in-your-region") {
         Ok(Finding::no(None, Some(Note::Overseas)))
     } else {
-        Ok(Finding::yes(Some("JP".into())))
+        Ok(Finding::yes(None))
     }
 }
 
+/// DMM TV gates twice: the site sends visitors whose address it calls foreign
+/// to its "not available in your region" page, and the player refuses them.
+/// Neither tells the region, so none is reported.
 async fn dmm_tv(http: &Http) -> Result<Finding> {
+    // The query the site runs on every page before it redirects.
+    let client = Http::send(
+        http.follow
+            .post("https://api.tv.dmm.com/graphql")
+            .header(header::ORIGIN, "https://tv.dmm.com")
+            .json(&json!({
+                "operationName": "FetchClient", "variables": {},
+                "query": "query FetchClient { client { isForeignAccess } }"
+            })),
+    )
+    .await?
+    .json()?;
+    match client["data"]["client"]["isForeignAccess"].as_bool() {
+        Some(true) => return Ok(Finding::no(None, Some(Note::RegionUnsupported))),
+        Some(false) => {}
+        None => bail!("unexpected response (no isForeignAccess)"),
+    }
     let data = Http::send(
         http.follow
             .post("https://api.beacon.dmm.com/v1/streaming/start")
@@ -985,7 +1006,7 @@ async fn dmm_tv(http: &Http) -> Result<Finding> {
     .json()?;
     match data["block_status"].as_str() {
         // Not logged in, but past the region check.
-        Some("UNAUTHORIZED") => Ok(Finding::yes(Some("JP".into()))),
+        Some("UNAUTHORIZED") => Ok(Finding::yes(None)),
         Some("FOREIGN") => Ok(Finding::no(None, Some(Note::RegionUnsupported))),
         Some(_) => Ok(Finding::no(None, Some(Note::ProxyDetected))),
         None => bail!("unexpected response"),
