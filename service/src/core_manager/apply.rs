@@ -119,18 +119,17 @@ impl Actor {
             if was_running {
                 live_attempted = true;
                 let tun_active = self.tun_live.load(std::sync::atomic::Ordering::Relaxed);
-                let tun_candidate = read_config(&candidate).await.is_ok_and(|c| {
-                    c.get("tun")
-                        .and_then(|t| t.get("enable"))
-                        .and_then(serde_yaml_ng::Value::as_bool)
-                        == Some(true)
-                });
-                // On Linux, Mihomo's TUN listener cannot hot-reload an existing TUN interface
-                // without getting EBUSY ("device or resource busy") because the existing interface
-                // is already open. Cleanly restarting the core avoids the reload timeout and rebinds
-                // TUN immediately in <300ms.
-                let reload_result = if tun_active && tun_candidate {
-                    Err(anyhow::anyhow!("TUN is active; restarting process to avoid device busy conflict"))
+                let tun_recreated = tun_active
+                    && match (read_config(&old_path).await, read_config(&candidate).await) {
+                        (Ok(old), Ok(new)) => tun_recreated(&old, &new),
+                        _ => true,
+                    };
+                // Mihomo keeps an unchanged TUN, and every connection through it (DIRECT ones
+                // included), across a hot reload. A changed one is recreated, which drops those
+                // connections anyway and on Linux can fail with EBUSY ("device or resource busy")
+                // while the old interface is still open; restarting the core rebinds it in <300ms.
+                let reload_result = if tun_recreated {
+                    Err(anyhow::anyhow!("TUN settings changed; restarting process to avoid device busy conflict"))
                 } else {
                     self.reload(&candidate).await
                 };
@@ -244,5 +243,42 @@ impl Actor {
             self.begin_restoration(true).await;
         }
         Ok(())
+    }
+}
+
+/// Whether applying `new` over a running `old` with a live TUN makes Mihomo
+/// recreate the interface: it stays enabled and any of its settings differ.
+fn tun_recreated(old: &Mapping, new: &Mapping) -> bool {
+    let enabled = new
+        .get("tun")
+        .and_then(|tun| tun.get("enable"))
+        .and_then(serde_yaml_ng::Value::as_bool)
+        == Some(true);
+    enabled && old.get("tun") != new.get("tun")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(yaml: &str) -> Mapping {
+        serde_yaml_ng::from_str(yaml).unwrap()
+    }
+
+    #[test]
+    fn only_a_changed_enabled_tun_is_recreated() {
+        let old = config("tun: {enable: true, device: ms1000, auto-route: true}\nproxies: []\n");
+        let other_profile =
+            config("tun: {enable: true, device: ms1000, auto-route: true}\nproxies: [{name: a, type: direct}]\n");
+        assert!(!tun_recreated(&old, &other_profile));
+        assert!(tun_recreated(
+            &old,
+            &config("tun: {enable: true, device: ms1000, auto-route: true, mtu: 1400}")
+        ));
+        assert!(!tun_recreated(
+            &old,
+            &config("tun: {enable: false, device: ms1000, auto-route: true}")
+        ));
+        assert!(!tun_recreated(&old, &config("proxies: []")));
     }
 }
