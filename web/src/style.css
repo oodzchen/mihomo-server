@@ -212,6 +212,8 @@ textarea {
   background: #fff;
   padding: 7px 10px;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   margin-top: 4px;
   color: #18181b;
   font-size: 13px;
@@ -231,10 +233,13 @@ textarea {
   line-height: 1.55;
 }
 .shell {
+  position: relative;
   display: flex;
   min-height: 100vh;
   max-width: 1600px;
   margin-inline: auto;
+  /* Bound page overflow without creating a scroll container for sticky UI. */
+  overflow-x: clip;
 }
 .sidebar {
   width: 196px;
@@ -349,6 +354,7 @@ nav a:hover {
   max-width: 1450px;
   padding: 0 32px 32px;
   margin-inline: auto;
+  overflow-wrap: anywhere;
 }
 .page-header {
   display: flex;
@@ -430,7 +436,7 @@ nav a:hover {
 }
 .two-column {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
   align-items: start;
 }
@@ -447,6 +453,7 @@ nav a:hover {
 }
 .panel-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
   justify-content: space-between;
@@ -717,9 +724,16 @@ dd {
 .form-actions,
 .section-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+.form-actions > *,
+.section-title > *,
+.panel-title > * {
+  min-width: 0;
+  max-width: 100%;
 }
 .section-title {
   margin-bottom: 16px;
@@ -729,7 +743,7 @@ dd {
 }
 .nodes {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
   gap: 8px;
 }
 .nodes button {
@@ -1135,7 +1149,7 @@ dd {
 }
 .rules-search input[type="search"] {
   flex: 1;
-  min-width: 220px;
+  min-width: min(100%, 220px);
   padding: 6px 10px;
   border: 1px solid #d4d4d8;
   border-radius: 4px;
@@ -1187,7 +1201,7 @@ dd {
 }
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
   gap: 10px;
   margin-top: 10px;
 }
@@ -1267,11 +1281,13 @@ dd {
 }
 .panel-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 .delay-url-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   margin-top: 6px;
 }
@@ -1331,7 +1347,7 @@ dd {
 }
 
 /* Runtime cards mirror Verge's mode segments and TUN status card. */
-.runtime-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.runtime-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .mode-segments { display: flex; gap: 4px; padding: 4px; background: #f4f4f5; border-radius: 8px; }
 .mode-segments button { flex: 1; padding: 8px 12px; text-align: center; color: #71717a; border: 0; background: transparent; border-radius: 5px; font-size: 14px; }
 .mode-segments button:hover:not(:disabled) { background: #e4e4e7; color: #18181b; }
@@ -1444,7 +1460,8 @@ dd {
 .unlock-panel .panel-title { flex-wrap: wrap; align-items: flex-start; }
 .unlock-panel .panel-title > div:first-child { flex: 1 1 320px; min-width: 0; }
 .unlock-summary { font-size: 12px; white-space: nowrap; }
-.unlock-table-scroll { overflow-x: auto; }
+/* Keep absolutely positioned accessible labels inside the table scroller. */
+.unlock-table-scroll { position: relative; overflow-x: auto; }
 .unlock-table { width: 100%; min-width: 760px; table-layout: fixed; border-collapse: collapse; text-align: left; font-size: 12px; }
 .unlock-table th, .unlock-table td { padding: 7px 10px; border-bottom: 1px solid #f4f4f5; height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .unlock-table th { font-weight: 600; color: #71717a; background: #fafafa; }
@@ -1468,8 +1485,9 @@ dd {
 .unlock-time { color: #71717a; font-variant-numeric: tabular-nums; }
 .unlock-table td:last-child { overflow: visible; text-overflow: clip; text-align: right; }
 .unlock-node { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px; }
-.unlock-node label { margin: 0; white-space: nowrap; }
-.unlock-node select { width: 360px; max-width: 100%; margin: 0; padding-block: 4px; }
+.unlock-header > div:first-child { flex: 1 1 360px; }
+.unlock-node label { margin: 0; white-space: nowrap; flex-shrink: 0; }
+.unlock-node select { flex: 0 1 360px; width: 360px; margin: 0; padding-block: 4px; }
 .unlock-run-all { flex-shrink: 0; white-space: nowrap; min-width: 168px; }
 @media (max-width: 600px) { .unlock-header { flex-wrap: wrap; } .unlock-run-all { width: 100%; } }
 .unlock-table .unlock-retest { padding: 2px 8px; min-height: 0; font-size: 12px; line-height: 1.4; }

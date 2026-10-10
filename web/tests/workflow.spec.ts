@@ -1435,6 +1435,109 @@ test.skip("proxy provider controls translate while an update is pending", async 
   expect(calls).toEqual(["update_proxy_provider", "healthcheck_proxy_provider", "update_proxy_provider"]);
 });
 
+// Keep layout fixtures independent of whichever core configuration earlier tests left.
+async function mockWideLayoutData(page: import("@playwright/test").Page) {
+  const node = `Singapore-${"long-node-name-".repeat(30)}`;
+  const status = { phase: "running", generation: 1, selection_pending: [] };
+  await page.routeWebSocket("**/api/events", socket => {
+    socket.onMessage(() => {
+      socket.send(JSON.stringify({ type: "ready" }));
+      socket.send(JSON.stringify({ type: "snapshot", status, profiles: {}, logs: [
+        { stream: "stdout", message: "long-log-entry-".repeat(100) },
+      ] }));
+    });
+  });
+  await page.route("**/api/commands", async route => {
+    const body = route.request().postDataJSON();
+    const fixtures: Record<string, unknown> = {
+      status,
+      proxies: { proxies: {
+        GLOBAL: { type: "Selector", now: node, all: [node] },
+        [node]: { type: "Shadowsocks", history: [] },
+      } },
+      unlock_services: { exit: { node, via: ["GLOBAL", "long-group-name-".repeat(20)] }, services: [
+        { id: "cloudflare", name: "Cloudflare", category: "location" },
+        { id: "netflix", name: "Netflix", category: "streaming" },
+      ] },
+      unlock_test: { id: body.id, verdict: "yes", region: "SG", ip: "2001:db8:1234:5678:abcd:ef01:2345:6789",
+        note: null, detail: "long-result-detail-".repeat(100), error: null, elapsed: 120 },
+      rules: { rules: [{ type: "DOMAIN", payload: `${"long-domain-".repeat(40)}.test`, proxy: node }] },
+      rule_providers: { providers: {} },
+      proxy_providers: { providers: {} },
+    };
+    if (body.command in fixtures) await route.fulfill({ json: fixtures[body.command] });
+    else await route.continue();
+  });
+}
+
+async function expectNoPageOverflow(page: import("@playwright/test").Page) {
+  const widths = await page.evaluate(() => [document.documentElement, document.body,
+    document.querySelector(".shell")!, document.querySelector(".workspace")!,
+  ].map(element => ({ container: element.className || element.tagName,
+    width: element.clientWidth, scroll: element.scrollWidth })));
+  for (const { container, width, scroll } of widths) {
+    expect(scroll, `${container} at ${page.viewportSize()!.width}px on ${new URL(page.url()).pathname}`).toBeLessThanOrEqual(width + 1);
+  }
+}
+
+for (const language of ["zh", "zhtw", "en"]) {
+  test(`unlock horizontal scrolling stays inside result tables (${language})`, async ({ page }) => {
+    await mockWideLayoutData(page);
+    await page.addInitScript(value => localStorage.setItem("mihomo-server-language", value), language);
+    await page.goto(`${base}/unlock#token=${encodeURIComponent(token)}`);
+    const picker = page.locator("#unlock-node");
+    await expect(picker).toBeEnabled();
+    await page.locator(".unlock-run-all").click();
+    await expect(page.locator(".unlock-detail").first()).toContainText("long-result-detail");
+    await expect(page.locator(".unlock-run-all")).toBeEnabled();
+    for (const width of [1440, 1024, 800, 761, 760, 600, 390, 320]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await expectNoPageOverflow(page);
+      const select = await picker.boundingBox();
+      expect(select!.x).toBeGreaterThanOrEqual(0);
+      expect(select!.x + select!.width).toBeLessThanOrEqual(width);
+      if (width <= 800) {
+        const scroller = page.locator(".unlock-table-scroll").first();
+        expect(await scroller.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+        const sidebarBefore = await page.locator(".sidebar").boundingBox();
+        await scroller.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+        expect(await scroller.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+        await expect(scroller.getByRole("button")).toBeInViewport();
+        await page.evaluate(() => window.scrollTo(10000, window.scrollY));
+        expect(await page.evaluate(() => window.scrollX)).toBe(0);
+        expect((await page.locator(".sidebar").boundingBox())!.x).toBe(sidebarBefore!.x);
+        await scroller.evaluate(element => { element.scrollLeft = 0; });
+      }
+      if (language === "zh" && [800, 390].includes(width))
+        await page.screenshot({ path: `test-results/unlock-contained-${width}.png`, fullPage: true });
+    }
+  });
+}
+
+test("all management pages keep wide content inside the workspace", async ({ page }) => {
+  await mockWideLayoutData(page);
+  await page.goto(`${base}/#token=${encodeURIComponent(token)}`);
+  await expect(page.locator(".sidebar")).toBeVisible();
+  const links = page.locator("nav a");
+  for (const width of [1440, 800, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (let index = 0; index < await links.count(); index++) {
+      await links.nth(index).click();
+      await expect(links.nth(index)).toHaveAttribute("aria-current", "page");
+      await expect(page.locator(".muted", { hasText: /^(读取中|加载中)/ })).toHaveCount(0);
+      await page.locator("details").evaluateAll(nodes => nodes.forEach(node => (node as HTMLDetailsElement).open = true));
+      await expectNoPageOverflow(page);
+      if (width > 760 && new URL(page.url()).pathname === "/settings") {
+        await page.evaluate(() => window.scrollTo(0, 200));
+        expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+        expect((await page.locator(".sidebar").boundingBox())!.y).toBe(0);
+        expect((await page.locator(".page-header").boundingBox())!.y).toBe(0);
+        await page.evaluate(() => window.scrollTo(0, 0));
+      }
+    }
+  }
+});
+
 test("unlock tests go through one node and are cleared when it changes", async ({ page }) => {
   const api = (command: string, fields: Record<string, unknown> = {}) => fetch(`${base}/api/commands`, {
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
