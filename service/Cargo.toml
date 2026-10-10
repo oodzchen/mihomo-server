@@ -32,12 +32,6 @@ zip = { version = "=8.6.0", default-features = false }
 futures-util = "0.3"
 reqwest = { version = "0.13", features = ["json", "system-proxy"] }
 webpki-root-certs = "=1.0.9"
-# HTTP/3 for unlock checks: some services answer QUIC clients differently.
-quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
-h3 = "0.0.8"
-h3-quinn = "0.0.10"
-http = "1"
-bytes = "1"
 rustls = { version = "=0.23.45", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
 tokio = { workspace = true, features = ["process", "signal", "fs", "io-util"] }
 clap = { version = "4.6.5", default-features = false, features = ["std", "help", "usage", "error-context"] }

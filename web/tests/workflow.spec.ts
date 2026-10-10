@@ -1457,7 +1457,7 @@ async function mockWideLayoutData(page: import("@playwright/test").Page) {
       } },
       unlock_services: { exit: { node, via: ["GLOBAL", "long-group-name-".repeat(20)] }, services: [
         { id: "cloudflare", name: "Cloudflare", category: "location" },
-        { id: "netflix", name: "Netflix", category: "streaming" },
+        { id: "bilibili_tw", name: "Bilibili TW sample", category: "streaming" },
       ] },
       unlock_test: { id: body.id, verdict: "yes", region: "SG", ip: "2001:db8:1234:5678:abcd:ef01:2345:6789",
         note: null, detail: "long-result-detail-".repeat(100), error: null, elapsed: 120 },
@@ -1543,7 +1543,15 @@ test("unlock tests go through one node and are cleared when it changes", async (
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ command, ...fields }),
   });
-  // Earlier tests leave the configuration in direct mode, where everything exits DIRECT.
+  // A focused run has no profile yet; keep the established full-suite fixture otherwise.
+  if (!(await (await api("status")).json()).active_profile) {
+    const profile = await (await api("import_profile", {
+      name: "Unlock fixture",
+      yaml: "mixed-port: 0\ndns: {enable: false}\ntun: {enable: false}\nproxies: []\nproxy-groups:\n  - name: Main\n    type: select\n    proxies: [REJECT, DIRECT]\nrules: ['MATCH,Main']\n",
+    })).json();
+    expect((await api("select_profile", { uid: profile.uid })).ok).toBe(true);
+    expect((await api("start")).ok).toBe(true);
+  }
   const { runtime } = await (await api("settings")).json();
   expect((await api("set_settings", { runtime: { ...runtime, mode: "rule" } })).ok).toBe(true);
   await page.goto(`${base}/proxies`);
@@ -1552,14 +1560,19 @@ test("unlock tests go through one node and are cleared when it changes", async (
   await expect(page.getByRole("button", { name: "选择 Main / REJECT" })).toHaveAttribute("aria-pressed", "true");
   // The catalog and the current exit come from the service; the checks are stubbed.
   const tested: string[] = [];
+  let sampleFailure = false;
   await page.route("**/api/commands", async (route) => {
     const body = route.request().postDataJSON();
     if (body?.command === "unlock_test") {
       tested.push(body.node);
       const outcome = {
-        id: body.id, verdict: body.id === "netflix" ? "partial" : "yes", region: "JP",
-        note: body.id === "netflix" ? "originals_only" : null, ip: "203.0.113.7", detail: null, error: null, elapsed: 120,
+        id: body.id, verdict: "yes", region: "JP",
+        note: null, ip: "203.0.113.7", detail: null, error: null, elapsed: 120,
       };
+      if (body.id === "bing") Object.assign(outcome, { region: null, detail: "WW" });
+      if (body.id === "bilibili_hk_mo_tw") Object.assign(outcome, sampleFailure
+        ? { verdict: "error", region: null, ip: null, error: "sample fetch failed (HTTP 403)" }
+        : { verdict: "no", region: null, ip: null, note: "region_unsupported" });
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(outcome) });
     } else {
       await route.continue();
@@ -1571,11 +1584,19 @@ test("unlock tests go through one node and are cleared when it changes", async (
   await expect(picker.locator("option:checked")).toHaveText("当前出口：Main → REJECT");
   await expect(picker.locator("option")).toHaveText(["当前出口：Main → REJECT", "DIRECT"]);
   await expect(page.getByText("测试在独立的临时内核中进行")).toBeVisible();
-  const netflix = page.getByRole("row", { name: /Netflix/ });
-  await expect(netflix).toContainText("未测");
+  const sample = page.getByRole("row", { name: /Bilibili TW sample/ });
+  await expect(page.getByRole("heading", { name: "AI 服务" })).toHaveCount(0);
+  await expect(page.getByRole("row", { name: /ChatGPT|Claude|Netflix|Disney/ })).toHaveCount(0);
+  await expect(sample).toContainText("未测");
   await page.getByRole("button", { name: "全部测试" }).click();
-  await expect(netflix).toContainText("部分可用");
-  await expect(netflix).toContainText("仅限自制剧");
+  await expect(sample).toContainText("样片可访问");
+  const otherSample = page.getByRole("row", { name: /Bilibili HK\/MO\/TW sample/ });
+  await expect(otherSample).toContainText("该样片在当前地区不可观看");
+  await expect(page.locator(".unlock-panel").filter({ has: sample }).locator(".unlock-summary")).toHaveText("样片可访问 1 / 2");
+  await expect(page.getByRole("row", { name: /Steam/ })).toContainText("已检测");
+  await expect(page.getByRole("row", { name: /Microsoft Bing/ })).toContainText("已检测");
+  await expect(page.getByRole("row", { name: /Microsoft Bing/ })).not.toContainText("已定位");
+  await expect(page.locator(".unlock-panel").filter({ has: page.getByRole("row", { name: /Cloudflare/ }) }).locator(".unlock-summary")).toHaveText("已定位 7 / 8");
   await expect(page.getByRole("row", { name: /Cloudflare/ })).toContainText("203.0.113.7");
   await expect(page.getByRole("button", { name: "全部测试" })).toBeEnabled();
   expect(new Set(tested)).toEqual(new Set(["REJECT"]));
@@ -1584,7 +1605,7 @@ test("unlock tests go through one node and are cleared when it changes", async (
   await navigation.getByRole("link", { name: "代理", exact: true }).click();
   await expect(page.getByRole("button", { name: "选择 Main / REJECT" })).toHaveAttribute("aria-pressed", "true");
   await navigation.getByRole("link", { name: "解锁测试" }).click();
-  await expect(netflix).toContainText("部分可用");
+  await expect(sample).toContainText("样片可访问");
 
   // The current exit moves to another node: the results no longer apply.
   await navigation.getByRole("link", { name: "代理", exact: true }).click();
@@ -1592,7 +1613,7 @@ test("unlock tests go through one node and are cleared when it changes", async (
   await expect(page.getByRole("button", { name: "选择 Main / DIRECT" })).toHaveAttribute("aria-pressed", "true");
   await navigation.getByRole("link", { name: "解锁测试" }).click();
   await expect(picker.locator("option:checked")).toHaveText("当前出口：Main → DIRECT");
-  await expect(netflix).toContainText("未测");
+  await expect(sample).toContainText("未测");
   await expect(page.getByRole("row", { name: /Cloudflare/ })).not.toContainText("203.0.113.7");
 
   await navigation.getByRole("link", { name: "代理", exact: true }).click();
@@ -1601,18 +1622,22 @@ test("unlock tests go through one node and are cleared when it changes", async (
   await navigation.getByRole("link", { name: "解锁测试" }).click();
   await expect(picker.locator("option:checked")).toHaveText("当前出口：Main → REJECT");
   await page.getByRole("button", { name: "全部测试" }).click();
-  await expect(netflix).toContainText("部分可用");
+  await expect(sample).toContainText("样片可访问");
   await expect(page.getByRole("button", { name: "全部测试" })).toBeEnabled();
 
   // A node chosen on the page replaces the current exit for the tests.
   tested.length = 0;
+  sampleFailure = true;
   await picker.selectOption("DIRECT");
-  await expect(netflix).toContainText("未测");
+  await expect(sample).toContainText("未测");
   await page.getByRole("button", { name: "全部测试" }).click();
-  await expect(netflix).toContainText("部分可用");
+  await expect(sample).toContainText("样片可访问");
+  await expect(otherSample).toContainText("无法确认");
+  await expect(otherSample).not.toContainText("受限");
+  await expect(otherSample).not.toContainText("样片可访问");
   expect(new Set(tested)).toEqual(new Set(["DIRECT"]));
   await picker.selectOption("");
-  await expect(netflix).toContainText("未测");
+  await expect(sample).toContainText("未测");
 
   // The mode decides the current exit too.
   expect((await api("set_settings", { runtime: { ...runtime, mode: "direct" } })).ok).toBe(true);

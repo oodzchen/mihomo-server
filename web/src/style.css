@@ -1475,7 +1475,6 @@ dd {
 .unlock-name { font-weight: 500; color: #18181b; }
 .unlock-status { display: inline-block; min-width: 56px; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 500; text-align: center; border: 1px solid #e4e4e7; background: #f4f4f5; color: #71717a; }
 .unlock-yes { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
-.unlock-partial { background: #fffbeb; color: #b45309; border-color: #fde68a; }
 .unlock-no { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
 .unlock-error { background: #fafafa; color: #52525b; border-color: #d4d4d8; }
 .unlock-testing { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }

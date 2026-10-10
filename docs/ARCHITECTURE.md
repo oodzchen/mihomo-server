@@ -147,28 +147,47 @@ service starts, and reuses while tests continue, an isolated core with the same
 nodes, providers, resolvers and dialer options, bound to the default-route
 interface, in global mode with `GLOBAL` set to that node and a mixed listener
 on a random loopback port that requires a random password (loopback is shared
-with every local user). Checks are HTTP clients of that listener. Services that
-answer QUIC clients differently (DMM TV and Abema refuse over HTTP/3 what they
-accept over HTTP/2, and browsers switch to HTTP/3 after the first response
-advertises it) are also asked over HTTP/3: `service/src/http3.rs` carries QUIC through the
-same listener's authenticated SOCKS5 UDP relay, racing a few handshakes since
-some nodes lose many; a node without UDP falls back to the HTTP/2 answer, as a
-browser would. At most two
-such cores run at once; one unused for a minute is stopped and its directory
-removed. The catalog and the detection logic (IP location databases, Google's
-and other platforms' placement, streaming, AI and store checks) live in
+with every local user). Checks use ordinary HTTP clients of that listener;
+the specialized HTTP/3 transport and device-session probes have been removed.
+At most two such cores run at once; one unused for a minute is stopped and its
+directory removed. The catalog and the detection logic (IP location databases, Google's
+and other platforms' placement, sample media and store checks) live in
 `service/src/unlock.rs`. Each command runs one service's check under a
 whole-check timeout and returns a verdict, the region the service reports, a
 reason code and untranslated details. The page runs a bounded number at once
 and keeps the results across navigation until the node they were taken with
 changes: a different active subscription, committed revision, chosen node or,
 when following the current exit, node selection clears them and discards tests
-still in flight. A service is listed only when an anonymous request reaches the
-gate it applies to everyone: each check reads that gate's own answer (a refusal
-page or redirect, a playback or session API), never a region matched against a
-list of supported regions. Services that decide only after sign-in (Gemini, AI
-Studio) or whose anonymous pages look the same everywhere (Hulu, Paramount+,
-Peacock, TikTok, Copilot, Grok, Perplexity) are not tested.
+still in flight. Tests report only evidence available without signing in:
+
+- Cloudflare, Google, IPinfo, ip-api.com, IP.SB, ipwho.is, Apple and Bing report
+  their public location fields. These are location lookups, never evidence
+  that a different product (such as Gemini or ChatGPT) works. Database IPs
+  must parse as IP addresses; Google's arbitrary `gl=` links are not placement.
+- Steam reports only the currency its store returned, without inferring a
+  country, purchasing rights or game access.
+- Bilibili checks two named regional samples. A positive result requires an
+  anonymous non-preview stream URL and recognizable media bytes fetched from
+  that stream through the same node. Only the explicit region-refusal message
+  yields a negative result; account/member errors, empty success envelopes,
+  CDN refusals and unrecognized responses are inconclusive. A sample result
+  does not claim access to the entire catalog or an app.
+
+All public fact parsers require a successful HTTP response. Network failures,
+rate limits, generic 403s, challenges, oversized bodies and missing fields
+remain inconclusive, never "unlocked" or "region restricted". Findings require
+an explicit verdict; there is no implicit success fallback. The UI distinguishes
+located, detected currency, sample access and inconclusive outcomes, without
+inserting transient notices into the page flow.
+
+ChatGPT and Claude are removed: anonymous page/compliance requests cannot
+establish actual chat or mobile-app access. Netflix, Disney+, YouTube Premium,
+Prime Video, HBO Max, DAZN, BBC iPlayer, Spotify, DMM, DMM TV, Abema and Bahamut
+are also removed: their old checks relied on homepages, signup markets,
+anonymous sessions, incomplete login gates or complex device/protocol emulation
+rather than verified anonymous playback. Do not reintroduce a service without
+a simple anonymous check and fixtures for positive, explicit refusal and
+unknown/error responses. Services requiring user credentials are out of scope.
 
 ## Management and browser boundary
 

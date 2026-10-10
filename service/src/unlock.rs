@@ -1,5 +1,5 @@
 //! Region-restriction ("unlock") tests: where common overseas services and IP
-//! location databases place the proxy, and whether they serve it.
+//! location databases place the proxy, and whether anonymous sample media is reachable.
 //!
 //! Every request goes through one node, in an isolated core that has no rules
 //! and bypasses the running core's TUN and listeners (see `proxy_probe`), so the
@@ -7,21 +7,18 @@
 //! service to another group or DIRECT, nor the host's own proxying change them.
 //! Each check is one small, independent test; the page runs several at once.
 //!
-//! A check reads the answer of the gate the service itself applies (a refusal
-//! page or redirect, a playback or session API), as a browser would meet it,
-//! never a region matched against a list. Services whose gate an anonymous
-//! request cannot reach are not listed.
+//! Public location/currency lookups report only those facts. Playback checks
+//! require a usable anonymous sample stream; a homepage, login error or unknown
+//! response never proves access. Services requiring sign-in or complex device
+//! sessions are deliberately omitted.
 use anyhow::{Context as _, Result, bail, ensure};
-use bytes::Bytes;
 use mihomo_client::models::ClashMode;
 use reqwest::{Client, RequestBuilder, StatusCode, Url, header, redirect};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::future::Future;
 use std::time::{Duration, Instant};
 
 use crate::core_manager::{CoreManager, CorePhase};
-use crate::http3::{self, Relay};
 
 const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
@@ -31,9 +28,7 @@ const GOOGLE_CONSENT: &str =
 /// One request; a check makes at most a few, and is cut off as a whole after `CHECK_TIMEOUT`.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const CHECK_TIMEOUT: Duration = Duration::from_secs(25);
-/// One HTTP/3 request; a node that drops UDP never answers.
-const QUIC_TIMEOUT: Duration = Duration::from_secs(4);
-/// Pages are read up to this size; the markers checked are in the first part.
+/// Larger or truncated pages cannot establish a result.
 const BODY_LIMIT: usize = 4 << 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -42,7 +37,6 @@ pub enum Category {
     /// IP location databases and what large platforms think the location is.
     Location,
     Streaming,
-    Ai,
     Other,
 }
 
@@ -66,22 +60,8 @@ pub const SERVICES: &[Service] = &[
     service("ipwhois", "ipwho.is", Category::Location),
     service("apple", "Apple", Category::Location),
     service("bing", "Microsoft Bing", Category::Location),
-    service("netflix", "Netflix", Category::Streaming),
-    service("disney_plus", "Disney+", Category::Streaming),
-    service("youtube_premium", "YouTube Premium", Category::Streaming),
-    service("prime_video", "Amazon Prime Video", Category::Streaming),
-    service("hbo_max", "HBO Max", Category::Streaming),
-    service("dazn", "DAZN", Category::Streaming),
-    service("bbc_iplayer", "BBC iPlayer", Category::Streaming),
-    service("spotify", "Spotify", Category::Streaming),
-    service("dmm", "DMM", Category::Streaming),
-    service("dmm_tv", "DMM TV", Category::Streaming),
-    service("abema", "AbemaTV", Category::Streaming),
-    service("bahamut", "Bahamut Anime", Category::Streaming),
-    service("bilibili_hk_mo_tw", "Bilibili HK/MO/TW", Category::Streaming),
-    service("bilibili_tw", "Bilibili TW", Category::Streaming),
-    service("chatgpt", "ChatGPT", Category::Ai),
-    service("claude", "Claude", Category::Ai),
+    service("bilibili_hk_mo_tw", "Bilibili HK/MO/TW sample", Category::Streaming),
+    service("bilibili_tw", "Bilibili TW sample", Category::Streaming),
     service("steam", "Steam", Category::Other),
 ];
 
@@ -90,8 +70,6 @@ pub const SERVICES: &[Service] = &[
 pub enum Verdict {
     /// Served (for location services: answered).
     Yes,
-    /// Served with a limitation the note names.
-    Partial,
     No,
     /// The test itself failed: network error, timeout or unrecognized answer.
     Error,
@@ -101,25 +79,15 @@ pub enum Verdict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Note {
-    /// Netflix: only Netflix's own productions.
-    OriginalsOnly,
-    /// ChatGPT: the website works, the mobile app endpoint refuses the address.
-    AppBlocked,
-    /// The region the service sees is outside the regions it serves.
+    /// The sample's player explicitly reports a region restriction.
     RegionUnsupported,
-    /// Disney+: the region is known but not launched yet.
-    ComingSoon,
-    /// The service recognized a proxy, VPN or data-center address.
-    ProxyDetected,
     /// An IP database classifies the address as hosting/data center.
     Hosting,
-    /// The service's international edition, not the local one.
-    Overseas,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 struct Finding {
-    verdict: Option<Verdict>,
+    verdict: Verdict,
     /// ISO 3166-1 alpha-2 code of the region the service sees.
     region: Option<String>,
     note: Option<Note>,
@@ -139,10 +107,11 @@ impl Finding {
 
     fn of(verdict: Verdict, region: Option<String>, note: Option<Note>) -> Self {
         Self {
-            verdict: Some(verdict),
+            verdict,
             region,
             note,
-            ..Self::default()
+            ip: None,
+            detail: None,
         }
     }
 
@@ -180,7 +149,7 @@ pub async fn test(manager: &CoreManager, id: &str, node: Option<&str>) -> Result
         .with_context(|| format!("unknown service '{id}'"))?;
     let exit = resolve(manager, node).await?;
     let core = manager.test_exit(&exit.node).await?;
-    let http = Http::new(core.proxy.clone(), Some(core.relay.clone()))?;
+    let http = Http::new(core.proxy.clone())?;
     Ok(http.run(service).await)
 }
 
@@ -239,40 +208,28 @@ fn final_target(runtime: &serde_yaml_ng::Mapping, mode: ClashMode) -> String {
 struct Http {
     /// Follows redirects.
     follow: Client,
-    /// Returns redirects, for checks that read where a service sends visitors.
-    manual: Client,
-    /// The same exit's UDP relay, for HTTP/3.
-    relay: Option<Relay>,
 }
 
 struct Page {
     status: StatusCode,
     url: Url,
-    location: Option<String>,
-    cookies: Vec<String>,
     body: String,
 }
 
 impl Page {
-    fn json(&self) -> Result<Value> {
-        serde_json::from_str(&self.body)
-            .with_context(|| format!("unexpected response (HTTP {}, not JSON)", self.status.as_u16()))
+    fn served(&self) -> Result<()> {
+        ensure!(
+            self.status.is_success(),
+            "unexpected response (HTTP {})",
+            self.status.as_u16()
+        );
+        Ok(())
     }
 
-    /// The response's cookies as a request `Cookie` header; a cookie set
-    /// twice keeps its last value, as in a browser.
-    fn cookie_header(&self) -> String {
-        let mut cookies: Vec<(&str, &str)> = Vec::new();
-        for pair in self.cookies.iter().filter_map(|cookie| cookie.split(';').next()) {
-            let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
-            cookies.retain(|(existing, _)| *existing != name);
-            cookies.push((name, value));
-        }
-        cookies
-            .iter()
-            .map(|(name, value)| format!("{name}={value}"))
-            .collect::<Vec<_>>()
-            .join("; ")
+    fn json(&self) -> Result<Value> {
+        self.served()?;
+        serde_json::from_str(&self.body)
+            .with_context(|| format!("unexpected response (HTTP {}, not JSON)", self.status.as_u16()))
     }
 
     fn unexpected<T>(&self) -> Result<T> {
@@ -281,8 +238,8 @@ impl Page {
 }
 
 impl Http {
-    fn new(proxy: reqwest::Proxy, relay: Option<Relay>) -> Result<Self> {
-        let build = |policy| {
+    fn new(proxy: reqwest::Proxy) -> Result<Self> {
+        let build = || {
             let mut headers = header::HeaderMap::new();
             headers.insert(
                 header::ACCEPT_LANGUAGE,
@@ -292,7 +249,7 @@ impl Http {
                 .proxy(proxy.clone())
                 .user_agent(USER_AGENT)
                 .default_headers(headers)
-                .redirect(policy)
+                .redirect(redirect::Policy::limited(10))
                 // Google resets some large HTTP/2 responses to this client.
                 .http1_only()
                 .connect_timeout(Duration::from_secs(8))
@@ -300,11 +257,7 @@ impl Http {
                 .build()
                 .context("failed to build the test client")
         };
-        Ok(Self {
-            follow: build(redirect::Policy::limited(10))?,
-            manual: build(redirect::Policy::none())?,
-            relay,
-        })
+        Ok(Self { follow: build()? })
     }
 
     async fn run(&self, service: &Service) -> Outcome {
@@ -316,7 +269,7 @@ impl Http {
         match result {
             Ok(finding) => Outcome {
                 id: service.id,
-                verdict: finding.verdict.unwrap_or(Verdict::Yes),
+                verdict: finding.verdict,
                 region: finding.region,
                 note: finding.note,
                 ip: finding.ip,
@@ -345,91 +298,16 @@ impl Http {
         let mut response = request.send().await.map_err(request_error)?;
         let status = response.status();
         let url = response.url().clone();
-        let location = response
-            .headers()
-            .get(header::LOCATION)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
-        let cookies = response
-            .headers()
-            .get_all(header::SET_COOKIE)
-            .iter()
-            .filter_map(|value| value.to_str().ok().map(str::to_owned))
-            .collect();
         let mut body = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(request_error)? {
             body.extend_from_slice(&chunk);
-            if body.len() >= BODY_LIMIT {
-                break;
-            }
+            ensure!(body.len() <= BODY_LIMIT, "response body exceeds the test limit");
         }
         Ok(Page {
             status,
             url,
-            location,
-            cookies,
             body: String::from_utf8_lossy(&body).into_owned(),
         })
-    }
-
-    /// A JSON POST from a page on `origin`; over HTTP/3 when `quic`.
-    async fn post_json(&self, url: &str, origin: &'static str, body: &Value, quic: bool) -> Result<Value> {
-        if !quic {
-            return Self::send(self.follow.post(url).header(header::ORIGIN, origin).json(body))
-                .await?
-                .json();
-        }
-        let request = http::Request::post(url)
-            .header(header::CONTENT_TYPE, "application/json")
-            .header(header::ORIGIN, origin)
-            .body(serde_json::to_vec(body)?.into())?;
-        let response = self.quic(request).await?;
-        serde_json::from_slice(&response.body)
-            .with_context(|| format!("unexpected response (HTTP {}, not JSON)", response.status.as_u16()))
-    }
-
-    /// A GET's status and body; over HTTP/3 when `quic`.
-    async fn fetch(&self, url: &str, quic: bool) -> Result<(StatusCode, String)> {
-        if !quic {
-            let page = self.page(url).await?;
-            return Ok((page.status, page.body));
-        }
-        let response = self.quic(http::Request::get(url).body(Bytes::new())?).await?;
-        Ok((response.status, String::from_utf8_lossy(&response.body).into_owned()))
-    }
-
-    /// One request over HTTP/3 through the exit's UDP relay, with the
-    /// headers every check sends.
-    async fn quic(&self, mut request: http::Request<Bytes>) -> Result<http3::Response> {
-        let relay = self.relay.as_ref().context("no UDP relay to test HTTP/3 through")?;
-        let headers = request.headers_mut();
-        headers.insert(header::USER_AGENT, header::HeaderValue::from_static(USER_AGENT));
-        headers.insert(
-            header::ACCEPT_LANGUAGE,
-            header::HeaderValue::from_static("en-US,en;q=0.9"),
-        );
-        tokio::time::timeout(QUIC_TIMEOUT, http3::send(relay, request))
-            .await
-            .map_err(|_| anyhow::anyhow!("HTTP/3 request timed out"))?
-    }
-
-    /// A check as a browser ends up running it. Browsers move to HTTP/3 once a
-    /// response advertises it, and some services refuse over HTTP/3 what they
-    /// serve over TCP, so the HTTP/3 answer decides when the node carries
-    /// QUIC; without UDP through the node browsers stay on TCP.
-    async fn as_browser<F, Fut>(&self, check: F) -> Result<Finding>
-    where
-        F: Fn(bool) -> Fut,
-        Fut: Future<Output = Result<Finding>>,
-    {
-        if self.relay.is_some() {
-            // Some nodes lose about half the QUIC handshakes; the rest finish quickly.
-            let attempts = (0..4).map(|_| Box::pin(check(true)));
-            if let Ok((finding, _)) = futures_util::future::select_ok(attempts).await {
-                return Ok(finding);
-            }
-        }
-        check(false).await
     }
 
     async fn page(&self, url: &str) -> Result<Page> {
@@ -439,6 +317,7 @@ impl Http {
     /// A Cloudflare-fronted host's view of the client.
     async fn trace(&self, host: &str) -> Result<Trace> {
         let page = self.page(&format!("https://{host}/cdn-cgi/trace")).await?;
+        page.served()?;
         let field = |key: &str| {
             page.body
                 .lines()
@@ -446,7 +325,7 @@ impl Http {
                 .map(str::to_owned)
         };
         match (field("ip"), field("loc").and_then(|loc| country(&loc))) {
-            (Some(ip), Some(loc)) => Ok(Trace {
+            (Some(ip), Some(loc)) if ip.parse::<std::net::IpAddr>().is_ok() => Ok(Trace {
                 ip,
                 loc,
                 colo: field("colo"),
@@ -532,22 +411,8 @@ async fn check(http: &Http, id: &str) -> Result<Finding> {
         "ipwhois" => ipwhois(http).await,
         "apple" => apple(http).await,
         "bing" => bing(http).await,
-        "netflix" => netflix(http).await,
-        "disney_plus" => disney_plus(http).await,
-        "youtube_premium" => youtube_premium(http).await,
-        "prime_video" => prime_video(http).await,
-        "hbo_max" => hbo_max(http).await,
-        "dazn" => dazn(http).await,
-        "bbc_iplayer" => bbc_iplayer(http).await,
-        "spotify" => spotify(http).await,
-        "dmm" => dmm(http).await,
-        "dmm_tv" => dmm_tv(http).await,
-        "abema" => abema(http).await,
-        "bahamut" => bahamut(http).await,
         "bilibili_hk_mo_tw" => bilibili(http, 18281381, 29892777, 183799).await,
         "bilibili_tw" => bilibili(http, 50762638, 100279344, 268176).await,
-        "chatgpt" => chatgpt(http).await,
-        "claude" => claude(http).await,
         "steam" => steam(http).await,
         _ => bail!("unknown service '{id}'"),
     }
@@ -568,10 +433,13 @@ async fn google(http: &Http) -> Result<Finding> {
             .header(header::COOKIE, GOOGLE_CONSENT),
     )
     .await?;
-    let region = quoted_after(&page.body, "\"MgUcDb\":\"").and_then(country).or_else(|| {
-        let start = page.body.find("gl=")? + 3;
-        page.body.get(start..start + 2).and_then(country)
-    });
+    google_finding(&page)
+}
+
+fn google_finding(page: &Page) -> Result<Finding> {
+    page.served()?;
+    // An arbitrary gl= link can name any country; only Google's placement field counts.
+    let region = quoted_after(&page.body, "\"MgUcDb\":\"").and_then(country);
     match region {
         Some(region) => Ok(Finding::yes(Some(region))),
         None => page.unexpected(),
@@ -585,7 +453,7 @@ async fn ipinfo(http: &Http) -> Result<Finding> {
         .and_then(country)
         .context("no country in the answer")?;
     Ok(Finding {
-        ip: string(&data, "ip"),
+        ip: Some(reported_ip(&data, "ip")?),
         ..Finding::yes(Some(region)).detail(place(
             string(&data, "city"),
             string(&data, "region"),
@@ -606,9 +474,9 @@ async fn ip_api(http: &Http) -> Result<Finding> {
         .as_deref()
         .and_then(country)
         .context("no country in the answer")?;
-    let note = (data["hosting"] == true || data["proxy"] == true).then_some(Note::Hosting);
+    let note = (data["hosting"] == true).then_some(Note::Hosting);
     Ok(Finding {
-        ip: string(&data, "query"),
+        ip: Some(reported_ip(&data, "query")?),
         note,
         ..Finding::yes(Some(region)).detail(place(
             string(&data, "city"),
@@ -625,7 +493,7 @@ async fn ip_sb(http: &Http) -> Result<Finding> {
         .and_then(country)
         .context("no country in the answer")?;
     Ok(Finding {
-        ip: string(&data, "ip"),
+        ip: Some(reported_ip(&data, "ip")?),
         ..Finding::yes(Some(region)).detail(place(
             string(&data, "city"),
             string(&data, "region"),
@@ -636,7 +504,7 @@ async fn ip_sb(http: &Http) -> Result<Finding> {
 
 async fn ipwhois(http: &Http) -> Result<Finding> {
     let data = http.page("https://ipwho.is/").await?.json()?;
-    if data["success"] == false {
+    if data["success"] != true {
         bail!("{}", string(&data, "message").unwrap_or_else(|| "lookup failed".into()));
     }
     let region = string(&data, "country_code")
@@ -645,7 +513,7 @@ async fn ipwhois(http: &Http) -> Result<Finding> {
         .context("no country in the answer")?;
     let network = string(&data["connection"], "isp").or_else(|| string(&data["connection"], "org"));
     Ok(Finding {
-        ip: string(&data, "ip"),
+        ip: Some(reported_ip(&data, "ip")?),
         ..Finding::yes(Some(region)).detail(place(string(&data, "city"), string(&data, "region"), network))
     })
 }
@@ -661,6 +529,11 @@ async fn apple(http: &Http) -> Result<Finding> {
 
 async fn bing(http: &Http) -> Result<Finding> {
     let page = http.page("https://www.bing.com/").await?;
+    bing_finding(&page)
+}
+
+fn bing_finding(page: &Page) -> Result<Finding> {
+    page.served()?;
     // Mainland China is served from its own host.
     if page.url.host_str() == Some("cn.bing.com") {
         return Ok(Finding::yes(Some("CN".into())));
@@ -676,416 +549,98 @@ async fn bing(http: &Http) -> Result<Finding> {
     }
 }
 
-/// A licensed title tells full access from Netflix-originals-only.
-async fn netflix(http: &Http) -> Result<Finding> {
-    for title in ["81280792", "70143836"] {
-        let page = http.page(&format!("https://www.netflix.com/title/{title}")).await?;
-        match page.status {
-            StatusCode::OK => {
-                // Localized URLs name the country: /jp-en/title/…, /tw/title/….
-                let from_path = page
-                    .url
-                    .path_segments()
-                    .and_then(|mut segments| segments.next())
-                    .and_then(|segment| segment.split('-').next())
-                    .and_then(country);
-                let region = from_path.or_else(|| {
-                    quoted_after(&page.body, "\"requestCountry\":{\"id\":\"")
-                        .or_else(|| quoted_after(&page.body, "\"country\":\""))
-                        .and_then(country)
-                });
-                return Ok(Finding::yes(region));
-            }
-            StatusCode::NOT_FOUND => {}
-            StatusCode::FORBIDDEN => return Ok(Finding::no(None, None)),
-            _ => return page.unexpected(),
-        }
-    }
-    Ok(Finding::of(Verdict::Partial, None, Some(Note::OriginalsOnly)))
-}
-
-/// Disney's device-token exchange, then the session's location.
-async fn disney_plus(http: &Http) -> Result<Finding> {
-    const KEY: &str = "ZGlzbmV5JmJyb3dzZXImMS4wLjA.Cu56AgSfBTDag5NiRA81oLHkDZfu5L3CKadnefEAY84";
-    let api = "https://disney.api.edge.bamgrid.com";
-    let device = Http::send(
-        http.follow
-            .post(format!("{api}/devices"))
-            .bearer_auth(KEY)
-            .json(&json!({"deviceFamily": "browser", "applicationRuntime": "chrome", "deviceProfile": "windows", "attributes": {}})),
-    )
-    .await?;
-    if device.status == StatusCode::FORBIDDEN {
-        return Ok(Finding::no(None, None));
-    }
-    let assertion = string(&device.json()?, "assertion").context("no device assertion")?;
-    let form = url::form_urlencoded::Serializer::new(String::new())
-        .extend_pairs([
-            ("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange"),
-            ("latitude", "0"),
-            ("longitude", "0"),
-            ("platform", "browser"),
-            ("subject_token", assertion.as_str()),
-            ("subject_token_type", "urn:bamtech:params:oauth:token-type:device"),
-        ])
-        .finish();
-    let token = Http::send(
-        http.follow
-            .post(format!("{api}/token"))
-            .bearer_auth(KEY)
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(form),
-    )
-    .await?;
-    if token.body.contains("forbidden-location") {
-        return Ok(Finding::no(None, Some(Note::ProxyDetected)));
-    }
-    if token.status == StatusCode::FORBIDDEN {
-        return Ok(Finding::no(None, None));
-    }
-    let refresh = string(&token.json()?, "refresh_token").context("no refresh token")?;
-    let query = "mutation refreshToken($input: RefreshTokenInput!) { refreshToken(refreshToken: $input) { activeSession { sessionId } } }";
-    let session = Http::send(
-        http.follow
-            .post(format!("{api}/graph/v1/device/graphql"))
-            .header(header::AUTHORIZATION, KEY)
-            .json(&json!({"query": query, "variables": {"input": {"refreshToken": refresh}}})),
-    )
-    .await?
-    .json()?;
-    let session = &session["extensions"]["sdk"]["session"];
-    let region = string(&session["location"], "countryCode").as_deref().and_then(country);
-    let supported = session["inSupportedLocation"].as_bool();
-    let preview = http.page("https://www.disneyplus.com/").await?;
-    if preview.url.path().contains("unavailable") {
-        return Ok(Finding::no(region, Some(Note::RegionUnsupported)));
-    }
-    match supported {
-        Some(true) => Ok(Finding::yes(region)),
-        // Japan's Disney+ runs on a partner platform and reports false.
-        Some(false) if region.as_deref() == Some("JP") => Ok(Finding::yes(region)),
-        Some(false) => Ok(Finding::of(Verdict::Partial, region, Some(Note::ComingSoon))),
-        None => bail!("unexpected response (no session location)"),
-    }
-}
-
-async fn youtube_premium(http: &Http) -> Result<Finding> {
-    let page = Http::send(
-        http.get("https://www.youtube.com/premium")
-            .header(header::COOKIE, GOOGLE_CONSENT),
-    )
-    .await?;
-    let region = quoted_after(&page.body, "\"INNERTUBE_CONTEXT_GL\":\"")
-        .or_else(|| quoted_after(&page.body, "\"countryCode\":\""))
-        .and_then(country);
-    if page.body.contains("Premium is not available in your country") || region.as_deref() == Some("CN") {
-        return Ok(Finding::no(region, Some(Note::RegionUnsupported)));
-    }
-    match region {
-        Some(region) if page.status.is_success() => Ok(Finding::yes(Some(region))),
-        _ => page.unexpected(),
-    }
-}
-
-async fn prime_video(http: &Http) -> Result<Finding> {
-    let page = http.page("https://www.primevideo.com/").await?;
-    if page.url.path().contains("servicerestricted") || page.body.contains("isServiceRestricted\":true") {
-        return Ok(Finding::no(None, Some(Note::RegionUnsupported)));
-    }
-    match quoted_after(&page.body, "\"currentTerritory\":\"").and_then(country) {
-        Some(region) => Ok(Finding::yes(Some(region))),
-        None if page.status.is_success() => Ok(Finding::no(None, None)),
-        None => page.unexpected(),
-    }
-}
-
-/// An anonymous session's home market, then the territory it was placed in.
-async fn hbo_max(http: &Http) -> Result<Finding> {
-    let headers = |request: RequestBuilder| {
-        request
-            .header(
-                "x-device-info",
-                "beam/5.0.0 (desktop/desktop; Windows/10; afbb9b4d-5bd5-4a3e-a4ee-d5fc95e78c1c/da0cdd94-5a39-42ef-aa68-54cbc1b852c3)",
-            )
-            .header("x-disco-client", "WEB:10:beam:5.2.1")
-            .header("x-disco-params", "realm=bolt,bid=beam,features=ar")
-    };
-    let mut device = [0u8; 16];
-    getrandom::fill(&mut device).context("generate a device id")?;
-    let device: String = device.iter().map(|byte| format!("{byte:02x}")).collect();
-    let token = Http::send(headers(http.get(&format!(
-        "https://default.any-any.prd.api.hbomax.com/token?realm=bolt&deviceId={device}"
-    ))))
-    .await?;
-    if !token.status.is_success() {
-        return token.unexpected();
-    }
-    let cookie = token.cookie_header();
-    let bootstrap = Http::send(
-        headers(
-            http.follow
-                .post("https://default.any-any.prd.api.hbomax.com/session-context/headwaiter/v1/bootstrap"),
-        )
-        .header(header::COOKIE, &cookie),
-    )
-    .await?
-    .json()?;
-    let routing = &bootstrap["routing"];
-    let (Some(tenant), Some(market)) = (string(routing, "tenant"), string(routing, "homeMarket")) else {
-        return Ok(Finding::no(None, Some(Note::RegionUnsupported)));
-    };
-    let me = Http::send(
-        headers(http.get(&format!(
-            "https://default.{tenant}-{market}.prd.api.hbomax.com/users/me"
-        )))
-        .header(header::COOKIE, &cookie),
-    )
-    .await?;
-    let region = quoted_after(&me.body.replace(' ', ""), "\"currentLocationTerritory\":\"").and_then(country);
-    let Some(region) = region else {
-        return me.unexpected();
-    };
-    // The site links every market it serves: /us/en, /tw/zh, ….
-    let site = http.page("https://www.hbomax.com/").await?;
-    let served = site
-        .body
-        .contains(&format!("\"url\":\"/{}/", region.to_ascii_lowercase()));
-    Ok(if served || !site.body.contains("\"url\":\"/us/") {
-        Finding::yes(Some(region))
-    } else {
-        Finding::no(Some(region), Some(Note::RegionUnsupported))
-    })
-}
-
-async fn dazn(http: &Http) -> Result<Finding> {
-    let page = Http::send(
-        http.follow
-            .post("https://startup.core.indazn.com/misl/v5/Startup")
-            .json(&json!({
-                "LandingPageKey": "generic", "languages": "en-US,en", "Platform": "web",
-                "PlatformAttributes": {}, "Manufacturer": "", "PromoCode": "", "Version": "2"
-            })),
-    )
-    .await?;
-    if page.status == StatusCode::FORBIDDEN {
-        return Ok(Finding::no(None, Some(Note::ProxyDetected)));
-    }
-    let data = page.json()?;
-    let region = &data["Region"];
-    let country = string(region, "GeolocatedCountry").as_deref().and_then(country);
-    match region["isAllowed"].as_bool() {
-        Some(true) => Ok(Finding::yes(country)),
-        Some(false) => Ok(Finding::no(country, Some(Note::RegionUnsupported))),
-        None => page.unexpected(),
-    }
-}
-
-async fn bbc_iplayer(http: &Http) -> Result<Finding> {
-    let page = http
-        .page("https://open.live.bbc.co.uk/mediaselector/6/select/version/2.0/mediaset/pc/vpid/bbc_one_london/format/json/jsfunc/JS_callbacks0")
-        .await?;
-    if page.body.contains("\"result\":\"geolocation\"") {
-        Ok(Finding::no(None, Some(Note::RegionUnsupported)))
-    } else if page.body.contains("\"connection\"") {
-        Ok(Finding::yes(Some("GB".into())))
-    } else {
-        page.unexpected()
-    }
-}
-
-/// Spotify sends visitors to their market's pages: /jp/signup/, /hk-zh/signup/.
-async fn spotify(http: &Http) -> Result<Finding> {
-    let page = Http::send(http.manual.get("https://www.spotify.com/signup")).await?;
-    let location = page.location.as_deref().unwrap_or_default();
-    if location.contains("why-not-available") {
-        return Ok(Finding::no(None, Some(Note::RegionUnsupported)));
-    }
-    let path = page
-        .url
-        .join(location)
-        .map(|url| url.path().to_owned())
-        .unwrap_or_default();
-    let segment = path.trim_matches('/').split('/').next().unwrap_or_default();
-    match segment.split('-').next().and_then(country) {
-        Some(region) => Ok(Finding::yes(Some(region))),
-        None => page.unexpected(),
-    }
-}
-
-/// Visitors from abroad get DMM's international (English) edition. DMM does not
-/// say which region it placed the address in, so none is reported.
-async fn dmm(http: &Http) -> Result<Finding> {
-    let page = http.page("https://www.dmm.co.jp/top/").await?;
-    if !page.status.is_success() {
-        return page.unexpected();
-    }
-    if page.url.path().starts_with("/en/") || page.body.contains("not-available-in-your-region") {
-        Ok(Finding::no(None, Some(Note::Overseas)))
-    } else {
-        Ok(Finding::yes(None))
-    }
-}
-
-/// DMM TV gates twice: the site sends visitors whose address it calls foreign
-/// to its "not available in your region" page, and the player refuses them.
-/// Neither tells the region, so none is reported. DMM accepts over HTTP/2
-/// addresses it refuses over HTTP/3: the first visit works, a reload does not.
-async fn dmm_tv(http: &Http) -> Result<Finding> {
-    http.as_browser(|quic| dmm_tv_over(http, quic)).await
-}
-
-async fn dmm_tv_over(http: &Http, quic: bool) -> Result<Finding> {
-    const ORIGIN: &str = "https://tv.dmm.com";
-    // The query the site runs on every page before it redirects.
-    let client = http
-        .post_json(
-            "https://api.tv.dmm.com/graphql",
-            ORIGIN,
-            &json!({
-                "operationName": "FetchClient", "variables": {},
-                "query": "query FetchClient { client { isForeignAccess } }"
-            }),
-            quic,
-        )
-        .await?;
-    match client["data"]["client"]["isForeignAccess"].as_bool() {
-        Some(true) => return Ok(Finding::no(None, Some(Note::RegionUnsupported))),
-        Some(false) => {}
-        None => bail!("unexpected response (no isForeignAccess)"),
-    }
-    let data = http
-        .post_json(
-            "https://api.beacon.dmm.com/v1/streaming/start",
-            ORIGIN,
-            &json!({
-                "player_name": "dmmtv_browser", "player_version": "0.0.0", "content_type_detail": "VOD_SVOD",
-                "content_id": "11uvjcm4fw2wdu7drtd1epnvz", "purchase_product_id": null
-            }),
-            quic,
-        )
-        .await?;
-    match data["block_status"].as_str() {
-        // Not logged in, but past the region check.
-        Some("UNAUTHORIZED") => Ok(Finding::yes(None)),
-        Some("FOREIGN") => Ok(Finding::no(None, Some(Note::RegionUnsupported))),
-        Some(_) => Ok(Finding::no(None, Some(Note::ProxyDetected))),
-        None => bail!("unexpected response"),
-    }
-}
-
-/// Abema places addresses over HTTP/2 that it calls anonymous over HTTP/3.
-async fn abema(http: &Http) -> Result<Finding> {
-    http.as_browser(|quic| abema_over(http, quic)).await
-}
-
-async fn abema_over(http: &Http, quic: bool) -> Result<Finding> {
-    let (status, body) = http
-        .fetch("https://api.abema.io/v1/ip/check?device=android", quic)
-        .await?;
-    if body.contains("anonymous_ip") {
-        return Ok(Finding::no(None, Some(Note::ProxyDetected)));
-    }
-    if body.contains("blocked_location") {
-        return Ok(Finding::no(None, Some(Note::RegionUnsupported)));
-    }
-    let data: Value = serde_json::from_str(&body)
-        .with_context(|| format!("unexpected response (HTTP {}, not JSON)", status.as_u16()))?;
-    match string(&data, "isoCountryCode").as_deref().and_then(country) {
-        Some(region) if region == "JP" => Ok(Finding::yes(Some(region))),
-        // Abroad only the free international lineup is offered.
-        Some(region) => Ok(Finding::of(Verdict::Partial, Some(region), Some(Note::Overseas))),
-        None => bail!("unexpected response (HTTP {}, no region)", status.as_u16()),
-    }
-}
-
-/// Bahamut's player token for a device registered from this address.
-async fn bahamut(http: &Http) -> Result<Finding> {
-    let device = http.page("https://ani.gamer.com.tw/ajax/getdeviceid.php").await?;
-    if device.status == StatusCode::FORBIDDEN {
-        return Ok(Finding::no(None, Some(Note::ProxyDetected)));
-    }
-    let cookie = device.cookie_header();
-    let id = string(&device.json()?, "deviceid").context("no device id")?;
-    let token = Http::send(
-        http.get(&format!(
-            "https://ani.gamer.com.tw/ajax/token.php?adID=89422&sn=37783&device={id}"
-        ))
-        .header(header::COOKIE, &cookie),
-    )
-    .await?;
-    if !token.body.contains("animeSn") {
-        return Ok(Finding::no(None, Some(Note::RegionUnsupported)));
-    }
-    let home = Http::send(http.get("https://ani.gamer.com.tw/").header(header::COOKIE, &cookie)).await?;
-    Ok(Finding::yes(quoted_after(&home.body, "data-geo=\"").and_then(country)))
-}
-
-/// A title limited to the regions the endpoint stands for.
+/// Anonymous playback of one sample, including a small fetch from its CDN.
+/// This does not establish access to the whole catalog or to paid content.
 async fn bilibili(http: &Http, avid: u64, cid: u64, episode: u64) -> Result<Finding> {
     let data = http
         .page(&format!(
-            "https://api.bilibili.com/pgc/player/web/playurl?avid={avid}&cid={cid}&qn=0&type=&otype=json&ep_id={episode}&fourk=1&fnver=0&fnval=16&module=bangumi"
+            "https://api.bilibili.com/pgc/player/web/playurl?avid={avid}&cid={cid}&qn=16&otype=json&ep_id={episode}&fnval=0&module=bangumi"
         ))
         .await?
         .json()?;
+    let Some(url) = bilibili_sample(&data)? else {
+        return Ok(Finding::no(None, Some(Note::RegionUnsupported)));
+    };
+    sample_media(http, &url).await?;
+    Ok(Finding::yes(None).detail(Some(format!("ep{episode}"))))
+}
+
+async fn sample_media(http: &Http, url: &Url) -> Result<()> {
+    let mut response = http
+        .get(url.as_str())
+        .header(header::REFERER, "https://www.bilibili.com/")
+        .header(header::RANGE, "bytes=0-1023")
+        .send()
+        .await
+        .map_err(request_error)?;
+    ensure!(
+        response.status().is_success(),
+        "sample fetch failed (HTTP {})",
+        response.status().as_u16()
+    );
+    let mut prefix = Vec::new();
+    while prefix.len() < 32 {
+        let Some(chunk) = response.chunk().await.map_err(request_error)? else {
+            break;
+        };
+        prefix.extend_from_slice(&chunk[..chunk.len().min(32 - prefix.len())]);
+    }
+    ensure!(is_media(&prefix), "sample did not return recognizable media");
+    Ok(())
+}
+
+fn bilibili_sample(data: &Value) -> Result<Option<Url>> {
     match data["code"].as_i64() {
-        Some(0) => Ok(Finding::yes(None)),
-        Some(-10403) => Ok(Finding::no(None, Some(Note::RegionUnsupported))),
+        Some(0) => {
+            // A success envelope without a stream, or an account/member gate,
+            // proves nothing. Never promote it to "unlocked".
+            let result = &data["result"];
+            let preview = &result["is_preview"];
+            ensure!(
+                preview.is_null() || preview == false || preview == 0,
+                "sample is a preview or its access format is unrecognized"
+            );
+            let stream = result["durl"]
+                .as_array()
+                .and_then(|streams| streams.first())
+                .context("no anonymous sample stream")?;
+            let url = string(stream, "url").context("no anonymous sample URL")?;
+            let url = Url::parse(&url).context("invalid sample URL")?;
+            ensure!(matches!(url.scheme(), "http" | "https"), "invalid sample URL scheme");
+            Ok(Some(url))
+        }
+        Some(-10403) if string(data, "message").is_some_and(|message| message.contains("地区不可观看")) => {
+            Ok(None)
+        }
         _ => bail!(
             "unexpected response ({})",
-            string(&data, "message").unwrap_or_else(|| data["code"].to_string())
+            string(data, "message").unwrap_or_else(|| data["code"].to_string())
         ),
     }
 }
 
-/// Where OpenAI places the address, and whether its app endpoint refuses it.
-async fn chatgpt(http: &Http) -> Result<Finding> {
-    let trace = http.trace("chatgpt.com").await?;
-    let compliance = Http::send(
-        http.get("https://api.openai.com/compliance/cookie_requirements")
-            .header(header::AUTHORIZATION, "Bearer null"),
-    )
-    .await?;
-    let mut finding = if compliance.body.contains("unsupported_country") {
-        Finding::no(Some(trace.loc), Some(Note::RegionUnsupported))
-    } else {
-        Finding::yes(Some(trace.loc))
-    };
-    if finding.verdict == Some(Verdict::Yes) {
-        let app = http.page("https://ios.chat.openai.com/").await?;
-        if app.status == StatusCode::FORBIDDEN && (app.body.contains("cf_details") || app.body.contains("VPN")) {
-            finding = Finding::of(Verdict::Partial, finding.region, Some(Note::AppBlocked));
-        }
-    }
-    Ok(Finding {
-        ip: Some(trace.ip),
-        ..finding
-    })
+fn is_media(prefix: &[u8]) -> bool {
+    prefix.starts_with(b"FLV") || prefix.get(4..8) == Some(b"ftyp") || prefix.starts_with(&[0x1a, 0x45, 0xdf, 0xa3])
 }
 
-async fn claude(http: &Http) -> Result<Finding> {
-    let trace = http.trace("claude.ai").await?;
-    let page = Http::send(http.manual.get("https://claude.ai/")).await?;
-    let finding = if page
-        .location
-        .as_deref()
-        .is_some_and(|location| location.contains("unavailable-in-region"))
-    {
-        Finding::no(Some(trace.loc), Some(Note::RegionUnsupported))
-    } else {
-        Finding::yes(Some(trace.loc))
-    };
-    Ok(Finding {
-        ip: Some(trace.ip),
-        ..finding
-    })
+fn reported_ip(data: &Value, key: &str) -> Result<String> {
+    let ip = string(data, key).context("no IP in the answer")?;
+    ip.parse::<std::net::IpAddr>().context("invalid IP in the answer")?;
+    Ok(ip)
 }
 
-/// The store currency shows the region Steam prices for.
+/// The store's returned currency; it does not uniquely identify a country.
 async fn steam(http: &Http) -> Result<Finding> {
     let page = http.page("https://store.steampowered.com/app/761830").await?;
+    steam_finding(&page)
+}
+
+fn steam_finding(page: &Page) -> Result<Finding> {
+    page.served()?;
     match quoted_after(&page.body, "\"priceCurrency\" content=\"") {
-        Some(currency) if !currency.is_empty() => Ok(Finding::yes(None).detail(Some(currency.to_owned()))),
+        Some(currency) if currency.len() == 3 && currency.bytes().all(|byte| byte.is_ascii_uppercase()) => {
+            Ok(Finding::yes(None).detail(Some(currency.to_owned())))
+        }
         _ => page.unexpected(),
     }
 }
@@ -1094,8 +649,16 @@ async fn steam(http: &Http) -> Result<Finding> {
 mod tests {
     use super::*;
 
+    fn page(status: StatusCode, url: &str, body: &str) -> Page {
+        Page {
+            status,
+            url: Url::parse(url).unwrap(),
+            body: body.into(),
+        }
+    }
+
     #[test]
-    fn catalog_ids_are_unique_and_dispatched() {
+    fn catalog_ids_are_unique() {
         let mut ids: Vec<_> = SERVICES.iter().map(|service| service.id).collect();
         ids.sort_unstable();
         ids.dedup();
@@ -1126,26 +689,163 @@ mod tests {
         let page = Page {
             status: StatusCode::OK,
             url: Url::parse("https://example.com/").unwrap(),
-            location: None,
-            cookies: vec!["a=1; path=/".into(), "b=2".into(), "a=3; Max-Age=60".into()],
             body: String::new(),
         };
-        assert_eq!(page.cookie_header(), "b=2; a=3");
+        assert!(page.json().is_err());
+    }
+
+    #[test]
+    fn unknown_and_blocked_responses_never_prove_public_facts() {
+        let body = r#"{"country":"JP","ip":"203.0.113.7"}"#;
+        for status in [
+            StatusCode::FORBIDDEN,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::BAD_GATEWAY,
+        ] {
+            assert!(page(status, "https://ipinfo.io/json", body).json().is_err());
+            assert!(google_finding(&page(status, "https://www.google.com/", r#""MgUcDb":"JP""#)).is_err());
+            assert!(bing_finding(&page(status, "https://cn.bing.com/", r#"Region:"CN""#)).is_err());
+            assert!(
+                steam_finding(&page(
+                    status,
+                    "https://store.steampowered.com/",
+                    r#""priceCurrency" content="USD""#
+                ))
+                .is_err()
+            );
+        }
+        for body in ["", "Just a moment...", r#"<a href="/?gl=JP">Japan</a>"#] {
+            assert!(google_finding(&page(StatusCode::OK, "https://www.google.com/", body)).is_err());
+        }
+        assert_eq!(
+            google_finding(&page(StatusCode::OK, "https://www.google.com/", r#""MgUcDb":"TW""#))
+                .unwrap()
+                .region
+                .as_deref(),
+            Some("TW")
+        );
+        assert!(reported_ip(&json!({"ip":"not an address"}), "ip").is_err());
+        assert!(reported_ip(&json!({}), "ip").is_err());
+        assert_eq!(reported_ip(&json!({"ip":"2001:db8::1"}), "ip").unwrap(), "2001:db8::1");
+    }
+
+    #[test]
+    fn bilibili_needs_an_anonymous_stream_and_an_explicit_region_refusal() {
+        let success = json!({"code":0,"result":{"durl":[{"url":"https://media.example/sample.mp4"}]}});
+        assert!(bilibili_sample(&success).unwrap().is_some());
+        assert!(
+            bilibili_sample(&json!({"code":-10403,"message":"抱歉您所在地区不可观看！"}))
+                .unwrap()
+                .is_none()
+        );
+        for response in [
+            json!({"code":0}),
+            json!({"code":0,"result":{"durl":[]}}),
+            json!({"code":0,"result":{"is_preview":true,"durl":[{"url":"https://media.example/preview"}]}}),
+            json!({"code":0,"result":{"is_preview":1,"durl":[{"url":"https://media.example/preview"}]}}),
+            json!({"code":0,"result":{"is_preview":"true","durl":[{"url":"https://media.example/preview"}]}}),
+            json!({"code":0,"result":{"durl":[{"url":"file:///tmp/video"}]}}),
+            json!({"code":-10403,"message":"请先登录"}),
+            json!({"code":-10403,"message":"大会员专享"}),
+            json!({"code":-412,"message":"请求被拦截"}),
+        ] {
+            assert!(bilibili_sample(&response).is_err(), "{response}");
+        }
+    }
+
+    #[test]
+    fn sample_requires_media_bytes_and_store_requires_a_currency() {
+        for bytes in [
+            &b"\0\0\0\x20ftypisom"[..],
+            &b"FLV\x01\x05"[..],
+            &[0x1a, 0x45, 0xdf, 0xa3][..],
+        ] {
+            assert!(is_media(bytes));
+        }
+        for body in ["", "<html>Login required</html>", "Just a moment...", r#"{"code":0}"#] {
+            assert!(!is_media(body.as_bytes()));
+            assert!(steam_finding(&page(StatusCode::OK, "https://store.steampowered.com/", body)).is_err());
+        }
+        let store = steam_finding(&page(
+            StatusCode::OK,
+            "https://store.steampowered.com/",
+            r#""priceCurrency" content="USD""#,
+        ))
+        .unwrap();
+        assert_eq!(store.detail.as_deref(), Some("USD"));
+        assert_eq!(store.region, None);
+    }
+
+    #[tokio::test]
+    async fn sample_fetch_rejects_cdn_blocks_and_successful_login_pages() {
+        use axum::{Router, extract::Path, routing::get};
+        async fn media(Path(kind): Path<String>, headers: header::HeaderMap) -> (StatusCode, &'static [u8]) {
+            assert_eq!(headers.get(header::RANGE).unwrap(), "bytes=0-1023");
+            assert_eq!(headers.get(header::REFERER).unwrap(), "https://www.bilibili.com/");
+            assert!(!headers.contains_key(header::AUTHORIZATION));
+            assert!(!headers.contains_key(header::COOKIE));
+            match kind.as_str() {
+                "media" => (StatusCode::PARTIAL_CONTENT, b"\0\0\0\x20ftypisom"),
+                "blocked" => (StatusCode::FORBIDDEN, b"\0\0\0\x20ftypisom"),
+                "login" => (StatusCode::OK, b"<html>Please log in</html>"),
+                _ => (StatusCode::OK, b""),
+            }
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, Router::new().route("/{kind}", get(media)))
+                .await
+                .unwrap();
+        });
+        let http = Http {
+            follow: Client::builder().no_proxy().build().unwrap(),
+        };
+        for kind in ["media", "blocked", "login", "empty"] {
+            let url = Url::parse(&format!("http://{address}/{kind}")).unwrap();
+            assert_eq!(sample_media(&http, &url).await.is_ok(), kind == "media", "{kind}");
+        }
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn removed_checks_are_rejected() {
+        let http = Http::new(reqwest::Proxy::all("http://127.0.0.1:1").unwrap()).unwrap();
+        for id in [
+            "chatgpt",
+            "claude",
+            "netflix",
+            "disney_plus",
+            "youtube_premium",
+            "prime_video",
+            "hbo_max",
+            "dazn",
+            "bbc_iplayer",
+            "spotify",
+            "dmm",
+            "dmm_tv",
+            "abema",
+            "bahamut",
+        ] {
+            assert!(!SERVICES.iter().any(|service| service.id == id));
+            assert!(
+                check(&http, id)
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .starts_with("unknown service")
+            );
+        }
     }
 
     /// Runs every check through `MIHOMO_TEST_UNLOCK_PROXY` (an HTTP proxy URL),
-    /// HTTP/3 through `MIHOMO_TEST_UNLOCK_SOCKS` (a SOCKS5 `host:port` without
-    /// login) when set, and prints the outcomes.
+    /// and prints the outcomes. No sign-in credentials are used.
     #[tokio::test]
     #[ignore = "needs network access through MIHOMO_TEST_UNLOCK_PROXY"]
     async fn live_checks_through_a_proxy() {
         let proxy = std::env::var("MIHOMO_TEST_UNLOCK_PROXY").expect("MIHOMO_TEST_UNLOCK_PROXY");
         let only = std::env::var("MIHOMO_TEST_UNLOCK_ONLY").ok();
-        let relay = std::env::var("MIHOMO_TEST_UNLOCK_SOCKS").ok().map(|address| Relay {
-            address: address.parse().expect("MIHOMO_TEST_UNLOCK_SOCKS"),
-            credentials: None,
-        });
-        let http = Http::new(reqwest::Proxy::all(proxy).unwrap(), relay).unwrap();
+        let http = Http::new(reqwest::Proxy::all(proxy).unwrap()).unwrap();
         let services = SERVICES.iter().filter(|service| {
             only.as_deref()
                 .is_none_or(|only| only.split(',').any(|id| id == service.id))

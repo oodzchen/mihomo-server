@@ -7,7 +7,6 @@
 //! nodes, DNS and dialer options into a fresh, listener-less process, so the
 //! first HTTPS request through each node is genuinely cold; the following
 //! requests show what every further new connection costs.
-use crate::http3::Relay;
 use anyhow::{Context as _, Result, bail, ensure};
 use futures_util::{StreamExt as _, stream};
 use headless_core::config::dns::is_own_listener;
@@ -183,15 +182,7 @@ impl Prober {
             for _ in 0..30 {
                 if tokio::net::TcpStream::connect(address).await.is_ok() {
                     let proxy = reqwest::Proxy::all(format!("http://{address}"))?.basic_auth(EXIT_USER, &password);
-                    let relay = Relay {
-                        address,
-                        credentials: Some((EXIT_USER.into(), password)),
-                    };
-                    return Ok(Exit {
-                        proxy,
-                        relay,
-                        _core: core,
-                    });
+                    return Ok(Exit { proxy, _core: core });
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
@@ -223,8 +214,6 @@ struct CachedExit {
 pub struct Exit {
     /// The listener as an authenticated HTTP proxy.
     pub proxy: reqwest::Proxy,
-    /// The same listener's SOCKS5 UDP relay, for QUIC.
-    pub relay: Relay,
     _core: IsolatedCore,
 }
 

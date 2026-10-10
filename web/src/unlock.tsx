@@ -5,12 +5,10 @@ import { t, type Language, type MessageKey } from "./i18n";
 import { useToast } from "./toast";
 import type { CoreStatus, Profiles, Proxies } from "./types";
 
-type Category = "location" | "streaming" | "ai" | "other";
+type Category = "location" | "streaming" | "other";
 type UnlockService = { id: string; name: string; category: Category };
-type Verdict = "yes" | "partial" | "no" | "error";
-type Note =
-  | "originals_only" | "app_blocked" | "region_unsupported" | "coming_soon"
-  | "proxy_detected" | "hosting" | "overseas";
+type Verdict = "yes" | "no" | "error";
+type Note = "region_unsupported" | "hosting";
 type Outcome = {
   id: string;
   verdict: Verdict;
@@ -33,18 +31,12 @@ const NOT_NODES = new Set([
 const categories: [Category, MessageKey, MessageKey][] = [
   ["location", "unlockLocationTitle", "unlockLocationHelp"],
   ["streaming", "unlockStreamingTitle", "unlockStreamingHelp"],
-  ["ai", "unlockAiTitle", "unlockAiHelp"],
   ["other", "unlockOtherTitle", "unlockOtherHelp"],
 ];
 
 const noteKeys: Record<Note, MessageKey> = {
-  originals_only: "unlockNoteOriginalsOnly",
-  app_blocked: "unlockNoteAppBlocked",
   region_unsupported: "unlockNoteRegionUnsupported",
-  coming_soon: "unlockNoteComingSoon",
-  proxy_detected: "unlockNoteProxyDetected",
   hosting: "unlockNoteHosting",
-  overseas: "unlockNoteOverseas",
 };
 
 // Results and the run in progress outlive the page, so leaving and coming
@@ -219,8 +211,7 @@ export function UnlockPage({
     const outcome = current.results[service.id];
     if (!outcome) return <span className="unlock-status unlock-untested">{t(language, "unlockUntested")}</span>;
     const key: MessageKey = {
-      yes: service.category === "location" ? "unlockLocated" : "unlockYes",
-      partial: "unlockPartial",
+      yes: service.category === "streaming" ? "unlockYes" : service.category === "location" && outcome.region ? "unlockLocated" : "unlockDetected",
       no: "unlockNo",
       error: "unlockError",
     }[outcome.verdict] as MessageKey;
@@ -282,7 +273,7 @@ export function UnlockPage({
         const members = services.filter(service => service.category === category);
         if (!members.length) return null;
         const tested = members.filter(service => current.results[service.id]);
-        const served = tested.filter(service => ["yes", "partial"].includes(current.results[service.id].verdict));
+        const served = tested.filter(service => current.results[service.id].verdict === "yes");
         const busy = members.some(service => current.queued.has(service.id) || current.testing.has(service.id));
         return (
           <section className="panel unlock-panel" key={category} aria-labelledby={`unlock-${category}`}>
@@ -294,8 +285,8 @@ export function UnlockPage({
               <div className="panel-actions">
                 <span className="unlock-summary muted">
                   {category === "location"
-                    ? t(language, "unlockLocatedSummary", { done: served.length, total: members.length })
-                    : t(language, "unlockSummary", { done: served.length, total: members.length })}
+                    ? t(language, "unlockLocatedSummary", { done: served.filter(service => current.results[service.id].region).length, total: members.length })
+                    : t(language, category === "other" ? "unlockDetectedSummary" : "unlockSummary", { done: served.length, total: members.length })}
                 </span>
                 <button type="button" disabled={!ready || busy} onClick={() => run(members.map(service => service.id))}>
                   {t(language, "unlockRunGroup")}
