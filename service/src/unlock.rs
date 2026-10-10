@@ -1,18 +1,17 @@
 //! Region-restriction ("unlock") tests: where common overseas services and IP
 //! location databases place the proxy, and whether they serve it.
 //!
-//! Requests go through the running core's own mixed or HTTP listener, so they
-//! follow the active rules exactly as the applications using the proxy do: a
-//! service a rule sends to another group, or DIRECT, is tested over that route.
+//! Every request goes through one node, in an isolated core that has no rules
+//! and bypasses the running core's TUN and listeners (see `proxy_probe`), so the
+//! results describe that node alone: neither the active rules, which may send a
+//! service to another group or DIRECT, nor the host's own proxying change them.
 //! Each check is one small, independent test; the page runs several at once.
 use anyhow::{Context as _, Result, bail, ensure};
+use mihomo_client::models::ClashMode;
 use reqwest::{Client, RequestBuilder, StatusCode, Url, header, redirect};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::{
-    net::IpAddr,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use crate::core_manager::{CoreManager, CorePhase};
 
@@ -179,69 +178,75 @@ pub struct Outcome {
     pub elapsed: u32,
 }
 
-/// The catalog the page lists, and the route tests take.
+/// The catalog the page lists, and the node tests use unless another is chosen.
 pub async fn services(manager: &CoreManager) -> Result<Value> {
-    let route = match proxy_route(manager).await {
-        Ok(route) => Some(route.display),
-        Err(_) => None,
-    };
-    Ok(json!({ "services": SERVICES, "route": route }))
+    let exit = resolve(manager, None).await.ok();
+    Ok(json!({ "services": SERVICES, "exit": exit }))
 }
 
-/// Run one service's test through the core's proxy listener.
-pub async fn test(manager: &CoreManager, id: &str) -> Result<Outcome> {
+/// Run one service's test through `node` (a group: its current node), or the
+/// node the final rule currently leads to.
+pub async fn test(manager: &CoreManager, id: &str, node: Option<&str>) -> Result<Outcome> {
     let service = SERVICES
         .iter()
         .find(|service| service.id == id)
         .with_context(|| format!("unknown service '{id}'"))?;
-    let route = proxy_route(manager).await?;
-    let http = Http::new(route.proxy)?;
+    let exit = resolve(manager, node).await?;
+    let core = manager.test_exit(&exit.node).await?;
+    let http = Http::new(core.proxy.clone())?;
     Ok(http.run(service).await)
 }
 
-struct Route {
-    proxy: reqwest::Proxy,
-    /// `host:port`, as the page shows it.
-    display: String,
+/// A node to test through, and the groups that led to it.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+struct TestExit {
+    node: String,
+    via: Vec<String>,
 }
 
-/// The core's mixed listener, or its HTTP one, as an HTTP proxy for this host.
-async fn proxy_route(manager: &CoreManager) -> Result<Route> {
+async fn resolve(manager: &CoreManager, name: Option<&str>) -> Result<TestExit> {
     ensure!(manager.status().phase == CorePhase::Running, "core is not running");
-    let core = tokio::time::timeout(Duration::from_secs(3), manager.client().get_base_config())
+    let client = manager.client();
+    let query = async {
+        let target = match name {
+            Some(name) => name.to_owned(),
+            None => {
+                let mode = client.get_base_config().await?.mode;
+                final_target(&manager.runtime_config().await?, mode)
+            }
+        };
+        anyhow::Ok((target, client.get_proxies().await?))
+    };
+    let (target, live) = tokio::time::timeout(Duration::from_secs(5), query)
         .await
         .map_err(|_| anyhow::anyhow!("core query timed out"))?
-        .context("failed to read the core's listeners")?;
-    let port = [core.mixed_port, core.port].into_iter().find(|port| *port != 0);
-    let Some(port) = port else {
-        bail!("the core has no mixed or HTTP proxy port; set one in Settings to run unlock tests");
+        .context("failed to read the core's proxies")?;
+    ensure!(live.proxies.contains_key(&target), "proxy '{target}' not found");
+    let (via, node) = crate::proxy_probe::follow_groups(&live, &target);
+    Ok(TestExit { node, via })
+}
+
+/// Where traffic no rule singles out goes: the final `MATCH` rule's target in
+/// rule mode.
+fn final_target(runtime: &serde_yaml_ng::Mapping, mode: ClashMode) -> String {
+    let rule = || {
+        runtime
+            .get("rules")?
+            .as_sequence()?
+            .iter()
+            .filter_map(serde_yaml_ng::Value::as_str)
+            .rev()
+            .find_map(|rule| {
+                let mut fields = rule.split(',').map(str::trim);
+                (fields.next() == Some("MATCH")).then(|| fields.next())?
+            })
+            .map(str::to_owned)
     };
-    // A listener bound to one address only answers there; any other binding
-    // includes loopback.
-    let host = core
-        .bind_address
-        .parse::<IpAddr>()
-        .ok()
-        .filter(|address| !address.is_unspecified())
-        .unwrap_or(IpAddr::from([127, 0, 0, 1]));
-    let display = match host {
-        IpAddr::V6(address) => format!("[{address}]:{port}"),
-        IpAddr::V4(address) => format!("{address}:{port}"),
-    };
-    let mut proxy = reqwest::Proxy::all(format!("http://{display}"))?;
-    // The core accepts loopback without credentials by default; a configuration
-    // that requires them anyway gets the first configured user.
-    let runtime = manager.runtime_config().await?;
-    if let Some((user, password)) = runtime
-        .get("authentication")
-        .and_then(serde_yaml_ng::Value::as_sequence)
-        .and_then(|users| users.first())
-        .and_then(serde_yaml_ng::Value::as_str)
-        .and_then(|entry| entry.split_once(':'))
-    {
-        proxy = proxy.basic_auth(user, password);
+    match mode {
+        ClashMode::Direct => "DIRECT".into(),
+        ClashMode::Global => "GLOBAL".into(),
+        ClashMode::Rule => rule().unwrap_or_else(|| "GLOBAL".into()),
     }
-    Ok(Route { proxy, display })
 }
 
 struct Http {
@@ -1141,6 +1146,17 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), SERVICES.len());
+    }
+
+    #[test]
+    fn tests_default_to_the_final_rule_target() {
+        let runtime: serde_yaml_ng::Mapping =
+            serde_yaml_ng::from_str("rules: ['DOMAIN-SUFFIX,apple.com,Apple', 'GEOIP,CN,DIRECT', 'MATCH, Final ']")
+                .unwrap();
+        assert_eq!(final_target(&runtime, ClashMode::Rule), "Final");
+        assert_eq!(final_target(&runtime, ClashMode::Global), "GLOBAL");
+        assert_eq!(final_target(&runtime, ClashMode::Direct), "DIRECT");
+        assert_eq!(final_target(&serde_yaml_ng::Mapping::new(), ClashMode::Rule), "GLOBAL");
     }
 
     #[test]

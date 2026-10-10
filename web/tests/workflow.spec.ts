@@ -1435,20 +1435,24 @@ test.skip("proxy provider controls translate while an update is pending", async 
   expect(calls).toEqual(["update_proxy_provider", "healthcheck_proxy_provider", "update_proxy_provider"]);
 });
 
-test("unlock test results are kept across pages and cleared when the node changes", async ({ page }) => {
+test("unlock tests go through one node and are cleared when it changes", async ({ page }) => {
+  const api = (command: string, fields: Record<string, unknown> = {}) => fetch(`${base}/api/commands`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ command, ...fields }),
+  });
+  // Earlier tests leave the configuration in direct mode, where everything exits DIRECT.
+  const { runtime } = await (await api("settings")).json();
+  expect((await api("set_settings", { runtime: { ...runtime, mode: "rule" } })).ok).toBe(true);
   await page.goto(`${base}/proxies`);
   await page.getByLabel("管理令牌").fill(token);
   await page.getByRole("button", { name: "连接服务" }).click();
   await expect(page.getByRole("button", { name: "选择 Main / REJECT" })).toHaveAttribute("aria-pressed", "true");
+  // The catalog and the current exit come from the service; the checks are stubbed.
+  const tested: string[] = [];
   await page.route("**/api/commands", async (route) => {
     const body = route.request().postDataJSON();
-    if (body?.command === "unlock_services") {
-      const services = [
-        { id: "cloudflare", name: "Cloudflare", category: "location" },
-        { id: "netflix", name: "Netflix", category: "streaming" },
-      ];
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ services, route: "127.0.0.1:7890" }) });
-    } else if (body?.command === "unlock_test") {
+    if (body?.command === "unlock_test") {
+      tested.push(body.node);
       const outcome = {
         id: body.id, verdict: body.id === "netflix" ? "partial" : "yes", region: "JP",
         note: body.id === "netflix" ? "originals_only" : null, ip: "203.0.113.7", detail: null, error: null, elapsed: 120,
@@ -1460,35 +1464,58 @@ test("unlock test results are kept across pages and cleared when the node change
   });
   const navigation = page.getByRole("navigation", { name: "主导航" });
   await navigation.getByRole("link", { name: "解锁测试" }).click();
-  await expect(page.getByText("测试经由代理端口 127.0.0.1:7890")).toBeVisible();
+  const picker = page.getByRole("combobox", { name: "测试节点" });
+  await expect(picker.locator("option:checked")).toHaveText("当前出口：Main → REJECT");
+  await expect(picker.locator("option")).toHaveText(["当前出口：Main → REJECT", "DIRECT"]);
+  await expect(page.getByText("测试在独立的临时内核中进行")).toBeVisible();
   const netflix = page.getByRole("row", { name: /Netflix/ });
   await expect(netflix).toContainText("未测");
   await page.getByRole("button", { name: "全部测试" }).click();
   await expect(netflix).toContainText("部分可用");
   await expect(netflix).toContainText("仅限自制剧");
   await expect(page.getByRole("row", { name: /Cloudflare/ })).toContainText("203.0.113.7");
+  await expect(page.getByRole("button", { name: "全部测试" })).toBeEnabled();
+  expect(new Set(tested)).toEqual(new Set(["REJECT"]));
 
-  // Another page and back: the same routing keeps its results.
+  // Another page and back: the same node keeps its results.
   await navigation.getByRole("link", { name: "代理", exact: true }).click();
   await expect(page.getByRole("button", { name: "选择 Main / REJECT" })).toHaveAttribute("aria-pressed", "true");
   await navigation.getByRole("link", { name: "解锁测试" }).click();
   await expect(netflix).toContainText("部分可用");
 
-  // A different node routes requests elsewhere: the results no longer apply.
+  // The current exit moves to another node: the results no longer apply.
   await navigation.getByRole("link", { name: "代理", exact: true }).click();
   await page.getByRole("button", { name: "选择 Main / DIRECT" }).click();
   await expect(page.getByRole("button", { name: "选择 Main / DIRECT" })).toHaveAttribute("aria-pressed", "true");
   await navigation.getByRole("link", { name: "解锁测试" }).click();
+  await expect(picker.locator("option:checked")).toHaveText("当前出口：Main → DIRECT");
   await expect(netflix).toContainText("未测");
   await expect(page.getByRole("row", { name: /Cloudflare/ })).not.toContainText("203.0.113.7");
-  await page.getByRole("button", { name: "全部测试" }).click();
-  await expect(netflix).toContainText("部分可用");
 
   await navigation.getByRole("link", { name: "代理", exact: true }).click();
   await page.getByRole("button", { name: "选择 Main / REJECT" }).click();
   await expect(page.getByRole("button", { name: "选择 Main / REJECT" })).toHaveAttribute("aria-pressed", "true");
   await navigation.getByRole("link", { name: "解锁测试" }).click();
+  await expect(picker.locator("option:checked")).toHaveText("当前出口：Main → REJECT");
+  await page.getByRole("button", { name: "全部测试" }).click();
+  await expect(netflix).toContainText("部分可用");
+  await expect(page.getByRole("button", { name: "全部测试" })).toBeEnabled();
+
+  // A node chosen on the page replaces the current exit for the tests.
+  tested.length = 0;
+  await picker.selectOption("DIRECT");
   await expect(netflix).toContainText("未测");
+  await page.getByRole("button", { name: "全部测试" }).click();
+  await expect(netflix).toContainText("部分可用");
+  expect(new Set(tested)).toEqual(new Set(["DIRECT"]));
+  await picker.selectOption("");
+  await expect(netflix).toContainText("未测");
+
+  // The mode decides the current exit too.
+  expect((await api("set_settings", { runtime: { ...runtime, mode: "direct" } })).ok).toBe(true);
+  await expect(picker.locator("option:checked")).toHaveText("当前出口：DIRECT");
+  expect((await api("set_settings", { runtime })).ok).toBe(true);
+  await expect(picker.locator("option:checked")).toHaveText("当前出口：Main → REJECT");
 });
 
 test("rule list and search translate without losing the filter or reloading rules", async ({ page }) => {
@@ -4334,7 +4361,6 @@ for (const channel of ["stable", "alpha"] as const) {
         },
         body: JSON.stringify({ command, ...fields }),
       });
-      if (!response.ok) console.log("DEBUGAPI", command, JSON.stringify(fields), await response.text());
       expect(response.ok).toBe(true);
       return response.json();
     };

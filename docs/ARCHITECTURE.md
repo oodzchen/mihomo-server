@@ -133,23 +133,28 @@ so that it bypasses any TUN. Through it each node gets one cold HTTPS request
 opened, 16 nodes at a time; a group is tested through its current node. One
 probe runs at a time and its process and directory are removed afterwards.
 
-Unlock tests (`unlock_services`, `unlock_test`, the Web unlock page) answer a
-different question: what a service sees when an application uses the proxy.
-So they deliberately do not use an isolated core. The service sends each
-check's requests as an HTTP client of the running core's own mixed (else HTTP)
-listener, at its bound address or loopback, with the first configured proxy
-user when authentication is set. Every request therefore follows the active
-rules, groups and DIRECT routes exactly as application traffic does. The
-catalog and the detection logic (IP location databases, Google's and other
-platforms' placement, streaming, AI and store checks) live in
+Unlock tests (`unlock_services`, `unlock_test`, the Web unlock page) test one
+node at a time, isolated like node tests: neither the active rules (which may
+send a service to another group or DIRECT), nor the running core's TUN or
+listeners, nor the host's system proxy affect them. The page tests the node it
+names, by default the current exit: the final `MATCH` rule's target (or the
+mode's), followed through each group's current choice. For each node the
+service starts, and reuses while tests continue, an isolated core with the same
+nodes, providers, resolvers and dialer options, bound to the default-route
+interface, in global mode with `GLOBAL` set to that node and a mixed listener
+on a random loopback port that requires a random password (loopback is shared
+with every local user). Checks are HTTP clients of that listener. At most two
+such cores run at once; one unused for a minute is stopped and its directory
+removed. The catalog and the detection logic (IP location databases, Google's
+and other platforms' placement, streaming, AI and store checks) live in
 `service/src/unlock.rs`. Each command runs one service's check under a
 whole-check timeout and returns a verdict, the region the service reports, a
 reason code and untranslated details. The page runs a bounded number at once
-and keeps the results across navigation until the routing they were taken with
-changes: a different active subscription, committed revision or saved node
-selection clears them and discards tests still in flight. AI services that look the same to
-anonymous clients everywhere are judged from the region they see against the
-regions they exclude.
+and keeps the results across navigation until the node they were taken with
+changes: a different active subscription, committed revision, chosen node or,
+when following the current exit, node selection clears them and discards tests
+still in flight. AI services that look the same to anonymous clients everywhere
+are judged from the region they see against the regions they exclude.
 
 ## Management and browser boundary
 

@@ -105,11 +105,14 @@ pub enum ManagementCommand {
         #[serde(default)]
         timeout: Option<u32>,
     },
-    /// The region-restriction test catalog and the listener tests use.
+    /// The region-restriction test catalog and the node tests use by default.
     UnlockServices {},
-    /// One region-restriction test through the core's proxy listener.
+    /// One region-restriction test through one node, in an isolated core.
     UnlockTest {
         id: String,
+        /// A node or group; by default the node the final rule leads to.
+        #[serde(default)]
+        node: Option<String>,
     },
     GeoSettings {},
     UpdateGeo {},
@@ -532,8 +535,8 @@ impl Management {
             }
             ManagementCommand::ProxyAccess {} => crate::proxy_access::inspect(&self.manager).await?,
             ManagementCommand::UnlockServices {} => crate::unlock::services(&self.manager).await?,
-            ManagementCommand::UnlockTest { id } => {
-                serde_json::to_value(crate::unlock::test(&self.manager, &id).await?)?
+            ManagementCommand::UnlockTest { id, node } => {
+                serde_json::to_value(crate::unlock::test(&self.manager, &id, node.as_deref()).await?)?
             }
             ManagementCommand::SetProxyMode { mode } => serde_json::to_value(self.manager.set_proxy_mode(mode).await?)?,
             ManagementCommand::Preferences {} => serde_json::to_value(self.preferences.get())?,

@@ -10,7 +10,10 @@
 use anyhow::{Context as _, Result, bail, ensure};
 use futures_util::{StreamExt as _, stream};
 use headless_core::config::dns::is_own_listener;
-use mihomo_client::{Builder, Mihomo, models::Protocol};
+use mihomo_client::{
+    Builder, Mihomo,
+    models::{Protocol, Proxies},
+};
 use serde::Serialize;
 use serde_yaml_ng::{Mapping, Value};
 use std::{
@@ -18,7 +21,7 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncBufReadExt as _, BufReader},
@@ -59,6 +62,9 @@ pub struct Prober {
     data_dir: PathBuf,
     /// One probe process at a time; later tests wait their turn.
     admission: tokio::sync::Semaphore,
+    /// Isolated cores that send all traffic through one node, kept for a test
+    /// run and stopped once idle.
+    exits: Arc<tokio::sync::Mutex<Vec<CachedExit>>>,
 }
 
 impl Prober {
@@ -67,6 +73,7 @@ impl Prober {
             binary,
             data_dir,
             admission: tokio::sync::Semaphore::new(1),
+            exits: Arc::default(),
         }
     }
 
@@ -85,14 +92,147 @@ impl Prober {
             "test URL must be an http or https URL"
         );
         let _permit = self.admission.acquire().await?;
-        let interface = default_interface(&std::fs::read_to_string("/proc/net/route").unwrap_or_default());
-        let config = probe_config(runtime, &self.data_dir, interface.as_deref())?;
-        let directory = ProbeDir::create(&self.data_dir.join("run"))?;
+        let config = probe_config(runtime, &self.data_dir, self.interface().as_deref())?;
+        let mut core = IsolatedCore::start(&self.binary, &self.data_dir, &config).await?;
+        let client = &core.client;
+
+        // The running core keeps its resolver connections open; so does the probe
+        // before the first node is measured. A resolver slower than this is part
+        // of what the first requests cost.
+        if let Some(host) = target.host_str() {
+            let _ = tokio::time::timeout(Duration::from_secs(1), warm_resolver(client, host)).await;
+        }
+        let results = stream::iter(nodes.iter().cloned())
+            .map(|node| async move {
+                let result = probe_node(client, &node, url, timeout_ms).await;
+                (node, result)
+            })
+            .buffer_unordered(PARALLEL)
+            .collect::<BTreeMap<_, _>>()
+            .await;
+        core.stop().await;
+        Ok(results)
+    }
+
+    /// An isolated core whose loopback listener sends every request through
+    /// `node` of `runtime` (the committed `revision`), reused while in use.
+    pub async fn exit(&self, runtime: &Mapping, revision: &str, node: &str) -> Result<Arc<Exit>> {
+        let mut exits = self.exits.lock().await;
+        exits.retain(|cached| cached.used.elapsed() < EXIT_IDLE);
+        if let Some(cached) = exits
+            .iter_mut()
+            .find(|cached| cached.revision == revision && cached.node == node)
+        {
+            cached.used = Instant::now();
+            return Ok(Arc::clone(&cached.exit));
+        }
+        if exits.len() >= MAX_EXITS
+            && let Some(oldest) = (0..exits.len()).min_by_key(|index| exits[*index].used)
+        {
+            // Tests still running keep the evicted core until they finish.
+            exits.remove(oldest);
+        }
+        let exit = Arc::new(self.start_exit(runtime, node).await?);
+        exits.push(CachedExit {
+            revision: revision.to_owned(),
+            node: node.to_owned(),
+            exit: Arc::clone(&exit),
+            used: Instant::now(),
+        });
+        if exits.len() == 1 {
+            let exits = Arc::downgrade(&self.exits);
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(EXIT_IDLE / 4).await;
+                    let Some(exits) = exits.upgrade() else { break };
+                    let mut exits = exits.lock().await;
+                    exits.retain(|cached| cached.used.elapsed() < EXIT_IDLE);
+                    if exits.is_empty() {
+                        break;
+                    }
+                }
+            });
+        }
+        Ok(exit)
+    }
+
+    async fn start_exit(&self, runtime: &Mapping, node: &str) -> Result<Exit> {
+        let mut secret = [0u8; 16];
+        getrandom::fill(&mut secret).context("generate test listener credentials")?;
+        let password = secret.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        let mut last_error = None;
+        // The port is free when chosen; another process may take it first.
+        for _ in 0..3 {
+            let port = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?
+                .local_addr()?
+                .port();
+            let config = exit_config(runtime, &self.data_dir, self.interface().as_deref(), port, &password)?;
+            let core = match IsolatedCore::start(&self.binary, &self.data_dir, &config).await {
+                Ok(core) => core,
+                Err(error) => {
+                    last_error = Some(error);
+                    continue;
+                }
+            };
+            core.client
+                .select_node_for_group("GLOBAL", node)
+                .await
+                .with_context(|| format!("node '{node}' is not available for testing"))?;
+            let address = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port));
+            for _ in 0..30 {
+                if tokio::net::TcpStream::connect(address).await.is_ok() {
+                    let proxy = reqwest::Proxy::all(format!("http://{address}"))?.basic_auth(EXIT_USER, &password);
+                    return Ok(Exit { proxy, _core: core });
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            last_error = Some(anyhow::anyhow!("the test core's listener did not open"));
+        }
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("failed to start the test core")))
+    }
+
+    /// Node connections leave through the physical interface, past any TUN.
+    fn interface(&self) -> Option<String> {
+        default_interface(&std::fs::read_to_string("/proc/net/route").unwrap_or_default())
+    }
+}
+
+/// How long an unused exit core stays up for further tests through its node.
+const EXIT_IDLE: Duration = Duration::from_secs(60);
+/// Exit cores alive at once (two pages testing different nodes).
+const MAX_EXITS: usize = 2;
+const EXIT_USER: &str = "test";
+
+struct CachedExit {
+    revision: String,
+    node: String,
+    exit: Arc<Exit>,
+    used: Instant,
+}
+
+/// An isolated core's listener that reaches the internet only through one node.
+pub struct Exit {
+    /// The listener as an authenticated HTTP proxy.
+    pub proxy: reqwest::Proxy,
+    _core: IsolatedCore,
+}
+
+/// A short-lived, unprivileged Mihomo in a private directory under `<data>/run/`.
+/// Dropping it kills the process and removes the directory.
+struct IsolatedCore {
+    child: tokio::process::Child,
+    client: Mihomo,
+    _directory: ProbeDir,
+}
+
+impl IsolatedCore {
+    async fn start(binary: &Path, data_dir: &Path, config: &Mapping) -> Result<Self> {
+        let directory = ProbeDir::create(&data_dir.join("run"))?;
         let config_path = directory.0.join("probe.yaml");
-        write_private(&config_path, serde_yaml_ng::to_string(&config)?.as_bytes())?;
+        write_private(&config_path, serde_yaml_ng::to_string(config)?.as_bytes())?;
         let socket = directory.0.join("s");
 
-        let mut command = Command::new(&self.binary);
+        let mut command = Command::new(binary);
         crate::shutdown::bind_child_lifetime(&mut command);
         let mut child = command
             .arg("-d")
@@ -102,7 +242,7 @@ impl Prober {
             .arg("-ext-ctl-unix")
             .arg(&socket)
             // Provider caches stay in the service data directory.
-            .env("SAFE_PATHS", &self.data_dir)
+            .env("SAFE_PATHS", data_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -140,7 +280,6 @@ impl Prober {
             .protocol(Protocol::LocalSocket)
             .socket_path(socket.to_string_lossy())
             .build()?;
-        let mut ready = false;
         for _ in 0..50 {
             if let Some(status) = child.try_wait()? {
                 bail!(
@@ -152,34 +291,41 @@ impl Prober {
                 .await
                 .is_ok_and(|version| version.is_ok())
             {
-                ready = true;
-                break;
+                return Ok(Self {
+                    child,
+                    client,
+                    _directory: directory,
+                });
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        ensure!(ready, "probe core did not become ready");
-
-        // The running core keeps its resolver connections open; so does the probe
-        // before the first node is measured. A resolver slower than this is part
-        // of what the first requests cost.
-        if let Some(host) = target.host_str() {
-            let _ = tokio::time::timeout(Duration::from_secs(1), warm_resolver(&client, host)).await;
-        }
-        let results = stream::iter(nodes.iter().cloned())
-            .map(|node| {
-                let client = &client;
-                async move {
-                    let result = probe_node(client, &node, url, timeout_ms).await;
-                    (node, result)
-                }
-            })
-            .buffer_unordered(PARALLEL)
-            .collect::<BTreeMap<_, _>>()
-            .await;
-        let _ = child.start_kill();
-        let _ = child.wait().await;
-        Ok(results)
+        bail!("probe core did not become ready")
     }
+
+    async fn stop(&mut self) {
+        let _ = self.child.start_kill();
+        let _ = self.child.wait().await;
+    }
+}
+
+/// The groups from `name` through each one's current choice, and the node
+/// they end at (`name` itself when it is a node).
+pub(crate) fn follow_groups(live: &Proxies, name: &str) -> (Vec<String>, String) {
+    let mut via = Vec::new();
+    let mut current = name.to_owned();
+    for _ in 0..16 {
+        let Some(now) = live
+            .proxies
+            .get(&current)
+            .filter(|proxy| proxy.all.is_some())
+            .and_then(|group| group.now.as_deref())
+            .filter(|now| !now.is_empty())
+        else {
+            break;
+        };
+        via.push(std::mem::replace(&mut current, now.to_owned()));
+    }
+    (via, current)
 }
 
 async fn warm_resolver(client: &Mihomo, host: &str) -> Result<()> {
@@ -261,6 +407,33 @@ pub(crate) fn probe_config(runtime: &Mapping, data_dir: &Path, interface: Option
         config.insert("proxy-providers".into(), cached_providers(providers, data_dir).into());
     }
     config.insert("rules".into(), Value::Sequence(vec!["MATCH,DIRECT".into()]));
+    Ok(config)
+}
+
+/// The probe configuration with a loopback listener, behind a password, that
+/// sends everything through the `GLOBAL` choice (set to the tested node).
+pub(crate) fn exit_config(
+    runtime: &Mapping,
+    data_dir: &Path,
+    interface: Option<&str>,
+    port: u16,
+    password: &str,
+) -> Result<Mapping> {
+    let mut config = probe_config(runtime, data_dir, interface)?;
+    for (key, value) in [
+        ("mode", Value::from("global")),
+        ("mixed-port", u64::from(port).into()),
+        ("bind-address", "127.0.0.1".into()),
+        ("find-process-mode", "off".into()),
+        (
+            "authentication",
+            vec![Value::from(format!("{EXIT_USER}:{password}"))].into(),
+        ),
+        // Loopback is shared with every local user and process.
+        ("skip-auth-prefixes", Value::Sequence(vec![])),
+    ] {
+        config.insert(key.into(), value);
+    }
     Ok(config)
 }
 
@@ -457,6 +630,43 @@ mod tests {
                 "enable: true\nenhanced-mode: normal\ndefault-nameserver: [223.5.5.5]\nnameserver: ['https://doh.example/dns-query']"
             ))
         );
+    }
+
+    #[test]
+    fn exit_listens_on_loopback_behind_a_password_and_sends_all_through_global() {
+        let runtime = yaml(
+            "mixed-port: 7890\nmode: rule\nallow-lan: true\nbind-address: '*'\nauthentication: ['a:b']\n\
+             skip-auth-prefixes: [127.0.0.1/8]\ntun: {enable: true}\nrules: ['DOMAIN-SUFFIX,apple.com,DIRECT', 'MATCH,G']\n\
+             proxy-groups: [{name: G, type: select, proxies: [a]}]\nproxies: [{name: a, type: ss, server: example.com, port: 1, cipher: none, password: p}]",
+        );
+        let exit = exit_config(&runtime, Path::new("/data"), Some("eth0"), 20999, "secret").unwrap();
+        assert_eq!(exit["mode"], Value::from("global"));
+        assert_eq!(exit["mixed-port"], Value::from(20999));
+        assert_eq!(exit["bind-address"], Value::from("127.0.0.1"));
+        assert_eq!(exit["allow-lan"], Value::from(false));
+        assert_eq!(exit["authentication"], Value::from(vec![Value::from("test:secret")]));
+        assert_eq!(exit["skip-auth-prefixes"], Value::Sequence(vec![]));
+        assert_eq!(exit["interface-name"], Value::from("eth0"));
+        assert_eq!(exit["tun"]["enable"], Value::from(false));
+        assert_eq!(exit["rules"], Value::from(vec![Value::from("MATCH,DIRECT")]));
+        assert!(!exit.contains_key("proxy-groups"));
+    }
+
+    #[test]
+    fn groups_are_followed_to_their_current_node() {
+        let live: Proxies = serde_json::from_value(serde_json::json!({"proxies": {
+            "Final": {"name": "Final", "type": "Selector", "all": ["Proxies", "DIRECT"], "now": "Proxies"},
+            "Proxies": {"name": "Proxies", "type": "Selector", "all": ["hk"], "now": "hk"},
+            "Empty": {"name": "Empty", "type": "Selector", "all": [], "now": ""},
+            "hk": {"name": "hk", "type": "Shadowsocks"},
+        }}))
+        .unwrap();
+        assert_eq!(
+            follow_groups(&live, "Final"),
+            (vec!["Final".to_owned(), "Proxies".to_owned()], "hk".to_owned())
+        );
+        assert_eq!(follow_groups(&live, "hk"), (vec![], "hk".to_owned()));
+        assert_eq!(follow_groups(&live, "Empty"), (vec![], "Empty".to_owned()));
     }
 
     #[test]

@@ -619,19 +619,7 @@ impl CoreManager {
             .map_err(|_| anyhow::anyhow!("proxies query timed out"))?
             .context("failed to query proxies from core")?;
         // A group is tested through the node it currently uses.
-        let leaf = |name: &str| {
-            let mut current = name.to_owned();
-            for _ in 0..16 {
-                match live.proxies.get(&current).filter(|proxy| proxy.all.is_some()) {
-                    Some(group) => match group.now.as_deref().filter(|now| !now.is_empty()) {
-                        Some(now) => current = now.to_owned(),
-                        None => break,
-                    },
-                    None => break,
-                }
-            }
-            current
-        };
+        let leaf = |name: &str| crate::proxy_probe::follow_groups(&live, name).1;
         let leaves = names.iter().map(|name| (name.clone(), leaf(name))).collect::<Vec<_>>();
         let mut nodes = leaves.iter().map(|(_, leaf)| leaf.clone()).collect::<Vec<_>>();
         nodes.sort();
@@ -647,6 +635,18 @@ impl CoreManager {
             .into_iter()
             .map(|(name, leaf)| (name, results.get(&leaf).copied().unwrap_or_default()))
             .collect())
+    }
+
+    /// An isolated core that sends every request through `node`, past the
+    /// running core's rules, TUN and listeners.
+    pub async fn test_exit(&self, node: &str) -> Result<Arc<crate::proxy_probe::Exit>> {
+        let status = self.status();
+        ensure!(status.phase == CorePhase::Running, "core is not running");
+        let revision = status.config_revision.unwrap_or_default();
+        let runtime = self.runtime_config().await?;
+        timeout(Duration::from_secs(30), self.prober.exit(&runtime, &revision, node))
+            .await
+            .map_err(|_| anyhow::anyhow!("starting the test core timed out"))?
     }
 
     pub async fn delay_group(

@@ -1467,6 +1467,9 @@ dd {
 .unlock-error-text { color: #b91c1c; }
 .unlock-time { color: #71717a; font-variant-numeric: tabular-nums; }
 .unlock-table td:last-child { overflow: visible; text-overflow: clip; text-align: right; }
+.unlock-node { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px; }
+.unlock-node label { margin: 0; white-space: nowrap; }
+.unlock-node select { width: 360px; max-width: 100%; margin: 0; padding-block: 4px; }
 .unlock-run-all { flex-shrink: 0; white-space: nowrap; min-width: 168px; }
 @media (max-width: 600px) { .unlock-header { flex-wrap: wrap; } .unlock-run-all { width: 100%; } }
 .unlock-table .unlock-retest { padding: 2px 8px; min-height: 0; font-size: 12px; line-height: 1.4; }
