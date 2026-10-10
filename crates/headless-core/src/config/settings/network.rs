@@ -120,6 +120,10 @@ pub struct TunSettings {
     pub strict_route: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mtu: Option<u16>,
+    /// Service-owned, never written to Mihomo: CN destinations bypass the TUN
+    /// (see `enhance::bypass`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bypass_cn: Option<bool>,
 }
 
 impl TunSettings {

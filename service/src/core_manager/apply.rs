@@ -27,6 +27,7 @@ impl Actor {
         let config = self.enforce_runtime_settings(config, &runtime)?;
         let config = headless_core::enhance::finalize::finalize(config);
         let config = self.isolate(config, &runtime);
+        let (config, bypassed) = self.bypass_domestic(config, &runtime)?;
         validate_resource_declarations(&config)?;
         let config = headless_core::config::resource_paths::prepare_owned(
             config,
@@ -35,12 +36,23 @@ impl Actor {
         )?;
         let revision = self.store.stage(config)?;
         let path = self.store.path(&revision)?;
+        // The bypass's DNS policy uses geosite:cn; without GeoSite.dat the core
+        // downloads it during this check, through the running TUN when there is one.
+        let deadline = if bypassed && !geosite_present(&self.options.data_dir) {
+            self.logs.append(
+                "manager",
+                "domestic bypass: GeoSite.dat missing, the core downloads it now".into(),
+            );
+            GEOSITE_DOWNLOAD_TIMEOUT.max(self.options.policy.validation_timeout)
+        } else {
+            self.options.policy.validation_timeout
+        };
         crate::validation::validate(
             &self.options.binary,
             &self.options.data_dir,
             &path,
             &mut self.shutdown,
-            self.options.policy.validation_timeout,
+            deadline,
         )
         .await?;
         ensure!(
@@ -244,6 +256,17 @@ impl Actor {
         }
         Ok(())
     }
+}
+
+const GEOSITE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Mihomo finds `GeoSite.dat` in its home directory regardless of case.
+fn geosite_present(data: &Path) -> bool {
+    std::fs::read_dir(data).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().eq_ignore_ascii_case("GeoSite.dat"))
+    })
 }
 
 /// Whether applying `new` over a running `old` with a live TUN makes Mihomo

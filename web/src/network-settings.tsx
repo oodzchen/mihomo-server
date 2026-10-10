@@ -46,6 +46,7 @@ const schemas: Record<"dns" | "tun", Field[]> = {
   ],
   tun: [
     { key: "enable", label: "netTunEnable", kind: "bool" },
+    { key: "bypass-cn", label: "netTunBypassCn", kind: "bool" },
     {
       key: "stack",
       label: "netTunStack",

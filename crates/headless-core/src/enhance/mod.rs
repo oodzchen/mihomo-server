@@ -1,5 +1,6 @@
 //! Pure configuration operations; the complete enhancement pipeline is not wired yet.
 
+pub mod bypass;
 pub mod field;
 pub mod finalize;
 pub mod isolation;

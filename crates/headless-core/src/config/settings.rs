@@ -363,6 +363,9 @@ impl RuntimeSettings {
             .clone();
         for section in ["dns", "tun", "geox-url"] {
             if let Some(nested) = values.get_mut(section).and_then(|v| v.as_mapping_mut()) {
+                if section == "tun" {
+                    nested.remove("bypass-cn");
+                }
                 if section == "dns" {
                     if let Some(filter) = nested
                         .get_mut("fallback-filter")

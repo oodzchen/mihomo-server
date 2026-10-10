@@ -112,7 +112,11 @@ persistent port conflicts still fail and preserve the last committed runtime.
 
 Valid configuration changes prefer Mihomo hot reload. The actor falls back to a
 restart where required and verifies the resulting process, controller and proxy
-listeners before committing. Unix SIGINT, SIGTERM and SIGHUP enter the same
+listeners before committing. With a live TUN, a change whose `tun` section is
+identical (a profile switch or refresh, usually) is hot reloaded: Mihomo keeps
+the interface and every connection through it, DIRECT ones included. Only a
+changed `tun` section restarts the core, since Mihomo would recreate the
+interface anyway (dropping those connections) and can hit EBUSY doing so. Unix SIGINT, SIGTERM and SIGHUP enter the same
 coordinated shutdown path: HTTP/WebSocket work drains, scheduled/background
 operations stop, and the child is terminated and reaped.
 
@@ -324,6 +328,22 @@ Linux TUN is an explicitly privileged, system-wide capability:
 If a saved instance starts while another user holds the system TUN, its saved TUN
 state is yielded and the instance starts without TUN. Ordinary mixed proxy
 listeners remain available for every user regardless of TUN ownership.
+
+Traffic DIRECT by rule still passes through Mihomo's user-space stack when it
+arrives over the TUN, which costs about one CPU core per Gbit/s. The
+service-owned `tun.bypass-cn` setting (never written to Mihomo) lets CN
+destinations skip the TUN entirely: at staging, after isolation, the service
+adds the CN ranges of the core's GeoIP MMDB (`Country.mmdb`, else
+`geoip.metadb`, merged into minimal CIDRs, about 10k) to
+`tun.route-exclude-address`, keeps `geosite:cn` out of fake IPs and resolves it
+with domestic resolvers unless the configuration already names some
+(`headless-core::enhance::bypass`). Mihomo installs the complement of the
+excluded ranges as ordinary routes in the TUN table, so lookups stay a single
+route-trie walk. Such connections follow the host's routes, are not subject to
+rules, do not appear in the connection list and survive core restarts. The
+range list is regenerated whenever a configuration is staged, so a Geo update
+takes effect at the next application. Without `GeoSite.dat` the core downloads
+it during validation, which is then given 60 s.
 
 ## Persistence and ownership
 

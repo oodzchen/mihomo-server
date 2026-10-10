@@ -287,6 +287,25 @@ fn dns_page_empty_and_false_values_inherit_while_tun_false_and_empty_lists_are_o
 }
 
 #[test]
+fn domestic_bypass_is_saved_but_never_written_to_the_core() -> Result<()> {
+    let settings: ServiceSettings =
+        serde_yaml_ng::from_str("schema_version: 1\nruntime:\n  tun: {enable: true, bypass-cn: true}")?;
+    assert_eq!(settings.runtime.tun.as_ref().and_then(|tun| tun.bypass_cn), Some(true));
+    let applied = settings
+        .runtime
+        .enforce(parse("tun: {enable: false, auto-route: true}")?)?;
+    assert_eq!(applied, parse("tun: {enable: true, auto-route: true}")?);
+    assert!(
+        settings
+            .runtime
+            .overridden_fields(&parse("{}")?, &applied)?
+            .iter()
+            .all(|field| field != "tun.bypass-cn")
+    );
+    Ok(())
+}
+
+#[test]
 fn resolver_policies_and_fallback_filter_keep_unowned_source_leaves() -> Result<()> {
     use headless_core::config::settings::RuntimeSettings;
     let source = parse(

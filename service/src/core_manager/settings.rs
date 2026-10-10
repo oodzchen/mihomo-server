@@ -213,6 +213,20 @@ impl Actor {
         config
     }
 
+    /// `tun.bypass-cn` with an enabled TUN: CN destinations skip the TUN, using
+    /// the CN ranges of the Geo database the core reads. Returns whether it applied.
+    pub(super) fn bypass_domestic(&self, config: Mapping, runtime: &RuntimeSettings) -> Result<(Mapping, bool)> {
+        use headless_core::enhance::bypass;
+        if runtime.tun.as_ref().and_then(|tun| tun.bypass_cn) != Some(true) || !bypass::tun_enabled(&config) {
+            return Ok((config, false));
+        }
+        #[cfg(unix)]
+        let (_, ranges) = crate::geo::cn::ranges(&self.options.data_dir)?;
+        #[cfg(not(unix))]
+        let ranges: Vec<String> = bail!("the domestic bypass is supported only on Linux");
+        Ok((bypass::bypass_domestic(config, &ranges), true))
+    }
+
     pub(super) fn read_profile_dns(&self, uid: &str) -> Result<DnsOverrideState> {
         self.profile_store
             .dns_source(uid)

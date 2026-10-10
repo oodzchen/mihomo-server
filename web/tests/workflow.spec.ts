@@ -3173,6 +3173,7 @@ test("network editor saves nested edits while preserving supported fields", asyn
     },
     tun: {
       enable: false,
+      "bypass-cn": false,
       stack: "mixed",
       device: "Mihomo",
       "auto-route": false,
