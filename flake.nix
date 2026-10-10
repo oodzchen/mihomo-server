@@ -12,8 +12,8 @@
         pkgs = nixpkgs.legacyPackages.${system};
 
         serverRelease = {
-          version = "0.2.25";
-          hash = "sha256-kFxKPXknWvz0ICX0sI/InZa7PMKyx8ROaiXL8zhvmWQ=";
+          version = "0.2.26";
+          hash = "sha256-F6zEn6XFdKwnS4yql/d8WyKOAu09fnG9QTEbBfj/i34=";
         };
 
         server-bin = pkgs.callPackage ./nix/server-bin.nix { release = serverRelease; };
