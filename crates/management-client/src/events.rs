@@ -15,6 +15,13 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// The service pings every 15 s; silence beyond this means a dead link.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Lightweight snapshots of status, access, proxies, profiles, user and
+/// preferences, without logs. Requires mihomo-server v0.3.2 or newer.
+pub const STATE_FEED: &str = "state";
+
+/// Core-reported upload/download rates in bytes per second.
+pub const TRAFFIC_FEED: &str = "traffic";
+
 pub struct Feed {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
 }

@@ -45,6 +45,8 @@ enum Feed {
     /// Interface preferences only: no core data, so clients that need just
     /// these (the desktop client) do not receive every log line.
     Preferences,
+    /// Service/profile/proxy facts only, shared across subscribers; no logs.
+    State,
 }
 impl Feed {
     fn parse(value: &str) -> Option<Self> {
@@ -55,12 +57,13 @@ impl Feed {
             "connections_count" => Self::ConnectionsCount,
             "logs" => Self::Logs,
             "preferences" => Self::Preferences,
+            "state" => Self::State,
             _ => return None,
         })
     }
 
     fn is_core(self) -> bool {
-        !matches!(self, Self::Preferences)
+        !matches!(self, Self::Preferences | Self::State)
     }
 }
 
@@ -237,7 +240,7 @@ async fn subscribe(
         Feed::Connections => client.ws_connections_checked(callback).await,
         Feed::ConnectionsCount => client.ws_connections_count_checked(callback).await,
         Feed::Logs => client.ws_logs_checked(LogLevel::DEBUG, callback).await,
-        Feed::Preferences => unreachable!("preferences are not a core stream"),
+        Feed::Preferences | Feed::State => unreachable!("not a core stream"),
     }
 }
 
@@ -273,6 +276,9 @@ async fn run(
     let core_feed = feed.is_some_and(Feed::is_core);
     let preference_events = feed.is_none_or(|feed| !feed.is_core());
     emit(socket, json!({"type":"ready"})).await?;
+    if matches!(feed, Some(Feed::State)) {
+        return run_state(socket, state, closing).await;
+    }
     match feed {
         None => {
             emit(
@@ -380,6 +386,33 @@ async fn run(
         }
     }
     Ok(())
+}
+
+async fn run_state(socket: &mut WebSocket, state: &HttpState, closing: &mut watch::Receiver<bool>) -> Result<()> {
+    let mut readings = state
+        .state_feed
+        .subscribe(Arc::clone(&state.management), closing.clone());
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
+    heartbeat.tick().await;
+    let mut last_pong = Instant::now();
+    loop {
+        tokio::select! {
+            biased;
+            _ = closed(closing) => return Ok(()),
+            message = socket.recv() => if !incoming(message, &mut last_pong).await? { return Ok(()); },
+            changed = readings.changed() => {
+                if changed.is_err() { return Ok(()); }
+                let current = readings.borrow_and_update().clone();
+                if let Some(current) = current {
+                    emit(socket, json!({"type":"state", "data":current})).await?;
+                }
+            }
+            _ = heartbeat.tick() => {
+                ensure!(last_pong.elapsed() < Duration::from_secs(45), "WebSocket heartbeat expired");
+                timeout(WRITE_TIMEOUT, socket.send(Message::Ping(Vec::new().into()))).await??;
+            }
+        }
+    }
 }
 
 #[cfg(test)]

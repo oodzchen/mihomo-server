@@ -28,6 +28,7 @@ pub struct HttpState {
     pub(super) closing: tokio::sync::watch::Sender<bool>,
     pub(super) sessions: Arc<tokio::sync::Semaphore>,
     pub(super) assets: Option<WebAssets>,
+    pub(super) state_feed: Arc<super::state_feed::StateFeed>,
 }
 
 impl HttpState {
@@ -38,6 +39,7 @@ impl HttpState {
             closing: tokio::sync::watch::channel(false).0,
             sessions: Arc::new(tokio::sync::Semaphore::new(MAX_WEBSOCKETS as usize)),
             assets: None,
+            state_feed: Arc::new(super::state_feed::StateFeed::default()),
         }
     }
 

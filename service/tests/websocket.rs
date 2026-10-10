@@ -409,3 +409,113 @@ async fn interface_preferences_are_pushed_to_event_and_preference_feeds() -> Res
     drop((events, feed, client));
     server.shutdown().await
 }
+
+#[tokio::test]
+async fn state_feed_sends_fresh_snapshots_profiles_and_preferences_without_logs() -> Result<()> {
+    let server = Server::new(false).await?;
+    let result = async {
+        let endpoint =
+            management_client::Endpoint::new(server.address, None, server.directory.0.join("management-token"))?;
+        let mut feed = management_client::events::Feed::connect(
+            &endpoint,
+            &server.token,
+            Some(management_client::events::STATE_FEED),
+        )
+        .await?;
+        let initial = feed.next().await?.context("missing initial state")?;
+        assert_eq!(initial["type"], "state");
+        assert_eq!(initial["data"]["status"]["phase"], "stopped");
+        assert!(initial["data"]["proxies"].is_null());
+        assert!(initial["data"].get("logs").is_none());
+        drop(feed);
+        let profile = server
+            .manager
+            .import_profile_yaml(
+                "mixed-port: 0\nproxies: []\nrules: ['MATCH,DIRECT']\n".into(),
+                "Fresh profile".into(),
+            )
+            .await?;
+        let uid = profile.uid.context("missing profile UID")?.to_string();
+        let mut socket = server.authenticated("/api/streams/state").await?;
+        let fresh = receive(&mut socket).await?;
+        assert_eq!(fresh["type"], "state");
+        assert!(
+            fresh["data"]["profiles"]["items"]
+                .as_array()
+                .context("missing profiles")?
+                .iter()
+                .any(|item| item["uid"] == uid)
+        );
+
+        reqwest::Client::new()
+            .post(format!("http://{}/api/commands", server.address))
+            .bearer_auth(&server.token)
+            .json(&json!({"command":"set_language", "language":"zh"}))
+            .send()
+            .await?
+            .error_for_status()?;
+        let preferences = until(&mut socket, |value| value["data"]["preferences"]["language"] == "zh").await?;
+        assert_eq!(preferences["type"], "state");
+
+        server
+            .manager
+            .edit_profile(uid.clone(), serde_json::from_value(json!({"name":"Renamed"}))?)
+            .await?;
+        let renamed = until(&mut socket, |value| {
+            value["data"]["profiles"]["items"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| item["uid"] == uid && item["name"] == "Renamed"))
+        })
+        .await?;
+        assert_eq!(renamed["type"], "state");
+        assert!(renamed["data"].get("logs").is_none());
+        drop(socket);
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    let cleanup = server.shutdown().await;
+    result.and(cleanup)
+}
+
+#[tokio::test]
+#[ignore = "requires a real core and TCP/Unix socket binding permissions"]
+async fn live_state_feed_follows_manager_and_core_selections_mode_and_restart() -> Result<()> {
+    let server = Server::new(true).await?;
+    let result = async {
+        let item = server.manager.import_profile_yaml(
+            "mixed-port: 0\nmode: rule\ndns: {enable: false}\nproxy-groups: [{name: Main, type: select, proxies: [DIRECT, REJECT]}]\nrules: ['MATCH,Main']\n".into(),
+            "Tray state".into(),
+        ).await?;
+        let uid = item.uid.context("missing UID")?.to_string();
+        server.manager.select_profile(uid.clone()).await?;
+        server.manager.start().await?;
+        let mut socket = server.authenticated("/api/streams/state").await?;
+        let initial = receive(&mut socket).await?;
+        assert_eq!(initial["type"], "state");
+        assert_eq!(initial["data"]["status"]["phase"], "running");
+        assert_eq!(initial["data"]["profiles"]["current"], uid);
+        assert_eq!(initial["data"]["proxies"]["proxies"]["Main"]["now"], "DIRECT");
+        let mut peer = server.authenticated("/api/streams/state").await?;
+        assert_eq!(receive(&mut peer).await?["data"], initial["data"]);
+        server.manager.select_node("Main".into(), "REJECT".into()).await?;
+        for socket in [&mut socket, &mut peer] {
+            let selected = until(socket, |value| value["data"]["proxies"]["proxies"]["Main"]["now"] == "REJECT").await?;
+            assert_eq!(selected["type"], "state");
+        }
+        drop(peer);
+        // A core-side change has no manager event, as with automatic groups.
+        server.manager.client().select_node_for_group("Main", "DIRECT").await?;
+        until(&mut socket, |value| value["data"]["proxies"]["proxies"]["Main"]["now"] == "DIRECT").await?;
+        server.manager.apply_overlay(headless_core::config::runtime::parse("mode: direct")?).await?;
+        until(&mut socket, |value| value["data"]["access"]["reported"]["mode"] == "direct").await?;
+        server.manager.stop().await?;
+        let stopped = until(&mut socket, |value| value["data"]["status"]["phase"] == "stopped").await?;
+        assert!(stopped["data"]["proxies"].is_null());
+        server.manager.start().await?;
+        until(&mut socket, |value| value["data"]["status"]["phase"] == "running" && value["data"]["proxies"].is_object()).await?;
+        drop(socket);
+        Ok::<(), anyhow::Error>(())
+    }.await;
+    let cleanup = server.shutdown().await;
+    result.and(cleanup)
+}

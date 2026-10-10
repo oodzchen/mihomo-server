@@ -3,6 +3,7 @@ mod assets;
 pub mod auth;
 pub mod http;
 pub mod preferences;
+mod state_feed;
 pub mod update_checks;
 mod websocket;
 

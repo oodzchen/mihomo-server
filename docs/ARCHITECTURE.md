@@ -246,8 +246,9 @@ versioned and released independently of the service. It depends on
 tag, so a change to that crate reaches the client only when the client moves its
 pin; keep the crate's public API compatible across releases. Its contract with
 this repository: the management window loads the service origin directly and
-logs in through the URL fragment; it subscribes only to
-`/api/streams/preferences`, never `/api/events`; the Web settings page shows the
+logs in through the URL fragment; its tray subscribes to
+`/api/streams/state` and `/api/streams/traffic`, never `/api/events`;
+the Web settings page shows the
 client's own start-at-login switch only when the page runs inside the client
 (`__MIHOMO_DESKTOP_VERSION__`), and calls the client's `client_autostart` /
 `set_client_autostart` commands through Tauri IPC; the service lifecycle goes
@@ -255,6 +256,18 @@ through the release's `mihomo-server-user` helper and installation through the
 published `install.sh` (`MIHOMO_INSTALL_ELEVATE=pkexec`,
 `MIHOMO_INSTALL_PROGRESS=1`). Its internal design is described in that
 repository's `docs/ARCHITECTURE.md`.
+
+The lightweight `state` feed sends an initial `state` event and subsequent
+snapshots with `status`, `access` (the `proxy_access` reading), `proxies`,
+`profiles`, `user` (multi-user facts), and `preferences`. It includes no logs.
+One observer shared by all subscribers reacts to status/profile/preference
+changes and checks core proxy selections and access once a second: Mihomo has
+no selection-change stream, including automatic URLTest/Fallback switches.
+Only changed snapshots are pushed, apart from the fresh snapshot requested by
+a newly connected subscriber. Observations stop when there are no subscribers;
+shutdown cancels them. Failed or inconsistent core readings become null rather
+than retaining stale nodes. Watch channels coalesce snapshots for slow readers.
+Rates use the existing traffic stream and remain core-reported bytes per second.
 
 Release builds of the service report the release tag as their version: CI sets
 `MIHOMO_SERVER_VERSION` to the tag without its `v` when building, checks
