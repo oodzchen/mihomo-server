@@ -36,7 +36,9 @@ impl fmt::Debug for Relay {
 
 pub struct Response {
     pub status: http::StatusCode,
-    pub body: Vec<u8>,
+    /// Keep failures after receiving HTTP headers separate from transport
+    /// failures: an incomplete/oversized response must not become TCP fallback.
+    pub body: Result<Vec<u8>>,
 }
 
 /// Bodies are read up to this size.
@@ -92,20 +94,27 @@ pub async fn send(relay: &Relay, request: http::Request<Bytes>) -> Result<Respon
         }
         stream.finish().await.context("HTTP/3 request failed")?;
         let response = stream.recv_response().await.context("HTTP/3 response failed")?;
-        let mut body = Vec::new();
-        while let Some(chunk) = stream.recv_data().await.context("HTTP/3 response failed")? {
-            body.put(chunk);
-            ensure!(body.len() <= BODY_LIMIT, "HTTP/3 response body exceeds the test limit");
-        }
-        anyhow::Ok(Response {
-            status: response.status(),
-            body,
-        })
+        anyhow::Ok((response.status(), stream))
     };
-    let result = tokio::select! {
-        result = exchange => result,
-        error = std::future::poll_fn(|cx| driver.poll_close(cx)) => Err(anyhow::anyhow!("HTTP/3 connection closed: {error}")),
-    };
+    let result = async {
+        let (status, mut stream) = tokio::select! {
+            result = exchange => result,
+            error = std::future::poll_fn(|cx| driver.poll_close(cx)) => Err(anyhow::anyhow!("HTTP/3 connection closed: {error}")),
+        }?;
+        let read = async {
+            let mut body = Vec::new();
+            while let Some(chunk) = stream.recv_data().await.context("HTTP/3 response failed")? {
+                body.put(chunk);
+                ensure!(body.len() <= BODY_LIMIT, "HTTP/3 response body exceeds the test limit");
+            }
+            Ok(body)
+        };
+        let body = tokio::select! {
+            result = read => result,
+            error = std::future::poll_fn(|cx| driver.poll_close(cx)) => Err(anyhow::anyhow!("HTTP/3 response interrupted: {error}")),
+        };
+        Ok(Response { status, body })
+    }.await;
     connection.close(0u32.into(), b"");
     result
 }

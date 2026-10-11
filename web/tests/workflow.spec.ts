@@ -1459,6 +1459,7 @@ async function mockWideLayoutData(page: import("@playwright/test").Page) {
         { id: "cloudflare", name: "Cloudflare", category: "location" },
         { id: "dmm", name: "DMM", category: "region" },
         { id: "dmm_tv", name: "DMM TV", category: "region" },
+        { id: "youtube_premium", name: "YouTube Premium", category: "region" },
         { id: "bilibili_tw", name: "Bilibili TW sample", category: "streaming" },
       ] },
       unlock_test: { id: body.id, verdict: "yes", region: "SG", ip: "2001:db8:1234:5678:abcd:ef01:2345:6789",
@@ -1577,6 +1578,12 @@ test("unlock tests go through one node and are cleared when it changes", async (
       if (body.id === "dmm_tv") Object.assign(outcome, sampleFailure
         ? { verdict: "error", region: null, error: "DMM TV region checks disagree: TCP isForeignAccess=false; HTTP/3 isForeignAccess=true" }
         : { region: null, note: "region_check_only" });
+      if (["netflix", "prime_video", "hbo_max"].includes(body.id)) Object.assign(outcome, { note: "location_only" });
+      if (body.id === "spotify") Object.assign(outcome, { note: "signup_market" });
+      if (body.id === "youtube_premium") Object.assign(outcome, { note: "offer_only" });
+      if (["disney_plus", "dazn", "abema"].includes(body.id)) Object.assign(outcome, sampleFailure
+        ? { verdict: "error", region: null, error: "unexpected response (HTTP 403)" }
+        : { note: "region_check_only" });
       if (body.id === "bing") Object.assign(outcome, { region: null, detail: "WW" });
       if (body.id === "bilibili_hk_mo_tw") Object.assign(outcome, sampleFailure
         ? { verdict: "error", region: null, ip: null, error: "sample fetch failed (HTTP 403)" }
@@ -1594,7 +1601,7 @@ test("unlock tests go through one node and are cleared when it changes", async (
   await expect(page.getByText("测试在独立的临时内核中进行")).toBeVisible();
   const sample = page.getByRole("row", { name: /Bilibili TW sample/ });
   await expect(page.getByRole("heading", { name: "AI 服务" })).toHaveCount(0);
-  await expect(page.getByRole("row", { name: /ChatGPT|Claude|Netflix|Disney/ })).toHaveCount(0);
+  await expect(page.getByRole("row", { name: /ChatGPT|Claude|BBC iPlayer|Bahamut/ })).toHaveCount(0);
   await expect(sample).toContainText("未测");
   await page.getByRole("button", { name: "全部测试" }).click();
   await expect(sample).toContainText("样片可访问");
@@ -1608,9 +1615,23 @@ test("unlock tests go through one node and are cleared when it changes", async (
   await expect(dmmTv).toContainText("地区检查通过");
   await expect(dmmTv).toContainText("仅匿名地区检测，不代表已登录或可播放");
   await expect(dmmTv).not.toContainText("样片可访问");
+  for (const name of ["Netflix", "Amazon Prime Video", "HBO Max"]) {
+    const row = page.getByRole("row", { name: new RegExp(name) });
+    await expect(row).toContainText("已定位");
+    await expect(row).toContainText("仅平台位置判定，不代表内容可播放");
+    await expect(row).not.toContainText("样片可访问");
+  }
+  await expect(page.getByRole("row", { name: /Spotify/ })).toContainText("注册市场");
+  await expect(page.getByRole("row", { name: /YouTube Premium/ })).toContainText("方案已展示");
+  await expect(page.getByRole("row", { name: /YouTube Premium/ })).toContainText("不验证购买资格或会员权益");
+  for (const name of ["Disney+", "DAZN", "AbemaTV"]) {
+    const row = page.getByRole("row").filter({ has: page.getByText(name, { exact: true }) });
+    await expect(row).toContainText("地区检查通过");
+    await expect(row).not.toContainText("样片可访问");
+  }
   await expect(page.getByRole("row", { name: /Microsoft Bing/ })).toContainText("已检测");
   await expect(page.getByRole("row", { name: /Microsoft Bing/ })).not.toContainText("已定位");
-  await expect(page.locator(".unlock-panel").filter({ has: page.getByRole("row", { name: /Cloudflare/ }) }).locator(".unlock-summary")).toHaveText("已定位 7 / 8");
+  await expect(page.locator(".unlock-panel").filter({ has: page.getByRole("row", { name: /Cloudflare/ }) }).locator(".unlock-summary")).toHaveText("已定位 11 / 12");
   await expect(page.getByRole("row", { name: /Cloudflare/ })).toContainText("203.0.113.7");
   await expect(page.getByRole("button", { name: "全部测试" })).toBeEnabled();
   expect(new Set(tested)).toEqual(new Set(["REJECT"]));
@@ -1652,6 +1673,11 @@ test("unlock tests go through one node and are cleared when it changes", async (
   await expect(dmmTv).not.toContainText("受限");
   await expect(dmm).toContainText("海外版");
   await expect(dmm).not.toContainText("受限");
+  for (const name of ["Disney+", "DAZN", "AbemaTV"]) {
+    const row = page.getByRole("row").filter({ has: page.getByText(name, { exact: true }) });
+    await expect(row).toContainText("无法确认");
+    await expect(row).not.toContainText("受限");
+  }
   await expect(otherSample).not.toContainText("受限");
   await expect(otherSample).not.toContainText("样片可访问");
   expect(new Set(tested)).toEqual(new Set(["DIRECT"]));

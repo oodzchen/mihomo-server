@@ -23,6 +23,8 @@ use std::time::{Duration, Instant};
 use crate::core_manager::{CoreManager, CorePhase};
 use crate::http3::{self, Relay};
 
+mod anonymous;
+
 const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 /// Google's consent pre-acceptance; EU addresses otherwise get the consent page.
@@ -65,8 +67,16 @@ pub const SERVICES: &[Service] = &[
     service("ipwhois", "ipwho.is", Category::Location),
     service("apple", "Apple", Category::Location),
     service("bing", "Microsoft Bing", Category::Location),
+    service("netflix", "Netflix", Category::Location),
+    service("prime_video", "Amazon Prime Video", Category::Location),
+    service("hbo_max", "HBO Max", Category::Location),
+    service("spotify", "Spotify", Category::Location),
     service("dmm", "DMM", Category::Region),
     service("dmm_tv", "DMM TV", Category::Region),
+    service("disney_plus", "Disney+", Category::Region),
+    service("dazn", "DAZN", Category::Region),
+    service("abema", "AbemaTV", Category::Region),
+    service("youtube_premium", "YouTube Premium", Category::Region),
     service("bilibili_hk_mo_tw", "Bilibili HK/MO/TW sample", Category::Streaming),
     service("bilibili_tw", "Bilibili TW sample", Category::Streaming),
     service("steam", "Steam", Category::Other),
@@ -94,6 +104,14 @@ pub enum Note {
     WebsiteOnly,
     /// Only an anonymous region gate was checked, not account/playback rights.
     RegionCheckOnly,
+    /// Only the platform's anonymous location field was read.
+    LocationOnly,
+    /// Only the signup site's market redirect was read.
+    SignupMarket,
+    /// A public Premium offer was displayed, not purchased or activated.
+    OfferOnly,
+    /// An IP gate explicitly identified an anonymous/proxy address.
+    ProxyDetected,
     /// An IP database classifies the address as hosting/data center.
     Hosting,
 }
@@ -222,6 +240,7 @@ fn final_target(runtime: &serde_yaml_ng::Mapping, mode: ClashMode) -> String {
 struct Http {
     /// Follows redirects.
     follow: Client,
+    manual: Client,
     relay: Option<Relay>,
 }
 
@@ -229,9 +248,26 @@ struct Page {
     status: StatusCode,
     url: Url,
     body: String,
+    location: Option<String>,
+    cookies: Vec<String>,
 }
 
 impl Page {
+    fn cookie_header(&self) -> String {
+        let mut pairs: Vec<(&str, &str)> = Vec::new();
+        for cookie in &self.cookies {
+            if let Some((name, value)) = cookie.split(';').next().and_then(|pair| pair.split_once('=')) {
+                pairs.retain(|(previous, _)| *previous != name);
+                pairs.push((name, value));
+            }
+        }
+        pairs
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
     fn served(&self) -> Result<()> {
         ensure!(
             self.status.is_success(),
@@ -254,7 +290,7 @@ impl Page {
 
 impl Http {
     fn new(proxy: reqwest::Proxy) -> Result<Self> {
-        let build = || {
+        let build = |policy| {
             let mut headers = header::HeaderMap::new();
             headers.insert(
                 header::ACCEPT_LANGUAGE,
@@ -264,7 +300,7 @@ impl Http {
                 .proxy(proxy.clone())
                 .user_agent(USER_AGENT)
                 .default_headers(headers)
-                .redirect(redirect::Policy::limited(10))
+                .redirect(policy)
                 // Google resets some large HTTP/2 responses to this client.
                 .http1_only()
                 .connect_timeout(Duration::from_secs(8))
@@ -273,7 +309,8 @@ impl Http {
                 .context("failed to build the test client")
         };
         Ok(Self {
-            follow: build()?,
+            follow: build(redirect::Policy::limited(10))?,
+            manual: build(redirect::Policy::none())?,
             relay: None,
         })
     }
@@ -316,6 +353,17 @@ impl Http {
         let mut response = request.send().await.map_err(request_error)?;
         let status = response.status();
         let url = response.url().clone();
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let cookies = response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok().map(str::to_owned))
+            .collect();
         let mut body = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(request_error)? {
             body.extend_from_slice(&chunk);
@@ -325,6 +373,8 @@ impl Http {
             status,
             url,
             body: String::from_utf8_lossy(&body).into_owned(),
+            location,
+            cookies,
         })
     }
 
@@ -429,6 +479,14 @@ async fn check(http: &Http, id: &str) -> Result<Finding> {
         "ipwhois" => ipwhois(http).await,
         "apple" => apple(http).await,
         "bing" => bing(http).await,
+        "netflix" => anonymous::netflix(http).await,
+        "prime_video" => anonymous::prime_video(http).await,
+        "hbo_max" => anonymous::hbo_max(http).await,
+        "spotify" => anonymous::spotify(http).await,
+        "disney_plus" => anonymous::disney_plus(http).await,
+        "dazn" => anonymous::dazn(http).await,
+        "abema" => anonymous::abema(http).await,
+        "youtube_premium" => anonymous::youtube_premium(http).await,
         "dmm" => dmm(http).await,
         "dmm_tv" => dmm_tv(http).await,
         "bilibili_hk_mo_tw" => bilibili(http, 18281381, 29892777, 183799).await,
@@ -644,10 +702,16 @@ async fn dmm_tv(http: &Http) -> Result<Finding> {
             })
         });
         let (response, _) = futures_util::future::select_ok(attempts).await.ok()?;
+        let body = match response.body {
+            Ok(body) => body,
+            Err(error) => return Some(Err(error)),
+        };
         let page = Page {
             status: response.status,
             url: Url::parse(DMM_TV_CLIENT).expect("constant URL"),
-            body: String::from_utf8_lossy(&response.body).into_owned(),
+            body: String::from_utf8_lossy(&body).into_owned(),
+            location: None,
+            cookies: Vec::new(),
         };
         Some(page.json().and_then(|data| dmm_tv_foreign(&data)))
     };
@@ -794,11 +858,13 @@ fn steam_finding(page: &Page) -> Result<Finding> {
 mod tests {
     use super::*;
 
-    fn page(status: StatusCode, url: &str, body: &str) -> Page {
+    pub(super) fn page(status: StatusCode, url: &str, body: &str) -> Page {
         Page {
             status,
             url: Url::parse(url).unwrap(),
             body: body.into(),
+            location: None,
+            cookies: Vec::new(),
         }
     }
 
@@ -835,6 +901,8 @@ mod tests {
             status: StatusCode::OK,
             url: Url::parse("https://example.com/").unwrap(),
             body: String::new(),
+            location: None,
+            cookies: Vec::new(),
         };
         assert!(page.json().is_err());
     }
@@ -1019,6 +1087,7 @@ mod tests {
         });
         let http = Http {
             follow: Client::builder().no_proxy().build().unwrap(),
+            manual: Client::builder().no_proxy().build().unwrap(),
             relay: None,
         };
         for kind in ["media", "blocked", "login", "empty"] {
@@ -1031,20 +1100,7 @@ mod tests {
     #[tokio::test]
     async fn removed_checks_are_rejected() {
         let http = Http::new(reqwest::Proxy::all("http://127.0.0.1:1").unwrap()).unwrap();
-        for id in [
-            "chatgpt",
-            "claude",
-            "netflix",
-            "disney_plus",
-            "youtube_premium",
-            "prime_video",
-            "hbo_max",
-            "dazn",
-            "bbc_iplayer",
-            "spotify",
-            "abema",
-            "bahamut",
-        ] {
+        for id in ["chatgpt", "claude", "bbc_iplayer", "bahamut"] {
             assert!(!SERVICES.iter().any(|service| service.id == id));
             assert!(
                 check(&http, id)

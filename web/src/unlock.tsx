@@ -8,7 +8,7 @@ import type { CoreStatus, Profiles, Proxies } from "./types";
 type Category = "location" | "region" | "streaming" | "other";
 type UnlockService = { id: string; name: string; category: Category };
 type Verdict = "yes" | "no" | "error";
-type Note = "region_unsupported" | "hosting" | "overseas" | "website_only" | "region_check_only";
+type Note = "region_unsupported" | "hosting" | "overseas" | "website_only" | "region_check_only" | "location_only" | "signup_market" | "offer_only" | "proxy_detected";
 type Outcome = {
   id: string;
   verdict: Verdict;
@@ -41,6 +41,10 @@ const noteKeys: Record<Note, MessageKey> = {
   overseas: "unlockNoteOverseas",
   website_only: "unlockNoteWebsiteOnly",
   region_check_only: "unlockNoteRegionCheckOnly",
+  location_only: "unlockNoteLocationOnly",
+  signup_market: "unlockNoteSignupMarket",
+  offer_only: "unlockNoteOfferOnly",
+  proxy_detected: "unlockNoteProxyDetected",
 };
 
 // Results and the run in progress outlive the page, so leaving and coming
@@ -215,7 +219,9 @@ export function UnlockPage({
     const outcome = current.results[service.id];
     if (!outcome) return <span className="unlock-status unlock-untested">{t(language, "unlockUntested")}</span>;
     const key: MessageKey = {
-      yes: service.category === "region"
+      yes: outcome.note === "offer_only" ? "unlockOfferVisible"
+        : outcome.note === "signup_market" ? "unlockSignupMarket"
+        : service.category === "region"
         ? outcome.note === "website_only" ? "unlockWebsiteAccessible" : "unlockRegionPassed"
         : service.category === "streaming" ? "unlockYes" : service.category === "location" && outcome.region ? "unlockLocated" : "unlockDetected",
       no: outcome.note === "overseas" ? "unlockOverseas" : "unlockNo",
