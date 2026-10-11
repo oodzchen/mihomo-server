@@ -5,10 +5,10 @@ import { t, type Language, type MessageKey } from "./i18n";
 import { useToast } from "./toast";
 import type { CoreStatus, Profiles, Proxies } from "./types";
 
-type Category = "location" | "streaming" | "other";
+type Category = "location" | "region" | "streaming" | "other";
 type UnlockService = { id: string; name: string; category: Category };
 type Verdict = "yes" | "no" | "error";
-type Note = "region_unsupported" | "hosting";
+type Note = "region_unsupported" | "hosting" | "overseas" | "website_only" | "region_check_only";
 type Outcome = {
   id: string;
   verdict: Verdict;
@@ -30,6 +30,7 @@ const NOT_NODES = new Set([
 
 const categories: [Category, MessageKey, MessageKey][] = [
   ["location", "unlockLocationTitle", "unlockLocationHelp"],
+  ["region", "unlockRegionTitle", "unlockRegionHelp"],
   ["streaming", "unlockStreamingTitle", "unlockStreamingHelp"],
   ["other", "unlockOtherTitle", "unlockOtherHelp"],
 ];
@@ -37,6 +38,9 @@ const categories: [Category, MessageKey, MessageKey][] = [
 const noteKeys: Record<Note, MessageKey> = {
   region_unsupported: "unlockNoteRegionUnsupported",
   hosting: "unlockNoteHosting",
+  overseas: "unlockNoteOverseas",
+  website_only: "unlockNoteWebsiteOnly",
+  region_check_only: "unlockNoteRegionCheckOnly",
 };
 
 // Results and the run in progress outlive the page, so leaving and coming
@@ -211,11 +215,13 @@ export function UnlockPage({
     const outcome = current.results[service.id];
     if (!outcome) return <span className="unlock-status unlock-untested">{t(language, "unlockUntested")}</span>;
     const key: MessageKey = {
-      yes: service.category === "streaming" ? "unlockYes" : service.category === "location" && outcome.region ? "unlockLocated" : "unlockDetected",
-      no: "unlockNo",
+      yes: service.category === "region"
+        ? outcome.note === "website_only" ? "unlockWebsiteAccessible" : "unlockRegionPassed"
+        : service.category === "streaming" ? "unlockYes" : service.category === "location" && outcome.region ? "unlockLocated" : "unlockDetected",
+      no: outcome.note === "overseas" ? "unlockOverseas" : "unlockNo",
       error: "unlockError",
     }[outcome.verdict] as MessageKey;
-    return <span className={`unlock-status unlock-${outcome.verdict}`}>{t(language, key)}</span>;
+    return <span className={`unlock-status unlock-${outcome.verdict}`} title={t(language, key)}>{t(language, key)}</span>;
   }
 
   function regionCell(outcome?: Outcome) {
@@ -286,7 +292,7 @@ export function UnlockPage({
                 <span className="unlock-summary muted">
                   {category === "location"
                     ? t(language, "unlockLocatedSummary", { done: served.filter(service => current.results[service.id].region).length, total: members.length })
-                    : t(language, category === "other" ? "unlockDetectedSummary" : "unlockSummary", { done: served.length, total: members.length })}
+                    : t(language, category === "region" ? "unlockRegionSummary" : category === "other" ? "unlockDetectedSummary" : "unlockSummary", { done: served.length, total: members.length })}
                 </span>
                 <button type="button" disabled={!ready || busy} onClick={() => run(members.map(service => service.id))}>
                   {t(language, "unlockRunGroup")}

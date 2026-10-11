@@ -148,10 +148,14 @@ nodes, providers, resolvers and dialer options, bound to the default-route
 interface, in global mode with `GLOBAL` set to that node and a mixed listener
 on a random loopback port that requires a random password (loopback is shared
 with every local user). Checks use ordinary HTTP clients of that listener;
-the specialized HTTP/3 transport and device-session probes have been removed.
+DMM TV also compares its anonymous region gate over TCP and HTTP/3, carrying
+QUIC through the same listener's authenticated SOCKS5 UDP relay (`http3.rs`).
+Transport failure permits a TCP-only result, explicitly labeled as such. An
+actual malformed/refused HTTP/3 response or disagreeing region flags stays
+inconclusive; it is never hidden by a successful TCP response.
 At most two such cores run at once; one unused for a minute is stopped and its
-directory removed. The catalog and the detection logic (IP location databases, Google's
-and other platforms' placement, sample media and store checks) live in
+directory removed. The catalog and detection logic (IP location databases,
+platform placement, public region gates, sample media and store checks) live in
 `service/src/unlock.rs`. Each command runs one service's check under a
 whole-check timeout and returns a verdict, the region the service reports, a
 reason code and untranslated details. The page runs a bounded number at once
@@ -164,6 +168,15 @@ still in flight. Tests report only evidence available without signing in:
   their public location fields. These are location lookups, never evidence
   that a different product (such as Gemini or ChatGPT) works. Database IPs
   must parse as IP addresses; Google's arbitrary `gl=` links are not placement.
+- DMM checks the Japanese FANZA entrance at `https://www.fanza.jp/top/` (the
+  old `www.dmm.co.jp/top/` redirects through a migration exchange). Only a
+  recognizable Japanese top page confirms website access; age/login pages,
+  challenges and generic HTTP errors are inconclusive. An international-edition
+  redirect is reported as that edition, not a blanket denial of DMM services.
+- DMM TV queries `FetchClient { client { isForeignAccess } }` without signing in.
+  An explicit boolean is a region-gate result only. The player response
+  `UNAUTHORIZED` is not evidence of playable content and is not used. Results
+  do not invent a country from a support list or claim membership rights.
 - Steam reports only the currency its store returned, without inferring a
   country, purchasing rights or game access.
 - Bilibili checks two named regional samples. A positive result requires an
@@ -177,17 +190,19 @@ All public fact parsers require a successful HTTP response. Network failures,
 rate limits, generic 403s, challenges, oversized bodies and missing fields
 remain inconclusive, never "unlocked" or "region restricted". Findings require
 an explicit verdict; there is no implicit success fallback. The UI distinguishes
-located, detected currency, sample access and inconclusive outcomes, without
-inserting transient notices into the page flow.
+located, detected currency, website access, region-gate results, sample access
+and inconclusive outcomes, without inserting transient notices into the page flow.
 
-ChatGPT and Claude are removed: anonymous page/compliance requests cannot
-establish actual chat or mobile-app access. Netflix, Disney+, YouTube Premium,
-Prime Video, HBO Max, DAZN, BBC iPlayer, Spotify, DMM, DMM TV, Abema and Bahamut
-are also removed: their old checks relied on homepages, signup markets,
-anonymous sessions, incomplete login gates or complex device/protocol emulation
-rather than verified anonymous playback. Do not reintroduce a service without
-a simple anonymous check and fixtures for positive, explicit refusal and
-unknown/error responses. Services requiring user credentials are out of scope.
+Checks must be evaluated individually. A product requiring login for normal
+use does not invalidate a reliable anonymous region gate, and a region gate
+passing does not prove that an account can log in or play paid content. Prefer
+explicit service flags and recognized refusal responses over country-list
+inference or absence of an error marker. Keep fixtures for successful, refused
+and unknown/error responses, with UI labels matching what was actually tested.
+ChatGPT and Claude remain absent because anonymous compliance/homepage requests
+did not establish actual chat or mobile-app access. Other omitted services are
+not classified collectively as requiring login; restoring a check requires
+reviewing its own anonymous endpoint and giving its result the appropriate scope.
 
 ## Management and browser boundary
 

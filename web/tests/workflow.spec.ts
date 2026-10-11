@@ -1457,6 +1457,8 @@ async function mockWideLayoutData(page: import("@playwright/test").Page) {
       } },
       unlock_services: { exit: { node, via: ["GLOBAL", "long-group-name-".repeat(20)] }, services: [
         { id: "cloudflare", name: "Cloudflare", category: "location" },
+        { id: "dmm", name: "DMM", category: "region" },
+        { id: "dmm_tv", name: "DMM TV", category: "region" },
         { id: "bilibili_tw", name: "Bilibili TW sample", category: "streaming" },
       ] },
       unlock_test: { id: body.id, verdict: "yes", region: "SG", ip: "2001:db8:1234:5678:abcd:ef01:2345:6789",
@@ -1569,6 +1571,12 @@ test("unlock tests go through one node and are cleared when it changes", async (
         id: body.id, verdict: "yes", region: "JP",
         note: null, ip: "203.0.113.7", detail: null, error: null, elapsed: 120,
       };
+      if (body.id === "dmm") Object.assign(outcome, sampleFailure
+        ? { verdict: "no", region: null, note: "overseas" }
+        : { region: null, note: "website_only" });
+      if (body.id === "dmm_tv") Object.assign(outcome, sampleFailure
+        ? { verdict: "error", region: null, error: "DMM TV region checks disagree: TCP isForeignAccess=false; HTTP/3 isForeignAccess=true" }
+        : { region: null, note: "region_check_only" });
       if (body.id === "bing") Object.assign(outcome, { region: null, detail: "WW" });
       if (body.id === "bilibili_hk_mo_tw") Object.assign(outcome, sampleFailure
         ? { verdict: "error", region: null, ip: null, error: "sample fetch failed (HTTP 403)" }
@@ -1591,9 +1599,15 @@ test("unlock tests go through one node and are cleared when it changes", async (
   await page.getByRole("button", { name: "全部测试" }).click();
   await expect(sample).toContainText("样片可访问");
   const otherSample = page.getByRole("row", { name: /Bilibili HK\/MO\/TW sample/ });
-  await expect(otherSample).toContainText("该样片在当前地区不可观看");
+  await expect(otherSample).toContainText("服务明确返回地区限制");
   await expect(page.locator(".unlock-panel").filter({ has: sample }).locator(".unlock-summary")).toHaveText("样片可访问 1 / 2");
   await expect(page.getByRole("row", { name: /Steam/ })).toContainText("已检测");
+  const dmm = page.getByRole("row").filter({ has: page.getByText("DMM", { exact: true }) });
+  const dmmTv = page.getByRole("row").filter({ has: page.getByText("DMM TV", { exact: true }) });
+  await expect(dmm).toContainText("日本站可访问");
+  await expect(dmmTv).toContainText("地区检查通过");
+  await expect(dmmTv).toContainText("仅匿名地区检测，不代表已登录或可播放");
+  await expect(dmmTv).not.toContainText("样片可访问");
   await expect(page.getByRole("row", { name: /Microsoft Bing/ })).toContainText("已检测");
   await expect(page.getByRole("row", { name: /Microsoft Bing/ })).not.toContainText("已定位");
   await expect(page.locator(".unlock-panel").filter({ has: page.getByRole("row", { name: /Cloudflare/ }) }).locator(".unlock-summary")).toHaveText("已定位 7 / 8");
@@ -1633,6 +1647,11 @@ test("unlock tests go through one node and are cleared when it changes", async (
   await page.getByRole("button", { name: "全部测试" }).click();
   await expect(sample).toContainText("样片可访问");
   await expect(otherSample).toContainText("无法确认");
+  await expect(dmmTv).toContainText("无法确认");
+  await expect(dmmTv).not.toContainText("地区检查通过");
+  await expect(dmmTv).not.toContainText("受限");
+  await expect(dmm).toContainText("海外版");
+  await expect(dmm).not.toContainText("受限");
   await expect(otherSample).not.toContainText("受限");
   await expect(otherSample).not.toContainText("样片可访问");
   expect(new Set(tested)).toEqual(new Set(["DIRECT"]));

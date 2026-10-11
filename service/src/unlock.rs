@@ -9,9 +9,11 @@
 //!
 //! Public location/currency lookups report only those facts. Playback checks
 //! require a usable anonymous sample stream; a homepage, login error or unknown
-//! response never proves access. Services requiring sign-in or complex device
-//! sessions are deliberately omitted.
+//! response never proves access. An explicit anonymous region gate can be
+//! tested independently of sign-in and paid playback; its result is scoped to
+//! that gate, not to the entire service.
 use anyhow::{Context as _, Result, bail, ensure};
+use bytes::Bytes;
 use mihomo_client::models::ClashMode;
 use reqwest::{Client, RequestBuilder, StatusCode, Url, header, redirect};
 use serde::Serialize;
@@ -19,6 +21,7 @@ use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
 use crate::core_manager::{CoreManager, CorePhase};
+use crate::http3::{self, Relay};
 
 const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
@@ -36,6 +39,8 @@ const BODY_LIMIT: usize = 4 << 20;
 pub enum Category {
     /// IP location databases and what large platforms think the location is.
     Location,
+    /// Anonymous website/region gates, not account or playback access.
+    Region,
     Streaming,
     Other,
 }
@@ -60,6 +65,8 @@ pub const SERVICES: &[Service] = &[
     service("ipwhois", "ipwho.is", Category::Location),
     service("apple", "Apple", Category::Location),
     service("bing", "Microsoft Bing", Category::Location),
+    service("dmm", "DMM", Category::Region),
+    service("dmm_tv", "DMM TV", Category::Region),
     service("bilibili_hk_mo_tw", "Bilibili HK/MO/TW sample", Category::Streaming),
     service("bilibili_tw", "Bilibili TW sample", Category::Streaming),
     service("steam", "Steam", Category::Other),
@@ -79,8 +86,14 @@ pub enum Verdict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Note {
-    /// The sample's player explicitly reports a region restriction.
+    /// The service explicitly reports a region restriction.
     RegionUnsupported,
+    /// The requested Japanese site redirected to its international edition.
+    Overseas,
+    /// Only the Japanese website entrance was checked.
+    WebsiteOnly,
+    /// Only an anonymous region gate was checked, not account/playback rights.
+    RegionCheckOnly,
     /// An IP database classifies the address as hosting/data center.
     Hosting,
 }
@@ -149,7 +162,8 @@ pub async fn test(manager: &CoreManager, id: &str, node: Option<&str>) -> Result
         .with_context(|| format!("unknown service '{id}'"))?;
     let exit = resolve(manager, node).await?;
     let core = manager.test_exit(&exit.node).await?;
-    let http = Http::new(core.proxy.clone())?;
+    let mut http = Http::new(core.proxy.clone())?;
+    http.relay = Some(core.relay.clone());
     Ok(http.run(service).await)
 }
 
@@ -208,6 +222,7 @@ fn final_target(runtime: &serde_yaml_ng::Mapping, mode: ClashMode) -> String {
 struct Http {
     /// Follows redirects.
     follow: Client,
+    relay: Option<Relay>,
 }
 
 struct Page {
@@ -257,7 +272,10 @@ impl Http {
                 .build()
                 .context("failed to build the test client")
         };
-        Ok(Self { follow: build()? })
+        Ok(Self {
+            follow: build()?,
+            relay: None,
+        })
     }
 
     async fn run(&self, service: &Service) -> Outcome {
@@ -411,6 +429,8 @@ async fn check(http: &Http, id: &str) -> Result<Finding> {
         "ipwhois" => ipwhois(http).await,
         "apple" => apple(http).await,
         "bing" => bing(http).await,
+        "dmm" => dmm(http).await,
+        "dmm_tv" => dmm_tv(http).await,
         "bilibili_hk_mo_tw" => bilibili(http, 18281381, 29892777, 183799).await,
         "bilibili_tw" => bilibili(http, 50762638, 100279344, 268176).await,
         "steam" => steam(http).await,
@@ -547,6 +567,131 @@ fn bing_finding(page: &Page) -> Result<Finding> {
         },
         None => page.unexpected(),
     }
+}
+
+/// DMM's old Japanese portal now redirects through an exchange to FANZA.
+/// Request the canonical entrance directly; an age acknowledgement is not login.
+async fn dmm(http: &Http) -> Result<Finding> {
+    let page = Http::send(
+        http.get("https://www.fanza.jp/top/")
+            .header(header::COOKIE, "age_check_done=1"),
+    )
+    .await?;
+    dmm_finding(&page)
+}
+
+fn dmm_finding(page: &Page) -> Result<Finding> {
+    page.served()?;
+    ensure!(
+        matches!(page.url.host_str(), Some("www.fanza.jp" | "www.dmm.co.jp")),
+        "DMM entrance returned an unrecognized page"
+    );
+    if page.url.path().starts_with("/en/") {
+        return Ok(Finding::no(None, Some(Note::Overseas)));
+    }
+    if page.url.path().contains("not-available-in-your-region") || page.body.contains("not-available-in-your-region") {
+        return Ok(Finding::no(None, Some(Note::RegionUnsupported)));
+    }
+    let title = page
+        .body
+        .split_once("<title>")
+        .and_then(|(_, rest)| rest.split_once("</title>"))
+        .map(|(title, _)| title);
+    ensure!(
+        page.url.path() == "/top/"
+            && page.body.contains("lang=\"ja\"")
+            && title.is_some_and(|title| title.contains("FANZA")),
+        "DMM entrance was not confirmed (login, age check or unrecognized page)"
+    );
+    Ok(Finding::of(Verdict::Yes, None, Some(Note::WebsiteOnly)))
+}
+
+const DMM_TV_CLIENT: &str = "https://api.tv.dmm.com/graphql";
+
+/// This is the site's anonymous redirect gate, not a playback/login test.
+async fn dmm_tv(http: &Http) -> Result<Finding> {
+    let query = json!({
+        "operationName": "FetchClient", "variables": {},
+        "query": "query FetchClient { client { isForeignAccess } }"
+    });
+    let tcp = async {
+        let page = Http::send(
+            http.follow
+                .post(DMM_TV_CLIENT)
+                .header(header::ORIGIN, "https://tv.dmm.com")
+                .json(&query),
+        )
+        .await?;
+        dmm_tv_foreign(&page.json()?)
+    };
+    let quic = async {
+        let relay = http.relay.as_ref()?;
+        let body = serde_json::to_vec(&query).ok()?;
+        // Transport failure means QUIC is unavailable. An actual HTTP answer,
+        // including a 403 or malformed JSON, must not silently fall back to TCP.
+        let attempts = (0..2).map(|_| {
+            let body = body.clone();
+            Box::pin(async move {
+                let request = http::Request::post(DMM_TV_CLIENT)
+                    .header(header::ORIGIN, "https://tv.dmm.com")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::USER_AGENT, USER_AGENT)
+                    .header(header::ACCEPT_LANGUAGE, "en-US,en;q=0.9")
+                    .body(Bytes::from(body))?;
+                tokio::time::timeout(Duration::from_secs(4), http3::send(relay, request))
+                    .await
+                    .context("HTTP/3 request timed out")?
+            })
+        });
+        let (response, _) = futures_util::future::select_ok(attempts).await.ok()?;
+        let page = Page {
+            status: response.status,
+            url: Url::parse(DMM_TV_CLIENT).expect("constant URL"),
+            body: String::from_utf8_lossy(&response.body).into_owned(),
+        };
+        Some(page.json().and_then(|data| dmm_tv_foreign(&data)))
+    };
+    let (tcp, quic) = tokio::join!(tcp, quic);
+    dmm_tv_finding(tcp, quic)
+}
+
+fn dmm_tv_foreign(data: &Value) -> Result<bool> {
+    ensure!(
+        data["errors"].is_null() || data["errors"] == json!([]),
+        "DMM TV returned GraphQL errors"
+    );
+    data["data"]["client"]["isForeignAccess"]
+        .as_bool()
+        .context("DMM TV returned no isForeignAccess boolean")
+}
+
+fn dmm_tv_finding(tcp: Result<bool>, quic: Option<Result<bool>>) -> Result<Finding> {
+    let (foreign, protocol) = match quic {
+        Some(quic) => {
+            let foreign = quic.context("DMM TV HTTP/3 response was inconclusive")?;
+            match tcp {
+                Ok(tcp) => {
+                    ensure!(
+                        tcp == foreign,
+                        "DMM TV region checks disagree: TCP isForeignAccess={tcp}; HTTP/3 isForeignAccess={foreign}"
+                    );
+                    (foreign, "TCP + HTTP/3")
+                }
+                Err(_) => (foreign, "HTTP/3"),
+            }
+        }
+        None => (tcp?, "TCP"),
+    };
+    Ok(Finding::of(
+        if foreign { Verdict::No } else { Verdict::Yes },
+        None,
+        Some(if foreign {
+            Note::RegionUnsupported
+        } else {
+            Note::RegionCheckOnly
+        }),
+    )
+    .detail(Some(format!("{protocol}: isForeignAccess={foreign}"))))
 }
 
 /// Anonymous playback of one sample, including a small fetch from its CDN.
@@ -776,6 +921,80 @@ mod tests {
         assert_eq!(store.region, None);
     }
 
+    #[test]
+    fn dmm_confirms_only_the_japanese_entrance_and_explicit_refusals() {
+        let html = "<html lang=\"ja\"><title>FANZA 日本最大級のポータル</title></html>";
+        let finding = dmm_finding(&page(StatusCode::OK, "https://www.fanza.jp/top/", html)).unwrap();
+        assert_eq!(finding.verdict, Verdict::Yes);
+        assert_eq!(finding.note, Some(Note::WebsiteOnly));
+        assert_eq!(finding.region, None);
+        let overseas = dmm_finding(&page(
+            StatusCode::OK,
+            "https://www.dmm.co.jp/en/",
+            "International edition",
+        ))
+        .unwrap();
+        assert_eq!(overseas.note, Some(Note::Overseas));
+        let refused = dmm_finding(&page(
+            StatusCode::OK,
+            "https://www.fanza.jp/top/",
+            "not-available-in-your-region",
+        ))
+        .unwrap();
+        assert_eq!(refused.verdict, Verdict::No);
+        assert_eq!(refused.note, Some(Note::RegionUnsupported));
+        for response in [
+            page(StatusCode::TOO_MANY_REQUESTS, "https://www.fanza.jp/top/", html),
+            page(
+                StatusCode::FORBIDDEN,
+                "https://www.fanza.jp/top/",
+                "not-available-in-your-region",
+            ),
+            page(StatusCode::OK, "https://www.fanza.jp/top/", "Just a moment..."),
+            page(StatusCode::OK, "https://www.fanza.jp/age_check/", html),
+            page(
+                StatusCode::OK,
+                "https://accounts.dmm.co.jp/service/login/password/",
+                html,
+            ),
+        ] {
+            assert!(dmm_finding(&response).is_err());
+        }
+    }
+
+    #[test]
+    fn dmm_tv_reads_the_anonymous_gate_without_inventing_playback_rights() {
+        for foreign in [false, true] {
+            assert_eq!(
+                dmm_tv_foreign(&json!({"data":{"client":{"isForeignAccess":foreign}}})).unwrap(),
+                foreign
+            );
+        }
+        for data in [
+            json!({"is_blocked":true,"block_status":"UNAUTHORIZED"}),
+            json!({"data":{"client":{}}}),
+            json!({"data":{"client":{"isForeignAccess":"false"}}}),
+            json!({"data":{"client":{"isForeignAccess":false}},"errors":[{"message":"Unauthenticated"}]}),
+        ] {
+            assert!(dmm_tv_foreign(&data).is_err());
+        }
+        let accepted = dmm_tv_finding(Ok(false), Some(Ok(false))).unwrap();
+        assert_eq!(accepted.verdict, Verdict::Yes);
+        assert_eq!(accepted.note, Some(Note::RegionCheckOnly));
+        assert_eq!(accepted.region, None);
+        assert!(accepted.detail.unwrap().contains("TCP + HTTP/3"));
+        let refused = dmm_tv_finding(Ok(true), Some(Ok(true))).unwrap();
+        assert_eq!(refused.verdict, Verdict::No);
+        assert_eq!(refused.note, Some(Note::RegionUnsupported));
+        assert!(dmm_tv_finding(Ok(false), Some(Ok(true))).is_err());
+        assert!(dmm_tv_finding(Ok(true), Some(Ok(false))).is_err());
+        // An actual bad HTTP/3 response cannot be hidden by a successful TCP gate.
+        assert!(dmm_tv_finding(Ok(false), Some(Err(anyhow::anyhow!("HTTP 403")))).is_err());
+        let tcp_only = dmm_tv_finding(Ok(false), None).unwrap();
+        assert_eq!(tcp_only.detail.as_deref(), Some("TCP: isForeignAccess=false"));
+        assert!(dmm_tv_finding(Err(anyhow::anyhow!("timeout")), None).is_err());
+    }
+
     #[tokio::test]
     async fn sample_fetch_rejects_cdn_blocks_and_successful_login_pages() {
         use axum::{Router, extract::Path, routing::get};
@@ -800,6 +1019,7 @@ mod tests {
         });
         let http = Http {
             follow: Client::builder().no_proxy().build().unwrap(),
+            relay: None,
         };
         for kind in ["media", "blocked", "login", "empty"] {
             let url = Url::parse(&format!("http://{address}/{kind}")).unwrap();
@@ -822,8 +1042,6 @@ mod tests {
             "dazn",
             "bbc_iplayer",
             "spotify",
-            "dmm",
-            "dmm_tv",
             "abema",
             "bahamut",
         ] {
@@ -845,7 +1063,11 @@ mod tests {
     async fn live_checks_through_a_proxy() {
         let proxy = std::env::var("MIHOMO_TEST_UNLOCK_PROXY").expect("MIHOMO_TEST_UNLOCK_PROXY");
         let only = std::env::var("MIHOMO_TEST_UNLOCK_ONLY").ok();
-        let http = Http::new(reqwest::Proxy::all(proxy).unwrap()).unwrap();
+        let mut http = Http::new(reqwest::Proxy::all(proxy).unwrap()).unwrap();
+        http.relay = std::env::var("MIHOMO_TEST_UNLOCK_SOCKS").ok().map(|address| Relay {
+            address: address.parse().expect("MIHOMO_TEST_UNLOCK_SOCKS"),
+            credentials: None,
+        });
         let services = SERVICES.iter().filter(|service| {
             only.as_deref()
                 .is_none_or(|only| only.split(',').any(|id| id == service.id))
