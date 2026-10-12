@@ -169,12 +169,14 @@ impl Actor {
         check_config(&path).await?;
         crate::validation::resource_paths(&self.options.data_dir, &path, &self.options.binary).await?;
         self.tun_preflight(&read_config(&path).await?)?;
+        // Mihomo applies a reloaded TUN within the request and logs its failure there.
+        let logs = self.logs.events.subscribe();
         tokio::select! {
             biased;
             _ = closing(&mut self.shutdown) => bail!("reload cancelled during shutdown"),
             result = self.client.reload_config(true, path.to_str().context("config path must be UTF-8")?) => result?,
         }
-        self.verify_proxy_ports(&path).await?;
+        self.verify_proxy_ports(&path, logs).await?;
         self.options.config = path;
         self.status.send_modify(|state| state.error = None);
         Ok(())
@@ -201,17 +203,29 @@ impl Actor {
         Ok(())
     }
 
-    pub(super) async fn verify_proxy_ports(&mut self, path: &Path) -> Result<()> {
+    /// `logs` must be subscribed before the core started applying `path`.
+    pub(super) async fn verify_proxy_ports(
+        &mut self,
+        path: &Path,
+        mut logs: broadcast::Receiver<CoreLog>,
+    ) -> Result<()> {
         // The API can answer before proxy listeners or TUN have finished
         // starting. Poll both, while still rejecting a persistent bind failure.
+        // A TUN installs its excluded routes one by one, which takes seconds
+        // for the domestic bypass's thousands of CN ranges; a failed start is
+        // reported in the core's log instead, so that ends the wait early.
         const LISTENER_SETTLE: Duration = Duration::from_secs(4);
+        const TUN_SETTLE: Duration = Duration::from_secs(30);
+        const TUN_FAILURE: &str = "Start TUN listening error: ";
         let config = read_config(path).await?;
         let tun_expected = config
             .get("tun")
             .and_then(|tun| tun.get("enable"))
             .and_then(serde_yaml_ng::Value::as_bool)
             == Some(true);
-        let deadline = Instant::now() + LISTENER_SETTLE;
+        let deadline = Instant::now() + if tun_expected { TUN_SETTLE } else { LISTENER_SETTLE };
+        let pid = self.process.as_ref().and_then(|process| process.child.id());
+        let mut tun_failure = None;
         loop {
             let core = tokio::select! {
                 biased;
@@ -220,9 +234,23 @@ impl Actor {
                     result.context("listener verification timed out")??
                 }
             };
+            loop {
+                match logs.try_recv() {
+                    Ok(line) => {
+                        if let Some((_, reason)) = line.message.split_once(TUN_FAILURE) {
+                            tun_failure = Some(reason.trim_end().trim_end_matches('"').to_owned());
+                        }
+                    }
+                    Err(broadcast::error::TryRecvError::Lagged(_)) => {}
+                    Err(_) => break,
+                }
+            }
             let verified = crate::proxy_access::verify_ports(&config, &core)
-                .and_then(|()| crate::native_tun::verify(&config, &core));
+                .and_then(|()| crate::native_tun::verify(&config, &core, pid));
             match verified {
+                Err(error) if let Some(reason) = &tun_failure => {
+                    return Err(error.context(format!("Mihomo could not start the TUN: {reason}")));
+                }
                 Err(_) if Instant::now() < deadline => {}
                 Ok(()) if tun_expected => {
                     self.tun_live.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -420,6 +448,7 @@ impl Actor {
             None => Command::new(&self.options.binary),
         };
         crate::shutdown::bind_child_lifetime(&mut command);
+        let logs = self.logs.events.subscribe();
         let mut child = command
             .arg("-d")
             .arg(&self.options.data_dir)
@@ -464,7 +493,7 @@ impl Actor {
             };
             match probe {
                 Ok(Ok(version)) => {
-                    self.verify_proxy_ports(&self.options.config.clone()).await?;
+                    self.verify_proxy_ports(&self.options.config.clone(), logs).await?;
                     self.status.send_modify(|state| {
                         state.phase = CorePhase::Running;
                         state.pid = self.process.as_ref().and_then(|process| process.child.id());

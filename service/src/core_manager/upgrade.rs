@@ -393,7 +393,8 @@ impl Actor {
                 version.version == receipt.version,
                 "activated core failed version health check"
             );
-            self.verify_proxy_ports(&self.options.config.clone()).await?;
+            self.verify_proxy_ports(&self.options.config.clone(), self.logs.events.subscribe())
+                .await?;
             if !was_running {
                 self.stop_process().await?;
                 self.publish(CorePhase::Stopped, None);

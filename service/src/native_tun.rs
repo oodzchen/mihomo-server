@@ -147,12 +147,16 @@ pub(crate) async fn resolved_link_dns(device: &str) -> Option<bool> {
     )
 }
 
+/// Whether the core process PID (this service when `None`) holds `CAP_NET_ADMIN`.
+/// The core may hold it when the service does not, through the TUN launcher.
 #[cfg(target_os = "linux")]
-pub(crate) fn has_net_admin_capability() -> bool {
-    if crate::secure_fs::euid() == 0 {
-        return true;
-    }
-    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+pub(crate) fn has_net_admin_capability(pid: Option<u32>) -> bool {
+    let status = match pid {
+        Some(pid) => format!("/proc/{pid}/status"),
+        None if crate::secure_fs::euid() == 0 => return true,
+        None => "/proc/self/status".to_owned(),
+    };
+    if let Ok(status) = std::fs::read_to_string(status) {
         for line in status.lines() {
             if let Some(rest) = line.strip_prefix("CapEff:") {
                 let hex_str = rest.trim();
@@ -166,7 +170,9 @@ pub(crate) fn has_net_admin_capability() -> bool {
     false
 }
 
-pub(crate) fn verify(config: &Mapping, core: &BaseConfig) -> Result<()> {
+/// Compare the live core's TUN state with `config`; `core_pid` names the
+/// process whose privileges a failed TUN start is blamed on.
+pub(crate) fn verify(config: &Mapping, core: &BaseConfig, core_pid: Option<u32>) -> Result<()> {
     if let Some(enable) = config
         .get("tun")
         .and_then(|tun| tun.get("enable"))
@@ -174,11 +180,13 @@ pub(crate) fn verify(config: &Mapping, core: &BaseConfig) -> Result<()> {
     {
         if enable && !core.tun.enable {
             #[cfg(target_os = "linux")]
-            let cap_msg = if !has_net_admin_capability() {
-                " (interface initialization failed: service lacks CAP_NET_ADMIN; grant capability or root privileges to Mihomo binary)"
+            let cap_msg = if !has_net_admin_capability(core_pid) {
+                " (interface initialization failed: Mihomo lacks CAP_NET_ADMIN; grant capability or root privileges to Mihomo binary)"
             } else {
                 " (interface initialization failed; check CAP_NET_ADMIN capability or root privileges for Mihomo)"
             };
+            #[cfg(not(target_os = "linux"))]
+            let _ = core_pid;
             #[cfg(not(target_os = "linux"))]
             let cap_msg = " (interface initialization failed; check TUN privileges)";
 
@@ -284,34 +292,35 @@ mod tests {
     fn enabled_tun_requires_matching_live_core_report() -> Result<()> {
         let config = from_str("tun: {enable: true, device: lo, auto-route: false}")?;
         let mut core = BaseConfig::default();
-        let err = verify(&config, &core).unwrap_err();
+        let err = verify(&config, &core, None).unwrap_err();
         assert!(format!("{err:#}").contains("CAP_NET_ADMIN"), "{err:#}");
 
         core.tun.enable = true;
         core.tun.device = "lo".into();
         core.tun.auto_route = false;
-        verify(&config, &core)?;
+        verify(&config, &core, None)?;
 
         core.tun.auto_route = true;
-        assert!(verify(&config, &core).is_err());
+        assert!(verify(&config, &core, None).is_err());
 
         core.tun.auto_route = false;
         core.tun.device = "other".into();
-        assert!(verify(&config, &core).is_err());
+        assert!(verify(&config, &core, None).is_err());
 
         // Interface verification: nonexistent device fails when core reports enable: true
         let config_missing = from_str("tun: {enable: true, device: nonexistent_tun_99, auto-route: false}")?;
         core.tun.device = "nonexistent_tun_99".into();
         #[cfg(target_os = "linux")]
-        assert!(verify(&config_missing, &core).is_err());
+        assert!(verify(&config_missing, &core, None).is_err());
 
-        assert!(verify(&from_str("tun: {enable: false}")?, &core).is_err());
+        assert!(verify(&from_str("tun: {enable: false}")?, &core, None).is_err());
         Ok(())
     }
 
     #[cfg(target_os = "linux")]
     #[test]
     fn capability_check_runs_without_panic() {
-        let _ = has_net_admin_capability();
+        let _ = has_net_admin_capability(None);
+        let _ = has_net_admin_capability(Some(std::process::id()));
     }
 }
