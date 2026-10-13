@@ -185,6 +185,57 @@ fn registered_slot() -> Option<u16> {
     None
 }
 
+/// The service process of a running unit. A user manager started before the
+/// TUN group authorization runs the launcher through `sg`, which stays the
+/// unit's main process and forks the service when login.defs enables
+/// `SYSLOG_SG_ENAB` (openSUSE, Debian); being setuid, its own /proc entries
+/// describe neither the service's arguments nor its directory.
+pub fn server_pid(state: &ServiceState) -> u32 {
+    let mut pid = state.main_pid;
+    for _ in 0..4 {
+        let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+            break;
+        };
+        if !switches_group(&raw) {
+            break;
+        }
+        match children(pid).as_slice() {
+            [child] => pid = *child,
+            _ => break,
+        }
+    }
+    pid
+}
+
+/// Whether a command line (NUL separated) runs `sg` or `newgrp`.
+fn switches_group(cmdline: &[u8]) -> bool {
+    let program = cmdline.split(|byte| *byte == 0).next().unwrap_or_default();
+    let name = program.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
+    matches!(name, b"sg" | b"newgrp")
+}
+
+/// The parent PID in a `/proc/<pid>/stat` line; the command name before it
+/// is parenthesized and may contain spaces or parentheses itself.
+fn parent_in_stat(stat: &str) -> Option<u32> {
+    stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.parse().ok()
+}
+
+fn children(parent: u32) -> Vec<u32> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
+        .filter(|pid| {
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|stat| parent_in_stat(&stat))
+                == Some(parent)
+        })
+        .collect()
+}
+
 pub fn discover_running(state: &ServiceState) -> Result<Endpoint> {
     if !state.running() {
         bail!(
@@ -196,7 +247,7 @@ pub fn discover_running(state: &ServiceState) -> Result<Endpoint> {
             }
         );
     }
-    let proc = PathBuf::from(format!("/proc/{}", state.main_pid));
+    let proc = PathBuf::from(format!("/proc/{}", server_pid(state)));
     let raw = std::fs::read(proc.join("cmdline")).context("cannot read the service command line")?;
     let arguments: Vec<String> = raw
         .split(|byte| *byte == 0)
@@ -275,6 +326,53 @@ mod tests {
             (v6.base.as_str(), v6.host.as_str()),
             ("http://[::1]:9090", "[::1]:9090")
         );
+    }
+
+    #[test]
+    fn group_switch_wrappers_are_recognized() {
+        assert!(switches_group(
+            b"sg\0mihomo-tun\0-c\0exec '/opt/launch' '--multi-user'\0"
+        ));
+        assert!(switches_group(b"/run/wrappers/bin/newgrp\0"));
+        assert!(!switches_group(
+            b"/opt/mihomo-server/current/bin/mihomo-server\0--multi-user\0"
+        ));
+        assert!(!switches_group(b""));
+        assert_eq!(parent_in_stat("42 (a) b) S 7 42 42 0"), Some(7));
+        assert_eq!(parent_in_stat("42 (x"), None);
+    }
+
+    /// A stand-in `sg` that forks its command, like shadow's sg with
+    /// `SYSLOG_SG_ENAB yes`: the service is its child, not the main process.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_service_behind_a_forking_sg_is_found() {
+        let directory = std::env::temp_dir().join(format!("management-client-sg-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let sg = directory.join("sg");
+        let _ = std::fs::remove_file(&sg);
+        std::os::unix::fs::symlink("/bin/sh", &sg).unwrap();
+        let mut wrapper = Command::new(&sg).args(["-c", "sleep 30; exit 0"]).spawn().unwrap();
+        let state = |pid| ServiceState {
+            active: "active".into(),
+            main_pid: pid,
+            ..ServiceState::default()
+        };
+        let mut found = wrapper.id();
+        for _ in 0..100 {
+            found = server_pid(&state(wrapper.id()));
+            if found != wrapper.id() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let child = std::fs::read(format!("/proc/{found}/cmdline")).unwrap();
+        wrapper.kill().unwrap();
+        wrapper.wait().unwrap();
+        std::fs::remove_dir_all(&directory).unwrap();
+        assert!(child.starts_with(b"sleep\0"), "{}", String::from_utf8_lossy(&child));
+        let own = std::process::id();
+        assert_eq!(server_pid(&state(own)), own, "other main processes are the service");
     }
 
     #[test]

@@ -11,6 +11,6 @@ pub mod view;
 pub use api::{Api, CommandError};
 pub use endpoint::{
     Endpoint, ServiceState, UNIT, argument, default_token_file, discover_running, from_arguments, locate,
-    management_port, parse_show, service_state,
+    management_port, parse_show, server_pid, service_state,
 };
 pub use view::current_mode;

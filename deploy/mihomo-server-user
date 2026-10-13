@@ -137,10 +137,30 @@ process_argument() {
         $0 == key {next_value=1}
         index($0, key "=") == 1 {print substr($0, length(key)+2); exit}'
 }
+# The service process: a launcher entering the TUN group runs it through sg,
+# which stays the main process and forks it when SYSLOG_SG_ENAB is enabled.
+server_pid() {
+    local pid=$1 child
+    for _ in 1 2 3 4; do
+        [ -r "/proc/$pid/cmdline" ] || break
+        case "$(tr '\0' '\n' < "/proc/$pid/cmdline" | head -n 1)" in
+            sg|*/sg|newgrp|*/newgrp) ;;
+            *) break ;;
+        esac
+        # The parent PID follows the parenthesized command name in stat.
+        child=$(awk -v parent="$pid" '{
+            sub(/.*\) /, ""); if ($2 == parent) { split(FILENAME, path, "/"); print path[3] }
+        }' /proc/[0-9]*/stat 2>/dev/null)
+        case "$child" in ''|*[!0-9]*) break ;; esac
+        pid=$child
+    done
+    echo "$pid"
+}
 endpoint() {
     local pid origin
     pid=$(systemctl --user show "$UNIT" -p MainPID --value)
     [ "${pid:-0}" != 0 ] || return 1
+    pid=$(server_pid "$pid")
     LISTEN=$(process_argument "$pid" --listen)
     if [ -z "$LISTEN" ]; then
         local n

@@ -268,7 +268,9 @@ reload, which also reports a result that settled just before it.
 The `mihomo-server` command is a second client of the same authenticated command
 API, with no private path into the service. It locates the invoking user's
 instance from the systemd unit's main process (listener, public origin and data
-directory from its command line), so it sends the Host the service authorizes and
+directory from its command line; when that process is the launcher's `sg`, which
+forks the service where login.defs enables `SYSLOG_SG_ENAB`, from its only
+child), so it sends the Host the service authorizes and
 reads the token the service wrote. Service lifecycle is delegated to the release's
 `mihomo-server-user` helper and program updates/uninstall to the installer, so
 systemd and root actions keep a single implementation.
