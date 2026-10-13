@@ -5288,6 +5288,32 @@ test("settings language applies on change and is shared through the service", as
   }
 });
 
+test("quick language changes reach the service in the order chosen", async ({ page }) => {
+  await loginSettings(page);
+  let delayed = 0;
+  // The first change is slow to reach the service; the second must not overtake it.
+  await page.route("**/api/commands", async (route) => {
+    const slow = route.request().postDataJSON()?.language === "zhtw";
+    if (slow) await new Promise(resolve => setTimeout(resolve, 1500));
+    await route.continue();
+    if (slow) delayed++;
+  });
+  try {
+    await page.getByRole("combobox", { name: "界面语言", exact: true }).selectOption("zhtw");
+    await page.getByRole("combobox", { name: "介面語言", exact: true }).selectOption("en");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect.poll(() => delayed).toBe(1);
+    await expect.poll(async () => (await settingsApi("preferences")).language).toBe("en");
+    // Pushes for the earlier choice do not switch the page back.
+    await page.waitForTimeout(500);
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    expect((await settingsApi("preferences")).language).toBe("en");
+  } finally {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await settingsApi("set_language", { language: null });
+  }
+});
+
 test("settings uses the compact layout and shows browser-safe version information", async ({ page, browser }) => {
   await loginSettings(page);
   await expect(page.getByText("工作空间", { exact: true })).toHaveCount(0);

@@ -252,17 +252,27 @@ function Manager({
   // The interface language is an instance preference shared with the other
   // clients (desktop tray included): adopt what the service pushes, and save
   // changes made here to the service, which pushes them to everyone else.
+  // Changes are sent one at a time so the service applies them in the order
+  // chosen, and pushes are ignored until they are applied: a push for an
+  // earlier choice must not switch the page back.
+  const languageWrites = useRef({ queue: Promise.resolve(), pending: 0 });
   const adoptPreferences = useCallback((preferences?: Preferences) => {
+    if (languageWrites.current.pending) return;
     if (preferences?.language && preferences.language !== languageRef.current) changeLanguage(preferences.language);
   }, [changeLanguage]);
   const changeSharedLanguage = useCallback((value: string) => {
     const next = resolveLanguage(value);
     changeLanguage(next);
-    command<Preferences>(token, "set_language", { language: next }).catch((error) => {
-      if (!alive.current) return;
-      if (error instanceof ApiError && error.status === 401) logout(t(languageRef.current, "expiredToken"));
-      else setNotice(describe(error), "error");
-    });
+    const writes = languageWrites.current;
+    writes.pending++;
+    writes.queue = writes.queue
+      .then(async () => { await command<Preferences>(token, "set_language", { language: next }); })
+      .catch((error) => {
+        if (!alive.current) return;
+        if (error instanceof ApiError && error.status === 401) logout(t(languageRef.current, "expiredToken"));
+        else setNotice(describe(error), "error");
+      })
+      .finally(() => { writes.pending--; });
   }, [changeLanguage, token, logout, setNotice]);
   const request = useCallback(
     async <T,>(name: string, fields: Record<string, unknown> = {}) => {
