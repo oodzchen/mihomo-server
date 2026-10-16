@@ -94,7 +94,7 @@ impl Prober {
         );
         let _permit = self.admission.acquire().await?;
         let config = probe_config(runtime, &self.data_dir, self.interface().as_deref())?;
-        let mut core = IsolatedCore::start(&self.binary, &self.data_dir, &config).await?;
+        let mut core = IsolatedCore::start(&self.binary, &self.data_dir, &config, nodes).await?;
         let client = &core.client;
 
         // The running core keeps its resolver connections open; so does the probe
@@ -168,7 +168,7 @@ impl Prober {
                 .local_addr()?
                 .port();
             let config = exit_config(runtime, &self.data_dir, self.interface().as_deref(), port, &password)?;
-            let core = match IsolatedCore::start(&self.binary, &self.data_dir, &config).await {
+            let core = match IsolatedCore::start(&self.binary, &self.data_dir, &config, &[node]).await {
                 Ok(core) => core,
                 Err(error) => {
                     last_error = Some(error);
@@ -236,7 +236,12 @@ struct IsolatedCore {
 }
 
 impl IsolatedCore {
-    async fn start(binary: &Path, data_dir: &Path, config: &Mapping) -> Result<Self> {
+    async fn start(
+        binary: &Path,
+        data_dir: &Path,
+        config: &Mapping,
+        expected_nodes: &[impl AsRef<str>],
+    ) -> Result<Self> {
         let directory = ProbeDir::create(&data_dir.join("run"))?;
         let config_path = directory.0.join("probe.yaml");
         write_private(&config_path, serde_yaml_ng::to_string(config)?.as_bytes())?;
@@ -290,24 +295,30 @@ impl IsolatedCore {
             .protocol(Protocol::LocalSocket)
             .socket_path(socket.to_string_lossy())
             .build()?;
-        for _ in 0..50 {
+        for attempt in 0..200 {
             if let Some(status) = child.try_wait()? {
                 bail!(
                     "probe core exited ({status}): {}",
                     output.lock().iter().cloned().collect::<Vec<_>>().join("; ")
                 );
             }
-            if tokio::time::timeout(Duration::from_millis(500), client.get_version())
-                .await
-                .is_ok_and(|version| version.is_ok())
-            {
-                return Ok(Self {
-                    child,
-                    client,
-                    _directory: directory,
-                });
+            if let Ok(Ok(proxies_resp)) = tokio::time::timeout(Duration::from_millis(200), client.get_proxies()).await {
+                let proxies = &proxies_resp.proxies;
+                if !proxies.is_empty() {
+                    let all_expected_ready = expected_nodes.is_empty()
+                        || expected_nodes.iter().all(|node| proxies.contains_key(node.as_ref()));
+                    // Wait for all expected nodes to be loaded, or after 500ms (20 attempts)
+                    // proceed if general proxies are already populated.
+                    if all_expected_ready || attempt >= 20 {
+                        return Ok(Self {
+                            child,
+                            client,
+                            _directory: directory,
+                        });
+                    }
+                }
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
         bail!("probe core did not become ready")
     }
@@ -350,18 +361,23 @@ async fn warm_resolver(client: &Mihomo, host: &str) -> Result<()> {
 
 async fn probe_node(client: &Mihomo, node: &str, url: &str, timeout_ms: u32) -> NodeProbe {
     let delay = || async {
-        client
-            .delay_proxy_by_name(node, url, timeout_ms)
-            .await
-            .map_or(0, |delay| delay.delay)
+        let start = Instant::now();
+        let res = client.delay_proxy_by_name(node, url, timeout_ms).await;
+        let elapsed = start.elapsed();
+        let val = res.map_or(0, |delay| delay.delay);
+        (val, elapsed)
     };
-    let cold = delay().await;
+    let (mut cold, elapsed) = delay().await;
+    if cold == 0 && elapsed < Duration::from_millis(u64::from(timeout_ms) / 2) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        cold = delay().await.0;
+    }
     if cold == 0 {
         return NodeProbe::default();
     }
     let mut total = 0;
     for _ in 0..WARM_SAMPLES {
-        match delay().await {
+        match delay().await.0 {
             0 => return NodeProbe { cold, warm: 0 },
             sample => total += sample,
         }
@@ -406,16 +422,33 @@ pub(crate) fn probe_config(runtime: &Mapping, data_dir: &Path, interface: Option
     if let Some(dns) = probe_dns(runtime) {
         config.insert("dns".into(), dns.into());
     }
-    config.insert(
-        "proxies".into(),
-        runtime
-            .get("proxies")
-            .cloned()
-            .unwrap_or_else(|| Value::Sequence(vec![])),
-    );
+    let mut all_proxies = runtime
+        .get("proxies")
+        .and_then(Value::as_sequence)
+        .cloned()
+        .unwrap_or_default();
     if let Some(providers) = runtime.get("proxy-providers").and_then(Value::as_mapping) {
         config.insert("proxy-providers".into(), cached_providers(providers, data_dir).into());
+        for (_, provider) in providers {
+            if let Some(provider_map) = provider.as_mapping()
+                && let Some(path) = provider_map.get("path").and_then(Value::as_str)
+            {
+                let full_path = data_dir.join(path);
+                if full_path.is_file()
+                    && let Ok(content) = std::fs::read_to_string(&full_path)
+                    && let Ok(val) = serde_yaml_ng::from_str::<Mapping>(&content)
+                    && let Some(provider_proxies) = val.get("proxies").and_then(Value::as_sequence)
+                {
+                    for p in provider_proxies {
+                        if !all_proxies.contains(p) {
+                            all_proxies.push(p.clone());
+                        }
+                    }
+                }
+            }
+        }
     }
+    config.insert("proxies".into(), Value::Sequence(all_proxies));
     config.insert("rules".into(), Value::Sequence(vec!["MATCH,DIRECT".into()]));
     Ok(config)
 }

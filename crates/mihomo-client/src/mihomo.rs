@@ -959,11 +959,13 @@ impl Mihomo {
             .send()
             .await?;
         if !response.status().is_success() {
+            let status = response.status();
             match response.json::<ErrorResponse>().await {
                 Ok(err_res) => {
                     log::debug!(
-                        "delay proxy[{}], mark it timeout, response error message: {}",
+                        "delay proxy[{}] failed (status {}), response message: {}",
                         proxy_name,
+                        status,
                         err_res.message
                     );
                     return Ok(ProxyDelay { delay: 0 });

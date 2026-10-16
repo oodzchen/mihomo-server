@@ -134,8 +134,10 @@ providers (read from their caches), node resolvers and dialer options, no
 listeners, TUN, rules or persisted state, bound to the default-route interface
 so that it bypasses any TUN. Through it each node gets one cold HTTPS request
 (node DNS, handshake, remote dial and target TLS) and one over the session that
-opened, 16 nodes at a time; a group is tested through its current node. One
-probe runs at a time and its process and directory are removed afterwards.
+opened, 16 nodes at a time; a group is tested through its current node. The probe
+verifies that proxy nodes are fully loaded into the isolated core before requests
+begin, avoiding premature timeout determinations during startup. One probe runs at
+a time and its process and directory are removed afterwards.
 
 Unlock tests (`unlock_services`, `unlock_test`, the Web unlock page) test one
 node at a time, isolated like node tests: neither the active rules (which may

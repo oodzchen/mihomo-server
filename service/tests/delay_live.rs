@@ -217,8 +217,31 @@ async fn proxy_providers_and_delay_testing_with_live_core() -> Result<()> {
             .body(Body::from(
                 json!({"command": "update_proxy_provider", "name": "non_existent"}).to_string(),
             ))?;
-        let res = http_app.oneshot(req).await?;
+        let res = http_app.clone().oneshot(req).await?;
         assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        // 10. HTTP management API probe_proxies
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/commands")
+            .header(header::HOST, "127.0.0.1:9090")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "command": "probe_proxies",
+                    "names": ["DIRECT", "MainGroup"],
+                    "url": test_url,
+                    "timeout": 2000
+                })
+                .to_string(),
+            ))?;
+        let res = http_app.oneshot(req).await?;
+        assert_eq!(res.status(), StatusCode::OK);
+        let probe_res: Value = serde_json::from_slice(&to_bytes(res.into_body(), usize::MAX).await?)?;
+        assert!(probe_res["DIRECT"]["cold"].as_u64().unwrap_or(0) > 0);
+        assert!(probe_res["DIRECT"]["warm"].as_u64().unwrap_or(0) > 0);
+        assert!(probe_res["MainGroup"]["cold"].as_u64().is_some());
 
         Ok::<(), anyhow::Error>(())
     }
