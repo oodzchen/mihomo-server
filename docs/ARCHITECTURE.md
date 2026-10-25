@@ -491,9 +491,13 @@ pinned upstream artifacts and executable checks:
   same glibc), publishes `mihomo-server-<tag>-<target>.tar.gz` for both and writes
   one hash per Nix system into `flake.nix`. `install.sh` picks the bundle from
   `uname -m`. CI runs the Rust and packaging tests on both architectures.
-- `CHANGELOG.md` contains versioned release bodies. `scripts/release_notes.py`
-  rejects missing/empty/duplicate sections for the pushed tag. Builds extract
-  notes from the tag into the release artifacts; publishing uses that same file
+- `CHANGELOG.md` optionally contains curated versioned release bodies.
+  `scripts/release_notes.py` uses a nonempty matching section when available;
+  otherwise it generates notes from commits since the previous reachable version
+  tag (all commits for the first release). Duplicate sections still fail.
+  Release builds fetch full history and tags; pushing a tag needs no manual
+  changelog edit or script invocation. Builds write notes for the exact tag into
+  the release artifacts; publishing uses that same file
   as the GitHub Release body (including reruns), independent of main advancing.
   Bundles include `CHANGELOG.md` and the extracted `release-notes.md`, both
   covered by the bundle checksums.

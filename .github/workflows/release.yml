@@ -34,8 +34,10 @@ jobs:
       TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # Automatic release notes need previous tags and commit history.
 
-      - name: Validate versioned release notes
+      - name: Prepare release notes (changelog or Git history)
         run: python3 scripts/release_notes.py --tag "$GITHUB_REF_NAME" --output dist/release-notes.md
 
       - uses: actions/setup-node@v5
