@@ -35,6 +35,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Validate versioned release notes
+        run: python3 scripts/release_notes.py --tag "$GITHUB_REF_NAME" --output dist/release-notes.md
+
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -65,6 +68,7 @@ jobs:
             --mihomo .core/verge-mihomo \
             --core-version "${{ steps.pin.outputs.version }}" \
             --core-sha256 "${{ steps.pin.outputs.sha256 }}" \
+            --release-notes dist/release-notes.md \
             --output "dist/mihomo-server-$GITHUB_REF_NAME-$TARGET"
 
       - name: Smoke test bundle binary
@@ -100,6 +104,7 @@ jobs:
             dist/mihomo-server-${{ github.ref_name }}-${{ env.TARGET }}.tar.gz
             dist/mihomo-server-${{ github.ref_name }}-${{ env.TARGET }}.tar.gz.sha256
             dist/install.sh
+            dist/release-notes.md
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
@@ -127,7 +132,12 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           (cd dist && sha256sum -c ./*.sha256)
-          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --clobber dist/*
+            gh release edit "$GITHUB_REF_NAME" --notes-file dist/release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --notes-file dist/release-notes.md dist/*
+          fi
 
       - name: Update flake.nix on main
         run: |

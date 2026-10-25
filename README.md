@@ -2,6 +2,8 @@
 
 无头运行的 [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev)：不需要桌面环境，以后台服务的形式在 Linux 服务器上运行 [Mihomo](https://github.com/MetaCubeX/mihomo) 内核，从任意浏览器远程管理订阅、节点和配置。
 
+更新内容见 [更新日志](CHANGELOG.md)，版本发布步骤见 [发布指南](docs/RELEASING.md)。
+
 ## 安装
 
 使用以下命令进行安装：

@@ -206,6 +206,19 @@ impl CoreManager {
         )
     }
 
+    pub async fn service_release_notes(&self, version: &str) -> Result<crate::cli::system::ServiceReleaseNotes> {
+        ensure!(!*self.shutdown.borrow(), "service is shutting down");
+        ensure!(!version.is_empty() && version.len() <= 256, "invalid release version");
+        let mut failures = Vec::new();
+        for route in self.core_download_routes().await {
+            match crate::cli::system::release_notes_via(version, &route).await {
+                Ok(notes) => return Ok(notes),
+                Err(error) => failures.push(format!("{} route: {error:#}", route.name())),
+            }
+        }
+        bail!("cannot fetch mihomo-server release notes ({})", failures.join("; "))
+    }
+
     pub(super) async fn core_download_routes(&self) -> Vec<crate::core_release::Route> {
         let mut routes = Vec::new();
         if self.status().phase == CorePhase::Running

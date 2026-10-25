@@ -90,6 +90,48 @@ pub(crate) async fn latest_release_via(route: &crate::core_release::Route) -> Re
     route.run(latest_release_from(&client)).await
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ServiceReleaseNotes {
+    #[serde(rename = "tag_name")]
+    pub version: String,
+    pub body: Option<String>,
+}
+
+/// Read the current Release page body for the exact version shown to the user.
+pub(crate) async fn release_notes_via(
+    version: &str,
+    route: &crate::core_release::Route,
+) -> Result<ServiceReleaseNotes> {
+    let mut url = url::Url::parse(&format!("https://api.github.com/repos/{REPOSITORY}/releases/tags/"))?;
+    url.path_segments_mut()
+        .map_err(|_| anyhow::anyhow!("invalid release URL"))?
+        .pop_if_empty()
+        .push(version);
+    let client = route.configure(client_builder(true)?)?.build()?;
+    route.run(release_notes_from(&client, url.as_str(), version)).await
+}
+
+async fn release_notes_from(client: &reqwest::Client, url: &str, version: &str) -> Result<ServiceReleaseNotes> {
+    let mut response = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .send()
+        .await
+        .context("cannot fetch release notes")?
+        .error_for_status()?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        anyhow::ensure!(
+            bytes.len() + chunk.len() <= 1024 * 1024,
+            "release notes response too large"
+        );
+        bytes.extend_from_slice(&chunk);
+    }
+    let notes: ServiceReleaseNotes = serde_json::from_slice(&bytes).context("invalid release notes response")?;
+    anyhow::ensure!(notes.version == version, "release notes version mismatch");
+    Ok(notes)
+}
+
 async fn latest_release_from(client: &reqwest::Client) -> Result<String> {
     let response = client
         .get(format!("https://github.com/{REPOSITORY}/releases/latest"))
@@ -222,6 +264,53 @@ mod tempdir {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn release_notes_use_current_body_and_reject_wrong_versions_or_http_errors() {
+        use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let app = Router::new()
+            .route(
+                "/notes",
+                get(|| async {
+                    axum::Json(serde_json::json!({"tag_name":"v1.2.3", "body":"### 修复\n- 新说明"}))
+                }),
+            )
+            .route(
+                "/empty",
+                get(|| async { axum::Json(serde_json::json!({"tag_name":"v1.2.3", "body":null})) }),
+            )
+            .route("/limited", get(|| async { StatusCode::FORBIDDEN.into_response() }))
+            .route("/invalid", get(|| async { "not JSON" }))
+            .route("/large", get(|| async { "x".repeat(1024 * 1024 + 1) }));
+        let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let notes = release_notes_from(&client, &format!("{base}/notes"), "v1.2.3")
+            .await
+            .unwrap();
+        assert_eq!(notes.body.as_deref(), Some("### 修复\n- 新说明"));
+        assert!(
+            release_notes_from(&client, &format!("{base}/empty"), "v1.2.3")
+                .await
+                .unwrap()
+                .body
+                .is_none()
+        );
+        assert!(
+            release_notes_from(&client, &format!("{base}/notes"), "v9.9.9")
+                .await
+                .is_err()
+        );
+        for path in ["limited", "invalid", "large"] {
+            assert!(
+                release_notes_from(&client, &format!("{base}/{path}"), "v1.2.3")
+                    .await
+                    .is_err()
+            );
+        }
+        task.abort();
+    }
 
     #[test]
     fn release_tag_is_read_from_the_redirect() {
