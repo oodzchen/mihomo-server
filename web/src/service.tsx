@@ -15,6 +15,7 @@ type ServiceInfo = {
   upgrade: { available: boolean; state: string; result: string; log: string[] };
 };
 type Operation = "restart" | "stop" | "upgrade";
+type ReleaseNotes = { tag_name: string; body: string | null };
 type Pending = {
   toast: ToastOperation;
   /** The connection dropped since the request (the service went away). */
@@ -85,6 +86,8 @@ export function ServicePage({
   const [refresh, setRefresh] = useState(0);
   const [operation, setOperation] = useState<Operation>();
   const [confirmation, setConfirmation] = useState<Operation>();
+  const [releaseNotes, setReleaseNotes] = useState<ReleaseNotes>();
+  const notesRequest = useRef<AbortController | undefined>(undefined);
   const pending = useRef<Pending>(undefined);
   const output = useRef<HTMLPreElement>(null);
 
@@ -97,6 +100,7 @@ export function ServicePage({
       setOperation("upgrade");
     }
     return () => {
+      notesRequest.current?.abort();
       pending.current?.toast.dismiss();
       rememberUpgrade();
     };
@@ -211,11 +215,33 @@ export function ServicePage({
       const latest = await command<string>(token, "service_release");
       // The service records the same check for later visits.
       setCheck({ installed: info.release, latest });
+      if (latest !== info.release) await showUpgrade(latest);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) logout(t(language, "expiredToken"));
       else notify(describe(error), "error");
     } finally {
       setChecking(false);
+    }
+  }
+
+  async function showUpgrade(version: string) {
+    notesRequest.current?.abort();
+    const controller = new AbortController();
+    notesRequest.current = controller;
+    setChecking(true);
+    setReleaseNotes(undefined);
+    try {
+      const notes = await command<ReleaseNotes>(token, "service_release_notes", { version }, controller.signal);
+      if (controller.signal.aborted) return;
+      if (notes.tag_name !== version) throw new Error(t(language, "serviceReleaseNotesMismatch"));
+      setReleaseNotes(notes);
+      setConfirmation("upgrade");
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (error instanceof ApiError && error.status === 401) logout(t(language, "expiredToken"));
+      else notify(`${t(language, "serviceReleaseNotesFailed")} ${describe(error)}`, "error");
+    } finally {
+      if (!controller.signal.aborted) setChecking(false);
     }
   }
 
@@ -360,8 +386,8 @@ export function ServicePage({
             <button
               type="button"
               className="primary"
-              disabled={!idle || !upgrade?.available || running}
-              onClick={() => setConfirmation("upgrade")}
+              disabled={!idle || checking || !upgrade?.available || running}
+              onClick={() => void showUpgrade(available)}
             >
               {t(language, "updateTo", { version: available })}
             </button>
@@ -385,7 +411,13 @@ export function ServicePage({
           title={confirmationCopy.title}
           confirmLabel={confirmationCopy.confirm}
           cancelLabel={t(language, "cancel")}
-          confirmDisabled={!idle}
+          confirmDisabled={!idle || (confirmation === "upgrade" && (!upgrade?.available || running || checking || releaseNotes?.tag_name !== available))}
+          details={confirmation === "upgrade" && releaseNotes ? (
+            <div className="release-notes">
+              <h3>{t(language, "serviceReleaseNotes", { version: releaseNotes.tag_name })}</h3>
+              <pre tabIndex={0}>{releaseNotes.body?.trim() || t(language, "serviceReleaseNotesEmpty")}</pre>
+            </div>
+          ) : undefined}
           onCancel={() => setConfirmation(undefined)}
           onConfirm={() => void start(confirmation, confirmationCopy.working)}
         >

@@ -152,6 +152,12 @@ def package(args):
             shutil.copyfile(ROOT / "deploy" / source, stage / "share" / target)
         shutil.copyfile(ROOT / "LICENSE", stage / "LICENSE")
         shutil.copyfile(ROOT / "LICENSES.txt", stage / "LICENSES.txt")
+        shutil.copyfile(ROOT / "CHANGELOG.md", stage / "CHANGELOG.md")
+        if getattr(args, "release_notes", None):
+            notes = Path(args.release_notes)
+            if notes.is_symlink() or not notes.is_file() or not notes.read_text(encoding="utf-8").strip():
+                raise ValueError("Expected nonempty regular release notes file")
+            shutil.copyfile(notes, stage / "release-notes.md")
         (stage / "docs").mkdir()
         for name in ["DEPLOYMENT.md", "UPSTREAM.md"]:
             shutil.copyfile(ROOT / "docs" / name, stage / "docs" / name)
@@ -173,6 +179,7 @@ def main():
     parser.add_argument("--core-sha256", required=True, help="Expected SHA-256 of the uncompressed core")
     parser.add_argument("--output", required=True, help="Fresh bundle directory; existing output is rejected")
     parser.add_argument("--build", action="store_true", help="Build locked frontend and release service first")
+    parser.add_argument("--release-notes", help="Version-specific Markdown notes to include in the bundle")
     parser.add_argument("--service", help="Use a prebuilt service instead of the release build location")
     parser.add_argument("--web-dir", help="Use prebuilt assets instead of web/dist")
     parser.add_argument("--geo-dir", help="Optional directory of existing Geo seed files")

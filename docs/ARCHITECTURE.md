@@ -346,6 +346,13 @@ service restarts. A record whose installed version no longer matches says
 nothing about updates; the next check replaces it. Failing to save a record
 never fails the check itself.
 
+After a service check finds an update, `service_release_notes { version }` reads
+the current GitHub Release body for that exact tag over the managed/system/direct
+download routes. The Web page presents the notes as text in a fixed modal before
+offering upgrade confirmation. Reopening the modal fetches the notes again;
+request failures allow retry without starting an upgrade. Empty historical notes
+are explicitly labelled. Notes are not persisted with update checks.
+
 ## Resources, downloads and backups
 
 Geo files and provider caches live below the managed data/resource roots. Their
@@ -484,6 +491,13 @@ pinned upstream artifacts and executable checks:
   same glibc), publishes `mihomo-server-<tag>-<target>.tar.gz` for both and writes
   one hash per Nix system into `flake.nix`. `install.sh` picks the bundle from
   `uname -m`. CI runs the Rust and packaging tests on both architectures.
+- `CHANGELOG.md` contains versioned release bodies. `scripts/release_notes.py`
+  rejects missing/empty/duplicate sections for the pushed tag. Builds extract
+  notes from the tag into the release artifacts; publishing uses that same file
+  as the GitHub Release body (including reruns), independent of main advancing.
+  Bundles include `CHANGELOG.md` and the extracted `release-notes.md`, both
+  covered by the bundle checksums.
+  See [RELEASING.md](RELEASING.md) for the release procedure.
 
 ## Supported and deferred scope
 

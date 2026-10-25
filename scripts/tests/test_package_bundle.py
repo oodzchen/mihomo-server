@@ -116,16 +116,23 @@ class PackageBoundaries(unittest.TestCase):
         (web / "index.html").write_text("<!doctype html><html></html>")
         self.args.service = str(service)
         self.args.web_dir = str(web)
+        notes = self.root / "notes.md"
+        notes.write_text("### 更新\n- 当前版本发布说明\n", encoding="utf-8")
+        self.args.release_notes = str(notes)
         output = self.root / "bundle"
         packager.package(self.args)
         self.assertTrue((output / "LICENSE").is_file())
         self.assertTrue((output / "LICENSES.txt").is_file())
+        self.assertEqual((output / "release-notes.md").read_text(encoding="utf-8"), notes.read_text(encoding="utf-8"))
+        self.assertTrue((output / "CHANGELOG.md").is_file())
         self.assertIn("GPL-3.0", (output / "LICENSES.txt").read_text())
         manifest = json.loads((output / "resources" / "manifest.json").read_text())
         self.assertEqual(manifest["licenses"], {"primary": "LICENSE", "inventory": "LICENSES.txt"})
         checksums = (output / "checksums.sha256").read_text()
         self.assertIn("  LICENSES.txt\n", checksums)
         self.assertIn("  LICENSE\n", checksums)
+        self.assertIn("  CHANGELOG.md\n", checksums)
+        self.assertIn("  release-notes.md\n", checksums)
         helper = output / "mihomo-server-user"
         self.assertTrue(helper.is_file() and helper.stat().st_mode & 0o111)
         self.assertIn("  mihomo-server-user\n", checksums)

@@ -23,6 +23,10 @@ pub enum ManagementCommand {
     ServiceInfo {},
     /// Latest published mihomo-server release tag (recorded as a check).
     ServiceRelease {},
+    /// Current Release page body for one published service version.
+    ServiceReleaseNotes {
+        version: String,
+    },
     /// The latest recorded core and service update checks.
     UpdateChecks {},
     /// Stop or restart this service (not the core) after answering.
@@ -419,6 +423,9 @@ impl Management {
                     eprintln!("cannot record service update check: {error:#}");
                 }
                 serde_json::to_value(latest)?
+            }
+            ManagementCommand::ServiceReleaseNotes { version } => {
+                serde_json::to_value(self.manager.service_release_notes(&version).await?)?
             }
             ManagementCommand::UpdateChecks {} => serde_json::to_value(self.update_checks.get().await)?,
             ManagementCommand::StopService {} => {

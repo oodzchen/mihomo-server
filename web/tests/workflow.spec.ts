@@ -5399,6 +5399,7 @@ test("settings reads service versions independently and preserves the host clien
 test("service page controls the foreground service and keeps long help in tooltips", async ({ page }) => {
   await page.route("**/api/commands", async route => {
     if (route.request().postDataJSON()?.command === "service_release") await route.fulfill({ json: "v9.9.9" });
+    else if (route.request().postDataJSON()?.command === "service_release_notes") await route.fulfill({ json: { tag_name: "v9.9.9", body: "- New features" } });
     else await route.continue();
   });
   await page.goto(`${base}/service#token=${encodeURIComponent(token)}`);
@@ -5428,6 +5429,10 @@ test("service page controls the foreground service and keeps long help in toolti
   // A found release is offered, but this installation cannot apply it here.
   await expect(upgrade.locator(".actions button")).toHaveText(["更新至 v9.9.9"]);
   await expect(upgrade.getByRole("button", { name: "更新至 v9.9.9" })).toBeDisabled();
+  const notes = page.getByRole("dialog", { name: "服务升级" });
+  await expect(notes).toContainText("- New features");
+  await expect(notes.getByRole("button", { name: "更新至 v9.9.9" })).toBeDisabled();
+  await notes.getByRole("button", { name: "取消" }).click();
 
   // The management address logs a browser straight in through the fragment.
   const address = page.getByRole("link", { name: `${base}/#token=${encodeURIComponent(token)}`, exact: true });
@@ -5485,6 +5490,7 @@ test("service restart and upgrade report progress without moving the page", asyn
       recorded = { installed: info.release, latest: "v0.3.0" };
       await route.fulfill({ json: "v0.3.0" });
     }
+    else if (command === "service_release_notes") await route.fulfill({ json: { tag_name: "v0.3.0", body: "### 修复\n- 修复升级流程" } });
     else if (command === "restart_service") {
       await route.fulfill({ json: { action: "restart" } });
       setTimeout(disconnect, 100);
@@ -5514,7 +5520,7 @@ test("service restart and upgrade report progress without moving the page", asyn
   await upgrade.getByRole("button", { name: "检查更新" }).click();
   await expect(upgrade.locator("div").filter({ hasText: "最新版本" }).locator("dd")).toHaveText("v0.3.0");
   const actions = await upgrade.locator(".actions").boundingBox();
-  await upgrade.getByRole("button", { name: "更新至 v0.3.0" }).click();
+  await expect(page.getByRole("dialog", { name: "服务升级" })).toContainText("修复升级流程");
   await page.getByRole("dialog", { name: "服务升级" }).getByRole("button", { name: "更新至 v0.3.0" }).click();
   await expect(upgrade.getByText("升级中…", { exact: true })).toBeVisible();
   await expect(output).toContainText("downloading mihomo-server-v0.3.0");
@@ -5558,6 +5564,84 @@ test("service restart and upgrade report progress without moving the page", asyn
   await expect(output).toHaveText("error: checksum mismatch");
   await expect(upgrade.getByRole("button", { name: "更新至 v0.3.0" })).toBeEnabled();
   await page.unroute("**/api/commands");
+});
+
+test("service release notes retry, refresh on reopen and require explicit upgrade confirmation", async ({ page }) => {
+  let notesRequests = 0, upgrades = 0;
+  let fail = true;
+  let body: string | null = "### 修复\n- 最新发布说明\n<script>window.notesExecuted = true</script>";
+  let tag = "v0.3.9";
+  await page.route("**/api/commands", async route => {
+    const request = route.request().postDataJSON();
+    if (request?.command === "service_info") await route.fulfill({ json: {
+      version: "0.3.8", release: "v0.3.8", unit: "mihomo-server.service",
+      upgrade: { available: true, state: "inactive", result: "success", log: [] },
+    } });
+    else if (request?.command === "update_checks") await route.fulfill({ json: { core: null, service: null } });
+    else if (request?.command === "service_release") await route.fulfill({ json: "v0.3.9" });
+    else if (request?.command === "service_release_notes") {
+      notesRequests++;
+      expect(request.version).toBe("v0.3.9");
+      if (fail) await route.fulfill({ status: 502, json: { error: "release provider unavailable" } });
+      else await route.fulfill({ json: { tag_name: tag, body } });
+    } else if (request?.command === "upgrade_service") {
+      upgrades++;
+      await route.fulfill({ json: { unit: "mihomo-server-update.service" } });
+    } else await route.continue();
+  });
+  await page.goto(`${base}/service#token=${encodeURIComponent(token)}`);
+  const panel = page.getByRole("region", { name: "服务升级" });
+  const before = await panel.boundingBox();
+  await panel.getByRole("button", { name: "检查更新" }).click();
+  await expect(page.locator(".toast").filter({ hasText: "获取发布说明失败" })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(upgrades).toBe(0);
+  fail = false;
+  await panel.getByRole("button", { name: "更新至 v0.3.9" }).click();
+  const dialog = page.getByRole("dialog", { name: "服务升级" });
+  await expect(dialog).toContainText("最新发布说明");
+  await expect(dialog).toContainText("<script>window.notesExecuted = true</script>");
+  expect(await page.evaluate(() => "notesExecuted" in window)).toBe(false);
+  expect(await panel.boundingBox()).toEqual(before);
+  expect(upgrades).toBe(0);
+  await dialog.getByRole("button", { name: "取消" }).click();
+  body = "- Release 页面修订后的内容";
+  await panel.getByRole("button", { name: "更新至 v0.3.9" }).click();
+  await expect(dialog).toContainText("Release 页面修订后的内容");
+  expect(notesRequests).toBe(3);
+  await page.keyboard.press("Escape");
+  tag = "v0.4.0";
+  await panel.getByRole("button", { name: "更新至 v0.3.9" }).click();
+  await expect(page.locator(".toast").filter({ hasText: "发布说明与待升级版本不一致" })).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  expect(upgrades).toBe(0);
+  tag = "v0.3.9";
+  body = null;
+  await panel.getByRole("button", { name: "更新至 v0.3.9" }).click();
+  await expect(dialog).toContainText("该版本未提供发布说明。");
+  await dialog.getByRole("button", { name: "更新至 v0.3.9" }).click();
+  await expect.poll(() => upgrades).toBe(1);
+});
+
+test("service update check skips release notes when already current", async ({ page }) => {
+  let notesRequests = 0;
+  await page.route("**/api/commands", async route => {
+    const request = route.request().postDataJSON();
+    if (request?.command === "service_info") await route.fulfill({ json: {
+      version: "0.3.8", release: "v0.3.8", unit: "mihomo-server.service",
+      upgrade: { available: true, state: "inactive", result: "success", log: [] },
+    } });
+    else if (request?.command === "update_checks") await route.fulfill({ json: { core: null, service: null } });
+    else if (request?.command === "service_release") await route.fulfill({ json: "v0.3.8" });
+    else if (request?.command === "service_release_notes") { notesRequests++; await route.abort(); }
+    else await route.continue();
+  });
+  await page.goto(`${base}/service#token=${encodeURIComponent(token)}`);
+  const panel = page.getByRole("region", { name: "服务升级" });
+  await panel.getByRole("button", { name: "检查更新" }).click();
+  await expect(panel).toContainText("v0.3.8（已是最新）");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(notesRequests).toBe(0);
 });
 
 test("Nix ownership keeps program upgrades and autostart declarative without moving the page", async ({ page }) => {

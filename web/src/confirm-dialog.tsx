@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 export function ConfirmDialog({
   title,
   children,
+  details,
   confirmLabel,
   cancelLabel,
   confirmDisabled = false,
@@ -11,6 +12,7 @@ export function ConfirmDialog({
 }: {
   title: string;
   children: ReactNode;
+  details?: ReactNode;
   confirmLabel: string;
   cancelLabel: string;
   confirmDisabled?: boolean;
@@ -55,6 +57,7 @@ export function ConfirmDialog({
         </div>
         <div className="modal-body">
           <p id={descriptionId}>{children}</p>
+          {details}
           <div className="form-actions">
             <button type="button" className="primary" disabled={confirmDisabled} onClick={onConfirm}>
               {confirmLabel}
