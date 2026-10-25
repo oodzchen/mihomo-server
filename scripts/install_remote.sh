@@ -281,9 +281,11 @@ install_shared() {
     local bundle=$1 tag=$2 caller=$3 config_home=$4 data_home=$5 tool
     local root=/opt/mihomo-server releases=/opt/mihomo-server/releases
     local registry=/var/lib/mihomo-server/slots previous='' name release stage uid home output
-    for tool in systemctl loginctl getent groupadd usermod runuser setcap getcap sg; do
+    for tool in systemctl loginctl getent groupadd usermod runuser setcap getcap; do
         command -v "$tool" >/dev/null || die "missing required tool: $tool"
     done
+    # The launcher enters a newly granted mihomo-tun group with either one.
+    command -v sg >/dev/null || command -v newgrp >/dev/null || die 'missing required tool: sg or newgrp'
     verify_bundle "$bundle"
     echo '==> installing the shared files'
     if [ -n "$caller" ]; then

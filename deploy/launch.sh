@@ -12,6 +12,24 @@ case "$MIHOMO_SERVER_DATA_DIR" in
     *) echo 'MIHOMO_SERVER_DATA_DIR must be an absolute directory other than /' >&2; exit 1 ;;
 esac
 
+# Arguments carried through newgrp's login shell (see below) replace "$@" once.
+entered_group=0
+if [ -n "${MIHOMO_LAUNCH_ARGC+x}" ]; then
+    count=$MIHOMO_LAUNCH_ARGC
+    case "$count" in '' | *[!0-9]*) echo 'invalid MIHOMO_LAUNCH_ARGC' >&2; exit 1 ;; esac
+    entered_group=1
+    exec </dev/null
+    set --
+    i=0
+    while [ "$i" -lt "$count" ]; do
+        i=$((i + 1))
+        # Only the variable name is constructed; the value is never evaluated.
+        eval "set -- \"\$@\" \"\${MIHOMO_LAUNCH_ARG_$i}\""
+        unset "MIHOMO_LAUNCH_ARG_$i"
+    done
+    unset MIHOMO_LAUNCH_ARGC MIHOMO_LAUNCH
+fi
+
 # A user manager may predate the administrator's group authorization. Enter the
 # authorized group for this process only; do not restart unrelated user services.
 multi_user=0
@@ -24,13 +42,31 @@ if [ "$multi_user" = 1 ] && [ "$(id -u)" != 0 ]; then
         *" $tun_gid "*) ;;
         *)
             if [ -n "$tun_gid" ] && id -G "$(id -un)" | tr ' ' '\n' | grep -qx "$tun_gid"; then
-                command -v sg >/dev/null 2>&1 || { echo 'TUN authorization requires sg' >&2; exit 1; }
-                # Quote each argument for sg's /bin/sh -c; never eval user options.
-                command_line="exec '$(printf '%s' "$bundle_root/launch" | sed "s/'/'\\\\''/g")'"
+                [ "$entered_group" = 0 ] || { echo 'entering the mihomo-tun group did not take effect' >&2; exit 1; }
+                if command -v sg >/dev/null 2>&1; then
+                    # Quote each argument for sg's /bin/sh -c; never eval user options.
+                    command_line="exec '$(printf '%s' "$bundle_root/launch" | sed "s/'/'\\\\''/g")'"
+                    for argument do
+                        command_line="$command_line '$(printf '%s' "$argument" | sed "s/'/'\\\\''/g")'"
+                    done
+                    exec sg mihomo-tun -c "$command_line"
+                fi
+                # Some distributions (Arch) ship only util-linux newgrp, which starts the
+                # login shell without a command. That shell reads one fixed line from
+                # stdin; the path and arguments travel in the environment, so nothing
+                # depends on the login shell's quoting rules.
+                command -v newgrp >/dev/null 2>&1 || { echo 'TUN authorization requires sg or newgrp' >&2; exit 1; }
+                MIHOMO_LAUNCH=$bundle_root/launch
+                MIHOMO_LAUNCH_ARGC=$#
+                export MIHOMO_LAUNCH MIHOMO_LAUNCH_ARGC
+                i=0
                 for argument do
-                    command_line="$command_line '$(printf '%s' "$argument" | sed "s/'/'\\\\''/g")'"
+                    i=$((i + 1))
+                    export "MIHOMO_LAUNCH_ARG_$i=$argument"
                 done
-                exec sg mihomo-tun -c "$command_line"
+                exec newgrp mihomo-tun <<'LAUNCH'
+exec "$MIHOMO_LAUNCH"
+LAUNCH
             fi
             ;;
     esac

@@ -216,12 +216,14 @@ The installer verifies the download before sudo elevation, deploys the shared
 bundle, adds the caller to `mihomo-tun`, enables linger and starts the user's
 instance. Readiness requires an authenticated API and running core; TUN
 capability and linger are also checked. Group refresh uses `sg` for the service
-process, without restarting the user manager. Direct root invocation deploys
+process, without restarting the user manager; where only util-linux `newgrp`
+exists (Arch), the launcher re-enters through it, passing its path and arguments
+in the environment instead of the login shell's command line. Direct root invocation deploys
 shared files only; `SUDO_USER` identifies a caller when invoked through sudo.
 
 Required tools: Bash, systemd (`systemctl`, `loginctl`, `systemd-run`), tar,
 SHA-256 (`sha256sum` or `shasum`), curl or wget, getent, groupadd, usermod,
-runuser, sg and libcap's setcap/getcap; non-root invocation also requires sudo.
+runuser, sg or newgrp and libcap's setcap/getcap; non-root invocation also requires sudo.
 Runtime does not require Python or Node.
 
 Graphical callers without a terminal (the desktop client) set

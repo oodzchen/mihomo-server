@@ -84,6 +84,41 @@ class Launcher(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.arguments()[4:], args)
 
+    def stale_group_tools(self, newgrp):
+        # A PATH without sg: only the utilities the launcher needs, then fakes.
+        tools = self.root / "tools"
+        tools.mkdir()
+        for name in ["sh", "dirname", "cut", "tr", "grep", "sed", "env", "python3"]:
+            (tools / name).symlink_to(shutil.which(name))
+        scripts = {
+            "id": "case \"$1\" in -u) echo 1000;; -un) echo alice;; -G) if [ $# = 1 ]; then echo 1000; else echo '1000 1234'; fi;; esac\n",
+            "getent": "echo 'mihomo-tun:x:1234:alice'\n",
+            "newgrp": newgrp,
+        }
+        for name, script in scripts.items():
+            file = tools / name
+            file.write_text("#!/bin/sh\n" + script)
+            file.chmod(0o755)
+        self.env["PATH"] = str(tools)
+
+    def test_stale_group_without_sg_reenters_through_newgrp_login_shell(self):
+        # Like util-linux newgrp: no command argument, the login shell reads stdin.
+        self.stale_group_tools('[ "$1" = mihomo-tun ] || exit 9\nexport PATH="$REAL_PATH" NEWGRP_STDIN=1\nexec sh\n')
+        self.env["REAL_PATH"] = os.environ["PATH"]
+        args = ["--multi-user", "--profile-name", "spaces 'quotes' \"dq\" $(touch /tmp/ms-unwanted-launch) `x`", ""]
+        result = self.run_launcher(args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.arguments()[4:], args)
+        self.assertFalse(Path("/tmp/ms-unwanted-launch").exists())
+
+    def test_newgrp_that_does_not_grant_the_group_fails_instead_of_looping(self):
+        # The fake id still reports no group after reentry.
+        self.stale_group_tools("exec sh\n")
+        result = self.run_launcher(["--multi-user"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("did not take effect", result.stderr)
+        self.assertFalse(self.capture.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
