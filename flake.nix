@@ -13,9 +13,10 @@
 
         # Release hashes per Nix system; written by scripts/update_flake.py.
         serverRelease = {
-          version = "0.3.7";
+          version = "0.3.8";
           hashes = {
-            x86_64-linux = "sha256-yF6C93Cp+V9KjbEyT5Hg5yQBNWOD9Spm28m7+6WTcGA=";
+            aarch64-linux = "sha256-Sfnpk61mqemaucldn6uCgryHAZzZMLF4/RQCTd5HqwQ=";
+            x86_64-linux = "sha256-g8upKBfDRjDevZNNfA5zyhIMcbJA164iZFWUGPOAsW0=";
           };
         };
         targets = {
