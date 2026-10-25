@@ -10,6 +10,7 @@
 # The container has its own network namespace, so its TUN devices and policy
 # rules never touch the host. Needs docker (or CONTAINER_ENGINE=podman) able to
 # run --privileged containers. KEEP=1 leaves the container running for debugging.
+# NO_SG=1 removes sg, as on Arch, so the launcher must re-enter via newgrp.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -79,6 +80,8 @@ if [ "$booted" != 1 ]; then
     exit 1
 fi
 
+# The removal persists in the container's filesystem across the reboot phase.
+[ "${NO_SG:-0}" != 1 ] || "$engine" exec "$name" sh -c 'rm -f /usr/bin/sg /usr/sbin/sg && ! command -v sg'
 "$engine" exec "$name" mkdir -p /work
 "$engine" cp "$bundle" "$name:/work/bundle"
 "$engine" cp "$root/scripts/install_remote.sh" "$name:/work/install.sh"
