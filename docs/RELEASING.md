@@ -13,6 +13,6 @@ CI 检出完整 Git 历史和标签。说明始终针对此次标签生成，发
 
 本地预览也是可选的：创建标签后运行 `python3 scripts/release_notes.py --tag v0.3.11`。
 
-`release-notes.md` 同时包含在安装包中并作为 Release 附件保留。安装包也包含完整的 `CHANGELOG.md`。Web 检查更新仍通过 GitHub 最新版跳转获取版本号；发现更新后，通过 GitHub API 按该标签读取 Release 正文。因此，在 Release 页面修订说明后，下次打开升级弹窗就能看到修订内容。
+`release-notes.md` 同时包含在安装包中并作为 Release 附件保留。安装包也包含完整的 `CHANGELOG.md`。Web 检查更新仍通过 GitHub 最新版跳转获取版本号；发现更新后，通过 GitHub API 按该标签读取 Release 正文。因此，在 Release 页面修订说明后，下次打开升级弹窗就能看到修订内容。未登录的 GitHub API 每个 IP 每小时只有少量额度，代理出口常被用尽（返回 403），这时改为下载该版本的 `release-notes.md` 附件，此时看不到发布后在页面上的修订。
 
-历史版本没有说明时，Web 弹窗会明确提示该版本未提供发布说明；网络或 API 请求失败时提示重试，成功读取之前不能确认升级。
+历史版本没有说明时，Web 弹窗会明确提示该版本未提供发布说明。发布说明仅供参考：获取失败时，弹窗内显示错误并可重新获取，仍可直接确认升级。

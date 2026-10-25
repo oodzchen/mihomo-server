@@ -348,10 +348,16 @@ never fails the check itself.
 
 After a service check finds an update, `service_release_notes { version }` reads
 the current GitHub Release body for that exact tag over the managed/system/direct
-download routes. The Web page presents the notes as text in a fixed modal before
-offering upgrade confirmation. Reopening the modal fetches the notes again;
-request failures allow retry without starting an upgrade. Empty historical notes
-are explicitly labelled. Notes are not persisted with update checks.
+download routes. Unauthenticated API calls share a small hourly quota per IP
+(proxy exits often exhaust it, returning 403), so on any API failure the route
+downloads the release's `release-notes.md` asset instead (no quota; page edits
+after publishing are not reflected); a release without that asset has no notes.
+The Web page presents the notes as text in a fixed modal with the upgrade
+confirmation. Notes are informative only: when they cannot be fetched, or name
+another version, the modal shows the error with an in-place retry and the
+upgrade can still be confirmed. Reopening the modal fetches the notes again.
+Empty historical notes are explicitly labelled. Notes are not persisted with
+update checks.
 
 ## Resources, downloads and backups
 

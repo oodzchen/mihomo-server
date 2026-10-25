@@ -706,6 +706,10 @@ dd {
   max-height: 40vh;
   overflow-y: auto;
 }
+.release-notes-error p {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
 .modal-body > form {
   margin-top: 10px;
 }

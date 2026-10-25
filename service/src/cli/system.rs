@@ -98,27 +98,68 @@ pub struct ServiceReleaseNotes {
 }
 
 /// Read the current Release page body for the exact version shown to the user.
+/// Unauthenticated API calls share a small hourly quota per IP (proxy exits
+/// often exhaust it), so any API failure falls back to the release's
+/// `release-notes.md` asset: a plain download, without later page edits.
 pub(crate) async fn release_notes_via(
     version: &str,
     route: &crate::core_release::Route,
 ) -> Result<ServiceReleaseNotes> {
-    let mut url = url::Url::parse(&format!("https://api.github.com/repos/{REPOSITORY}/releases/tags/"))?;
+    let api = release_url(
+        &format!("https://api.github.com/repos/{REPOSITORY}/releases/tags/"),
+        &[version],
+    )?;
+    let asset = release_url(
+        &format!("https://github.com/{REPOSITORY}/releases/download/"),
+        &[version, "release-notes.md"],
+    )?;
+    let client = route.configure(client_builder(true)?)?.build()?;
+    route
+        .run(release_notes_or_asset(&client, api.as_str(), asset.as_str(), version))
+        .await
+}
+
+async fn release_notes_or_asset(
+    client: &reqwest::Client,
+    api: &str,
+    asset: &str,
+    version: &str,
+) -> Result<ServiceReleaseNotes> {
+    match release_notes_from(client, api, version).await {
+        Ok(notes) => Ok(notes),
+        Err(api_error) => release_notes_asset(client, asset, version)
+            .await
+            .with_context(|| format!("release API: {api_error:#}; release notes asset")),
+    }
+}
+
+fn release_url(base: &str, segments: &[&str]) -> Result<url::Url> {
+    let mut url = url::Url::parse(base)?;
     url.path_segments_mut()
         .map_err(|_| anyhow::anyhow!("invalid release URL"))?
         .pop_if_empty()
-        .push(version);
-    let client = route.configure(client_builder(true)?)?.build()?;
-    route.run(release_notes_from(&client, url.as_str(), version)).await
+        .extend(segments);
+    Ok(url)
 }
 
-async fn release_notes_from(client: &reqwest::Client, url: &str, version: &str) -> Result<ServiceReleaseNotes> {
-    let mut response = client
-        .get(url)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .send()
-        .await
-        .context("cannot fetch release notes")?
-        .error_for_status()?;
+/// The published `release-notes.md`; releases before v0.3.9 have none.
+async fn release_notes_asset(client: &reqwest::Client, url: &str, version: &str) -> Result<ServiceReleaseNotes> {
+    let response = client.get(url).send().await.context("cannot fetch release notes")?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(ServiceReleaseNotes {
+            version: version.into(),
+            body: None,
+        });
+    }
+    let bytes = bounded_body(response.error_for_status()?).await?;
+    let body = String::from_utf8(bytes).context("release notes are not UTF-8")?;
+    Ok(ServiceReleaseNotes {
+        version: version.into(),
+        body: Some(body),
+    })
+}
+
+async fn bounded_body(mut response: reqwest::Response) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await? {
         anyhow::ensure!(
@@ -127,6 +168,18 @@ async fn release_notes_from(client: &reqwest::Client, url: &str, version: &str) 
         );
         bytes.extend_from_slice(&chunk);
     }
+    Ok(bytes)
+}
+
+async fn release_notes_from(client: &reqwest::Client, url: &str, version: &str) -> Result<ServiceReleaseNotes> {
+    let response = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .send()
+        .await
+        .context("cannot fetch release notes")?
+        .error_for_status()?;
+    let bytes = bounded_body(response).await?;
     let notes: ServiceReleaseNotes = serde_json::from_slice(&bytes).context("invalid release notes response")?;
     anyhow::ensure!(notes.version == version, "release notes version mismatch");
     Ok(notes)
@@ -282,6 +335,11 @@ mod tests {
                 get(|| async { axum::Json(serde_json::json!({"tag_name":"v1.2.3", "body":null})) }),
             )
             .route("/limited", get(|| async { StatusCode::FORBIDDEN.into_response() }))
+            .route("/v1.2.3/release-notes.md", get(|| async { "### 修复\n- 附件说明\n" }))
+            .route(
+                "/v1.2.4/release-notes.md",
+                get(|| async { StatusCode::FORBIDDEN.into_response() }),
+            )
             .route("/invalid", get(|| async { "not JSON" }))
             .route("/large", get(|| async { "x".repeat(1024 * 1024 + 1) }));
         let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -309,7 +367,45 @@ mod tests {
                     .is_err()
             );
         }
+
+        // A rate-limited API falls back to the published asset; no asset means no notes.
+        let asset = |version: &str| format!("{base}/{version}/release-notes.md");
+        let api = format!("{base}/limited");
+        let notes = release_notes_or_asset(&client, &format!("{base}/notes"), &asset("v1.2.3"), "v1.2.3")
+            .await
+            .unwrap();
+        assert_eq!(notes.body.as_deref(), Some("### 修复\n- 新说明"));
+        let notes = release_notes_or_asset(&client, &api, &asset("v1.2.3"), "v1.2.3")
+            .await
+            .unwrap();
+        assert_eq!(
+            (notes.version.as_str(), notes.body.as_deref()),
+            ("v1.2.3", Some("### 修复\n- 附件说明\n"))
+        );
+        let notes = release_notes_or_asset(&client, &api, &asset("v0.3.8"), "v0.3.8")
+            .await
+            .unwrap();
+        assert!(notes.body.is_none());
+        let error = release_notes_or_asset(&client, &api, &asset("v1.2.4"), "v1.2.4")
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("release API"), "{error:#}");
         task.abort();
+    }
+
+    #[test]
+    fn release_urls_escape_the_version() {
+        let url = release_url(
+            "https://github.com/o/r/releases/download/",
+            &["v1.2.3", "release-notes.md"],
+        )
+        .unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://github.com/o/r/releases/download/v1.2.3/release-notes.md"
+        );
+        let url = release_url("https://api.github.com/repos/o/r/releases/tags/", &["../x"]).unwrap();
+        assert!(url.as_str().ends_with("/releases/tags/..%2Fx"), "{url}");
     }
 
     #[test]

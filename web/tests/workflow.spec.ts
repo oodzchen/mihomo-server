@@ -5566,7 +5566,7 @@ test("service restart and upgrade report progress without moving the page", asyn
   await page.unroute("**/api/commands");
 });
 
-test("service release notes retry, refresh on reopen and require explicit upgrade confirmation", async ({ page }) => {
+test("service release notes retry in place, refresh on reopen and never block the upgrade", async ({ page }) => {
   let notesRequests = 0, upgrades = 0;
   let fail = true;
   let body: string | null = "### 修复\n- 最新发布说明\n<script>window.notesExecuted = true</script>";
@@ -5582,7 +5582,7 @@ test("service release notes retry, refresh on reopen and require explicit upgrad
     else if (request?.command === "service_release_notes") {
       notesRequests++;
       expect(request.version).toBe("v0.3.9");
-      if (fail) await route.fulfill({ status: 502, json: { error: "release provider unavailable" } });
+      if (fail) await route.fulfill({ status: 502, json: { error: { code: "operation_failed", message: "release provider unavailable" } } });
       else await route.fulfill({ json: { tag_name: tag, body } });
     } else if (request?.command === "upgrade_service") {
       upgrades++;
@@ -5593,14 +5593,17 @@ test("service release notes retry, refresh on reopen and require explicit upgrad
   const panel = page.getByRole("region", { name: "服务升级" });
   const before = await panel.boundingBox();
   await panel.getByRole("button", { name: "检查更新" }).click();
-  await expect(page.locator(".toast").filter({ hasText: "获取发布说明失败" })).toBeVisible();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  // A failed fetch opens the dialog anyway: the error is shown and the update stays possible.
+  const dialog = page.getByRole("dialog", { name: "服务升级" });
+  await expect(dialog).toContainText("暂时无法获取发布说明，可以重试，也可以直接更新。");
+  await expect(dialog).toContainText("release provider unavailable");
+  await expect(dialog.getByRole("button", { name: "更新至 v0.3.9" })).toBeEnabled();
   expect(upgrades).toBe(0);
   fail = false;
-  await panel.getByRole("button", { name: "更新至 v0.3.9" }).click();
-  const dialog = page.getByRole("dialog", { name: "服务升级" });
+  await dialog.getByRole("button", { name: "重新获取发布说明" }).click();
   await expect(dialog).toContainText("最新发布说明");
   await expect(dialog).toContainText("<script>window.notesExecuted = true</script>");
+  await expect(dialog.getByRole("button", { name: "重新获取发布说明" })).toHaveCount(0);
   expect(await page.evaluate(() => "notesExecuted" in window)).toBe(false);
   expect(await panel.boundingBox()).toEqual(before);
   expect(upgrades).toBe(0);
@@ -5610,11 +5613,13 @@ test("service release notes retry, refresh on reopen and require explicit upgrad
   await expect(dialog).toContainText("Release 页面修订后的内容");
   expect(notesRequests).toBe(3);
   await page.keyboard.press("Escape");
+  // Notes for another version are never shown as this update's notes.
   tag = "v0.4.0";
   await panel.getByRole("button", { name: "更新至 v0.3.9" }).click();
-  await expect(page.locator(".toast").filter({ hasText: "发布说明与待升级版本不一致" })).toBeVisible();
-  await expect(dialog).toHaveCount(0);
-  expect(upgrades).toBe(0);
+  await expect(dialog).toContainText("发布说明与待升级版本不一致");
+  await expect(dialog).not.toContainText("Release 页面修订后的内容");
+  await expect(dialog.getByRole("button", { name: "更新至 v0.3.9" })).toBeEnabled();
+  await page.keyboard.press("Escape");
   tag = "v0.3.9";
   body = null;
   await panel.getByRole("button", { name: "更新至 v0.3.9" }).click();

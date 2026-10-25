@@ -16,6 +16,8 @@ type ServiceInfo = {
 };
 type Operation = "restart" | "stop" | "upgrade";
 type ReleaseNotes = { tag_name: string; body: string | null };
+// Notes are informative: a failed fetch is shown in the dialog, never blocks the update.
+type NotesState = { version: string; notes?: ReleaseNotes; error?: string };
 type Pending = {
   toast: ToastOperation;
   /** The connection dropped since the request (the service went away). */
@@ -86,7 +88,7 @@ export function ServicePage({
   const [refresh, setRefresh] = useState(0);
   const [operation, setOperation] = useState<Operation>();
   const [confirmation, setConfirmation] = useState<Operation>();
-  const [releaseNotes, setReleaseNotes] = useState<ReleaseNotes>();
+  const [releaseNotes, setReleaseNotes] = useState<NotesState>();
   const notesRequest = useRef<AbortController | undefined>(undefined);
   const pending = useRef<Pending>(undefined);
   const output = useRef<HTMLPreElement>(null);
@@ -229,20 +231,22 @@ export function ServicePage({
     const controller = new AbortController();
     notesRequest.current = controller;
     setChecking(true);
-    setReleaseNotes(undefined);
     try {
       const notes = await command<ReleaseNotes>(token, "service_release_notes", { version }, controller.signal);
       if (controller.signal.aborted) return;
       if (notes.tag_name !== version) throw new Error(t(language, "serviceReleaseNotesMismatch"));
-      setReleaseNotes(notes);
-      setConfirmation("upgrade");
+      setReleaseNotes({ version, notes });
     } catch (error) {
       if (controller.signal.aborted) return;
-      if (error instanceof ApiError && error.status === 401) logout(t(language, "expiredToken"));
-      else notify(`${t(language, "serviceReleaseNotesFailed")} ${describe(error)}`, "error");
+      if (error instanceof ApiError && error.status === 401) {
+        logout(t(language, "expiredToken"));
+        return;
+      }
+      setReleaseNotes({ version, error: describe(error) });
     } finally {
       if (!controller.signal.aborted) setChecking(false);
     }
+    setConfirmation("upgrade");
   }
 
   const connected = connection === "connected";
@@ -411,11 +415,21 @@ export function ServicePage({
           title={confirmationCopy.title}
           confirmLabel={confirmationCopy.confirm}
           cancelLabel={t(language, "cancel")}
-          confirmDisabled={!idle || (confirmation === "upgrade" && (!upgrade?.available || running || checking || releaseNotes?.tag_name !== available))}
+          confirmDisabled={!idle || (confirmation === "upgrade" && (!upgrade?.available || running || checking || releaseNotes?.version !== available))}
           details={confirmation === "upgrade" && releaseNotes ? (
             <div className="release-notes">
-              <h3>{t(language, "serviceReleaseNotes", { version: releaseNotes.tag_name })}</h3>
-              <pre tabIndex={0}>{releaseNotes.body?.trim() || t(language, "serviceReleaseNotesEmpty")}</pre>
+              <h3>{t(language, "serviceReleaseNotes", { version: releaseNotes.version })}</h3>
+              {releaseNotes.notes ? (
+                <pre tabIndex={0}>{releaseNotes.notes.body?.trim() || t(language, "serviceReleaseNotesEmpty")}</pre>
+              ) : (
+                <div className="release-notes-error">
+                  <p>{t(language, "serviceReleaseNotesFailed")}</p>
+                  <p className="muted">{releaseNotes.error}</p>
+                  <button type="button" disabled={checking} onClick={() => void showUpgrade(releaseNotes.version)}>
+                    {t(language, "serviceReleaseNotesRetry")}
+                  </button>
+                </div>
+              )}
             </div>
           ) : undefined}
           onCancel={() => setConfirmation(undefined)}
