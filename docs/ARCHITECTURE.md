@@ -491,6 +491,22 @@ pinned upstream artifacts and executable checks:
   same glibc), publishes `mihomo-server-<tag>-<target>.tar.gz` for both and writes
   one hash per Nix system into `flake.nix`. `install.sh` picks the bundle from
   `uname -m`. CI runs the Rust and packaging tests on both architectures.
+- Android host networking (a container sharing Android's network namespace,
+  e.g. Droidspaces `--net=host`) is detected at startup by the absence of
+  Linux's catch-all `from all lookup main` rule (`policy_routing`), and is
+  handled only when the user's core gets the TUN launcher. netd keeps the
+  default route in per-network tables and IPv6 prefix routes in per-interface
+  tables, so Mihomo's Linux TUN route (its gateway is validated through the
+  rules) and interface detection both fail there. Isolation then gives the TUN
+  no IPv6 address, turns interface detection off, starts sing-tun's rules two
+  priorities into the slot block and marks the core's traffic `0x30000`
+  (netd's "explicitly selected" and "protected from VPN" bits on network 0).
+  Before executing the core, `mihomo-tun-exec` adds `to <TUN /30> lookup main`,
+  `fwmark 0x30000/0x3ffff goto <last>` and a `nop` at the slot's last priority,
+  so the core's own traffic leaves through netd's default network and never
+  through the TUN or an Android VPN. The TUN is IPv4 only and captures the whole
+  device, Android apps included; the rules only match the TUN network and the
+  mark and stay in place after the core stops.
 - `CHANGELOG.md` optionally contains curated versioned release bodies.
   `scripts/release_notes.py` uses a nonempty matching section when available;
   otherwise it generates notes from commits since the previous reachable version

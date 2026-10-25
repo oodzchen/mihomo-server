@@ -50,10 +50,18 @@ fn isolation(arguments: &ArgMatches) -> Result<(Isolation, Option<mihomo_server:
                 .unwrap_or_else(|| mihomo_server::multi_user::DEFAULT_SLOT_REGISTRY.into());
             let slot = mihomo_server::multi_user::claim_slot(&registry, uid)?;
             let lock = mihomo_server::tun_lock::TunLock::beside(&registry);
-            return Ok((Isolation::new(uid, slot)?.with_system_tun(lock.is_some()), lock));
+            let isolation = Isolation::new(uid, slot)?.with_system_tun(lock.is_some());
+            return Ok((isolation.with_android_routing(android_routing()), lock));
         }
     };
-    Ok((Isolation::new(uid, slot)?, None))
+    Ok((Isolation::new(uid, slot)?.with_android_routing(android_routing()), None))
+}
+
+/// Android host networking, handled when this user's core gets the TUN launcher
+/// (marking the core's traffic needs its CAP_NET_ADMIN).
+#[cfg(target_os = "linux")]
+fn android_routing() -> bool {
+    mihomo_server::tun_exec::available().is_some() && mihomo_server::policy_routing::android_style()
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -237,7 +245,7 @@ async fn run(arguments: Vec<OsString>) -> Result<()> {
         }
         let user = manager.multi_user().context("multi-user state missing")?;
         eprintln!(
-            "multi-user slot {} (uid {}): mixed port {}, TUN device {} ({})",
+            "multi-user slot {} (uid {}): mixed port {}, TUN device {} ({}{})",
             user.slot,
             user.uid,
             user.mixed_port,
@@ -246,6 +254,11 @@ async fn run(arguments: Vec<OsString>) -> Result<()> {
                 (true, true) => "available, system-wide",
                 (true, false) => "available",
                 (false, _) => "unavailable: not in the TUN group",
+            },
+            if user.tun_android {
+                "; Android host networking: IPv4 only, captures the whole device, bypasses Android VPNs"
+            } else {
+                ""
             }
         );
     }

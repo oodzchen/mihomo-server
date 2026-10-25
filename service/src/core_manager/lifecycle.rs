@@ -443,6 +443,17 @@ impl Actor {
             Some(launcher) => {
                 let mut command = Command::new(launcher);
                 command.arg(std::process::id().to_string()).arg(&self.options.binary);
+                #[cfg(target_os = "linux")]
+                if let Some(isolation) = self.options.isolation.filter(|isolation| isolation.android_routing()) {
+                    command.env(
+                        crate::policy_routing::RULES_ENV,
+                        crate::policy_routing::spec(
+                            isolation.rule_index(),
+                            isolation.last_rule_index(),
+                            isolation.tun_network(),
+                        ),
+                    );
+                }
                 command
             }
             None => Command::new(&self.options.binary),

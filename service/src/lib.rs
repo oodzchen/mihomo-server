@@ -10,6 +10,8 @@ pub mod management;
 #[cfg(target_os = "linux")]
 pub mod multi_user;
 mod native_tun;
+#[cfg(target_os = "linux")]
+pub mod policy_routing;
 mod proxy_access;
 pub mod proxy_probe;
 pub mod remote;

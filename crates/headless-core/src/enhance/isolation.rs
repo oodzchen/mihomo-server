@@ -30,6 +30,13 @@ const TABLE_INDEX_BASE: u32 = 10000;
 const FAKE_IP_BASE: Ipv4Addr = Ipv4Addr::new(198, 19, 0, 0);
 const FAKE_IP_BLOCK: u32 = 1024;
 const FAKE_IP_PREFIX: u8 = 22;
+/// Mark on every connection of an Android-routed core: netd's "explicitly
+/// selected" and "protected from VPN" bits with network 0, which netd routes
+/// through the current default network and never into an Android VPN.
+pub const ANDROID_ROUTING_MARK: u32 = 0x3_0000;
+/// The rule priorities before sing-tun's in an Android-routed slot (see
+/// [`Isolation::with_android_routing`]).
+pub const ANDROID_RULES: u32 = 2;
 
 /// Listener fields a user may still choose explicitly on the settings page.
 const LISTENERS: [&str; 5] = ["mixed-port", "port", "socks-port", "redir-port", "tproxy-port"];
@@ -50,6 +57,7 @@ pub struct Isolation {
     uid: u32,
     slot: u16,
     tun: TunScope,
+    android: bool,
 }
 
 impl Isolation {
@@ -59,7 +67,26 @@ impl Isolation {
             uid,
             slot,
             tun: TunScope::Own,
+            android: false,
         })
+    }
+
+    /// The host network is Android's (a container sharing its namespace): netd
+    /// has no catch-all `lookup main` rule, keeps the default route in a
+    /// per-network table and an IPv6 prefix route in a per-interface table.
+    /// The TUN then gets no IPv6 address, leaves interface detection off, and
+    /// the core marks its own traffic ([`ANDROID_ROUTING_MARK`]). The TUN
+    /// launcher adds [`ANDROID_RULES`] rules ahead of sing-tun's: the TUN's /30
+    /// via `main` (its gateway check) and marked traffic past the slot's TUN
+    /// rules, plus their target at the end of the slot's block. Needs a core
+    /// with CAP_NET_ADMIN, which setting a mark requires.
+    pub fn with_android_routing(mut self, android: bool) -> Self {
+        self.android = android;
+        self
+    }
+
+    pub fn android_routing(&self) -> bool {
+        self.android
     }
 
     /// Installed hosts (with the system TUN lock) give each TUN the whole host.
@@ -114,6 +141,16 @@ impl Isolation {
         RULE_INDEX_BASE + u32::from(self.slot) * RULES_PER_SLOT
     }
 
+    /// Where sing-tun's rules start: after the Android rules when present.
+    pub fn tun_rule_index(&self) -> u32 {
+        self.rule_index() + if self.android { ANDROID_RULES } else { 0 }
+    }
+
+    /// The last priority of this slot's block (the Android rules' jump target).
+    pub fn last_rule_index(&self) -> u32 {
+        self.rule_index() + RULES_PER_SLOT - 1
+    }
+
     pub fn table_index(&self) -> u32 {
         TABLE_INDEX_BASE + u32::from(self.slot)
     }
@@ -126,6 +163,12 @@ impl Isolation {
 
     pub fn fake_ip_range6(&self) -> String {
         format!("2001:2:0:{:x}::1/64", self.slot)
+    }
+
+    /// The TUN's IPv4 network: Mihomo uses the fake-IP range's first address as a /30.
+    pub fn tun_network(&self) -> (Ipv4Addr, u8) {
+        let first = u32::from(FAKE_IP_BASE) + u32::from(self.slot) * FAKE_IP_BLOCK;
+        (Ipv4Addr::from(first), 30)
     }
 
     pub fn tun_inet6_address(&self) -> String {
@@ -154,6 +197,11 @@ impl Isolation {
                 config.remove(field);
                 changed.push(field.into());
             }
+        }
+
+        if self.android {
+            let mark = u64::from(ANDROID_ROUTING_MARK).into();
+            set(&mut config, "routing-mark", mark, &mut changed, "routing-mark");
         }
 
         let has_tun = config.get("tun").is_some_and(Value::is_mapping);
@@ -212,7 +260,7 @@ impl Isolation {
                 &mut changed,
                 "tun.iproute2-table-index",
             );
-            let rule = u64::from(self.rule_index()).into();
+            let rule = u64::from(self.tun_rule_index()).into();
             set(
                 &mut tun,
                 "iproute2-rule-index",
@@ -220,8 +268,30 @@ impl Isolation {
                 &mut changed,
                 "tun.iproute2-rule-index",
             );
-            let inet6 = Value::Sequence(vec![self.tun_inet6_address().into()]);
-            set(&mut tun, "inet6-address", inet6, &mut changed, "tun.inet6-address");
+            // Android files an IPv6 prefix route in a per-interface table, where
+            // the kernel cannot validate sing-tun's gateway: the TUN stays IPv4.
+            let inet6 = if self.android {
+                Vec::new()
+            } else {
+                vec![self.tun_inet6_address().into()]
+            };
+            set(
+                &mut tun,
+                "inet6-address",
+                Value::Sequence(inet6),
+                &mut changed,
+                "tun.inet6-address",
+            );
+            if self.android {
+                // No default route in `main`: detection finds no interface.
+                set(
+                    &mut tun,
+                    "auto-detect-interface",
+                    false.into(),
+                    &mut changed,
+                    "tun.auto-detect-interface",
+                );
+            }
             // auto-redirect installs host-wide nftables tables with fixed names.
             if tun.get("auto-redirect").and_then(Value::as_bool) == Some(true) {
                 tun.insert("auto-redirect".into(), false.into());

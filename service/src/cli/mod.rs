@@ -478,18 +478,17 @@ fn tun_summary(access: &Value, user: &Value) -> String {
         return format!("off (the system-wide TUN is held by {holder})");
     }
     if tun.enabled {
-        return format!(
-            "on{}{}",
-            tun.device
-                .as_deref()
-                .map(|device| format!(" (device {device}"))
-                .unwrap_or_default(),
-            match (tun.device.is_some(), tun.system) {
-                (true, true) => ", system-wide)",
-                (true, false) => ")",
-                _ => "",
-            }
-        );
+        let Some(device) = tun.device else {
+            return "on".into();
+        };
+        let mut details = vec![format!("device {device}")];
+        if tun.system {
+            details.push("system-wide".into());
+        }
+        if user.get("tun_android").and_then(Value::as_bool) == Some(true) {
+            details.push("Android host: IPv4 only".into());
+        }
+        return format!("on ({})", details.join(", "));
     }
     if tun.capable == Some(false) {
         return "off (unavailable: ask the administrator to add you to group mihomo-tun)".into();
@@ -1146,6 +1145,11 @@ mod tests {
                 &user
             ),
             "on (device ms1000, system-wide)"
+        );
+        let android = json!({"tun_device": "ms1000", "tun_capable": true, "tun_system": true, "tun_android": true});
+        assert_eq!(
+            tun_summary(&json!({"tun_enabled": true}), &android),
+            "on (device ms1000, system-wide, Android host: IPv4 only)"
         );
         assert_eq!(
             tun_summary(

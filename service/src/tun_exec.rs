@@ -58,6 +58,16 @@ pub fn run() -> Result<()> {
     ensure!(core.is_absolute(), "core path must be absolute");
     let rest: Vec<OsString> = arguments.collect();
     raise_ambient()?;
+    // Android host routing: the rules the TUN needs there (see policy_routing).
+    // Without them only the TUN fails, so the core still starts.
+    if let Some(spec) = std::env::var_os(crate::policy_routing::RULES_ENV)
+        && let Err(error) = spec
+            .to_str()
+            .context("invalid Android rule specification")
+            .and_then(crate::policy_routing::ensure_tun_rules)
+    {
+        eprintln!("warning: Android TUN routing rules: {error:#}");
+    }
     // Executing a file with capabilities cleared the parent-death signal.
     // SAFETY: plain prctl/getppid calls with constant arguments.
     unsafe {
@@ -68,7 +78,11 @@ pub fn run() -> Result<()> {
             bail!("supervisor exited before the core started");
         }
     }
-    Err(std::process::Command::new(&core).args(rest).exec()).with_context(|| format!("execute {}", core.display()))
+    Err(std::process::Command::new(&core)
+        .args(rest)
+        .env_remove(crate::policy_routing::RULES_ENV)
+        .exec())
+    .with_context(|| format!("execute {}", core.display()))
 }
 
 fn raise_ambient() -> Result<()> {
@@ -110,7 +124,7 @@ fn raise_ambient() -> Result<()> {
 }
 
 /// The installed launcher beside the running service, when this user may run it.
-pub(crate) fn available() -> Option<PathBuf> {
+pub fn available() -> Option<PathBuf> {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
     let candidates: [Option<PathBuf>; 3] = [

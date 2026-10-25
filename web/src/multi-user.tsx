@@ -11,6 +11,7 @@ type MultiUser = {
   tun_device: string;
   tun_capable: boolean;
   tun_system: boolean;
+  tun_android: boolean;
   tun_holder: TunHolder | null;
 };
 
@@ -57,6 +58,12 @@ export function MultiUserPanel({ token, language, connection }: {
             </span>
           </dd>
         </div>
+        {value.tun_android && (
+          <div>
+            <dt>{t(language, "multiUserTunAndroid")}</dt>
+            <dd className="muted">{t(language, "multiUserTunAndroidHint")}</dd>
+          </div>
+        )}
       </dl>
     </section>
   );

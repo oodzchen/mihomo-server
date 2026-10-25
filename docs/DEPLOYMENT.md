@@ -221,6 +221,13 @@ exists (Arch), the launcher re-enters through it, passing its path and arguments
 in the environment instead of the login shell's command line. Direct root invocation deploys
 shared files only; `SUDO_USER` identifies a caller when invoked through sudo.
 
+On Android host networking (for example Arch in Droidspaces with host
+networking) the TUN works without extra setup: the launcher adds the policy
+rules netd lacks. That TUN is IPv4 only and captures the whole device, Android
+apps included. The service's own connections bypass Android VPNs such as Clash
+Meta for Android, so traffic is proxied once even when both run; run only one of
+them as the device-wide proxy.
+
 Required tools: Bash, systemd (`systemctl`, `loginctl`, `systemd-run`), tar,
 SHA-256 (`sha256sum` or `shasum`), curl or wget, getent, groupadd, usermod,
 runuser, sg or newgrp and libcap's setcap/getcap; non-root invocation also requires sudo.

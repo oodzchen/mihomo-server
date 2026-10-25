@@ -146,6 +146,52 @@ fn system_tun_captures_every_uid() -> Result<()> {
 }
 
 #[test]
+fn android_routing_keeps_the_tun_ipv4_and_marks_the_core() -> Result<()> {
+    let plain = Isolation::new(1000, 0)?.with_system_tun(true);
+    assert!(!plain.android_routing());
+    assert_eq!(plain.tun_rule_index(), plain.rule_index());
+    let android = plain.with_android_routing(true);
+    assert!(android.android_routing());
+    assert_eq!(
+        (
+            android.rule_index(),
+            android.tun_rule_index(),
+            android.last_rule_index()
+        ),
+        (10000, 10002, 10031)
+    );
+    // Mihomo's TUN /30 is the first address of the slot's fake-IP block.
+    assert_eq!(android.tun_network(), ("198.19.0.0".parse()?, 30));
+    assert_eq!(Isolation::new(1001, 3)?.tun_network(), ("198.19.12.0".parse()?, 30));
+
+    let (config, changed) = android.apply(mapping(SUBSCRIPTION)?, &RuntimeSettings::default());
+    let tun = &config["tun"];
+    assert_eq!(tun["iproute2-rule-index"].as_u64(), Some(10002));
+    assert_eq!(tun["iproute2-table-index"].as_u64(), Some(10000));
+    assert_eq!(tun["inet6-address"].as_sequence().map(Vec::len), Some(0));
+    assert_eq!(tun["auto-detect-interface"].as_bool(), Some(false));
+    assert_eq!(config["routing-mark"].as_u64(), Some(0x3_0000));
+    assert_eq!(config["dns"]["fake-ip-range"].as_str(), Some("198.19.0.1/22"));
+    for field in ["routing-mark", "tun.auto-detect-interface", "tun.inet6-address"] {
+        assert!(
+            changed.iter().any(|item| item == field),
+            "{field} missing from {changed:?}"
+        );
+    }
+    let (again, changed) = android.apply(config.clone(), &RuntimeSettings::default());
+    assert_eq!(again, config);
+    assert!(changed.is_empty(), "{changed:?}");
+
+    // The mark applies without a TUN too: the proxy port never enters an Android VPN.
+    let (config, _) = android.apply(mapping("mixed-port: 1")?, &RuntimeSettings::default());
+    assert_eq!(config["routing-mark"].as_u64(), Some(0x3_0000));
+    let (config, _) = plain.apply(mapping(SUBSCRIPTION)?, &RuntimeSettings::default());
+    assert!(config.get("routing-mark").is_none());
+    assert!(config["tun"].get("auto-detect-interface").is_none());
+    Ok(())
+}
+
+#[test]
 fn settings_page_listeners_are_kept() -> Result<()> {
     let runtime = RuntimeSettings {
         mixed_port: Some(7890),

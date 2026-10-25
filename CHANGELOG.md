@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 修复
+
+- 修复在 Android 宿主网络中（例如 Droidspaces 以 host 网络运行的 Arch）无法开启 TUN 的问题（报错 `add route 0: network is unreachable`）。服务会自动识别 Android 的路由方式并补上所需的路由规则，无需手动设置。此时 TUN 接管整台设备（包括 Android 应用），仅支持 IPv4；服务自身的出站流量不经过 Android VPN（如 Clash Meta for Android），两者同时开启也只会代理一次。
+
 ## [v0.3.11] - 2026-10-25
 
 v0.3.10 未能发布，其改动包含在本版本中。

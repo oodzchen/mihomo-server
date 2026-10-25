@@ -330,6 +330,9 @@ pub struct MultiUser {
     pub tun_capable: bool,
     /// A TUN here captures the whole host and its resolver, one user at a time.
     pub tun_system: bool,
+    /// Android host networking: the TUN is IPv4 only and captures the whole
+    /// device, while the core's own traffic bypasses any Android VPN.
+    pub tun_android: bool,
 }
 
 #[derive(Clone)]
@@ -390,6 +393,7 @@ impl CoreManager {
             tun_device: isolation.tun_device(),
             tun_capable: options.tun_capable == Some(true),
             tun_system: isolation.tun_scope() == headless_core::enhance::isolation::TunScope::System,
+            tun_android: isolation.android_routing(),
         });
         let core_downloads = if options.managed_core() {
             Some(Arc::new(crate::core_release::CoreDownloads::new(
