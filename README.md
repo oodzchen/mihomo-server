@@ -10,7 +10,7 @@
 curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/install.sh | bash
 ```
 
-脚本下载并校验最新版本，自动通过 sudo 安装到 `/opt/mihomo-server`，为你启动独立的 systemd 用户实例。安装完成会显示管理地址、代理端口、配置文件和令牌位置，并提供 `mihomo-server` 命令（`/usr/local/bin`，附 man 手册和 bash/zsh 补全）。
+脚本按机器架构（x86_64 或 aarch64）下载并校验最新版本，自动通过 sudo 安装到 `/opt/mihomo-server`，为你启动独立的 systemd 用户实例。安装完成会显示管理地址、代理端口、配置文件和令牌位置，并提供 `mihomo-server` 命令（`/usr/local/bin`，附 man 手册和 bash/zsh 补全）。
 
 程序全系统共享，用户配置和数据各自独立：
 
@@ -26,7 +26,7 @@ curl -fsSL https://github.com/oodzchen/mihomo-server/releases/latest/download/in
 ### NixOS
 
 NixOS 可以通过系统 flake 安装后台和桌面端。默认后台包使用 CI 发布的
-x86_64 Linux 预编译产物，系统切换时只下载、解包和适配路径，不编译 Rust 或前端。
+x86_64 / aarch64 Linux 预编译产物，系统切换时只下载、解包和适配路径，不编译 Rust 或前端。
 配置及迁移步骤见 [NixOS 部署说明](docs/NIXOS.md)。
 
 ## 使用

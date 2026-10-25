@@ -70,14 +70,22 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   rust-test:
-    name: Rust and packaging tests
-    runs-on: ubuntu-24.04
+    name: Rust and packaging tests (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-rust
         with:
           save-cache: ${{ env.SAVE_CACHE }}
-          cache-key: test
+          cache-key: test-${{ matrix.arch }}
       - uses: ./.github/actions/setup-core
       - name: Rust tests
         env:
@@ -109,15 +117,16 @@ jobs:
           save-cache: ${{ env.SAVE_CACHE }}
           cache-key: multiuser
       - uses: ./.github/actions/setup-core
+        id: core
       # A debug service is enough here; release.yml packages the release build.
       - name: Package test bundle
         run: |
           cargo build --locked
           npm --prefix web ci
           npm --prefix web run build
-          python3 scripts/package_bundle.py --target x86_64-unknown-linux-gnu \
-            --mihomo .core/verge-mihomo --core-version "$(jq -r .version deploy/core-pin.json)" \
-            --core-sha256 "$(jq -r .sha256 deploy/core-pin.json)" \
+          python3 scripts/package_bundle.py --target "${{ steps.core.outputs.target }}" \
+            --mihomo .core/verge-mihomo --core-version "${{ steps.core.outputs.version }}" \
+            --core-sha256 "${{ steps.core.outputs.sha256 }}" \
             --service target/debug/mihomo-server --web-dir web/dist --output "$RUNNER_TEMP/bundle"
       # Two concurrent TUN users, per-UID routing, crash/upgrade, cleanup.
       - name: Multi-user end-to-end

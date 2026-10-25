@@ -142,6 +142,19 @@ class Installer(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_release_bundle_follows_machine_architecture(self):
+        code = ('source "$1"; require_elevation() { :; }; uname() { echo "$TEST_ARCH"; }; '
+                'fetch_progress() { echo "$1"; return 1; }; main')
+        env = {"MIHOMO_INSTALL_BUNDLE": "", "MIHOMO_INSTALL_TAG": "v1.2.3", "MIHOMO_INSTALL_REPO": "o/r"}
+        for arch, target in [("x86_64", "x86_64-unknown-linux-gnu"), ("aarch64", "aarch64-unknown-linux-gnu")]:
+            result = self.run_shell(code, **env, TEST_ARCH=arch)
+            self.assertIn(f"/o/r/releases/download/v1.2.3/mihomo-server-v1.2.3-{target}.tar.gz", result.stdout)
+            self.assertIn("bundle download failed", result.stderr)
+        result = self.run_shell(code, **env, TEST_ARCH="riscv64")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("unsupported architecture: riscv64", result.stderr)
+
     def test_latest_tag_reads_redirect_without_api(self):
         class Redirect(BaseHTTPRequestHandler):
             def do_GET(self):

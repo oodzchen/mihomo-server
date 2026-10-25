@@ -1,9 +1,9 @@
-#![cfg(target_os = "linux")]
+#![cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
 use anyhow::{Context as _, Result, ensure};
 use flate2::{Compression, write::GzEncoder};
 use mihomo_server::{
     core_manager::{CoreManager, CoreOptions, CorePhase},
-    resources::{Resources, TARGET},
+    resources::{CORE_PLATFORM, Resources, TARGET},
 };
 use serde_json::{Value, json};
 use std::{
@@ -14,6 +14,7 @@ use std::{
     process::Stdio,
     time::Duration,
 };
+const PREFIX: &str = CORE_PLATFORM.unwrap().asset_prefix;
 struct Directory(PathBuf);
 impl Directory {
     fn new() -> Result<Self> {
@@ -64,7 +65,7 @@ impl Directory {
         } else {
             version
         };
-        let release = json!({"version":version,"target":TARGET,"asset":format!("mihomo-linux-amd64-v2-{version}.gz"),"bytes":package.len(),"sha256":sha256,"download_url":format!("https://github.com/MetaCubeX/mihomo/releases/download/{tag}/mihomo-linux-amd64-v2-{version}.gz")});
+        let release = json!({"version":version,"target":TARGET,"asset":format!("{PREFIX}{version}.gz"),"bytes":package.len(),"sha256":sha256,"download_url":format!("https://github.com/MetaCubeX/mihomo/releases/download/{tag}/{PREFIX}{version}.gz")});
         fs::write(dir.join("package.gz"), package)?;
         fs::write(
             dir.join("release.json"),

@@ -1,12 +1,13 @@
-#![cfg(all(unix, target_arch = "x86_64"))]
+#![cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
 use anyhow::{Context as _, Result};
 use flate2::{Compression, write::GzEncoder};
 use mihomo_server::{
     core_manager::{CoreManager, CoreOptions, CorePhase},
-    resources::{Resources, TARGET},
+    resources::{CORE_PLATFORM, Resources, TARGET},
 };
 use serde_json::json;
 use std::{fs, io::Write as _, os::unix::fs::PermissionsExt as _, path::PathBuf};
+const PREFIX: &str = CORE_PLATFORM.unwrap().asset_prefix;
 struct Directory(PathBuf);
 impl Drop for Directory {
     fn drop(&mut self) {
@@ -63,7 +64,7 @@ async fn actor_staging_preserves_running_core_and_snapshot_across_validation_fai
         let seed=|version:&str|->Result<String> {
             let digest=hash(&package);let id=format!("{version}-{digest}");
             let path=directory.0.join("data/core/.upgrade-staging").join(&id);fs::create_dir(&path)?;fs::set_permissions(&path,fs::Permissions::from_mode(0o700))?;
-            let release=json!({"version":version,"target":TARGET,"asset":format!("mihomo-linux-amd64-v2-{version}.gz"),"bytes":package.len(),"sha256":digest,"download_url":format!("https://github.com/MetaCubeX/mihomo/releases/download/{version}/mihomo-linux-amd64-v2-{version}.gz")});
+            let release=json!({"version":version,"target":TARGET,"asset":format!("{PREFIX}{version}.gz"),"bytes":package.len(),"sha256":digest,"download_url":format!("https://github.com/MetaCubeX/mihomo/releases/download/{version}/{PREFIX}{version}.gz")});
             fs::write(path.join("package.gz"),&package)?;fs::write(path.join("release.json"),serde_json::to_vec(&json!({"schema_version":1,"release":release}))?)?;
             for name in ["package.gz","release.json"] {fs::set_permissions(path.join(name),fs::Permissions::from_mode(0o600))?;}
             Ok(id)

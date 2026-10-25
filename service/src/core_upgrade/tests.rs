@@ -30,6 +30,7 @@ fn staged_version(dir: &Directory, version: &str) -> Result<(PathBuf, StagedCore
     let path = dir.0.join("staged");
     fs::write(&path, &bytes)?;
     fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
+    let prefix = CORE_PLATFORM.map_or("", |p| p.asset_prefix);
     let package_hash = "a".repeat(64);
     let config_sha256 = "b".repeat(64);
     let id = format!("{version}-{package_hash}");
@@ -47,11 +48,11 @@ fn staged_version(dir: &Directory, version: &str) -> Result<(PathBuf, StagedCore
                 release: CoreRelease {
                     version: version.into(),
                     target: TARGET.into(),
-                    asset: format!("mihomo-linux-amd64-v2-{version}.gz"),
+                    asset: format!("{prefix}{version}.gz"),
                     bytes: 100,
                     sha256: package_hash,
                     download_url: format!(
-                        "https://github.com/MetaCubeX/mihomo/releases/download/{tag}/mihomo-linux-amd64-v2-{version}.gz"
+                        "https://github.com/MetaCubeX/mihomo/releases/download/{tag}/{prefix}{version}.gz"
                     ),
                 },
             },

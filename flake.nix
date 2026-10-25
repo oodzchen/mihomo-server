@@ -11,22 +11,36 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
+        # Release hashes per Nix system; written by scripts/update_flake.py.
         serverRelease = {
           version = "0.3.7";
-          hash = "sha256-yF6C93Cp+V9KjbEyT5Hg5yQBNWOD9Spm28m7+6WTcGA=";
+          hashes = {
+            x86_64-linux = "sha256-yF6C93Cp+V9KjbEyT5Hg5yQBNWOD9Spm28m7+6WTcGA=";
+          };
         };
+        targets = {
+          x86_64-linux = "x86_64-unknown-linux-gnu";
+          aarch64-linux = "aarch64-unknown-linux-gnu";
+        };
+        target = targets.${system};
 
-        server-bin = pkgs.callPackage ./nix/server-bin.nix { release = serverRelease; };
+        server-bin = pkgs.callPackage ./nix/server-bin.nix {
+          inherit target;
+          inherit (serverRelease) version;
+          hash = serverRelease.hashes.${system};
+        };
         server-source = pkgs.callPackage ./nix/server-source.nix {
+          inherit target;
           version = "${serverRelease.version}-dev.${self.shortRev or "dirty"}";
         };
+        released = serverRelease.hashes ? ${system};
       in
       {
-        packages = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
-          default = server-bin;
-          server-bin = server-bin;
+        # A system without a published release yet builds from source.
+        packages = pkgs.lib.optionalAttrs (targets ? ${system}) ({
+          default = if released then server-bin else server-source;
           server-source = server-source;
-        };
+        } // pkgs.lib.optionalAttrs released { server-bin = server-bin; });
 
         checks = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
           module = import ./nix/tests.nix { inherit self nixpkgs pkgs; };

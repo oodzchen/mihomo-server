@@ -11,7 +11,8 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
-TARGET = "x86_64-unknown-linux-gnu"
+# Rust target -> (ELF e_machine, name) of the service and bundled core.
+TARGETS = {"x86_64-unknown-linux-gnu": (62, "x86_64"), "aarch64-unknown-linux-gnu": (183, "aarch64")}
 GEO_NAMES = {"Country.mmdb", "ASN.mmdb", "geoip.dat", "geosite.dat", "geoip.metadb", "GeoSite.dat"}
 MAX_GEO_FILE = 128 * 1024 * 1024
 
@@ -61,19 +62,20 @@ def regular_tree(directory):
             raise ValueError(f"Unsafe resource entry: {path}")
 
 
-def executable(path):
+def executable(path, target):
     if path.is_symlink() or not path.is_file() or not os.access(path, os.X_OK):
         raise ValueError(f"Expected regular executable: {path}")
     with path.open("rb") as stream:
         header = stream.read(20)
+    machine, name = TARGETS[target]
     if (len(header) != 20 or header[:6] != b"\x7fELF\x02\x01"
-            or int.from_bytes(header[18:20], "little") != 62):
-        raise ValueError(f"Expected Linux x86_64 ELF executable: {path}")
+            or int.from_bytes(header[18:20], "little") != machine):
+        raise ValueError(f"Expected Linux {name} ELF executable: {path}")
 
 
 def package(args):
-    if args.target != TARGET:
-        raise ValueError(f"Initial bundle supports only {TARGET}")
+    if args.target not in TARGETS:
+        raise ValueError(f"Bundle supports only {', '.join(TARGETS)}")
     if not re.fullmatch(r"[0-9a-fA-F]{64}", args.core_sha256):
         raise ValueError("Provide the expected 64-digit core SHA-256")
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", args.core_version):
@@ -83,7 +85,7 @@ def package(args):
     if output.exists() or output.is_symlink():
         raise ValueError("Bundle output already exists; use a fresh version directory")
     core = Path(args.mihomo).absolute()
-    executable(core)
+    executable(core, args.target)
     if sha256(core) != args.core_sha256.lower():
         raise ValueError("Core SHA-256 does not match the supplied pin")
     version = subprocess.run([str(core), "-v"], check=True, capture_output=True,
@@ -97,7 +99,7 @@ def package(args):
                         "--target", args.target], cwd=ROOT, check=True)
     service = Path(args.service or ROOT / "target" / args.target / "release" / "mihomo-server").absolute()
     web = Path(args.web_dir or ROOT / "web" / "dist").absolute()
-    executable(service)
+    executable(service, args.target)
     regular_tree(web)
     if not (web / "index.html").is_file():
         raise ValueError("Web directory needs a built index.html")

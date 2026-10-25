@@ -1886,8 +1886,8 @@ Use the existing authenticated POST /api/commands endpoint:
 {"command":"prepared_core_upgrade","id":"v1.19.31-<64 lowercase SHA-256 digits>"}
 ```
 
-An omitted version queries the latest published stable release. Only Linux x86_64
-amd64-v2 packages are supported. The response includes version, target, asset,
+An omitted version queries the latest published stable release. Supported packages are
+Linux amd64-v2 on x86_64 and Linux arm64 on aarch64 bundles. The response includes version, target, asset,
 compressed bytes, SHA-256 and the fixed public download URL. Preparation returns
 an immutable ID plus that release object; use the actual returned ID for readback.
 These commands reject extra fields, arbitrary URLs/checksums/filesystem paths,
@@ -1936,8 +1936,9 @@ available; other actor operations wait until staging finishes.
 
 The service rechecks the compressed digest, decodes a single gzip stream, validates
 CRC and EOF, rejects trailing data or extra members and bounds the executable to
-128 MiB. Extraction checks shutdown and a 15-second clock between chunks. Linux
-x86_64 ELF format is required; scripts/other architectures are rejected. The private
+128 MiB. Extraction checks shutdown and a 15-second clock between chunks. The ELF
+machine must match the service (x86_64 or aarch64); scripts/other architectures are
+rejected. The private
 candidate runs -v and must report exactly the pinned release version, then runs -t
 against the captured YAML. Each process has a five-second deadline, bounded stdout/
 stderr capture, and kill/reap on timeout or shutdown. Raw probe output is not
@@ -1980,7 +1981,7 @@ the HTTP caller disconnects. Lifecycle/configuration requests wait; HTTP state a
 WebSocket transport remain available. Current normalized YAML must match the saved
 configuration hash, otherwise stage again. The service reruns bounded extraction,
 version and isolated configuration/resource validation before creating backups.
-Only Linux x86_64 ordinary executables are supported; capability-bearing/set-ID
+Only Linux x86_64/aarch64 ordinary executables are supported; capability-bearing/set-ID
 cores require the pending native privilege integration before upgrade.
 
 A private .core-upgrade directory holds bounded hash-checked old/new copies and a
@@ -2047,7 +2048,7 @@ reconnection/navigation. Upgrade failure remains visible; retry after addressing
 the reported error.
 An unmanaged `--mihomo` service shows that online upgrading requires a bundle.
 
-This increment supports stable Linux x86_64 ordinary managed executables, including
+This increment supports stable Linux x86_64/aarch64 ordinary managed executables, including
 repair of unreadable/empty/nonexecutable existing files. Alpha and other platforms
 remain pending. The browser does not accept package URLs, paths, hashes or version
 overrides for the latest-stable wrapper.
@@ -2105,7 +2106,7 @@ and native privilege integration remain pending.
 
 ## Prepare an Alpha core candidate
 
-For a Linux x86_64 bundle, use the authenticated command endpoint:
+For a Linux x86_64 or aarch64 bundle, use the authenticated command endpoint:
 
 ```json
 {"command":"alpha_core_release"}
@@ -2116,7 +2117,8 @@ For a Linux x86_64 bundle, use the authenticated command endpoint:
 
 The example version is illustrative; first query the current release. Optional
 versions must be `alpha-` followed by 7–40 lowercase hexadecimal characters and
-must match the currently published ordinary Linux amd64-v2 asset. Alpha uses the
+must match the currently published ordinary Linux amd64-v2 (x86_64) or arm64
+(aarch64) asset. Alpha uses the
 fixed official `Prerelease-Alpha` tag. The API snapshot supplies exact asset size,
 URL and SHA-256; requests cannot override them. Go-version-specific variants are
 ignored. Both new commands use the shared single upgrade admission slot, existing
@@ -2147,7 +2149,7 @@ Use the prepared ID returned by `prepare_alpha_core_upgrade`:
 
 The lifecycle actor snapshots the current YAML, retains its runtime revision and
 validates the prepared package again. Extraction requires a single CRC-valid gzip
-member, complete EOF, no trailing bytes, Linux x86_64 ELF and at most 128 MiB of
+member, complete EOF, no trailing bytes, an ELF for the service's architecture and at most 128 MiB of
 unpacked data. Extraction has a 15-second budget. Separate five-second `-v` and
 `-t` probes verify the exact resolved Alpha version and current configuration.
 Validation uses private copies of supported Geo resources, with an aggregate

@@ -21,7 +21,7 @@ class PackageBoundaries(unittest.TestCase):
         self.core = self.root / "core"
         self.core.write_bytes(b"\x7fELF\x02\x01" + bytes(12) + (62).to_bytes(2, "little"))
         self.core.chmod(0o700)
-        self.args = SimpleNamespace(target=packager.TARGET, mihomo=str(self.core),
+        self.args = SimpleNamespace(target="x86_64-unknown-linux-gnu", mihomo=str(self.core),
                                     core_sha256=hashlib.sha256(self.core.read_bytes()).hexdigest(),
                                     core_version="v1.19.31", output=str(self.root / "bundle"),
                                     build=False, service=None, web_dir=None)
@@ -44,14 +44,20 @@ class PackageBoundaries(unittest.TestCase):
         self.assertEqual((output / "retained").read_text(), "existing release")
 
     def test_unsupported_target_is_not_silently_approximated(self):
-        self.args.target = "aarch64-unknown-linux-gnu"
+        self.args.target = "riscv64gc-unknown-linux-gnu"
         with self.assertRaisesRegex(ValueError, "supports only"):
             packager.package(self.args)
 
     def test_wrong_binary_architecture_is_rejected(self):
         self.core.write_bytes(b"not an ELF executable")
         with self.assertRaisesRegex(ValueError, "x86_64 ELF"):
-            packager.executable(self.core)
+            packager.executable(self.core, "x86_64-unknown-linux-gnu")
+
+    def test_core_must_match_the_bundle_target(self):
+        with self.assertRaisesRegex(ValueError, "aarch64 ELF"):
+            packager.executable(self.core, "aarch64-unknown-linux-gnu")
+        self.core.write_bytes(b"\x7fELF\x02\x01" + bytes(12) + (183).to_bytes(2, "little"))
+        packager.executable(self.core, "aarch64-unknown-linux-gnu")
 
     def test_web_symlinks_are_rejected(self):
         web = self.root / "web"

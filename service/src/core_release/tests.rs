@@ -1,4 +1,4 @@
-#![cfg(all(unix, target_arch = "x86_64"))]
+#![cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
 use super::*;
 use axum::{
     Router,
@@ -8,6 +8,7 @@ use axum::{
     response::Response,
 };
 use serde_json::{Value, json};
+const PREFIX: &str = CORE_PLATFORM.unwrap().asset_prefix;
 use std::{
     os::unix::fs::{PermissionsExt as _, symlink},
     sync::{
@@ -713,7 +714,7 @@ async fn alpha_discovery_pins_unique_default_variant_and_rejects_invalid_request
     let client = fixture.repository.client()?;
     let mut metadata = alpha_metadata(&fixture, "alpha-63bd52e")?;
     let mut other = metadata["assets"][0].clone();
-    other["name"] = json!("mihomo-linux-amd64-v2-go123-alpha-63bd52e.gz");
+    other["name"] = json!(format!("{PREFIX}go123-alpha-63bd52e.gz"));
     metadata["assets"].as_array_mut().unwrap().push(other);
     *fixture.state.metadata.lock().unwrap() = metadata;
     let release = fixture
@@ -721,7 +722,7 @@ async fn alpha_discovery_pins_unique_default_variant_and_rejects_invalid_request
         .discover_channel(&client, None, ReleaseChannel::Alpha)
         .await?;
     assert_eq!(release.version, "alpha-63bd52e");
-    assert_eq!(release.asset, "mihomo-linux-amd64-v2-alpha-63bd52e.gz");
+    assert_eq!(release.asset, format!("{PREFIX}alpha-63bd52e.gz"));
     assert!(release.download_url.contains("/Prerelease-Alpha/"));
     assert_eq!(
         fixture
@@ -772,8 +773,8 @@ async fn alpha_metadata_rejects_draft_tag_ambiguity_invalid_version_digest_size_
         cases.push(metadata);
     }
     for (key, value) in [
-        ("name", json!("mihomo-linux-amd64-v2-alpha-secret.gz")),
-        ("name", json!("mihomo-linux-amd64-v2-alpha-abcdef0/../private.gz")),
+        ("name", json!(format!("{PREFIX}alpha-secret.gz"))),
+        ("name", json!(format!("{PREFIX}alpha-abcdef0/../private.gz"))),
         ("state", json!("new")),
         ("size", json!(0)),
         ("size", json!(MAX_PACKAGE + 1)),
@@ -786,7 +787,7 @@ async fn alpha_metadata_rejects_draft_tag_ambiguity_invalid_version_digest_size_
                 fixture
                     .repository
                     .packages
-                    .join("alpha-63bd52e/mihomo-linux-amd64-v2-alpha-63bd52e.gz")?
+                    .join(&format!("alpha-63bd52e/{PREFIX}alpha-63bd52e.gz"))?
                     .to_string()
             ),
         ),
@@ -855,7 +856,10 @@ async fn alpha_preparation_retains_snapshot_readback_and_live_core_while_nonexec
         )
         .await
         .unwrap_err();
-    assert!(format!("{result:#}").contains("candidate must be a Linux x86_64 ELF executable"));
+    assert!(format!("{result:#}").contains(&format!(
+        "candidate must be a Linux {} ELF executable",
+        platform()?.name
+    )));
     assert_eq!(fs::read(dir.0.join("verge-mihomo"))?, b"unchanged live core");
     assert!(!fs::read_dir(&downloads.root)?.any(|entry| entry.unwrap().file_name().to_str().is_some_and(pending_name)));
     assert!(
@@ -865,7 +869,7 @@ async fn alpha_preparation_retains_snapshot_readback_and_live_core_while_nonexec
             .lock()
             .unwrap()
             .iter()
-            .any(|path| path.contains("/download/Prerelease-Alpha/mihomo-linux-amd64-v2-alpha-63bd52e.gz"))
+            .any(|path| path.contains(&format!("/download/Prerelease-Alpha/{PREFIX}alpha-63bd52e.gz")))
     );
     Ok(())
 }

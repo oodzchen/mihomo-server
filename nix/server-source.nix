@@ -1,17 +1,18 @@
 { lib, rustPlatform, buildNpmPackage, importNpmLock, fetchurl, gzip,
   makeWrapper, python3, bash, coreutils, gnugrep, gnused, gawk, curl, systemd,
-  getent, version }:
+  getent, version, target }:
 let
   pin = builtins.fromJSON (builtins.readFile ../deploy/core-pin.json);
+  core = pin.targets.${target};
   coreArchive = fetchurl {
-    url = lib.replaceStrings [ "{version}" ] [ pin.version ] pin.download;
+    url = lib.replaceStrings [ "{version}" "{asset}" ] [ pin.version (lib.replaceStrings [ "{version}" ] [ pin.version ] core.asset) ] pin.download;
     # Pin the uncompressed output, as in deploy/core-pin.json.
     postFetch = ''
       mv $out $out.gz
       ${gzip}/bin/gunzip -c $out.gz > $out
       rm $out.gz
     '';
-    sha256 = pin.sha256;
+    sha256 = core.sha256;
   };
   web = buildNpmPackage {
     pname = "mihomo-server-web";
@@ -43,7 +44,7 @@ in rustPlatform.buildRustPackage {
     cp ${../deploy/completions/mihomo-server.bash} $out/share/bash-completion/completions/mihomo-server
     cp ${../deploy/completions/_mihomo-server} $out/share/zsh/site-functions/
     cat > $out/resources/manifest.json <<EOF
-    {"schema_version":1,"target":"x86_64-unknown-linux-gnu","core":{"version":"${pin.version}","sha256":"${pin.sha256}"},"licenses":{"primary":"LICENSE","inventory":"LICENSES.txt"}}
+    {"schema_version":1,"target":"${target}","core":{"version":"${pin.version}","sha256":"${core.sha256}"},"licenses":{"primary":"LICENSE","inventory":"LICENSES.txt"}}
     EOF
   '' + import ./server-install.nix {
     inherit lib bash coreutils gnugrep gnused gawk curl getent systemd;
@@ -52,7 +53,7 @@ in rustPlatform.buildRustPackage {
   meta = {
     description = "Mihomo supervisor and Web UI built from source";
     license = lib.licenses.gpl3Only;
-    platforms = [ "x86_64-linux" ];
+    platforms = [ "x86_64-linux" "aarch64-linux" ];
     mainProgram = "mihomo-server";
   };
 }

@@ -1,12 +1,35 @@
 name: Set up pinned core
-description: Download and verify the pinned mihomo core into .core/ (cached by pin sha256).
+description: Download and verify the pinned mihomo core for the runner's architecture into .core/ (cached by pin sha256).
+outputs:
+  target:
+    description: Rust target of this runner (also the core-pin.json targets key).
+    value: ${{ steps.pin.outputs.target }}
+  version:
+    description: Pinned core version.
+    value: ${{ steps.pin.outputs.version }}
+  sha256:
+    description: SHA-256 of the uncompressed core for this target.
+    value: ${{ steps.pin.outputs.sha256 }}
 runs:
   using: composite
   steps:
     - id: pin
       shell: bash
       run: |
-        echo "sha256=$(jq -r .sha256 deploy/core-pin.json)" >> "$GITHUB_OUTPUT"
+        case "$(uname -m)" in
+          x86_64) target=x86_64-unknown-linux-gnu ;;
+          aarch64) target=aarch64-unknown-linux-gnu ;;
+          *) echo "unsupported runner architecture: $(uname -m)" >&2; exit 1 ;;
+        esac
+        version=$(jq -r .version deploy/core-pin.json)
+        asset=$(jq -er --arg t "$target" '.targets[$t].asset' deploy/core-pin.json)
+        url=$(jq -r .download deploy/core-pin.json)
+        {
+          echo "target=$target"
+          echo "version=$version"
+          echo "sha256=$(jq -er --arg t "$target" '.targets[$t].sha256' deploy/core-pin.json)"
+          echo "url=$(printf '%s' "$url" | sed "s/{asset}/$asset/; s/{version}/$version/g")"
+        } >> "$GITHUB_OUTPUT"
     - id: cache
       uses: actions/cache@v5
       with:
@@ -16,11 +39,8 @@ runs:
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        version=$(jq -r .version deploy/core-pin.json)
-        url=$(jq -r .download deploy/core-pin.json)
-        url=$(printf '%s' "$url" | sed "s/{version}/$version/g")
         mkdir -p .core
-        curl -fsSL --retry 3 -o .core/core.gz "$url"
+        curl -fsSL --retry 3 -o .core/core.gz "${{ steps.pin.outputs.url }}"
         gunzip -c .core/core.gz > .core/verge-mihomo
         rm .core/core.gz
     - name: Verify pinned core

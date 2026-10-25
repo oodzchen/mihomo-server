@@ -808,5 +808,5 @@ async fn read_config(path: &Path) -> Result<Mapping> {
     runtime::parse(&yaml)
 }
 
-#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+#[cfg(all(test, target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod upgrade_tests;

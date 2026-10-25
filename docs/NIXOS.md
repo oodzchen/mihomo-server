@@ -3,8 +3,8 @@
 The native NixOS installation owns the program and service definitions through
 the system flake. Each selected user keeps independent XDG configuration, data,
 management token, proxy ports and a mutable managed core. The default package
-downloads the complete x86_64 Linux CI release; `switch` does not compile Rust or
-the Web UI. A first installation may fetch ordinary Nixpkgs dependencies too.
+downloads the complete CI release for the host (`x86_64-linux` or
+`aarch64-linux`); `switch` does not compile Rust or the Web UI. A first installation may fetch ordinary Nixpkgs dependencies too.
 
 ## System configuration
 
@@ -96,8 +96,9 @@ binary. To build that commit's code, explicitly select
 `mihomo-server.packages.${pkgs.stdenv.hostPlatform.system}.server-source` as the
 service `package`. That opt-in package compiles locked Rust and frontend sources.
 Its reported version includes a development revision. Both server packages
-currently support x86_64 Linux only; other architectures require new pinned
-core/release assets.
+support `x86_64-linux` and `aarch64-linux`. `flake.nix` keeps one release hash
+per system; until a release with that system's tarball is published, its
+`default` is `server-source` and `server-bin` is absent.
 
 Nix metadata follows the executable, not `/etc/NIXOS`. `mihomo-server update`
 and `uninstall` refuse the remote installer for Nix packages, including binaries

@@ -1,5 +1,8 @@
 //! Durable Linux managed-core replacement. Paths are fixed under the private core directory.
-use crate::{core_release::StagedCore, resources::TARGET};
+use crate::{
+    core_release::StagedCore,
+    resources::{CORE_PLATFORM, TARGET},
+};
 use anyhow::{Context as _, Result, ensure};
 use ring::digest::{Context, SHA256};
 use serde::{Deserialize, Serialize};
@@ -447,8 +450,8 @@ pub(crate) fn prepare_with_repair(
     repair: bool,
 ) -> Result<CoreInstallation> {
     ensure!(
-        matches!(TARGET, "x86_64-unknown-linux-gnu" | "x86_64-unknown-linux-musl"),
-        "core activation currently requires Linux x86_64"
+        CORE_PLATFORM.is_some(),
+        "core activation currently requires Linux x86_64 or aarch64"
     );
     directory(core)?;
     ensure!(!core.join(TRANSACTION).try_exists()?, "core upgrade recovery required");

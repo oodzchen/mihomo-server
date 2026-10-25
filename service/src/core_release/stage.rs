@@ -49,14 +49,16 @@ fn bounded_read(path: &Path, limit: u64) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 fn check_elf(bytes: &[u8]) -> Result<()> {
+    let platform = super::platform()?;
     ensure!(
         bytes.len() >= 64
             && &bytes[..7] == b"\x7fELF\x02\x01\x01"
             && matches!(u16::from_le_bytes([bytes[16], bytes[17]]), 2 | 3)
-            && u16::from_le_bytes([bytes[18], bytes[19]]) == 62
+            && u16::from_le_bytes([bytes[18], bytes[19]]) == platform.elf_machine
             && u32::from_le_bytes(bytes[20..24].try_into().unwrap()) == 1
             && u16::from_le_bytes([bytes[52], bytes[53]]) == 64,
-        "candidate must be a Linux x86_64 ELF executable"
+        "candidate must be a Linux {} ELF executable",
+        platform.name
     );
     Ok(())
 }

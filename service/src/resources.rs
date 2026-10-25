@@ -11,6 +11,32 @@ use std::{
 
 pub const TARGET: &str = env!("MIHOMO_SERVER_TARGET");
 
+/// Upstream core package and executable format managed on this service target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CorePlatform {
+    /// Release asset name before the version, e.g. `mihomo-linux-arm64-`.
+    pub asset_prefix: &'static str,
+    /// ELF `e_machine` of the core executable.
+    pub elf_machine: u16,
+    pub name: &'static str,
+}
+
+/// x86_64 retains upstream's amd64-v2 variant; arm64 publishes a single one.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub const CORE_PLATFORM: Option<CorePlatform> = Some(CorePlatform {
+    asset_prefix: "mihomo-linux-amd64-v2-",
+    elf_machine: 62,
+    name: "x86_64",
+});
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+pub const CORE_PLATFORM: Option<CorePlatform> = Some(CorePlatform {
+    asset_prefix: "mihomo-linux-arm64-",
+    elf_machine: 183,
+    name: "aarch64",
+});
+#[cfg(not(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+pub const CORE_PLATFORM: Option<CorePlatform> = None;
+
 #[derive(Debug, Deserialize, Clone, Default, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct LicenseInfo {

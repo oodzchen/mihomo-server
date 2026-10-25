@@ -17,13 +17,21 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   build-release:
-    name: Build and package release
-    # Pinned: ubuntu-latest migrates to Ubuntu 26.04 from 2026-10-19. Release
-    # binaries must keep linking against the 24.04 glibc so the bundle stays
-    # runnable on older distros (Debian 12, Ubuntu 22.04, etc.).
-    runs-on: ubuntu-24.04
+    name: Build and package release (${{ matrix.target }})
+    # Each target builds natively on its own runner. Pinned: ubuntu-latest
+    # migrates to Ubuntu 26.04 from 2026-10-19. Release binaries must keep
+    # linking against the 24.04 glibc so the bundle stays runnable on older
+    # distros (Debian 12, Ubuntu 22.04, etc.).
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     env:
-      TARGET: x86_64-unknown-linux-gnu
+      TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v5
 
@@ -40,12 +48,10 @@ jobs:
           build-cache: "false"
 
       - uses: ./.github/actions/setup-core
-
-      - name: Read pinned core
         id: pin
-        run: |
-          echo "version=$(jq -r .version deploy/core-pin.json)" >> "$GITHUB_OUTPUT"
-          echo "sha256=$(jq -r .sha256 deploy/core-pin.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check runner target
+        run: test "${{ steps.pin.outputs.target }}" = "$TARGET"
 
       - name: Build and package bundle
         env:
@@ -78,7 +84,9 @@ jobs:
             > "mihomo-server-$GITHUB_REF_NAME-$TARGET.tar.gz.sha256"
           sha256sum -c "mihomo-server-$GITHUB_REF_NAME-$TARGET.tar.gz.sha256"
 
+      # The installer is target-independent; publish it once.
       - name: Render install.sh with repository slug
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           sed "s|local REPO=\"__REPO_SLUG__\"|local REPO=\"$GITHUB_REPOSITORY\"|" \
             scripts/install_remote.sh > dist/install.sh
@@ -87,7 +95,7 @@ jobs:
       - name: Upload release assets
         uses: actions/upload-artifact@v6
         with:
-          name: release-assets
+          name: release-${{ matrix.target }}-assets
           path: |
             dist/mihomo-server-${{ github.ref_name }}-${{ env.TARGET }}.tar.gz
             dist/mihomo-server-${{ github.ref_name }}-${{ env.TARGET }}.tar.gz.sha256
@@ -124,7 +132,8 @@ jobs:
       - name: Update flake.nix on main
         run: |
           python3 scripts/update_flake.py --tag "$GITHUB_REF_NAME" \
-            --tarball "dist/mihomo-server-$GITHUB_REF_NAME-x86_64-unknown-linux-gnu.tar.gz"
+            --tarball "x86_64-linux=dist/mihomo-server-$GITHUB_REF_NAME-x86_64-unknown-linux-gnu.tar.gz" \
+            --tarball "aarch64-linux=dist/mihomo-server-$GITHUB_REF_NAME-aarch64-unknown-linux-gnu.tar.gz"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

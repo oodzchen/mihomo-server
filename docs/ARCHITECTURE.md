@@ -8,7 +8,8 @@ instructions belong in [RUNNING.md](RUNNING.md), packaging and installation in
 
 ## Current state
 
-The active Linux scope is implemented and verified on x86_64. The product is a
+The active Linux scope is implemented and verified on x86_64; aarch64 builds the
+same bundle natively (see Platforms below). The product is a
 single systemd service entry that serves the management application and owns one
 Mihomo child process. Node and subscription data, configuration, core upgrades,
 Geo resources, rules/providers, delay tests, localization, backup/restore, and
@@ -425,7 +426,9 @@ directory lock prevents two supervisors from owning the same state.
 Shared installation follows XDG locations for per-user config and data. The
 installer records resolved absolute paths so systemd startup does not depend on
 an interactive shell environment. Native NixOS installation uses immutable CI release bundles in `/nix/store`.
-`packages.default`/`server-bin` fetch a version/hash-pinned x86_64 Linux release,
+`packages.default`/`server-bin` fetch a version/hash-pinned Linux release for the
+host system (x86_64 or aarch64; a system without a published hash falls back to
+`server-source`),
 verify its published checksums, patch ELF interpreters/shebangs, add the current
 Nix integration scripts, and regenerate the resource manifest's core hash after
 fixup. `server-source` is an explicit alternative, building locked Rust and npm
@@ -465,11 +468,29 @@ execution never passes through a shell wrapper.
 Upgrades preserve user data and individually upgraded cores; uninstall and purge remain
 distinct operations.
 
+## Platforms
+
+The supported targets are `x86_64-unknown-linux-gnu` and
+`aarch64-unknown-linux-gnu`. One source tree serves both; the target only selects
+pinned upstream artifacts and executable checks:
+
+- `deploy/core-pin.json` pins one core version with a per-target upstream asset
+  and uncompressed SHA-256 (`mihomo-linux-amd64-*` / `mihomo-linux-arm64-*`). CI
+  (`setup-core`), the packager and `server-source` read the entry for their target.
+- The service compiles in `resources::CORE_PLATFORM`: the Stable/Alpha upgrade asset
+  prefix (amd64-v2 on x86_64, arm64 on aarch64) and the ELF machine that staged
+  cores must match. Other targets build but refuse core preparation/activation.
+- `release.yml` builds each bundle natively (`ubuntu-24.04` / `ubuntu-24.04-arm`,
+  same glibc), publishes `mihomo-server-<tag>-<target>.tar.gz` for both and writes
+  one hash per Nix system into `flake.nix`. `install.sh` picks the bundle from
+  `uname -m`. CI runs the Rust and packaging tests on both architectures.
+
 ## Supported and deferred scope
 
 | Area | Status |
 | --- | --- |
 | Linux x86_64 service, Web management and systemd installation | Implemented and verified |
+| Linux aarch64 (glibc) bundle, installer, Nix package and core upgrades | Implemented; verified under emulation, CI runs Rust tests natively |
 | Profiles, enhancements, settings, rules/providers, selection and delay tests | Implemented and verified |
 | Region-restriction (unlock) and IP location tests through the core's listener | Implemented |
 | Resource inventory, Geo/provider lifecycle and live readback | Implemented and verified |
@@ -478,7 +499,7 @@ distinct operations.
 | Simplified/traditional Chinese and English browser UI; service locale catalog | Implemented |
 | Linux x86_64 desktop client (local instance; deb/RPM/AppImage/Nix Flake; separate repository) | Implemented |
 | Desktop client management of remote instances | Deferred |
-| aarch64/musl bundles, server deb/RPM and containers | Deferred |
+| musl bundles, server deb/RPM and containers | Deferred |
 | Windows service/Named Pipe and native macOS deployment validation | Deferred |
 | SOCKS/PAC subscription download routes and full connection dashboard | Deferred |
 | Backup automation, WebDAV and backup UI | Deferred |

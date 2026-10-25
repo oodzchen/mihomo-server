@@ -1,7 +1,16 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "version": "v1.19.31",
-  "sha256": "08787faafea19c1ab0f83fa5a1b22363b7d03ea78da18091a4c883aecaaa5979",
-  "download": "https://github.com/MetaCubeX/mihomo/releases/download/{version}/mihomo-linux-amd64-{version}.gz",
-  "notes": "sha256 is of the uncompressed linux-amd64 core binary; upgrade by bumping version + sha256 in one PR."
+  "download": "https://github.com/MetaCubeX/mihomo/releases/download/{version}/{asset}",
+  "targets": {
+    "x86_64-unknown-linux-gnu": {
+      "asset": "mihomo-linux-amd64-{version}.gz",
+      "sha256": "08787faafea19c1ab0f83fa5a1b22363b7d03ea78da18091a4c883aecaaa5979"
+    },
+    "aarch64-unknown-linux-gnu": {
+      "asset": "mihomo-linux-arm64-{version}.gz",
+      "sha256": "1b315bc038d05f84ee86d232f3c3d2b020b5044e9b971bb8fe215b6e6a2148f3"
+    }
+  },
+  "notes": "sha256 is of the uncompressed core binary per target; upgrade by bumping version + every target's sha256 in one PR."
 }

@@ -3,7 +3,7 @@
 mod stage;
 mod transport;
 use crate::remote::tls::{self, RootMode};
-use crate::resources::TARGET;
+use crate::resources::{CORE_PLATFORM, CorePlatform, TARGET};
 use anyhow::{Context as _, Result, ensure};
 use ring::digest::{Context, SHA256};
 use serde::{Deserialize, Serialize};
@@ -91,15 +91,14 @@ pub(crate) fn release_version(version: &str) -> bool {
 fn valid_hash(hash: &str) -> bool {
     hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())
 }
+// Other targets need their own archive/platform runtime validation before
+// being advertised as upgrades.
+pub(crate) fn platform() -> Result<CorePlatform> {
+    CORE_PLATFORM.context("core preparation currently requires Linux x86_64 or aarch64")
+}
 fn asset_name(version: &str) -> Result<String> {
     ensure!(release_version(version), "unsupported core version");
-    // Retain upstream's bundled amd64-v2 variant. Other targets need their own
-    // archive/platform runtime validation before being advertised as upgrades.
-    ensure!(
-        matches!(TARGET, "x86_64-unknown-linux-gnu" | "x86_64-unknown-linux-musl"),
-        "core preparation currently requires Linux x86_64"
-    );
-    Ok(format!("mihomo-linux-amd64-v2-{version}.gz"))
+    Ok(format!("{}{version}.gz", platform()?.asset_prefix))
 }
 #[derive(Clone)]
 struct Repository {
@@ -293,15 +292,16 @@ impl Repository {
                     metadata.prerelease && metadata.tag_name == "Prerelease-Alpha",
                     "invalid Alpha core release tag/status"
                 );
+                let prefix = platform()?.asset_prefix;
                 let mut assets = metadata
                     .assets
                     .into_iter()
-                    .filter(|a| a.name.starts_with("mihomo-linux-amd64-v2-alpha-") && a.name.ends_with(".gz"));
+                    .filter(|a| a.name.starts_with(&format!("{prefix}alpha-")) && a.name.ends_with(".gz"));
                 let asset = assets.next().context("matching Alpha core release asset missing")?;
                 ensure!(assets.next().is_none(), "duplicate Alpha core release assets");
                 let resolved = asset
                     .name
-                    .strip_prefix("mihomo-linux-amd64-v2-")
+                    .strip_prefix(prefix)
                     .and_then(|v| v.strip_suffix(".gz"))
                     .context("invalid Alpha core asset")?
                     .to_string();

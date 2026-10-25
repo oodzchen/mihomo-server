@@ -510,7 +510,7 @@ require_elevation() {
 main() {
     # CI replaces this assignment, including for a piped/elevated invocation.
     local REPO="__REPO_SLUG__"
-    local uninstall=0 purge=0 caller='' caller_home config_home data_home bundle tag work='' arch name base
+    local uninstall=0 purge=0 caller='' caller_home config_home data_home bundle tag work='' arch target name base
     while [ $# -gt 0 ]; do
         case "$1" in
             -h | --help) usage; return ;;
@@ -544,14 +544,18 @@ main() {
     if [ -z "$bundle" ]; then
         [ "$REPO" != __REPO_SLUG__ ] || die 'use the published installer; repository was not rendered'
         arch=$(uname -m)
-        [ "$arch" = x86_64 ] || die "unsupported architecture: $arch"
+        case "$arch" in
+            x86_64 | amd64) target=x86_64-unknown-linux-gnu ;;
+            aarch64 | arm64) target=aarch64-unknown-linux-gnu ;;
+            *) die "unsupported architecture: $arch" ;;
+        esac
         command -v tar >/dev/null || die 'missing tar'
         if ! command -v sha256sum >/dev/null && ! command -v shasum >/dev/null; then die 'need sha256sum or shasum'; fi
         if [ -z "$tag" ]; then
             tag=$(latest_tag "$base/$REPO/releases/latest") || die 'cannot query latest release'
         fi
         case "$tag" in '' | . | .. | */* | .*) die 'invalid release tag' ;; esac
-        name="mihomo-server-$tag-x86_64-unknown-linux-gnu"
+        name="mihomo-server-$tag-$target"
         work=$(mktemp -d)
         # Trap stores the quoted path, not a function-local variable after return.
         # shellcheck disable=SC2064

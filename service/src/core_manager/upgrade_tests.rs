@@ -1,10 +1,11 @@
 use super::*;
 use crate::{
     core_release::CoreDownloads,
-    resources::{Resources, TARGET},
+    resources::{CORE_PLATFORM, Resources, TARGET},
 };
 use flate2::{Compression, write::GzEncoder};
 use serde_json::json;
+const PREFIX: &str = CORE_PLATFORM.unwrap().asset_prefix;
 use std::{
     fs,
     io::Write as _,
@@ -64,7 +65,7 @@ impl Directory {
         } else {
             version
         };
-        let release = json!({"version":version,"target":TARGET,"asset":format!("mihomo-linux-amd64-v2-{version}.gz"),"bytes":package.len(),"sha256":sha256,"download_url":format!("https://github.com/MetaCubeX/mihomo/releases/download/{tag}/mihomo-linux-amd64-v2-{version}.gz")});
+        let release = json!({"version":version,"target":TARGET,"asset":format!("{PREFIX}{version}.gz"),"bytes":package.len(),"sha256":sha256,"download_url":format!("https://github.com/MetaCubeX/mihomo/releases/download/{tag}/{PREFIX}{version}.gz")});
         fs::write(path.join("package.gz"), package)?;
         fs::write(
             path.join("release.json"),

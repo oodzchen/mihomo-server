@@ -21,7 +21,7 @@ runs:
         path: |
           ~/.rustup/toolchains
           ~/.rustup/update-hashes
-        key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+        key: rustup-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}
     - name: Install pinned Rust toolchain (rust-toolchain.toml)
       shell: bash
       run: cargo --version

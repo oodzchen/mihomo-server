@@ -1,11 +1,11 @@
 { lib, stdenv, fetchurl, autoPatchelfHook, makeWrapper, python3, bash, coreutils,
-  gnugrep, gnused, gawk, curl, getent, systemd, release }:
+  gnugrep, gnused, gawk, curl, getent, systemd, version, hash, target }:
 stdenv.mkDerivation {
   pname = "mihomo-server";
-  inherit (release) version;
+  inherit version;
   src = fetchurl {
-    url = "https://github.com/oodzchen/mihomo-server/releases/download/v${release.version}/mihomo-server-v${release.version}-x86_64-unknown-linux-gnu.tar.gz";
-    inherit (release) hash;
+    url = "https://github.com/oodzchen/mihomo-server/releases/download/v${version}/mihomo-server-v${version}-${target}.tar.gz";
+    inherit hash;
   };
   nativeBuildInputs = [ autoPatchelfHook makeWrapper python3 ];
   buildInputs = [ stdenv.cc.cc.lib ];
@@ -25,7 +25,7 @@ stdenv.mkDerivation {
   meta = {
     description = "Mihomo supervisor with Web UI and a bundled core (CI release)";
     license = lib.licenses.gpl3Only;
-    platforms = [ "x86_64-linux" ];
+    platforms = [ "x86_64-linux" "aarch64-linux" ];
     mainProgram = "mihomo-server";
   };
 }

@@ -1,5 +1,6 @@
-#![cfg(all(unix, target_arch = "x86_64"))]
+#![cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
 use super::*;
+use crate::resources::CORE_PLATFORM;
 use flate2::{Compression, write::GzEncoder};
 use std::os::unix::fs::{PermissionsExt as _, symlink};
 struct Directory(PathBuf);
@@ -28,7 +29,7 @@ fn elf() -> Vec<u8> {
     let mut header = vec![0; 64];
     header[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
     header[16] = 2;
-    header[18] = 62;
+    header[18..20].copy_from_slice(&CORE_PLATFORM.unwrap().elf_machine.to_le_bytes());
     header[20] = 1;
     header[52] = 64;
     header
@@ -65,7 +66,8 @@ fn extraction_checks_crc_eof_single_member_size_elf_and_cancellation() -> Result
     let n = crc.len();
     crc[n - 8] ^= 1;
     let mut architecture = bytes.clone();
-    architecture[18] = 183;
+    // EM_ARM: a foreign machine on every supported target.
+    architecture[18..20].copy_from_slice(&40u16.to_le_bytes());
     let cases = vec![
         crc,
         package[..package.len() - 1].to_vec(),

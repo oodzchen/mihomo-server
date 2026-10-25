@@ -5,8 +5,8 @@ version supported by the locked Vite release.
 
 The verified deployment path is one foreground Rust service launched from a local
 bundle. It serves the Web build and owns one independent Mihomo child. The first
-bundle supports `x86_64-unknown-linux-gnu`; other targets and containers remain
-pending. No Node/Vite, Python, download or second service is needed at runtime.
+bundle supports `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`
+(glibc); other targets and containers remain pending. No Node/Vite, Python, download or second service is needed at runtime.
 
 Native NixOS installation and migration are documented in [NIXOS.md](NIXOS.md).
 The Nix default consumes CI binaries; local source compilation is opt-in.
@@ -65,7 +65,9 @@ python3 scripts/package_bundle.py --build \
 ```
 
 `--build` runs `npm ci`, the frontend build, and locked Cargo release compilation
-for the explicit target. Initial dependency downloads require network access;
+for the explicit target. Use `--target aarch64-unknown-linux-gnu` and the arm64
+core on aarch64 hosts; the packager rejects a service or core whose ELF machine does
+not match the target. Release builds run natively on each architecture. Initial dependency downloads require network access;
 subsequent builds can use the dependency cache. To package already-built artifacts,
 omit `--build` and specify `--service /path/to/mihomo-server --web-dir /path/to/web/dist`.
 The output must be a new directory; packaging never installs over a running bundle
@@ -200,7 +202,9 @@ every Geo database format. Select suitable assets for the configuration's Geo mo
 
 Releases are produced by `.github/workflows/release.yml` on `v*` tags; the bundle builds alongside CI and is published once CI passes.
 They contain a pinned tarball, its SHA-256 checksum and a rendered `install.sh`.
-The embedded core pin is recorded in `deploy/core-pin.json`.
+There is one tarball per target (`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`);
+`install.sh` downloads the one matching `uname -m`.
+The embedded core pin, with one asset and SHA-256 per target, is recorded in `deploy/core-pin.json`.
 
 As a normal user, run without arguments:
 

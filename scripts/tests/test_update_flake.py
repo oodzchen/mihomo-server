@@ -1,8 +1,9 @@
+import argparse
 import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.update_flake import compute_sri_hash, update_flake
+from scripts.update_flake import compute_sri_hash, system_tarball, update_flake
 
 
 class TestUpdateFlake(unittest.TestCase):
@@ -22,8 +23,11 @@ class TestUpdateFlake(unittest.TestCase):
     packages.default = ...;
     serverRelease = {
       version = "0.1.0";
-      hash = "sha256-oldhasholdhasholdhasholdhasholdhasholdha=";
+      hashes = {
+        x86_64-linux = "sha256-oldhasholdhasholdhasholdhasholdhasholdha=";
+      };
     };
+    targets = { x86_64-linux = "x"; };
   };
 }
 """
@@ -31,18 +35,37 @@ class TestUpdateFlake(unittest.TestCase):
             flake_file = Path(tmpdir) / "flake.nix"
             flake_file.write_text(sample_flake, encoding="utf-8")
 
-            update_flake(flake_file, "0.2.10", "sha256-newhashnewhashnewhashnewhashnewhashnewha=")
+            update_flake(flake_file, "0.2.10", {"x86_64-linux": "sha256-new-x86", "aarch64-linux": "sha256-new-arm"})
             updated = flake_file.read_text(encoding="utf-8")
 
-            self.assertIn('version = "0.2.10";', updated)
-            self.assertIn('hash = "sha256-newhashnewhashnewhashnewhashnewhashnewha=";', updated)
+            self.assertIn(
+                """    serverRelease = {
+      version = "0.2.10";
+      hashes = {
+        aarch64-linux = "sha256-new-arm";
+        x86_64-linux = "sha256-new-x86";
+      };
+    };
+    targets = { x86_64-linux = "x"; };
+""",
+                updated,
+            )
+            self.assertNotIn("oldhash", updated)
+
+    def test_cli_requires_system_for_each_tarball(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tarball = Path(tmpdir) / "bundle.tar.gz"
+            tarball.write_bytes(b"bundle")
+            self.assertEqual(system_tarball(f"aarch64-linux={tarball}"), ("aarch64-linux", tarball))
+            with self.assertRaises(argparse.ArgumentTypeError):
+                system_tarball(str(tarball))
 
     def test_update_flake_requires_the_pin(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             flake_file = Path(tmpdir) / "flake.nix"
             flake_file.write_text("{ }\n", encoding="utf-8")
             with self.assertRaises(RuntimeError):
-                update_flake(flake_file, "0.2.10", "sha256-new")
+                update_flake(flake_file, "0.2.10", {"x86_64-linux": "sha256-new"})
 
 
 if __name__ == "__main__":
