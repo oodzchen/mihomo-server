@@ -96,7 +96,10 @@ Important invariants:
 - Core state, generated configuration and persisted authority are independently
   readable; API receipts do not substitute for readback.
 - Node selections are stored per profile and reconciled after starts and
-  accepted configuration changes.
+  accepted configuration changes. When a selection changes a group's current
+  node, the connections through that group are closed so that clients
+  (everything behind the TUN especially) reconnect through the new node
+  instead of reusing ones opened through the old one.
 - Source files and protected service resources are accessed with confined,
   no-follow filesystem operations; provider caches use service-owned identities.
 - Script enhancements run in a separate, bounded Linux worker process.
@@ -133,9 +136,11 @@ only a request over an open connection. The service starts a short-lived,
 unprivileged Mihomo under `<data>/run/` with the committed revision's nodes,
 providers (read from their caches), node resolvers and dialer options, no
 listeners, TUN, rules or persisted state, bound to the default-route interface
-so that it bypasses any TUN. Through it each node gets one cold HTTPS request
-(node DNS, handshake, remote dial and target TLS) and one over the session that
-opened, 16 nodes at a time; a group is tested through its current node. The probe
+so that it bypasses any TUN. Where the main table has no default route
+(Android's netd), that interface is the route the running core's marked
+traffic takes; the probe itself, unprivileged, binds to it instead of marking.
+Through it each node gets one cold HTTPS request (node DNS, handshake, remote
+dial and target TLS) and one over the session that opened, 16 nodes at a time; a group is tested through its current node. The probe
 verifies that proxy nodes are fully loaded into the isolated core before requests
 begin, avoiding premature timeout determinations during startup. One probe runs at
 a time and its process and directory are removed afterwards.

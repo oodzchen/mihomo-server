@@ -16,6 +16,7 @@
 //! They only match the TUN's own network and the core's mark, so they are left
 //! in place when the core stops.
 use std::{
+    ffi::CStr,
     io,
     net::Ipv4Addr,
     os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd},
@@ -29,6 +30,8 @@ pub(crate) const RULES_ENV: &str = "MIHOMO_TUN_ANDROID_RULES";
 /// selected" and "protected from VPN".
 const MARK_MASK: u32 = 0x3_ffff;
 
+const RTM_NEWROUTE: u16 = 24;
+const RTM_GETROUTE: u16 = 26;
 const RTM_NEWRULE: u16 = 32;
 const RTM_GETRULE: u16 = 34;
 const NLMSG_ERROR: u16 = 2;
@@ -38,6 +41,9 @@ const NLM_F_ACK: u16 = 0x4;
 const NLM_F_EXCL: u16 = 0x200;
 const NLM_F_CREATE: u16 = 0x400;
 const NLM_F_DUMP: u16 = 0x300;
+const RTA_DST: u16 = 1;
+const RTA_OIF: u16 = 4;
+const RTA_MARK: u16 = 16;
 const FRA_DST: u16 = 1;
 const FRA_GOTO: u16 = 4;
 const FRA_PRIORITY: u16 = 6;
@@ -54,6 +60,7 @@ const FIB_RULE_INVERT: u32 = 0x2;
 const RT_TABLE_MAIN: u8 = 254;
 const HEADER: usize = 16;
 const RULE_HEADER: usize = 12;
+const ROUTE_HEADER: usize = 12;
 
 /// Whether IPv4 policy routing has no catch-all `lookup main` rule, as with
 /// Android's netd. Unknown (no netlink) counts as ordinary Linux.
@@ -62,6 +69,51 @@ pub fn android_style() -> bool {
         Ok(rules) => !rules.is_empty() && !rules.iter().any(Rule::catch_all_main),
         Err(_) => false,
     }
+}
+
+/// The interface the kernel routes `destination` through for traffic carrying
+/// `mark`, as `ip route get DESTINATION mark MARK` shows it. No privileges.
+pub(crate) fn route_interface(destination: Ipv4Addr, mark: Option<u32>) -> Result<String> {
+    let socket = Socket::open()?;
+    let mut request = header(RTM_GETROUTE, NLM_F_REQUEST, 1);
+    request.extend_from_slice(&[libc::AF_INET as u8, 32, 0, 0, 0, 0, 0, 0]);
+    request.extend_from_slice(&0_u32.to_ne_bytes());
+    attribute(&mut request, RTA_DST, &destination.octets());
+    if let Some(mark) = mark {
+        attribute(&mut request, RTA_MARK, &mark.to_ne_bytes());
+    }
+    socket.send(&finish(request))?;
+    let index = output_interface(&socket.receive()?)?;
+    let mut name = [0 as libc::c_char; libc::IF_NAMESIZE];
+    // SAFETY: the buffer holds IF_NAMESIZE bytes, as if_indextoname requires.
+    let found = unsafe { libc::if_indextoname(index, name.as_mut_ptr()) };
+    if found.is_null() {
+        return Err(io::Error::last_os_error()).context("name the route's interface");
+    }
+    // SAFETY: if_indextoname wrote a NUL-terminated name into the buffer.
+    Ok(unsafe { CStr::from_ptr(name.as_ptr()) }.to_string_lossy().into_owned())
+}
+
+/// The output interface index of an RTM_GETROUTE reply.
+fn output_interface(bytes: &[u8]) -> Result<u32> {
+    ensure!(bytes.len() >= HEADER, "truncated netlink message");
+    let length = u32::from_ne_bytes(bytes[..4].try_into().unwrap()) as usize;
+    ensure!((HEADER..=bytes.len()).contains(&length), "truncated netlink message");
+    match u16::from_ne_bytes([bytes[4], bytes[5]]) {
+        NLMSG_ERROR => bail!(io::Error::from_raw_os_error(-acknowledgement(&bytes[..length])?)),
+        RTM_NEWROUTE if length >= HEADER + ROUTE_HEADER => {}
+        _ => bail!("unexpected netlink reply"),
+    }
+    let mut attributes = &bytes[HEADER + ROUTE_HEADER..length];
+    while attributes.len() >= 4 {
+        let size = usize::from(u16::from_ne_bytes([attributes[0], attributes[1]]));
+        ensure!((4..=attributes.len()).contains(&size), "truncated route attribute");
+        if u16::from_ne_bytes([attributes[2], attributes[3]]) & 0x3fff == RTA_OIF && size >= 8 {
+            return Ok(u32::from_ne_bytes(attributes[4..8].try_into().unwrap()));
+        }
+        attributes = &attributes[align(size).min(attributes.len())..];
+    }
+    bail!("the route has no output interface")
 }
 
 /// The launcher's rules; idempotent, needs CAP_NET_ADMIN.
@@ -483,6 +535,27 @@ mod tests {
     fn ordinary_linux_hosts_are_not_android() {
         // Development and CI hosts keep `32766: from all lookup main`.
         assert!(!android_style());
+    }
+
+    #[test]
+    fn route_replies_name_their_output_interface() -> Result<()> {
+        let mut reply = header(RTM_NEWROUTE, 0, 1);
+        reply.extend_from_slice(&[libc::AF_INET as u8, 32, 0, 0, 254, 0, 0, 1]);
+        reply.extend_from_slice(&0_u32.to_ne_bytes());
+        attribute(&mut reply, RTA_DST, &[1, 1, 1, 1]);
+        attribute(&mut reply, RTA_OIF, &7_u32.to_ne_bytes());
+        assert_eq!(output_interface(&finish(reply))?, 7);
+
+        let mut error = header(NLMSG_ERROR, 0, 1);
+        error.extend_from_slice(&(-libc::ENETUNREACH).to_ne_bytes());
+        assert!(output_interface(&finish(error)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn loopback_is_routed_through_lo() -> Result<()> {
+        assert_eq!(route_interface(Ipv4Addr::LOCALHOST, None)?, "lo");
+        Ok(())
     }
 
     /// Needs root in a private network namespace (e.g. a privileged container).

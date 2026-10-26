@@ -108,7 +108,9 @@ impl Actor {
         } else {
             Some(proxy.now.clone().context("previous group selection is unavailable")?)
         };
+        let previous_now = proxy.now.clone();
         self.cancel_restoration();
+        let mut current_now = None;
         let result = async {
             self.set_runtime_node(group, node, Instant::now() + self.options.policy.selection_timeout)
                 .await?;
@@ -129,6 +131,7 @@ impl Actor {
                     "core did not remove the fixed node"
                 ),
             }
+            current_now = actual.now.clone();
             ensure!(!*self.shutdown.borrow(), "node persistence cancelled during shutdown");
             match node {
                 Some(node) => self.profile_store.record_selection(&uid, group, node)?,
@@ -164,7 +167,43 @@ impl Actor {
             state.error = None;
             state.selection_error = None;
         });
+        if current_now != previous_now {
+            self.close_group_connections(group).await;
+        }
         Ok(())
+    }
+
+    /// Mihomo keeps open connections on the node they were opened through, and
+    /// clients (above all, everything behind a TUN) reuse them for a long
+    /// time. Closing those through `group` makes them reconnect through its
+    /// new choice. Best effort: the selection itself has been committed.
+    pub(super) async fn close_group_connections(&mut self, group: &str) {
+        let client = self.client.clone();
+        let group = group.to_owned();
+        let result = self
+            .selection_call(Instant::now() + self.options.policy.selection_timeout, async move {
+                let connections = client.get_connections().await?.connections.unwrap_or_default();
+                let mut closed = 0;
+                for connection in connections {
+                    // A connection that ended meanwhile is no longer found.
+                    if connection.chains.contains(&group) && client.close_connection(&connection.id).await.is_ok() {
+                        closed += 1;
+                    }
+                }
+                Ok((group, closed))
+            })
+            .await;
+        match result {
+            Ok((_, 0)) => {}
+            Ok((group, closed)) => self.logs.append(
+                "manager",
+                format!("closed {closed} connections through {group} after a node change"),
+            ),
+            Err(error) => self.logs.append(
+                "manager",
+                format!("cannot close connections after a node change: {error:#}"),
+            ),
+        }
     }
 
     pub(super) async fn begin_restoration(&mut self, prune: bool) {

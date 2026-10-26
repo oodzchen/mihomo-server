@@ -93,7 +93,7 @@ impl Prober {
             "test URL must be an http or https URL"
         );
         let _permit = self.admission.acquire().await?;
-        let config = probe_config(runtime, &self.data_dir, self.interface().as_deref())?;
+        let config = probe_config(runtime, &self.data_dir, interface(runtime).as_deref())?;
         let mut core = IsolatedCore::start(&self.binary, &self.data_dir, &config, nodes).await?;
         let client = &core.client;
 
@@ -167,7 +167,7 @@ impl Prober {
             let port = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?
                 .local_addr()?
                 .port();
-            let config = exit_config(runtime, &self.data_dir, self.interface().as_deref(), port, &password)?;
+            let config = exit_config(runtime, &self.data_dir, interface(runtime).as_deref(), port, &password)?;
             let core = match IsolatedCore::start(&self.binary, &self.data_dir, &config, &[node]).await {
                 Ok(core) => core,
                 Err(error) => {
@@ -198,11 +198,26 @@ impl Prober {
         }
         Err(last_error.unwrap_or_else(|| anyhow::anyhow!("failed to start the test core")))
     }
+}
 
-    /// Node connections leave through the physical interface, past any TUN.
-    fn interface(&self) -> Option<String> {
-        default_interface(&std::fs::read_to_string("/proc/net/route").unwrap_or_default())
-    }
+/// Node connections leave through the physical interface, past any TUN: the
+/// main table's default route or, where there is none (Android's netd keeps it
+/// in a per-network table), the route the running core's marked traffic takes.
+fn interface(runtime: &Mapping) -> Option<String> {
+    default_interface(&std::fs::read_to_string("/proc/net/route").unwrap_or_default()).or_else(|| {
+        let mark = runtime
+            .get("routing-mark")
+            .and_then(Value::as_u64)
+            .and_then(|mark| u32::try_from(mark).ok());
+        let tun = runtime
+            .get("tun")
+            .and_then(|tun| tun.get("device"))
+            .and_then(Value::as_str);
+        // Any public address: the lookup sends nothing.
+        crate::policy_routing::route_interface(std::net::Ipv4Addr::new(1, 1, 1, 1), mark)
+            .ok()
+            .filter(|interface| Some(interface.as_str()) != tun && interface != "lo")
+    })
 }
 
 /// How long an unused exit core stays up for further tests through its node.
@@ -397,6 +412,12 @@ pub(crate) fn probe_config(runtime: &Mapping, data_dir: &Path, interface: Option
         if let Some(value) = runtime.get(*field) {
             config.insert((*field).into(), value.clone());
         }
+    }
+    // An unprivileged core cannot mark its connections (SO_MARK needs
+    // CAP_NET_ADMIN, which the TUN launcher grants only the running core) and
+    // fails every dial that tries; the interface binding below replaces it.
+    if !crate::native_tun::has_net_admin_capability(None) {
+        config.remove("routing-mark");
     }
     // The core binds node connections to the physical interface so that they
     // bypass a TUN, including another user's system-wide one.
