@@ -90,7 +90,10 @@ write.
 Important invariants:
 
 - A candidate is never committed before YAML/resource checks and `mihomo -t`
-  succeed.
+  succeed. The validator runs without `CAP_NET_ADMIN` and so cannot set
+  `SO_MARK`; for a candidate with `routing-mark` (multi-user isolation) it
+  checks a private copy without the mark, or every download the check makes
+  for a missing Geo database would fail.
 - Failed reload, restart, profile switch, settings edit, restore, core upgrade
   or live Geo replacement preserves or recovers the last working state.
 - Core state, generated configuration and persisted authority are independently

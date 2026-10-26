@@ -87,6 +87,7 @@ pub(crate) async fn validate(
 ) -> Result<()> {
     ensure!(!*shutdown.borrow(), "validation cancelled during shutdown");
     resource_paths(data_dir, config, binary).await?;
+    let unmarked = unmarked_copy(config).await?;
     let mut command = Command::new(binary);
     crate::shutdown::bind_child_lifetime(&mut command);
     let mut child = command
@@ -94,7 +95,7 @@ pub(crate) async fn validate(
         .arg("-d")
         .arg(data_dir)
         .arg("-f")
-        .arg(config)
+        .arg(unmarked.as_ref().map_or(config, |copy| copy.file.as_path()))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -136,6 +137,45 @@ pub(crate) async fn validate(
     Ok(())
 }
 
+/// A private copy of a configuration, removed with its directory on drop.
+struct CheckCopy {
+    directory: PathBuf,
+    file: PathBuf,
+}
+
+impl Drop for CheckCopy {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
+
+/// An unprivileged validator cannot mark its sockets (SO_MARK needs
+/// CAP_NET_ADMIN, which the TUN launcher grants only the running core), so
+/// with `routing-mark` every dial fails, including the downloads the check
+/// makes for missing Geo databases. It then checks a copy without the mark,
+/// which changes nothing but how sockets are created. Relative paths resolve
+/// against `-d`, not the file, so the copy may live elsewhere.
+async fn unmarked_copy(config: &Path) -> Result<Option<CheckCopy>> {
+    let mut contents: serde_yaml_ng::Mapping = serde_yaml_ng::from_slice(&tokio::fs::read(config).await?)?;
+    if contents.remove("routing-mark").is_none() || crate::native_tun::has_net_admin_capability(None) {
+        return Ok(None);
+    }
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random).context("generate validation directory name")?;
+    let directory = std::env::temp_dir().join(format!("ms-check-{}", crate::secure_fs::hex(&random)));
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(&directory)?;
+    let copy = CheckCopy {
+        file: directory.join("config.yaml"),
+        directory,
+    };
+    let bytes = serde_yaml_ng::to_string(&contents)?;
+    std::io::Write::write_all(&mut crate::secure_fs::create_private(&copy.file)?, bytes.as_bytes())?;
+    Ok(Some(copy))
+}
+
 fn capture<R: AsyncRead + Unpin + Send + 'static>(mut reader: R) -> JoinHandle<Result<Vec<u8>>> {
     tokio::spawn(async move {
         let mut output = Vec::new();
@@ -163,5 +203,41 @@ async fn collect(reader: &mut JoinHandle<Result<Vec<u8>>>) -> Result<Vec<u8>> {
             let _ = reader.await;
             Err(error).context("validator output did not close")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn unprivileged_checks_drop_only_the_routing_mark() -> Result<()> {
+        let directory = std::env::temp_dir().join(format!("ms-validation-test-{}", std::process::id()));
+        std::fs::create_dir_all(&directory)?;
+        let marked = directory.join("marked.yaml");
+        std::fs::write(&marked, "routing-mark: 196608\nmixed-port: 7890\n")?;
+        let plain = directory.join("plain.yaml");
+        std::fs::write(&plain, "mixed-port: 7890\n")?;
+        let result = async {
+            assert!(unmarked_copy(&plain).await?.is_none());
+            let copy = unmarked_copy(&marked).await?;
+            if crate::native_tun::has_net_admin_capability(None) {
+                assert!(copy.is_none());
+                return Ok(());
+            }
+            let copy = copy.context("unprivileged check keeps the mark")?;
+            let contents: serde_yaml_ng::Mapping = serde_yaml_ng::from_slice(&std::fs::read(&copy.file)?)?;
+            assert_eq!(
+                contents,
+                serde_yaml_ng::from_str::<serde_yaml_ng::Mapping>("mixed-port: 7890")?
+            );
+            let copied = copy.directory.clone();
+            drop(copy);
+            assert!(!copied.exists());
+            Ok(())
+        }
+        .await;
+        std::fs::remove_dir_all(&directory)?;
+        result
     }
 }
