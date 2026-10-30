@@ -231,7 +231,9 @@ impl Actor {
             }
             CommandMessage::SetSettings { runtime, reply } => {
                 if !reply.is_closed() {
+                    self.tun_takeover = true;
                     let result = self.update_settings(*runtime).await;
+                    self.tun_takeover = false;
                     self.record_error(&result);
                     let _ = reply.send(result);
                 }
@@ -240,7 +242,9 @@ impl Actor {
                 if !reply.is_closed() {
                     let mut runtime = self.settings.runtime.clone();
                     runtime.tun.get_or_insert_with(Default::default).enable = Some(enabled);
+                    self.tun_takeover = enabled;
                     let result = self.update_settings(runtime).await;
+                    self.tun_takeover = false;
                     self.record_error(&result);
                     let _ = reply.send(result);
                 }

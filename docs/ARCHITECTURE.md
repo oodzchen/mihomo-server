@@ -403,12 +403,22 @@ the isolation model permits them.
 Linux TUN is an explicitly privileged, system-wide capability:
 
 - membership of `mihomo-tun` controls eligibility;
-- one root-owned lock is acquired non-blockingly by the first eligible user who
-  enables TUN;
-- the holder keeps the lock only while its verified TUN is live; process exit
-  releases the kernel lock;
-- other users can see the holder but cannot stop that TUN; root retains service
-  administration authority;
+- one root-owned lock (`tun.lock`, an `flock`) marks the holder; the member who
+  turned TUN on last holds it;
+- the holder keeps the lock only while its verified TUN is live, and until the
+  interface of a TUN that a reload turned off is gone (Mihomo can leave it for
+  many seconds), so two TUNs never run side by side; process exit releases the
+  kernel lock;
+- a member who turns TUN on while another holds it writes its UID and a
+  boot-clock time into the group-writable `tun.request` and waits up to 30 s for
+  the lock; the holder's actor polls that file while it holds the lock, turns
+  its own TUN off (persisted like the switch; if that fails it stops its core),
+  restarts its core if the interface is still there after 3 s, and so releases
+  the lock. Requests older than the holder's acquisition are
+  ignored, and a third member taking the TUN meanwhile is asked in turn;
+- only an explicit request of this user (the TUN switch, `set_settings`) takes
+  the TUN over; automatic applications such as scheduled refreshes and starts
+  leave it with the holder;
 - the active TUN captures host traffic and system DNS, so it intentionally
   affects all accounts;
 - installer-managed capabilities and polkit rules allow eligible services to
@@ -420,6 +430,17 @@ Linux TUN is an explicitly privileged, system-wide capability:
 If a saved instance starts while another user holds the system TUN, its saved TUN
 state is yielded and the instance starts without TUN. Ordinary mixed proxy
 listeners remain available for every user regardless of TUN ownership.
+
+Joining `mihomo-tun` is a one-time administrator authorization. A refused TUN
+enable carries the API code `tun_unauthorized` (a takeover that timed out:
+`tun_busy`). The service cannot ask for it itself: it runs in the user manager
+outside any login session, where polkit has no authentication agent. Clients in
+the user's session do it instead (`management-client::installation`): `pkexec
+usermod -aG mihomo-tun USER` (skipped when the account database already lists
+the user), a restart of the instance (the launcher enters the new group through
+`sg`/`newgrp`) and the TUN switch again. The command line does this for `tun on`
+and the desktop client for its tray item and for the management page shown in
+its window; in an ordinary browser the Web page only explains these two ways.
 
 Traffic DIRECT by rule still passes through Mihomo's user-space stack when it
 arrives over the TUN, which costs about one CPU core per Gbit/s. The
@@ -543,7 +564,7 @@ pinned upstream artifacts and executable checks:
 | Region-restriction (unlock) and IP location tests through the core's listener | Implemented |
 | Resource inventory, Geo/provider lifecycle and live readback | Implemented and verified |
 | Stable/Alpha core management and transactional backup/restore | Implemented and verified |
-| Multi-user isolation and first-come system-wide TUN | Implemented and verified |
+| Multi-user isolation and last-come system-wide TUN with handover | Implemented and verified |
 | Simplified/traditional Chinese and English browser UI; service locale catalog | Implemented |
 | Linux x86_64 desktop client (local instance; deb/RPM/AppImage/Nix Flake; separate repository) | Implemented |
 | Desktop client management of remote instances | Deferred |

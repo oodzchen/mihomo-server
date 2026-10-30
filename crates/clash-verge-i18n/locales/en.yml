@@ -40,6 +40,7 @@ service:
   errors:
     method_not_allowed: Method is not allowed
     shutting_down: Service is shutting down
+    tun_unauthorized: "TUN needs authorization: this account is not in the TUN group (mihomo-tun). Turn TUN on in the desktop client or run 'mihomo-server tun on' in a terminal to authorize it once."
     invalid_headers: Invalid request headers
     duplicate_credential: Duplicate credential header
     invalid_credential: Invalid credential header

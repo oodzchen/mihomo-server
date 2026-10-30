@@ -108,7 +108,7 @@ impl Actor {
         let result = async {
             if was_running {
                 let config = read_config(&candidate).await?;
-                self.tun_preflight(&config)?;
+                self.tun_preflight(&config).await?;
             }
             if setting {
                 self.settings_store.begin(settings_candidate, self.store.state().pending.context("settings candidate revision missing")?)?;
@@ -225,23 +225,27 @@ impl Actor {
             } else {
                 Ok(())
             };
-            let mut message = format!("configuration application failed: {error:#}");
+            let mut problems = String::new();
             if let Err(error) = settings_rollback {
-                message.push_str(&format!("; settings rollback failed: {error:#}"));
+                problems.push_str(&format!("; settings rollback failed: {error:#}"));
             }
             if let Err(error) = refresh_rollback {
-                message.push_str(&format!("; profile change rollback failed: {error:#}"));
+                problems.push_str(&format!("; profile change rollback failed: {error:#}"));
             }
             if let Err(error) = profile_rollback {
-                message.push_str(&format!("; profile rollback failed: {error:#}"));
+                problems.push_str(&format!("; profile rollback failed: {error:#}"));
             }
             if let Err(error) = disk {
-                message.push_str(&format!("; disk rollback failed: {error:#}"));
+                problems.push_str(&format!("; disk rollback failed: {error:#}"));
             }
             if let Err(error) = recovery {
-                message.push_str(&format!("; core recovery failed: {error:#}"));
+                problems.push_str(&format!("; core recovery failed: {error:#}"));
             }
-            bail!(message);
+            // A clean rollback keeps the cause's type (clients act on refused TUN).
+            if problems.is_empty() {
+                return Err(error.context("configuration application failed"));
+            }
+            bail!("configuration application failed: {error:#}{problems}");
         }
         // Cleanup errors remain observable without undoing an already committed profile change.
         self.profile_store

@@ -168,7 +168,7 @@ impl Actor {
         let path = tokio::fs::canonicalize(path).await?;
         check_config(&path).await?;
         crate::validation::resource_paths(&self.options.data_dir, &path, &self.options.binary).await?;
-        self.tun_preflight(&read_config(&path).await?)?;
+        self.tun_preflight(&read_config(&path).await?).await?;
         // Mihomo applies a reloaded TUN within the request and logs its failure there.
         let logs = self.logs.events.subscribe();
         tokio::select! {
@@ -183,24 +183,145 @@ impl Actor {
     }
 
     /// Host TUN checks, plus this user's TUN authorization in multi-user mode.
-    pub(super) fn tun_preflight(&self, config: &Mapping) -> Result<()> {
+    pub(super) async fn tun_preflight(&mut self, config: &Mapping) -> Result<()> {
         crate::native_tun::preflight(config)?;
         let enabled = config
             .get("tun")
             .and_then(|tun| tun.get("enable"))
             .and_then(serde_yaml_ng::Value::as_bool)
             == Some(true);
-        ensure!(
-            !enabled || self.options.tun_capable != Some(false),
-            "TUN is not available to this user: ask the administrator to add this user to the \
-             TUN group (mihomo-tun)"
-        );
-        // The first user to enable the host's one system-wide TUN keeps it until off.
+        if enabled && self.options.tun_capable == Some(false) {
+            return Err(crate::tun_lock::Unauthorized.into());
+        }
         #[cfg(target_os = "linux")]
-        if enabled && let Some(lock) = &self.options.tun_lock {
-            lock.acquire()?;
+        if enabled && let Some(lock) = self.options.tun_lock.clone() {
+            self.take_system_tun(&lock).await?;
         }
         Ok(())
+    }
+
+    /// Take the host's one system-wide TUN. Turning TUN on here (`tun_takeover`)
+    /// asks its holder to hand it over and waits for that; anything else, such
+    /// as a scheduled refresh, leaves it with the holder.
+    #[cfg(target_os = "linux")]
+    async fn take_system_tun(&mut self, lock: &crate::tun_lock::TunLock) -> Result<()> {
+        use crate::tun_lock::{Busy, describe};
+        const HANDOVER: Duration = Duration::from_secs(30);
+        let holder = match lock.acquire() {
+            Ok(()) => return Ok(()),
+            Err(error) => match error.downcast_ref::<Busy>() {
+                Some(busy) if self.tun_takeover => busy.holder,
+                _ => return Err(error),
+            },
+        };
+        if !lock.request_takeover()? {
+            return Err(Busy { holder, asked: false }.into());
+        }
+        let name = |holder: Option<u32>| holder.map_or_else(|| "another user".to_owned(), describe);
+        self.logs.append(
+            "manager",
+            format!("asking {} to hand over the system-wide TUN", name(holder)),
+        );
+        let mut asked = holder;
+        let deadline = Instant::now() + HANDOVER;
+        loop {
+            tokio::select! {
+                biased;
+                _ = closing(&mut self.shutdown) => bail!("TUN handover cancelled during shutdown"),
+                _ = sleep(Duration::from_millis(200)) => {}
+            }
+            let holder = match lock.acquire() {
+                Ok(()) => {
+                    self.logs
+                        .append("manager", format!("took over the system-wide TUN from {}", name(asked)));
+                    return Ok(());
+                }
+                Err(error) => match error.downcast_ref::<Busy>() {
+                    Some(busy) => busy.holder,
+                    None => return Err(error),
+                },
+            };
+            if Instant::now() >= deadline {
+                return Err(Busy { holder, asked: true }.into());
+            }
+            // A third account took it meanwhile: the last to turn TUN on gets it.
+            if holder.is_some() && holder != asked {
+                lock.request_takeover()?;
+                asked = holder;
+            }
+        }
+    }
+
+    /// Another TUN-group member turned TUN on: turn this TUN off, saved as by
+    /// the switch, so that the lock is free for theirs. A reload that turns TUN
+    /// off can leave its interface behind for a while, and the lock is kept
+    /// until it is gone (`release_idle_tun`), so a lingering one is removed by
+    /// restarting the core. Should turning TUN off fail, the core is stopped
+    /// rather than keep the TUN.
+    pub(super) async fn hand_over_tun(&mut self) {
+        #[cfg(target_os = "linux")]
+        if let Some(uid) = self.options.tun_lock.as_ref().and_then(|lock| lock.take_request()) {
+            const LINGER: Duration = Duration::from_secs(3);
+            let name = crate::tun_lock::describe(uid);
+            self.logs.append(
+                "manager",
+                format!("{name} turned on TUN: handing the system-wide TUN over"),
+            );
+            let mut stop = false;
+            if self.tun_live.load(std::sync::atomic::Ordering::Relaxed) {
+                let mut runtime = self.settings.runtime.clone();
+                runtime.tun.get_or_insert_with(Default::default).enable = Some(false);
+                if let Err(error) = self.update_settings(runtime).await {
+                    self.logs.append(
+                        "manager",
+                        format!("turning TUN off for {name} failed: {error:#}; stopping the core"),
+                    );
+                    stop = true;
+                }
+                stop |= self.tun_live.load(std::sync::atomic::Ordering::Relaxed);
+            }
+            let deadline = Instant::now() + LINGER;
+            while !stop && self.tun_interface_lingers() && Instant::now() < deadline {
+                tokio::select! {
+                    biased;
+                    _ = closing(&mut self.shutdown) => return,
+                    _ = sleep(Duration::from_millis(100)) => {}
+                }
+            }
+            let restart = !stop && self.tun_interface_lingers();
+            if !stop && !restart {
+                return;
+            }
+            if restart {
+                self.logs.append(
+                    "manager",
+                    "restarting the core to remove the TUN interface it left behind".into(),
+                );
+            }
+            self.retry_at = None;
+            self.cancel_restoration();
+            self.publish(CorePhase::Stopping, None);
+            match self.stop_process().await {
+                Ok(()) if restart => {
+                    if self.start_core().await.is_err() {
+                        self.schedule_recovery();
+                    }
+                }
+                Ok(()) => self.publish(CorePhase::Stopped, None),
+                Err(error) => self.publish(CorePhase::Failed, Some(format!("{error:#}"))),
+            }
+        }
+    }
+
+    /// The running core turned its TUN off but the interface still exists.
+    #[cfg(target_os = "linux")]
+    pub(super) fn tun_interface_lingers(&self) -> bool {
+        self.process.is_some()
+            && !self.tun_live.load(std::sync::atomic::Ordering::Relaxed)
+            && self
+                .options
+                .isolation
+                .is_some_and(|isolation| crate::native_tun::check_interface_exists(&isolation.tun_device()))
     }
 
     /// `logs` must be subscribed before the core started applying `path`.
@@ -408,7 +529,7 @@ impl Actor {
         );
         check_config(&self.options.config).await?;
         crate::validation::resource_paths(&self.options.data_dir, &self.options.config, &self.options.binary).await?;
-        self.tun_preflight(&read_config(&self.options.config).await?)?;
+        self.tun_preflight(&read_config(&self.options.config).await?).await?;
         if self.store.state().pending.is_none() {
             crate::validation::validate(
                 &self.options.binary,

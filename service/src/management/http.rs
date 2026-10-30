@@ -549,6 +549,18 @@ async fn execute(state: HttpState, headers: HeaderMap, command: ManagementComman
     };
     match state.management.execute(credentials, command).await {
         Ok(value) => Json(value).into_response(),
+        // Clients ask for authorization (or offer to retry) on these codes.
+        #[cfg(target_os = "linux")]
+        Err(cause) if cause.chain().any(|error| error.is::<crate::tun_lock::Unauthorized>()) => error_with_headers(
+            &headers,
+            StatusCode::FORBIDDEN,
+            "tun_unauthorized",
+            &format!("{cause:#}"),
+        ),
+        #[cfg(target_os = "linux")]
+        Err(cause) if cause.chain().any(|error| error.is::<crate::tun_lock::Busy>()) => {
+            error_with_headers(&headers, StatusCode::CONFLICT, "tun_busy", &format!("{cause:#}"))
+        }
         // Validation/application errors preserve their actionable domain context.
         // A failed operation can already have attempted recovery; inspect status.
         Err(cause) => error_with_headers(

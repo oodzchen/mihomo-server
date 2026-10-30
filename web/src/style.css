@@ -1368,10 +1368,12 @@ dd {
 .mode-segments button:focus-visible { outline: 2px solid #10b981; outline-offset: 2px; }
 .proxy-mode-control .alert { margin: 10px 0 0; }
 .runtime-state { margin-top: 8px; font-size: 12px; color: #71717a; }
-.tun-status { display: flex; align-items: center; gap: 14px; min-height: 68px; }
+.tun-status { display: flex; align-items: center; gap: 14px; min-height: 68px; min-width: 0; }
 .tun-indicator { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; font-size: 24px; background: #f4f4f5; color: #71717a; }
 .tun-indicator.enabled { background: #ecfdf5; color: #047857; }
 .tun-status strong { font-size: 17px; font-weight: 600; }
+.tun-status-text { display: grid; gap: 2px; min-width: 0; }
+.tun-status-text small { overflow: hidden; color: #71717a; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
 
 /* Help is shared across settings and rendered above panels and modal clipping. */
 .setting-heading, .setting-name { display: inline-flex; align-items: center; gap: 6px; }

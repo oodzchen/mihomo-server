@@ -475,7 +475,7 @@ fn now() -> u64 {
 fn tun_summary(access: &Value, user: &Value) -> String {
     let tun = tun_state(access, user);
     if let Some(holder) = tun.held_by {
-        return format!("off (the system-wide TUN is held by {holder})");
+        return format!("off (the system-wide TUN is held by {holder}; 'tun on' takes it over)");
     }
     if tun.enabled {
         let Some(device) = tun.device else {
@@ -491,7 +491,7 @@ fn tun_summary(access: &Value, user: &Value) -> String {
         return format!("on ({})", details.join(", "));
     }
     if tun.capable == Some(false) {
-        return "off (unavailable: ask the administrator to add you to group mihomo-tun)".into();
+        return "off (needs authorization for group mihomo-tun: 'tun on' asks for it once)".into();
     }
     "off".into()
 }
@@ -988,13 +988,22 @@ async fn mode(context: &Context, matches: &ArgMatches) -> Result<i32> {
 }
 
 async fn tun(context: &Context, matches: &ArgMatches) -> Result<i32> {
-    let api = context.connect()?;
+    let mut api = context.connect()?;
     if let Some(requested) = matches.get_one::<String>("state") {
         let enabled = view::parse_switch(requested).map_err(|error| usage(error.to_string()))?;
         if !context.json {
             eprintln!("{} TUN...", if enabled { "Enabling" } else { "Disabling" });
         }
-        api.command("set_tun_enabled", json!({"enabled": enabled})).await?;
+        let fields = json!({"enabled": enabled});
+        match api.command("set_tun_enabled", fields.clone()).await {
+            // This account's own instance: authorize it once, then retry.
+            Err(error) if enabled && context.api.is_none() && error_code(&error) == Some("tun_unauthorized") => {
+                authorize_tun()?;
+                api = context.connect()?;
+                api.command("set_tun_enabled", fields).await?;
+            }
+            result => drop(result?),
+        }
     }
     let access = api.command("proxy_access", json!({})).await?;
     let user = api.command("multi_user", json!({})).await.unwrap_or(Value::Null);
@@ -1010,6 +1019,30 @@ async fn tun(context: &Context, matches: &ArgMatches) -> Result<i32> {
     }
     label("tun", tun_summary(&access, &user));
     Ok(0)
+}
+
+fn error_code(error: &anyhow::Error) -> Option<&str> {
+    error.downcast_ref::<api::CommandError>()?.code.as_deref()
+}
+
+/// Add this user to the TUN group through polkit (unless the account database
+/// already lists it), then restart the instance so that it enters the group.
+fn authorize_tun() -> Result<()> {
+    let user = api::installation::current_user()?;
+    if api::installation::tun_member(&user) != Some(true) {
+        eprintln!(
+            "TUN needs a one-time authorization: adding {user} to the {} group",
+            api::installation::TUN_GROUP
+        );
+        let status = api::installation::authorize_tun(&user)?
+            .status()
+            .context("cannot run pkexec")?;
+        if !status.success() {
+            bail!(api::installation::authorization_failure(status.code()));
+        }
+    }
+    eprintln!("Restarting your instance to use the TUN authorization...");
+    system::run_helper(&["restart".into()])
 }
 
 async fn core(context: &Context, matches: &ArgMatches) -> Result<i32> {
@@ -1156,7 +1189,7 @@ mod tests {
                 &json!({"tun_enabled": false, "tun_holder": {"name": "alice", "self": false}}),
                 &user
             ),
-            "off (the system-wide TUN is held by alice)"
+            "off (the system-wide TUN is held by alice; 'tun on' takes it over)"
         );
         assert!(tun_summary(&json!({"tun_enabled": false}), &json!({"tun_capable": false})).contains("mihomo-tun"));
         assert_eq!(tun_summary(&json!({}), &Value::Null), "off");

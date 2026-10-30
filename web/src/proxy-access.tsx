@@ -22,6 +22,8 @@ export type Access = {
   authentication_required: boolean | null;
   /** The host's one system-wide TUN and who holds it (multi-user installations). */
   tun_holder?: TunHolder | null;
+  /** Multi-user installations: whether this account may create a TUN (in the TUN group). */
+  tun_capable?: boolean | null;
 };
 export type TunHolder = { uid: number; name: string; self: boolean };
 // Protocol names stay untranslated.

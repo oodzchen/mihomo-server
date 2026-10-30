@@ -5163,6 +5163,70 @@ test("overview TUN switch and compact settings row preserve advanced settings an
   expect(await api("settings")).toEqual(before);
 });
 
+test("TUN switch takes over another user's TUN and asks for authorization outside the TUN group", async ({ page }) => {
+  const api = async (command: string, fields: Record<string, unknown> = {}) => {
+    const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  await api("set_settings", { runtime: {} });
+  const profile = await api("import_profile", { name: "TUN takeover", yaml: "mode: direct\nmixed-port: 0\ndns: {enable: false}\ntun: {enable: false}\nrules: ['MATCH,DIRECT']" });
+  await api("select_profile", { uid: profile.uid });
+  await api("start");
+  // A multi-user installation where alice holds the system TUN (fixture only).
+  const alice = { uid: 1001, name: "alice (uid 1001)", self: false };
+  let fixture: { holder: unknown; capable: boolean; tun?: boolean } = { holder: alice, capable: false };
+  const writes: unknown[] = [];
+  await page.route("**/api/commands", async route => {
+    const body = route.request().postDataJSON();
+    if (body.command === "set_tun_enabled") { writes.push(body); return route.fulfill({ status: 500, json: { error: { message: "unexpected" } } }); }
+    if (body.command !== "proxy_access") return route.continue();
+    const access = await (await route.fetch()).json();
+    Object.assign(access, { tun_holder: fixture.holder, tun_capable: fixture.capable });
+    if (fixture.tun !== undefined) access.reported.tun_enabled = fixture.tun;
+    await route.fulfill({ json: access });
+  });
+  await page.goto(`${base}/#token=${encodeURIComponent(token)}`);
+  const card = page.getByRole("region", { name: "TUN 模式", exact: true });
+  const toggle = card.getByRole("switch", { name: "TUN 模式", exact: true });
+  await expect(card.getByRole("note")).toHaveText("alice (uid 1001) 使用中，开启即可接管");
+  await expect(card.getByRole("note")).toHaveAttribute("title", "整机 TUN 正由 alice (uid 1001) 使用，你的流量目前按其规则处理；开启 TUN 即可接管。");
+  await expect(toggle).toBeEnabled();
+  const height = (await card.boundingBox())!.height;
+  await card.screenshot({ path: "test-results/tun-held-overview.png" });
+  // A browser cannot show the polkit dialog: remind, and send nothing.
+  await toggle.click();
+  await expect(page.locator(".toast").filter({ hasText: "TUN 需要一次性管理员授权：请在桌面客户端中开启 TUN" })).toBeVisible();
+  expect(writes).toEqual([]);
+  // This user's TUN turned off because alice turned hers on.
+  fixture = { holder: { ...alice, uid: 1000, name: "me (uid 1000)", self: true }, capable: true, tun: true };
+  await page.getByRole("button", { name: "刷新连接信息", exact: true }).click();
+  await expect(card.getByRole("status")).toHaveText("已开启");
+  await expect(card.getByRole("note")).toHaveCount(0);
+  fixture = { holder: alice, capable: true, tun: false };
+  await page.getByRole("button", { name: "刷新连接信息", exact: true }).click();
+  await expect(page.locator(".toast").filter({ hasText: "alice (uid 1001) 开启了 TUN，已接管整机 TUN。" })).toBeVisible();
+  await expect(card.getByRole("status")).toHaveText("已关闭");
+  expect((await card.boundingBox())!.height).toBe(height);
+  // Inside the desktop client, the client asks polkit and turns TUN on.
+  fixture = { holder: alice, capable: false };
+  await page.addInitScript(() => {
+    const invoked: string[] = [];
+    Object.assign(window, {
+      __MIHOMO_DESKTOP_VERSION__: "test", __invoked: invoked,
+      __TAURI_INTERNALS__: { invoke: async (command: string) => { invoked.push(command); return command === "client_autostart" ? false : null; } },
+    });
+  });
+  await page.reload();
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+  await expect(page.locator(".toast").filter({ hasText: "TUN：已开启" })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __invoked: string[] }).__invoked)).toContain("authorize_tun");
+  expect(writes).toEqual([]);
+  await page.unroute("**/api/commands");
+  await api("stop");
+});
+
 test("overview mode button group applies immediately, verifies live state and preserves other settings", async ({ page }) => {
   const api = async (command: string, fields: Record<string, unknown> = {}) => {
     const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ command, ...fields }) });

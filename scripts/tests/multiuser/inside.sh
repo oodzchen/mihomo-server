@@ -3,7 +3,7 @@
 #
 # /work holds: install.sh, bundle/ (extracted release bundle) and an optional
 # profile.yaml (real subscription). Users: alice (installer) + bob (TUN group),
-# carol (not). The host has one system-wide TUN, held by whoever enables it first.
+# carol (not). The host has one system-wide TUN, held by whoever turned it on last.
 set -uo pipefail
 
 PASS=0
@@ -398,13 +398,12 @@ phase_port_conflict() {
 
 tun_enable() {
     # ---------------------------------------------------------------- concurrent TUN
-    echo "== system-wide TUN: alice enables it first"
+    echo "== system-wide TUN: alice enables it"
     for user in alice bob carol; do
         profile_import "$user" || fatal "$user profile import failed"
     done
     api alice set_settings "$TUN_ON" >/dev/null || fatal "alice TUN enable failed"
-    check "bob TUN enable is rejected while alice holds it" tun_rejected bob 'in use by alice'
-    check "carol TUN enable is rejected" tun_rejected carol 'TUN group'
+    check "carol TUN enable asks for authorization" tun_rejected carol '"tun_unauthorized"'
     check "bob's Web view names alice as TUN holder" holder_is bob alice
     check "carol core still running after rejection" bash -c "pgrep -u carol -x verge-mihomo >/dev/null"
 }
@@ -481,7 +480,9 @@ phase_cli() {
     cli bob status >/tmp/cli-status-bob.log 2>&1
     check "bob status reaches his public-origin wildcard listener" grep -q '^manage: *https://bob.example$' /tmp/cli-status-bob.log
     check "bob status names alice as TUN holder" grep -q '^tun: *off (the system-wide TUN is held by alice' /tmp/cli-status-bob.log
-    check "carol tun on is refused with the reason" fails_with 'TUN group' cli carol tun on
+    # pkexec finds no authentication agent here, so the one-time authorization fails.
+    check "carol tun on asks polkit to authorize her" fails_with 'authorization was refused or unavailable' cli carol tun on
+    check "carol was not added to the TUN group" bash -c '! id -nG carol | grep -qw mihomo-tun'
     check "token command prints the token" test "$(cli alice token)" = "$(cat "$(data_dir alice)/management-token")"
     check "logs passes journalctl options" cli alice logs -n 5 --no-pager
     cli alice core >/tmp/cli-core.log 2>&1
@@ -515,7 +516,7 @@ phase_cli() {
 
     cli alice tun off >/dev/null
     check "tun off via the command removes the device" wait_for 40 link_down "$(dev alice)"
-    check "tun off releases the system TUN" holder_is bob ''
+    check "tun off releases the system TUN" wait_for 10 holder_is bob ''
     cli alice tun on >/dev/null
     check "tun on via the command brings the device back" wait_for 60 link_up "$(dev alice)"
     check "alice holds the system TUN again" holder_is bob alice
@@ -542,7 +543,7 @@ phase_crash() {
     check "alice traffic still uses alice's TUN" uses_tun alice alice
     check "resolved points at alice's TUN again after crash" wait_for 20 resolver_uses_tun "$(dev alice)"
     check "carol unaffected by alice's crash" system_lookup_works carol
-    check "alice keeps the system TUN through crash recovery" tun_rejected bob 'in use by alice'
+    check "alice keeps the system TUN through crash recovery" holder_is bob alice
 }
 
 phase_core_upgrade() {
@@ -641,22 +642,30 @@ phase_web_upgrade() {
     check "carol's unit is active after the Web restart" wait_for 60 instance_active carol
 }
 
+# logged USER TEXT: USER's service log contains TEXT.
+logged() { api "$1" logs | grep -qF "$2"; }
 # USER's saved TUN switch is explicitly off.
 tun_saved_off() {
     api "$1" settings | python3 -c 'import json,sys; sys.exit(json.load(sys.stdin)["runtime"]["tun"]["enable"] is not False)'
 }
-# The holder keeps the TUN until it turns it off; only root can end it for them.
+# The member who turned TUN on last holds it; the previous holder hands it over.
 phase_handover() {
     echo "== system TUN handover between users"
-    api alice set_tun_enabled '{"enabled":false}' >/dev/null || fatal 'alice TUN off'
-    check "alice's TUN released when she turns it off" holder_is bob ''
-    api bob set_tun_enabled '{"enabled":true}' >/dev/null || fatal 'bob TUN on with his own subscription'
-    check "bob TUN up" wait_for 60 link_up "$(dev bob)"
+    api bob set_tun_enabled '{"enabled":true}' >/dev/null || fatal 'bob TUN on while alice holds it'
+    check "bob TUN up" link_up "$(dev bob)"
+    check "alice handed her TUN over" wait_for 20 link_down "$(dev alice)"
+    check "alice's saved TUN setting was turned off" tun_saved_off alice
+    check "alice's log names who took the TUN over" \
+        logged alice "bob (uid $(id -u bob)) turned on TUN: handing the system-wide TUN over"
     check "root traffic uses bob's TUN" uses_tun root bob
     check "systemd-resolved now routes every lookup to bob's TUN" wait_for 20 resolver_uses_tun "$(dev bob)"
     check "root reaches resolved's fake IPs through bob's TUN" system_lookup_works root
-    check "alice TUN enable is rejected while bob holds it" tun_rejected alice 'in use by bob'
     check "alice's Web view names bob as TUN holder" holder_is alice bob
+    api alice set_tun_enabled '{"enabled":true}' >/dev/null || fatal 'alice TUN on while bob holds it'
+    check "alice took the TUN back" link_up "$(dev alice)"
+    check "bob handed his TUN over" wait_for 20 link_down "$(dev bob)"
+    check "bob traffic uses alice's TUN after taking it back" uses_tun bob alice
+    api bob set_tun_enabled '{"enabled":true}' >/dev/null || fatal 'bob TUN on again'
     systemctl --user -M bob@ stop mihomo-server.service
     check "root stopping bob ends his TUN" wait_for 40 bash -c "! ip link show $(dev bob) >/dev/null 2>&1"
     api alice set_tun_enabled '{"enabled":true}' >/dev/null || fatal 'alice TUN on after bob stopped'
@@ -665,6 +674,19 @@ phase_handover() {
     check "bob starts without TUN while alice holds it" bash -c "! ip link show $(dev bob) >/dev/null 2>&1"
     check "bob's saved TUN setting was turned off" tun_saved_off bob
     check "bob traffic uses alice's TUN again" uses_tun bob alice
+
+    echo "== one-time TUN authorization"
+    # The administrator authorizes carol (what pkexec does); her service lacks the group until it restarts.
+    usermod -aG mihomo-tun carol
+    cli carol tun on >/tmp/carol-authorize.log 2>&1 || { cat /tmp/carol-authorize.log; fatal 'carol tun on after authorization'; }
+    check "carol's tun on restarted her instance into the TUN group" grep -q 'Restarting your instance' /tmp/carol-authorize.log
+    check "carol took the TUN over" link_up "$(dev carol)"
+    check "alice handed her TUN over to carol" wait_for 20 link_down "$(dev alice)"
+    check "kernel routes carol via carol's TUN" routes_via carol "$(dev carol)"
+    check "carol's traffic no longer uses alice's or bob's TUN" uses_tun carol none
+    api alice set_tun_enabled '{"enabled":true}' >/dev/null || fatal 'alice TUN on while carol holds it'
+    check "alice took the TUN back from carol" link_up "$(dev alice)"
+    check "carol handed her TUN over" wait_for 20 link_down "$(dev carol)"
 }
 
 phase_cleanup() {

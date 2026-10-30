@@ -60,6 +60,32 @@ pub fn exec_helper(arguments: &[OsString]) -> Result<i32> {
     }
 }
 
+/// Run `mihomo-server-user ARGS` to completion, its report on stderr.
+pub fn run_helper(arguments: &[OsString]) -> Result<()> {
+    let helper = helper();
+    let mut command = Command::new(&helper);
+    command.args(arguments);
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsFd as _;
+        command.stdout(std::io::stderr().as_fd().try_clone_to_owned()?);
+    }
+    let status = command
+        .status()
+        .with_context(|| format!("cannot run {}", helper.display()))?;
+    if !status.success() {
+        bail!(
+            "{} {} failed",
+            helper.display(),
+            arguments
+                .first()
+                .map(|argument| argument.to_string_lossy())
+                .unwrap_or_default()
+        );
+    }
+    Ok(())
+}
+
 fn http_client(redirects: bool) -> Result<reqwest::Client> {
     Ok(client_builder(redirects)?.build()?)
 }

@@ -170,6 +170,8 @@ pub(crate) async fn inspect(manager: &CoreManager) -> Result<Value> {
         "tun_enabled": config.get("tun").and_then(|value| value.get("enable")).and_then(|value| value.as_bool()).unwrap_or(false),
         "authentication_required": core.as_ref().map(|core| core.authentication.as_ref().is_some_and(|values| !values.is_empty())),
         "tun_holder": tun_holder(manager),
+        // Multi-user installations only: whether this account is in the TUN group.
+        "tun_capable": manager.multi_user().map(|user| user.tun_capable),
     }))
 }
 

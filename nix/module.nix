@@ -55,6 +55,7 @@ in {
         "d /var/lib/mihomo-server/slots 1777 root root -"
       ] ++ lib.optionals cfg.tun.enable [
         "f /var/lib/mihomo-server/tun.lock 0640 root mihomo-tun -"
+        "f /var/lib/mihomo-server/tun.request 0660 root mihomo-tun -"
       ];
       security.wrappers.mihomo-tun-exec = lib.mkIf cfg.tun.enable {
         source = "${cfg.package}/bin/mihomo-tun-exec";

@@ -324,7 +324,12 @@ mihomo-server-user purge --yes   # delete own data/config and release slot
 ```
 
 Other users opt in with `enable`; administrators separately grant their TUN and
-linger with `usermod -aG mihomo-tun USER` and `loginctl enable-linger USER`.
+linger with `usermod -aG mihomo-tun USER` and `loginctl enable-linger USER`. A
+user outside the group who turns TUN on with `mihomo-server tun on` or in the
+desktop client is asked for that group authorization once through polkit
+(`pkexec usermod -aG mihomo-tun USER`); the instance then restarts into the group
+and turns TUN on. A Web page in an ordinary browser cannot show the dialog and
+names these two ways instead.
 Slot 0 uses management 9090, mixed proxy 7890 and DNS 1053. Slots 1–63 use
 management `20000+10N`, proxy `20001+10N` and DNS `20002+10N`. Port conflicts are
 reported rather than silently allocating alternatives. Existing slot-0 defaults
@@ -344,15 +349,19 @@ host-wide auto-redirect. Shared-resolver traffic uses the existing domain sniffe
 TUN here is **system-wide**, like a single-user client: it has no
 `include-uid`, carries every account's traffic, and Mihomo's `resolvectl` calls
 point systemd-resolved at it, so every account's lookups get fake IPs that are
-routed through it. A host has one such TUN at a time: the first TUN-group member
-to enable TUN holds an `flock` on `/var/lib/mihomo-server/tun.lock`
-(root:mihomo-tun 0640) until they turn it off or their service stops (the kernel
-releases it, so a crashed holder never blocks the host). Other members see the
-holder in the Web UI with their TUN switch disabled; their traffic follows the
-holder's rules and their own proxy ports keep working. Nobody else can turn the
-holder's TUN off; root can, e.g. `systemctl --user -M alice@ stop mihomo-server`.
-An instance that starts with TUN saved while someone else holds it turns its TUN
-setting off and starts without it. The installer adds
+routed through it. A host has one such TUN at a time, held by the TUN-group
+member who turned it on last: the holder's service keeps an `flock` on
+`/var/lib/mihomo-server/tun.lock` (root:mihomo-tun 0640) while its TUN is live
+(the kernel releases it when the service stops, so a crashed holder never blocks
+the host). A member who turns TUN on while another holds it writes a request to
+`/var/lib/mihomo-server/tun.request` (root:mihomo-tun 0660); the holder's service
+turns its own TUN off (saved, as by its switch) and the requester's starts,
+within 30 s or the request fails. Other members see the holder in the Web UI;
+their traffic follows the holder's rules and their own proxy ports keep working.
+Root can also end it, e.g. `systemctl --user -M alice@ stop mihomo-server`. An
+instance that starts with TUN saved while someone else holds it turns its TUN
+setting off and starts without it, as do other automatic applications: only an
+explicit TUN switch takes the TUN over. The installer adds
 `/etc/polkit-1/rules.d/50-mihomo-server-tun.rules`, which allows those resolve1
 link actions for each member's own `ms<uid>` link without a prompt and refuses
 other members' links (a local-authority `.pkla` group grant on polkit 0.105).

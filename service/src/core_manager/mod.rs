@@ -469,6 +469,7 @@ impl CoreManager {
             retry_at: None,
             restoration: None,
             tun_live: std::sync::atomic::AtomicBool::new(false),
+            tun_takeover: false,
         };
         tokio::spawn(async move {
             let result = actor.run().await.map_err(|error| format!("{error:#}"));
@@ -692,6 +693,9 @@ struct Actor {
     restoration: Option<Restoration>,
     /// The running core's TUN is verified up; the system TUN lock is kept only then.
     tun_live: std::sync::atomic::AtomicBool,
+    /// The command being handled turns TUN on at this user's request, so it may
+    /// take the system TUN over from its holder.
+    tun_takeover: bool,
 }
 
 async fn closing(receiver: &mut watch::Receiver<bool>) {
@@ -752,10 +756,13 @@ impl Actor {
     }
 
     /// Give up the system TUN unless this core's TUN is verified up, so a failed
-    /// or reverted enable never blocks other users.
+    /// or reverted enable never blocks other users; not while the interface of
+    /// a TUN turned off by a reload is still there, which the next holder's TUN
+    /// must not run beside.
     fn release_idle_tun(&self) {
         #[cfg(target_os = "linux")]
         if !self.tun_live.load(std::sync::atomic::Ordering::Relaxed)
+            && !self.tun_interface_lingers()
             && let Some(lock) = &self.options.tun_lock
         {
             lock.release();
@@ -781,7 +788,10 @@ impl Actor {
                     let Some(request) = request else { break; };
                     self.handle(request).await;
                 }
-                _ = monitor.tick() => self.observe_exit().await?,
+                _ = monitor.tick() => {
+                    self.observe_exit().await?;
+                    self.hand_over_tun().await;
+                }
                 _ = sleep_until(retry), if self.retry_at.is_some() => {
                     self.retry_at = None;
                     if self.start_core().await.is_err() { self.schedule_recovery(); }

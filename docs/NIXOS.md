@@ -43,10 +43,12 @@ inputs.mihomo-server-desktop = {
 ```
 
 TUN DNS integration requires systemd-resolved (`services.resolved.enable = true`).
-The module owns the `mihomo-tun` group, sticky slot registry, TUN lock, capability
-wrapper and DNS polkit rules (enabling polkit). Do not run `setcap`, `usermod` or the installer for a
-Nix-owned installation. TUN authorization grants system-wide network control;
-the program's existing one-holder lock applies across users.
+The module owns the `mihomo-tun` group, sticky slot registry, TUN lock and
+handover request file, capability wrapper and DNS polkit rules (enabling polkit).
+Do not run `setcap`, `usermod` or the installer for a Nix-owned installation; the
+clients' one-time TUN authorization refuses there and points to
+`services.mihomo-server.users`. TUN authorization grants system-wide network
+control; one member holds the TUN at a time, the one who turned it on last.
 
 Apply the system configuration, then run commands as the selected user:
 

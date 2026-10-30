@@ -316,10 +316,14 @@ install_shared() {
     chown root:root "$registry"
     chmod 1777 "$registry"
     # One system-wide TUN at a time: its holder's service keeps an flock on this
-    # file, which only TUN-group members can open.
+    # file, which only TUN-group members can open. A member turning TUN on
+    # writes tun.request, which asks the holder to hand its TUN over.
     [ -f /var/lib/mihomo-server/tun.lock ] || : > /var/lib/mihomo-server/tun.lock
     chown root:mihomo-tun /var/lib/mihomo-server/tun.lock
     chmod 0640 /var/lib/mihomo-server/tun.lock
+    [ -f /var/lib/mihomo-server/tun.request ] || : > /var/lib/mihomo-server/tun.request
+    chown root:mihomo-tun /var/lib/mihomo-server/tun.request
+    chmod 0660 /var/lib/mihomo-server/tun.request
     polkit_tun_dns install
     update_unit install
     ln -sfn "releases/$(basename "$release")" "$root/.current.new"

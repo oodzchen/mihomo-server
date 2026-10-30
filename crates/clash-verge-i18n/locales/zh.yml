@@ -40,6 +40,7 @@ service:
   errors:
     method_not_allowed: 不支持的请求方法
     shutting_down: 服务正在关闭
+    tun_unauthorized: "TUN 需要授权：当前账户不在 TUN 用户组（mihomo-tun）中。请在桌面客户端中开启 TUN，或在终端运行 mihomo-server tun on 完成一次性授权。"
     invalid_headers: 请求头无效
     duplicate_credential: 凭据头重复
     invalid_credential: 凭据头无效
