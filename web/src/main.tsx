@@ -23,6 +23,7 @@ import { ProxyPage } from "./proxies";
 import { UnlockPage } from "./unlock";
 import { LogPage } from "./logs";
 import { ToastProvider, useToast } from "./toast";
+import { applyTheme, savedTheme, resolveTheme, type Theme } from "./theme";
 import "./style.css";
 
 const pages: [string, MessageKey][] = [
@@ -95,6 +96,11 @@ const initialToken = consumeUrlToken() ?? savedToken();
 
 function App() {
   const [language, setLanguage] = useState<Language>(savedLanguage);
+  const [theme, setTheme] = useState<Theme>(savedTheme);
+  const changeTheme = useCallback((value: Theme) => {
+    applyTheme(value);
+    setTheme(value);
+  }, []);
   const [session, setSession] = useState<{
     token: string;
     status: CoreStatus;
@@ -140,7 +146,7 @@ function App() {
   }, [language]);
   if (restoring) return null;
   return <LanguageContext.Provider value={language}>{session ? (
-    <ToastProvider language={language}><Manager token={session.token} initial={session.status} logout={logout} language={language} changeLanguage={changeLanguage} /></ToastProvider>
+    <ToastProvider language={language}><Manager token={session.token} initial={session.status} logout={logout} language={language} changeLanguage={changeLanguage} theme={theme} changeTheme={changeTheme} /></ToastProvider>
   ) : (
     <Login error={loginError} login={login} language={language} changeLanguage={changeLanguage} />
   )}</LanguageContext.Provider>;
@@ -218,6 +224,8 @@ function Login({
 }
 
 function Manager({
+  theme,
+  changeTheme,
   token,
   initial,
   logout,
@@ -225,6 +233,8 @@ function Manager({
   changeLanguage,
 }: {
   token: string;
+  theme: Theme;
+  changeTheme: (value: Theme) => void;
   initial: CoreStatus;
   logout: (reason?: string) => void;
   language: Language;
@@ -256,10 +266,36 @@ function Manager({
   // chosen, and pushes are ignored until they are applied: a push for an
   // earlier choice must not switch the page back.
   const languageWrites = useRef({ queue: Promise.resolve(), pending: 0 });
+  const themeWrites = useRef({ queue: Promise.resolve(), pending: 0 });
   const adoptPreferences = useCallback((preferences?: Preferences) => {
-    if (languageWrites.current.pending) return;
-    if (preferences?.language && preferences.language !== languageRef.current) changeLanguage(preferences.language);
-  }, [changeLanguage]);
+    if (!languageWrites.current.pending && preferences?.language && preferences.language !== languageRef.current)
+      changeLanguage(preferences.language);
+    // A missing field is an older service; its theme remains a local choice.
+    if (!themeWrites.current.pending && preferences?.theme !== undefined)
+      changeTheme(resolveTheme(preferences.theme));
+  }, [changeLanguage, changeTheme]);
+  const changeSharedTheme = useCallback((value: Theme) => {
+    changeTheme(value);
+    const writes = themeWrites.current;
+    writes.pending++;
+    writes.queue = writes.queue
+      .then(async () => { await command<Preferences>(token, "set_theme", { theme: value }); })
+      .catch(error => {
+        if (!alive.current) return;
+        if (error instanceof ApiError && error.status === 401) logout(t(languageRef.current, "expiredToken"));
+        else setNotice(describe(error), "error");
+      })
+      .finally(async () => {
+        writes.pending--;
+        if (writes.pending || !alive.current) return;
+        // Reconcile failures and concurrent changes with the saved preference.
+        try {
+          const current = await command<Preferences>(token, "preferences");
+          if (alive.current && !writes.pending && current.theme !== undefined)
+            changeTheme(resolveTheme(current.theme));
+        } catch { /* The next event snapshot reconciles after reconnection. */ }
+      });
+  }, [changeTheme, token, logout, setNotice]);
   const changeSharedLanguage = useCallback((value: string) => {
     const next = resolveLanguage(value);
     changeLanguage(next);
@@ -582,6 +618,8 @@ function Manager({
             token={token}
             language={language}
             changeLanguage={changeSharedLanguage}
+            theme={theme}
+            changeTheme={changeSharedTheme}
             status={status}
             connection={connection}
             busy={busy}

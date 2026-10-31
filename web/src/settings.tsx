@@ -26,6 +26,7 @@ import {
   validateAuthority,
 } from "./authority-settings";
 import { t, type Language, type MessageKey } from "./i18n";
+import type { Theme } from "./theme";
 import { LanguagePicker } from "./language-picker";
 
 type Settings = { schema_version: number; runtime: Runtime };
@@ -195,6 +196,8 @@ type SettingsPageProps = {
   perform: Perform;
   logout: (reason?: string) => void;
   desktopVersion?: string;
+  theme: Theme;
+  changeTheme: (value: Theme) => void;
   onEditorStateChange: (dirty: boolean, busy: boolean) => void;
 };
 
@@ -237,6 +240,8 @@ function VersionInfo({ token, status, connection, desktopVersion, language }: {
 
 export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(function SettingsPage({
   token,
+  theme,
+  changeTheme,
   language = "zh",
   changeLanguage,
   status,
@@ -535,6 +540,17 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
             <LanguagePicker language={language} changeLanguage={changeLanguage} />
           </section>
         )}
+        <section className="panel">
+          <h2>{t(language, "theme")}</h2>
+          <label className="language-picker">
+            {t(language, "theme")}
+            <select value={theme} onChange={event => changeTheme(event.target.value as Theme)}>
+              <option value="system">{t(language, "themeSystem")}</option>
+              <option value="light">{t(language, "themeLight")}</option>
+              <option value="dark">{t(language, "themeDark")}</option>
+            </select>
+          </label>
+        </section>
         <AutostartPanel token={token} language={language} connection={connection} logout={logout} />
         <details className="settings-details"><summary>{t(language, "setResources")}</summary>
         <ResourcesPanel token={token} status={status} connection={connection} logout={logout} language={language} />

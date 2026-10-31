@@ -376,11 +376,11 @@ async fn interface_preferences_are_pushed_to_event_and_preference_feeds() -> Res
     let server = Server::new(false).await?;
     let mut events = server.authenticated("/api/events").await?;
     let snapshot = until(&mut events, |value| value["type"] == "snapshot").await?;
-    assert_eq!(snapshot["preferences"], json!({"language": null}));
+    assert_eq!(snapshot["preferences"], json!({"language": null, "theme":"system"}));
     let mut feed = server.authenticated("/api/streams/preferences").await?;
     assert_eq!(
         receive(&mut feed).await?,
-        json!({"type":"preferences","data":{"language":null}})
+        json!({"type":"preferences","data":{"language":null,"theme":"system"}})
     );
 
     let set = reqwest::Client::new()
@@ -390,7 +390,7 @@ async fn interface_preferences_are_pushed_to_event_and_preference_feeds() -> Res
         .send()
         .await?;
     ensure!(set.status().is_success(), "set_language failed: {}", set.status());
-    let expected = json!({"type":"preferences","data":{"language":"zhtw"}});
+    let expected = json!({"type":"preferences","data":{"language":"zhtw","theme":"system"}});
     assert_eq!(receive(&mut feed).await?, expected);
     assert_eq!(
         until(&mut events, |value| value["type"] == "preferences").await?,
@@ -402,8 +402,31 @@ async fn interface_preferences_are_pushed_to_event_and_preference_feeds() -> Res
     let mut client = management_client::events::Feed::connect(&endpoint, &server.token, Some("preferences")).await?;
     assert_eq!(
         client.next().await?,
-        Some(json!({"type":"preferences","data":{"language":"zhtw"}}))
+        Some(json!({"type":"preferences","data":{"language":"zhtw","theme":"system"}}))
     );
+    for theme in ["dark", "light", "system"] {
+        reqwest::Client::new()
+            .post(format!("http://{}/api/commands", server.address))
+            .bearer_auth(&server.token)
+            .json(&json!({"command":"set_theme","theme":theme}))
+            .send()
+            .await?
+            .error_for_status()?;
+        let expected = json!({"type":"preferences","data":{"language":"zhtw","theme":theme}});
+        assert_eq!(receive(&mut feed).await?, expected);
+        assert_eq!(
+            until(&mut events, |value| value["type"] == "preferences").await?,
+            expected
+        );
+        assert_eq!(client.next().await?, Some(expected));
+    }
+    let invalid = reqwest::Client::new()
+        .post(format!("http://{}/api/commands", server.address))
+        .bearer_auth(&server.token)
+        .json(&json!({"command":"set_theme","theme":"invalid"}))
+        .send()
+        .await?;
+    assert_eq!(invalid.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
     let wrong = management_client::events::Feed::connect(&endpoint, &"0".repeat(64), Some("preferences")).await;
     assert!(wrong.is_err(), "a wrong token is refused");
     drop((events, feed, client));
@@ -456,6 +479,16 @@ async fn state_feed_sends_fresh_snapshots_profiles_and_preferences_without_logs(
             .error_for_status()?;
         let preferences = until(&mut socket, |value| value["data"]["preferences"]["language"] == "zh").await?;
         assert_eq!(preferences["type"], "state");
+
+        reqwest::Client::new()
+            .post(format!("http://{}/api/commands", server.address))
+            .bearer_auth(&server.token)
+            .json(&json!({"command":"set_theme", "theme":"dark"}))
+            .send()
+            .await?
+            .error_for_status()?;
+        let themed = until(&mut socket, |value| value["data"]["preferences"]["theme"] == "dark").await?;
+        assert_eq!(themed["data"]["preferences"]["language"], "zh");
 
         server
             .manager

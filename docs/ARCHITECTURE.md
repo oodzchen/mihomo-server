@@ -49,7 +49,7 @@ core problems can be repaired through the same interface.
 | `crates/management-client` | Client side of the management API shared by the command line and the desktop client (a separate repository that pins this crate by release tag): locating this user's instance from systemd, authenticated commands with typed errors, and pure readings of proxy groups, subscriptions, mode and TUN. |
 | `crates/clash-verge-*` | Small reusable upstream components: drafts, admission limiting, locale resources and Unix signal handling. |
 | `service` | Axum management surface, authentication, durable stores, core actor, downloads, resource/core updates, backup/restore, multi-user isolation and shutdown. The same executable is the `mihomo-server` command-line client (`service/src/cli`): `serve` (or a leading service option) runs the service, any other command is a client. |
-| `web` | React browser client. It talks only to the Rust service, keeps session state local and shares the interface language through the instance's preferences. |
+| `web` | React browser client. It talks only to the Rust service, keeps session state local and shares the interface language and theme through the instance's preferences. |
 | `deploy` and `scripts` | Pinned bundle creation, installation, systemd integration, per-user helper and lifecycle checks. |
 
 `headless-core` must remain independent of Axum, React, systemd and process
@@ -327,10 +327,19 @@ comes from the host client's immutable build value, not the service.
 Browser operations use independent readback after mutations. Realtime feeds can
 disconnect and resubscribe without becoming configuration authority.
 
-The interface language is a per-instance presentation preference, kept apart
+The interface language and theme are per-instance presentation preferences, kept apart
 from the core's settings in `<data-dir>/preferences.json` (owner-only, replaced
 atomically) and never applied to the core. `preferences` reads it and
-`set_language` changes or clears it (`null`: each client uses its own default).
+`set_language` changes or clears the language (`null`: each client uses its own default).
+`set_theme` saves `system` (the default and migration value), `light`, or `dark`.
+Updates preserve the other preference and share the same persistence lock.
+The Web UI applies the cached theme before mounting, uses semantic CSS colors
+across views, dialogs and notifications, and lets CSS track system color changes
+in `system` mode. Settings changes apply immediately and are sent in order;
+a final read reconciles failed or concurrent writes. Both the browser and the
+desktop dashboard adopt the shared events. The desktop also caches the theme
+for its offline status page. Native window decorations retain the system
+appearance, preserving WebKit system color tracking.
 Each change is persisted, then pushed as a `preferences` event on `/api/events`
 (whose snapshot also carries it) and on the lightweight
 `/api/streams/preferences` feed. The Web UI adopts the pushed language after

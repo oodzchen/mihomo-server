@@ -270,7 +270,7 @@ export function ProxyPage({
                   <h2>{name}</h2>
                   <p className="muted">
                     {group.type} · {t(language, "proxyCurrent")}
-                    <strong style={{ color: "#111827", marginLeft: "4px" }}>
+                    <strong style={{ color: "var(--text)", marginLeft: "4px" }}>
                       {currentSelection}
                     </strong>
                   </p>

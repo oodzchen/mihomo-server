@@ -273,6 +273,9 @@ pub enum ManagementCommand {
     SetLanguage {
         language: Option<preferences::Language>,
     },
+    SetTheme {
+        theme: preferences::Theme,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -551,6 +554,7 @@ impl Management {
             ManagementCommand::SetLanguage { language } => {
                 serde_json::to_value(self.preferences.set_language(language).await?)?
             }
+            ManagementCommand::SetTheme { theme } => serde_json::to_value(self.preferences.set_theme(theme).await?)?,
             ManagementCommand::SetTunEnabled { enabled } => {
                 serde_json::to_value(self.manager.set_tun_enabled(enabled).await?)?
             }

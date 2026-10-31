@@ -34,6 +34,7 @@ export function saveLanguage(language: Language) {
 }
 
 const zh = {
+  theme: "界面主题", themeSystem: "跟随系统", themeLight: "浅色", themeDark: "深色",
   language: "界面语言", navAria: "主导航",
   overview: "概览", proxies: "代理", profiles: "订阅", config: "配置", rules: "规则",
   logs: "日志", settings: "设置", core: "内核", logout: "退出登录",
@@ -543,6 +544,7 @@ const zh = {
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
+  theme: "Interface theme", themeSystem: "Follow system", themeLight: "Light", themeDark: "Dark",
   language: "Interface language", navAria: "Main navigation",
   overview: "Overview", profiles: "Profiles", config: "Configuration", proxies: "Proxies", rules: "Rules",
   logs: "Logs", settings: "Settings", core: "Core", logout: "Log out",
@@ -1052,6 +1054,7 @@ const en: Record<keyof typeof zh, string> = {
 };
 
 const zhtw: Record<keyof typeof zh, string> = {
+  theme: "介面主題", themeSystem: "跟隨系統", themeLight: "淺色", themeDark: "深色",
   language: "介面語言", navAria: "主導航",
   overview: "概覽", proxies: "代理", profiles: "訂閱", config: "設定", rules: "規則",
   logs: "記錄", settings: "設定", core: "核心", logout: "登出",

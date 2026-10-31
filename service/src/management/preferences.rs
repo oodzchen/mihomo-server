@@ -21,12 +21,23 @@ pub enum Language {
     En,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 /// Unset fields mean "no preference": each client uses its own default.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
     #[serde(default)]
     pub language: Option<Language>,
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 pub struct PreferenceStore {
@@ -80,6 +91,20 @@ impl PreferenceStore {
             return Ok(next);
         }
         next.language = language;
+        self.persist(next).await
+    }
+
+    pub async fn set_theme(&self, theme: Theme) -> Result<Preferences> {
+        let _write = self.write.lock().await;
+        let mut next = self.get();
+        if next.theme == theme {
+            return Ok(next);
+        }
+        next.theme = theme;
+        self.persist(next).await
+    }
+
+    async fn persist(&self, next: Preferences) -> Result<Preferences> {
         if let Some(path) = &self.path {
             let path = path.clone();
             let saved = next.clone();
@@ -140,6 +165,7 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         let path = directory.join("preferences.json");
 
+        fs::write(&path, r#"{"language":null}"#).unwrap();
         let store = PreferenceStore::load(path.clone());
         assert_eq!(store.get(), Preferences::default());
         let mut changes = store.subscribe();
@@ -150,6 +176,18 @@ mod tests {
         store.set_language(Some(Language::En)).await.unwrap();
         assert!(!changes.has_changed().unwrap(), "an unchanged value sends no event");
 
+        store.set_theme(Theme::Dark).await.unwrap();
+        assert!(changes.has_changed().unwrap());
+        assert_eq!(changes.borrow_and_update().theme, Theme::Dark);
+        store.set_theme(Theme::Dark).await.unwrap();
+        assert!(!changes.has_changed().unwrap());
+        assert_eq!(PreferenceStore::load(path.clone()).get().theme, Theme::Dark);
+        store.set_language(Some(Language::Zh)).await.unwrap();
+        assert_eq!(store.get().theme, Theme::Dark);
+        store.set_language(Some(Language::En)).await.unwrap();
+        store.set_theme(Theme::Light).await.unwrap();
+        assert_eq!(store.get().language, Some(Language::En));
+        store.set_theme(Theme::System).await.unwrap();
         let reloaded = PreferenceStore::load(path.clone());
         assert_eq!(reloaded.get().language, Some(Language::En));
         reloaded.set_language(None).await.unwrap();

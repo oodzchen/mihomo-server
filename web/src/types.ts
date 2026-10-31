@@ -86,7 +86,7 @@ export interface NodeProbe {
   warm: number;
 }
 /** Interface preferences this instance shares with all of its clients. */
-export type Preferences = { language?: "zh" | "zhtw" | "en" | null };
+export type Preferences = { language?: "zh" | "zhtw" | "en" | null; theme?: import("./theme").Theme };
 export type EventMessage = {
   type: string;
   data?: unknown;

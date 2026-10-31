@@ -225,8 +225,12 @@ test.beforeAll(async () => {
   base = `http://127.0.0.1:${port}`;
   await start();
 });
-// The interface language is shared through the service; start every test unset.
+// Presentation preferences are shared through the service; reset between tests.
 test.afterEach(async () => {
+  await fetch(`${base}/api/commands`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ command: "set_theme", theme: "system" }),
+  }).catch(() => undefined);
   // Tolerant: a test may leave the service stopped.
   await fetch(`${base}/api/commands`, {
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -5799,4 +5803,103 @@ test("settings start at login separates the service unit from the desktop client
   } finally {
     await desktop.close();
   }
+});
+
+// The desktop dashboard serves these same assets and receives these same events.
+test("interface theme follows system changes and explicit choices without shifting settings", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await loginSettings(page);
+  const picker = page.getByRole("combobox", { name: "界面主题", exact: true });
+  const canvas = () => page.locator("html").evaluate(node => getComputedStyle(node).backgroundColor);
+  await expect(picker).toHaveValue("system");
+  await expect.poll(canvas).toBe("rgb(21, 21, 24)");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect.poll(canvas).toBe("rgb(244, 244, 245)");
+  const before = await page.locator(".settings-layout").boundingBox();
+  const runtime = await settingsApi("settings");
+  await picker.selectOption("dark");
+  await expect.poll(canvas).toBe("rgb(21, 21, 24)");
+  await expect.poll(async () => (await settingsApi("preferences")).theme).toBe("dark");
+  expect(await page.locator(".settings-layout").boundingBox()).toEqual(before);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await picker.selectOption("light");
+  await expect.poll(canvas).toBe("rgb(244, 244, 245)");
+  await expect.poll(async () => (await settingsApi("preferences")).theme).toBe("light");
+  await picker.selectOption("system");
+  await expect.poll(canvas).toBe("rgb(21, 21, 24)");
+  expect(await settingsApi("settings")).toEqual(runtime);
+  await expect(page.getByRole("button", { name: "保存服务设置", exact: true })).toBeDisabled();
+});
+
+test("interface theme syncs browser and desktop sessions and survives service restart", async ({ page, browser }) => {
+  await loginSettings(page);
+  const desktop = await browser.newContext({ colorScheme: "dark" });
+  const dashboard = await desktop.newPage();
+  await dashboard.addInitScript(() => Object.defineProperty(window, "__MIHOMO_DESKTOP_VERSION__", { value: "theme-test" }));
+  try {
+    await dashboard.goto(`${base}/settings#token=${encodeURIComponent(token)}`);
+    await expect(dashboard.getByRole("combobox", { name: "界面主题", exact: true })).toHaveValue("system");
+    await page.getByRole("combobox", { name: "界面主题", exact: true }).selectOption("light");
+    await expect(dashboard.locator("html")).toHaveAttribute("data-theme", "light");
+    await dashboard.getByRole("combobox", { name: "界面主题", exact: true }).selectOption("dark");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect.poll(async () => (await settingsApi("preferences")).theme).toBe("dark");
+    await stop();
+    await start();
+    expect((await settingsApi("preferences")).theme).toBe("dark");
+    await dashboard.reload();
+    await expect(dashboard.locator("html")).toHaveAttribute("data-theme", "dark");
+    await dashboard.getByRole("button", { name: "退出登录", exact: true }).click();
+    await expect(dashboard.locator(".login-card")).toBeVisible();
+    await expect(dashboard.locator("html")).toHaveAttribute("data-theme", "dark");
+    expect(await dashboard.locator(".login-card").evaluate(node => getComputedStyle(node).backgroundColor)).toBe("rgb(32, 32, 36)");
+    await settingsApi("set_theme", { theme: "system" });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "system");
+  } finally { await desktop.close(); }
+});
+
+test("interface theme rapid choices stay ordered and failed writes reconcile visibly", async ({ page }) => {
+  await loginSettings(page);
+  await page.route("**/api/commands", async route => {
+    const data = route.request().postDataJSON();
+    if (data.command === "set_theme" && data.theme === "dark") await new Promise(resolve => setTimeout(resolve, 500));
+    await route.continue();
+  });
+  const picker = page.getByRole("combobox", { name: "界面主题", exact: true });
+  await picker.selectOption("dark");
+  await picker.selectOption("light");
+  await expect.poll(async () => (await settingsApi("preferences")).theme).toBe("light");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.unrouteAll({ behavior: "wait" });
+  await page.route("**/api/commands", async route => {
+    if (route.request().postDataJSON().command === "set_theme")
+      return route.fulfill({ status: 500, json: { error: { message: "fixture theme save failed" } } });
+    await route.continue();
+  });
+  await picker.selectOption("dark");
+  await expect(page.locator(".toast-error")).toContainText("fixture theme save failed");
+  await expect(picker).toHaveValue("light");
+  expect((await settingsApi("preferences")).theme).toBe("light");
+});
+
+test("interface theme covers every view, dialogs and notifications", async ({ page }) => {
+  await settingsApi("set_theme", { theme: "dark" });
+  await loginSettings(page);
+  for (const path of ["/", "/proxies", "/unlock", "/profiles", "/config", "/rules", "/logs", "/core", "/service", "/settings"]) {
+    await page.locator(`nav a[href="${path}"]`).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator(".page-header")).toHaveCSS("background-color", "rgb(21, 21, 24)");
+    for (const panel of await page.locator(".panel:visible").all())
+      await expect(panel).toHaveCSS("background-color", "rgb(32, 32, 36)");
+  }
+  await page.getByRole("textbox", { name: "混合端口", exact: true }).fill("12345");
+  await page.locator('nav a[href="/"]').click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.locator(".modal-dialog")).toHaveCSS("background-color", "rgb(32, 32, 36)");
+  await page.getByRole("button", { name: "继续编辑", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/theme-dark-mobile.png", fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.screenshot({ path: "test-results/theme-dark-settings.png", fullPage: true });
 });
