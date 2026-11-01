@@ -255,7 +255,10 @@ load its scripts or images to recognize it. Browsers send these headers to
 loopback and HTTPS origins; clients that do not send them are unaffected. That
 something answers on the port cannot be hidden from a page by any response.
 The Web page logs in only from a `#token=` fragment, which never reaches the
-server; a `?token=` query is removed from the address unused.
+server; a `?token=` query is removed from the address unused. A fragment set
+while the page is open is adopted without reloading: a signed-out page signs
+in, a signed-in page continues with the new token, and a token that does not
+work leaves a working session unchanged.
 
 For local access, the default origin/Host derive from the explicit listening
 address. Accessing `localhost` when configured as `127.0.0.1` requires specifying

@@ -260,7 +260,9 @@ authenticated with and ends (`token_rotated`, close 1008) when it changes.
 Clients never share a token through the service: the command line and the
 desktop client read the file again for each connection; a Web page that
 rotates the token receives the new one in the answer and adopts it, other pages
-return to login. Pages remind of a rotation within its last week (or quarter
+return to login. An open page also adopts a `#token=` fragment set later (a
+same-document navigation), which the desktop client uses to hand a rotated
+token to its management window without reloading it. Pages remind of a rotation within its last week (or quarter
 of a shorter period) with a notification, never by inserting page content.
 
 The management command allowlist covers:

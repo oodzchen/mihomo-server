@@ -148,6 +148,35 @@ function App() {
       .finally(() => active && setRestoring(false));
     return () => { active = false; };
   }, [login]);
+  // A host that holds the token (the desktop client) hands a new one to an
+  // open page through the fragment, without reloading it: the page signs in
+  // again, or keeps its session with the new token. The token it already
+  // uses changes nothing; one that does not work is ignored while signed in.
+  const sessionToken = useRef<string>(undefined);
+  sessionToken.current = session?.token;
+  useEffect(() => {
+    let latest = 0;
+    function adopt() {
+      const token = consumeUrlToken();
+      if (!token || token === sessionToken.current) return;
+      const attempt = ++latest;
+      command<CoreStatus>(token, "status")
+        .then((status) => {
+          if (attempt !== latest) return;
+          if (sessionToken.current) replaceToken(token);
+          else login({ token, status });
+          setLoginError("");
+        })
+        .catch((error) => {
+          if (attempt !== latest || sessionToken.current) return;
+          setLoginError(error instanceof ApiError && error.status === 401
+            ? t(savedLanguage(), "invalidToken")
+            : describe(error));
+        });
+    }
+    window.addEventListener("hashchange", adopt);
+    return () => window.removeEventListener("hashchange", adopt);
+  }, [login, replaceToken]);
   useEffect(() => {
     document.documentElement.lang = language === "en" ? "en" : language === "zhtw" ? "zh-TW" : "zh-CN";
     document.title = `Mihomo · ${t(language, "serviceManagement")}`;

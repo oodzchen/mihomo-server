@@ -6001,3 +6001,32 @@ test("a coming token rotation is reminded once without moving the page", async (
   await expect(page.getByRole("region", { name: "管理令牌" })).toContainText("即将轮换");
   await expect(reminder).toHaveCount(0);
 });
+
+test("an open page adopts a token handed over through the fragment without reloading", async ({ page }) => {
+  await page.goto(`${base}/#token=${encodeURIComponent(token)}`);
+  await expect(page.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+  await page.evaluate(() => { (window as unknown as { __loaded: boolean }).__loaded = true; });
+  // The token it already uses changes nothing.
+  await page.evaluate(value => { location.hash = `token=${value}`; }, token);
+  await expect(page).toHaveURL(`${base}/`);
+  await expect(page.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+
+  // Rotated elsewhere (the command line): the page signs out and says why.
+  const rotated = await settingsApi("rotate_token");
+  token = rotated.token;
+  await expect(page.getByRole("heading", { name: "连接你的服务" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("管理令牌已轮换");
+  // The desktop client hands the new token over: signed in again, same document.
+  await page.evaluate(value => { location.hash = `token=${value}`; }, token);
+  await expect(page.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(`${base}/`);
+  expect(await page.evaluate(() => sessionStorage.getItem("mihomo.token"))).toBe(token);
+  expect(await page.evaluate(() => (window as unknown as { __loaded?: boolean }).__loaded)).toBe(true);
+
+  // A token that does not work never ends a working session.
+  await page.evaluate(() => { location.hash = `token=${"0".repeat(64)}`; });
+  await expect(page).toHaveURL(`${base}/`);
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("mihomo.token"))).toBe(token);
+});
