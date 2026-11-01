@@ -276,6 +276,21 @@ pub enum ManagementCommand {
     SetTheme {
         theme: preferences::Theme,
     },
+    /// The management token's rotation period and schedule.
+    TokenRotation {},
+    /// Days between automatic rotations; `null` (required, never omitted):
+    /// the token stays valid until rotated by hand.
+    SetTokenRotation {
+        #[serde(deserialize_with = "required_nullable")]
+        period_days: Option<u32>,
+    },
+    /// Replace the token now; the answer carries the new token.
+    RotateToken {},
+}
+
+/// A field that must be present, though it may be null.
+fn required_nullable<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<u32>, D::Error> {
+    Option::<u32>::deserialize(deserializer)
 }
 
 #[derive(Clone, Copy)]
@@ -555,6 +570,11 @@ impl Management {
                 serde_json::to_value(self.preferences.set_language(language).await?)?
             }
             ManagementCommand::SetTheme { theme } => serde_json::to_value(self.preferences.set_theme(theme).await?)?,
+            ManagementCommand::TokenRotation {} => serde_json::to_value(self.authentication.rotation())?,
+            ManagementCommand::SetTokenRotation { period_days } => {
+                serde_json::to_value(self.authentication.set_rotation_period(period_days).await?)?
+            }
+            ManagementCommand::RotateToken {} => serde_json::to_value(self.authentication.rotate().await?)?,
             ManagementCommand::SetTunEnabled { enabled } => {
                 serde_json::to_value(self.manager.set_tun_enabled(enabled).await?)?
             }

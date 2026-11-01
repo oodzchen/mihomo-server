@@ -250,7 +250,7 @@ test.afterAll(async () => {
   }
 });
 
-for (const parameter of ["fragment", "query"]) {
+for (const parameter of ["fragment"]) {
   test(`management link ${parameter} token logs in automatically and is consumed`, async ({ page }) => {
     // A new link must override a stale credential left in this tab.
     await page.goto(base);
@@ -278,6 +278,48 @@ for (const parameter of ["fragment", "query"]) {
     await expect(page.getByRole("heading", { name: "连接你的服务" })).toBeVisible();
   });
 }
+
+test("a query token is removed from the address without logging in", async ({ page }) => {
+  // A query reaches the server and proxy logs; only the fragment logs in.
+  await page.goto(`${base}/?view=install&token=${token}#panel=overview`);
+  await expect(page.getByRole("heading", { name: "连接你的服务" })).toBeVisible();
+  await expect(page).toHaveURL(`${base}/?view=install#panel=overview`);
+  expect(await page.evaluate(() => sessionStorage.getItem("mihomo.token"))).toBeNull();
+});
+
+test("other sites cannot load anything from the service", async ({ page }) => {
+  const asset = await page.request.get(`${base}/`).then(response => response.text())
+    .then(html => html.match(/src="(\/assets\/[^"]+\.js)"/)?.[1]);
+  expect(asset).toBeTruthy();
+  const script = (url: string) => page.evaluate(url => new Promise<string>(resolve => {
+    const element = document.createElement("script");
+    element.onload = () => resolve("loaded");
+    element.onerror = () => resolve("failed");
+    element.src = url;
+    document.head.append(element);
+  }), url);
+  // Another port of the same host is "same-site": as close as a local test gets to another site.
+  const other = createHttpServer((_, response) => {
+    response.writeHead(200, { "Content-Type": "text/html" });
+    response.end("<!doctype html><title>other</title>");
+  });
+  await new Promise<void>(resolve => other.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = other.address();
+    if (!address || typeof address === "string") throw new Error("No address");
+    await page.goto(`http://127.0.0.1:${address.port}/`);
+    // Nothing loads, though a classic script needs no CORS. (That something
+    // answers on the port cannot be hidden by any response: an opaque no-cors
+    // fetch resolves either way.)
+    expect(await script(`${base}${asset}`)).toBe("failed");
+    // Following a link to the management page still works.
+    await page.evaluate(url => { location.href = url; }, `${base}/`);
+    await expect(page.getByRole("heading", { name: "连接你的服务" })).toBeVisible();
+    expect(await page.evaluate(url => fetch(url).then(response => response.status), `${base}${asset}`)).toBe(200);
+  } finally {
+    await new Promise<void>(resolve => other.close(() => resolve()));
+  }
+});
 
 test("invalid management link token is removed and permits manual login", async ({ page }) => {
   await page.goto(`${base}/#token=incorrect`);
@@ -5902,4 +5944,60 @@ test("interface theme covers every view, dialogs and notifications", async ({ pa
   await page.screenshot({ path: "test-results/theme-dark-mobile.png", fullPage: true });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: "test-results/theme-dark-settings.png", fullPage: true });
+});
+
+test("settings rotate the management token, keep this page signed in and end other pages", async ({ page, browser }) => {
+  await loginSettings(page);
+  const panel = page.getByRole("region", { name: "管理令牌" });
+  const period = panel.getByRole("combobox", { name: "自动轮换" });
+  await expect(period).toHaveValue("30");
+  await expect(panel).toContainText("签发于");
+  await expectHelp(page, "管理令牌", "定期自动轮换可以限制泄露令牌的有效期");
+  const box = await panel.boundingBox();
+
+  await period.selectOption("never");
+  await expect(page.locator(".toast-success").filter({ hasText: "保存成功" })).toHaveCount(1);
+  await expect(panel).toContainText("不会自动轮换");
+  expect((await settingsApi("token_rotation")).period_days).toBeNull();
+  await period.selectOption("90");
+  await expect(panel).toContainText("天后");
+  expect((await settingsApi("token_rotation")).period_days).toBe(90);
+  expect(await panel.boundingBox()).toEqual(box);
+
+  const other = await browser.newPage();
+  await other.goto(`${base}/#token=${encodeURIComponent(token)}`);
+  await expect(other.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+
+  const old = token;
+  await panel.getByRole("button", { name: "立即轮换" }).click();
+  const dialog = page.getByRole("dialog", { name: "立即更换管理令牌？" });
+  await expect(dialog).toContainText("其他已打开的网页需要重新登录");
+  await dialog.getByRole("button", { name: "立即轮换" }).click();
+  await expect(page.locator(".toast-success").filter({ hasText: "本页面已改用新令牌" })).toBeVisible();
+  token = (await readFile(join(directory, "management-token"), "utf8")).trim();
+  expect(token).not.toBe(old);
+  expect(await page.evaluate(() => sessionStorage.getItem("mihomo.token"))).toBe(token);
+  await expect(page.getByRole("heading", { name: "连接你的服务" })).toHaveCount(0);
+  // This page keeps working with the new token.
+  await period.selectOption("30");
+  await expect(period).toHaveValue("30");
+  expect((await settingsApi("token_rotation")).period_days).toBe(30);
+
+  // Another page loses its session and says why.
+  await expect(other.getByRole("heading", { name: "连接你的服务" })).toBeVisible();
+  await expect(other.getByRole("alert")).toContainText("管理令牌已轮换");
+  await other.close();
+});
+
+test("a coming token rotation is reminded once without moving the page", async ({ page }) => {
+  const rotation = await settingsApi("token_rotation");
+  // Inside the last week before the rotation; timers keep running.
+  await page.clock.setFixedTime((rotation.expires_at - 2 * 86_400) * 1000);
+  await loginSettings(page);
+  const reminder = page.locator(".toast-info").filter({ hasText: "管理令牌将于" });
+  await expect(reminder).toContainText("后天");
+  await expect(page.getByRole("region", { name: "管理令牌" })).toContainText("即将轮换");
+  await page.reload();
+  await expect(page.getByRole("region", { name: "管理令牌" })).toContainText("即将轮换");
+  await expect(reminder).toHaveCount(0);
 });

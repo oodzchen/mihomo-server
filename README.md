@@ -38,7 +38,12 @@ x86_64 / aarch64 Linux 预编译产物，系统切换时只下载、解包和适
 ```sh
 mihomo-server info     # 查看登录地址（含令牌）和文件路径
 mihomo-server token    # 查看登录令牌
+mihomo-server token status            # 令牌签发时间与下次轮换时间
+mihomo-server token period 90|never   # 调整自动轮换周期（默认 30 天），或设为永久有效
+mihomo-server token rotate            # 立即更换令牌
 ```
+
+令牌默认每 30 天自动轮换一次。轮换后命令行和桌面客户端会自动读取新令牌，已打开的网页需要用新令牌重新登录；到期前一周网页会提醒一次，也可在「设置 → 管理令牌」中立即轮换或调整周期。
 
 打开管理页面，使用令牌登录；在「订阅」页导入 YAML 或远程订阅链接并使用订阅，然后在「代理」页选择节点。开启 TUN 在「设置」页或用 `mihomo-server tun on` 完成。
 

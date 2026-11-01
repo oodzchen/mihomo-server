@@ -1,7 +1,7 @@
 import { HelpTip } from "./help-tip";
 import { useToast } from "./toast";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { ApiError, command, type Perform, type Connection } from "./api";
+import { ApiError, command, type Perform, type Connection, type TokenRotation } from "./api";
 import type { CoreStatus } from "./types";
 import {
   NetworkFields,
@@ -18,6 +18,7 @@ import { DOWNLOAD_KEYS, DownloadFields, downloadDraft, downloadRuntime, validate
 import { HostsFields, hostsDraft, hostsRuntime, validateHosts } from "./hosts-settings";
 import { ResourcesPanel } from "./resources";
 import { AutostartPanel } from "./autostart";
+import { TokenPanel } from "./token-rotation";
 import {
   AUTHORITY_KEYS,
   AuthorityFields,
@@ -195,6 +196,8 @@ type SettingsPageProps = {
   busy: boolean;
   perform: Perform;
   logout: (reason?: string) => void;
+  tokenRotation?: TokenRotation;
+  changeToken?: (command: "rotate_token" | "set_token_rotation", fields?: Record<string, unknown>) => Promise<TokenRotation>;
   desktopVersion?: string;
   theme: Theme;
   changeTheme: (value: Theme) => void;
@@ -249,6 +252,8 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   busy,
   perform,
   logout,
+  tokenRotation,
+  changeToken,
   desktopVersion,
   onEditorStateChange,
 }, ref) {
@@ -552,6 +557,15 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
           </label>
         </section>
         <AutostartPanel token={token} language={language} connection={connection} logout={logout} />
+        {changeToken && (
+          <TokenPanel
+            rotation={tokenRotation}
+            language={language}
+            disabled={connection !== "connected"}
+            change={changeToken}
+            logout={logout}
+          />
+        )}
         <details className="settings-details"><summary>{t(language, "setResources")}</summary>
         <ResourcesPanel token={token} status={status} connection={connection} logout={logout} language={language} />
         </details>

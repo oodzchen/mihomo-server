@@ -7,7 +7,8 @@ import {
   type FormEvent,
   type MouseEvent,
 } from "react";
-import { ApiError, command, reloadToServedBuild, servedBuildChanged, subscribe, type Connection, type Perform } from "./api";
+import { ApiError, command, reloadToServedBuild, servedBuildChanged, subscribe, type Connection, type Perform, type TokenRotation } from "./api";
+import { useTokenReminder } from "./token-rotation";
 import { SettingsPage, type SettingsPageHandle } from "./settings";
 import { CoreUpgradePage } from "./core-upgrade";
 import { ServicePage } from "./service";
@@ -76,18 +77,20 @@ function storeToken(token: string) {
   } catch { /* Private browser storage can be unavailable. */ }
 }
 
+/** Only the fragment logs in: unlike a query, it never reaches the server or
+ *  a proxy's request log. A query token is removed from the address unused. */
 function consumeUrlToken(): string | undefined {
   const url = new URL(window.location.href);
   const fragment = new URLSearchParams(url.hash.slice(1));
-  const token = fragment.get("token") ?? url.searchParams.get("token");
-  if (token === null) return undefined;
+  const token = fragment.get("token");
+  if (token === null && !url.searchParams.has("token")) return undefined;
   url.searchParams.delete("token");
   if (fragment.has("token")) {
     fragment.delete("token");
     url.hash = fragment.toString();
   }
   window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
-  return token.trim();
+  return token?.trim() || undefined;
 }
 
 // Consume the URL once before React renders; explicit links take precedence
@@ -122,6 +125,11 @@ function App() {
     storeToken(value.token);
     setSession(value);
   }, []);
+  // This page replaced the token itself: keep the session with the new one.
+  const replaceToken = useCallback((token: string) => {
+    storeToken(token);
+    setSession(current => current && { ...current, token });
+  }, []);
   useEffect(() => {
     const token = initialToken;
     if (!token) return;
@@ -146,7 +154,7 @@ function App() {
   }, [language]);
   if (restoring) return null;
   return <LanguageContext.Provider value={language}>{session ? (
-    <ToastProvider language={language}><Manager token={session.token} initial={session.status} logout={logout} language={language} changeLanguage={changeLanguage} theme={theme} changeTheme={changeTheme} /></ToastProvider>
+    <ToastProvider language={language}><Manager token={session.token} replaceToken={replaceToken} initial={session.status} logout={logout} language={language} changeLanguage={changeLanguage} theme={theme} changeTheme={changeTheme} /></ToastProvider>
   ) : (
     <Login error={loginError} login={login} language={language} changeLanguage={changeLanguage} />
   )}</LanguageContext.Provider>;
@@ -227,12 +235,14 @@ function Manager({
   theme,
   changeTheme,
   token,
+  replaceToken,
   initial,
-  logout,
+  logout: endSession,
   language,
   changeLanguage,
 }: {
   token: string;
+  replaceToken: (token: string) => void;
   theme: Theme;
   changeTheme: (value: Theme) => void;
   initial: CoreStatus;
@@ -259,6 +269,33 @@ function Manager({
   settingsDirtyRef.current = settingsEditor.dirty;
   const languageRef = useRef(language);
   languageRef.current = language;
+  // While this page replaces the token, the service ends the sessions and may
+  // briefly refuse requests made with the old one: those must not log out.
+  // The flag clears once the new token's subscriptions replace the old ones.
+  const rotating = useRef(false), rotatedMeanwhile = useRef(false);
+  const logout = useCallback((reason?: string) => {
+    if (!rotating.current) endSession(reason);
+  }, [endSession]);
+  useEffect(() => { rotating.current = false; }, [token]);
+  const [tokenRotation, setTokenRotation] = useState<TokenRotation>();
+  useTokenReminder(tokenRotation, language);
+  const changeToken = useCallback(async (name: "rotate_token" | "set_token_rotation", fields: Record<string, unknown> = {}) => {
+    rotating.current = true;
+    rotatedMeanwhile.current = false;
+    try {
+      const result = await command<TokenRotation>(token, name, fields);
+      const { token: replacement, ...rotation } = result;
+      setTokenRotation(rotation);
+      if (replacement) replaceToken(replacement);
+      else rotating.current = false;
+      return result;
+    } catch (error) {
+      rotating.current = false;
+      // Replaced, but the answer with the new token was lost.
+      if (rotatedMeanwhile.current) endSession(t(languageRef.current, "tokenRotatedLogin"));
+      throw error;
+    }
+  }, [token, replaceToken, endSession]);
   // The interface language is an instance preference shared with the other
   // clients (desktop tray included): adopt what the service pushes, and save
   // changes made here to the service, which pushes them to everyone else.
@@ -344,8 +381,13 @@ function Manager({
         if (event.type === "logs_reset") setLogs(event.data as CoreLog[]);
       },
       (value) => {
+        if (value === "tokenRotated" && rotating.current) {
+          rotatedMeanwhile.current = true;
+          return;
+        }
         setConnection(value);
         if (value === "unauthorized") logout(t(languageRef.current, "expiredToken"));
+        if (value === "tokenRotated") logout(t(languageRef.current, "tokenRotatedLogin"));
       },
     );
     const popstate = () => {
@@ -365,6 +407,17 @@ function Manager({
       window.removeEventListener("popstate", popstate);
     };
   }, [token, logout, adoptPreferences]);
+  // Read the token's schedule on every connection (a rotation or a change by
+  // another client ends the session, so this also follows those).
+  useEffect(() => {
+    if (connection !== "connected") return;
+    const controller = new AbortController();
+    command<TokenRotation>(token, "token_rotation", {}, controller.signal)
+      .then(setTokenRotation)
+      // An older service has no rotation; nothing to show or remind.
+      .catch(() => {});
+    return () => controller.abort();
+  }, [token, connection]);
   // A service that comes back upgraded serves new page files: load them, as a
   // browser refresh would (the desktop client has none), but never over
   // unsaved settings edits.
@@ -625,6 +678,8 @@ function Manager({
             busy={busy}
             perform={perform}
             logout={logout}
+            tokenRotation={tokenRotation}
+            changeToken={changeToken}
             desktopVersion={window.__MIHOMO_DESKTOP_VERSION__}
             onEditorStateChange={updateSettingsEditor}
           />

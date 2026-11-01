@@ -128,15 +128,18 @@ fn upgrade_session(
         .on_upgrade(move |mut socket| async move {
             let _permit = permit;
             let mut closing = state.closing.subscribe();
-            let authenticated = authenticate(&mut socket, &state, &mut closing).await;
-            let code = if authenticated {
-                if run(&mut socket, &state, feed, &mut closing).await.is_ok() {
-                    1000
-                } else {
-                    1011
+            // Subscribed before authenticating, so no rotation goes unnoticed.
+            let rotations = state.management.authentication.subscribe_rotations();
+            let code = match authenticate(&mut socket, &state, &mut closing).await {
+                Some(generation) => {
+                    let mut session = Session { rotations, generation };
+                    match run(&mut socket, &state, feed, &mut closing, &mut session).await {
+                        Ok(()) => 1000,
+                        Err(error) if error.is::<TokenRotated>() => 1008,
+                        Err(_) => 1011,
+                    }
                 }
-            } else {
-                1008
+                None => 1008,
             };
             let _ = timeout(
                 WRITE_TIMEOUT,
@@ -157,23 +160,63 @@ enum AuthenticationFrame {
     Authenticate { token: String },
 }
 
-async fn authenticate(socket: &mut WebSocket, state: &HttpState, closing: &mut watch::Receiver<bool>) -> bool {
+/// The token generation a session authenticated with; a rotation ends it.
+struct Session {
+    rotations: watch::Receiver<u64>,
+    generation: u64,
+}
+
+impl Session {
+    async fn rotated(&mut self) {
+        loop {
+            if *self.rotations.borrow_and_update() != self.generation {
+                return;
+            }
+            if self.rotations.changed().await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct TokenRotated;
+
+impl std::fmt::Display for TokenRotated {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("management token was rotated")
+    }
+}
+
+impl std::error::Error for TokenRotated {}
+
+/// Tell the client why its session ends: it has to read the new token.
+async fn end_rotated(socket: &mut WebSocket) -> Result<()> {
+    let _ = emit(
+        socket,
+        json!({"type":"error","code":"token_rotated","message":"management token was rotated"}),
+    )
+    .await;
+    Err(TokenRotated.into())
+}
+
+async fn authenticate(socket: &mut WebSocket, state: &HttpState, closing: &mut watch::Receiver<bool>) -> Option<u64> {
     let accepted = tokio::select! {
         biased;
-        _ = closed(closing) => return false,
+        _ = closed(closing) => return None,
         message = timeout(AUTH_TIMEOUT, socket.recv()) => {
             match message {
                 Ok(Some(Ok(Message::Text(text)))) => {
                     match serde_json::from_str::<AuthenticationFrame>(&text) {
-                        Ok(AuthenticationFrame::Authenticate { token }) => state.management.authentication.authorize_token(&token).is_ok(),
-                        Err(_) => false,
+                        Ok(AuthenticationFrame::Authenticate { token }) => state.management.authentication.authorize_session(&token).ok(),
+                        Err(_) => None,
                     }
                 }
-                _ => false,
+                _ => None,
             }
         }
     };
-    if !accepted {
+    if accepted.is_none() {
         let _ = emit(
             socket,
             json!({"type":"error","code":"unauthorized","message":"authentication required"}),
@@ -263,6 +306,7 @@ async fn run(
     state: &HttpState,
     feed: Option<Feed>,
     closing: &mut watch::Receiver<bool>,
+    session: &mut Session,
 ) -> Result<()> {
     let manager = &state.management.manager;
     let client = manager.client();
@@ -277,7 +321,7 @@ async fn run(
     let preference_events = feed.is_none_or(|feed| !feed.is_core());
     emit(socket, json!({"type":"ready"})).await?;
     if matches!(feed, Some(Feed::State)) {
-        return run_state(socket, state, closing).await;
+        return run_state(socket, state, closing, session).await;
     }
     match feed {
         None => {
@@ -306,6 +350,7 @@ async fn run(
         tokio::select! {
             biased;
             _ = closed(closing) => break,
+            () = session.rotated() => return end_rotated(socket).await,
             message = socket.recv() => if !incoming(message, &mut last_pong).await? { break; },
             changed = preferences.changed(), if preference_events => {
                 if changed.is_err() { break; }
@@ -388,7 +433,12 @@ async fn run(
     Ok(())
 }
 
-async fn run_state(socket: &mut WebSocket, state: &HttpState, closing: &mut watch::Receiver<bool>) -> Result<()> {
+async fn run_state(
+    socket: &mut WebSocket,
+    state: &HttpState,
+    closing: &mut watch::Receiver<bool>,
+    session: &mut Session,
+) -> Result<()> {
     let mut readings = state
         .state_feed
         .subscribe(Arc::clone(&state.management), closing.clone());
@@ -399,6 +449,7 @@ async fn run_state(socket: &mut WebSocket, state: &HttpState, closing: &mut watc
         tokio::select! {
             biased;
             _ = closed(closing) => return Ok(()),
+            () = session.rotated() => return end_rotated(socket).await,
             message = socket.recv() => if !incoming(message, &mut last_pong).await? { return Ok(()); },
             changed = readings.changed() => {
                 if changed.is_err() { return Ok(()); }

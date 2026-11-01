@@ -2150,3 +2150,126 @@ async fn proxy_mode_command_authenticates_and_preserves_other_settings() -> Resu
     let cleanup = manager.shutdown().await;
     result.and(cleanup)
 }
+
+#[tokio::test]
+async fn token_rotation_persists_its_period_and_restarts_it_for_a_replaced_token() -> Result<()> {
+    let directory = Directory::new()?;
+    let record = directory.0.join("management-token.json");
+    let authentication = directory.authentication()?;
+    let first = authentication.rotation();
+    assert_eq!(first.period_days, Some(30), "a new instance rotates monthly");
+    assert_eq!(first.expires_at, Some(first.issued_at + 30 * 86_400));
+    assert_eq!(first.remind_at, Some(first.issued_at + 23 * 86_400));
+    assert_eq!(std::fs::metadata(&record)?.permissions().mode() & 0o077, 0);
+
+    let reply = authentication.set_rotation_period(Some(7)).await?;
+    assert!(reply.token.is_none(), "a period that has not run out keeps the token");
+    assert_eq!(directory.authentication()?.rotation().period_days, Some(7));
+    assert_eq!(directory.authentication()?.rotation().issued_at, first.issued_at);
+    for invalid in [Some(0), Some(3651)] {
+        assert!(authentication.set_rotation_period(invalid).await.is_err());
+    }
+    authentication.set_rotation_period(None).await?;
+    let never = directory.authentication()?.rotation();
+    assert_eq!(
+        (never.period_days, never.expires_at, never.remind_at),
+        (None, None, None)
+    );
+    assert!(!directory.authentication()?.rotate_if_due().await?);
+    authentication.set_rotation_period(Some(1)).await?;
+
+    // A record whose period has run out rotates on the next check.
+    let mut stored: Value = serde_json::from_slice(&std::fs::read(&record)?)?;
+    stored["issued_at"] = json!(1);
+    std::fs::write(&record, stored.to_string())?;
+    let old = directory.token()?;
+    let expired = directory.authentication()?;
+    assert_eq!(expired.rotation().issued_at, 1);
+    assert!(expired.rotate_if_due().await?);
+    let new = directory.token()?;
+    assert_ne!(new, old);
+    assert_eq!(new.len(), 64);
+    assert_eq!(
+        std::fs::metadata(directory.0.join("management-token"))?
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert!(expired.authorize_token(&new).is_ok() && expired.authorize_token(&old).is_err());
+    assert!(expired.rotation().issued_at > 1 && expired.rotation().period_days == Some(1));
+    assert!(!expired.rotate_if_due().await?);
+
+    // Shortening the period below the token's age rotates and hands over the new token.
+    let mut stored: Value = serde_json::from_slice(&std::fs::read(&record)?)?;
+    stored["issued_at"] = json!(1);
+    stored["period_days"] = json!(null);
+    std::fs::write(&record, stored.to_string())?;
+    let shortened = directory.authentication()?.set_rotation_period(Some(30)).await?;
+    assert_eq!(shortened.token.as_deref(), Some(directory.token()?.as_str()));
+    assert_ne!(directory.token()?, new);
+
+    // A token replaced outside the service starts a new period, keeping the choice.
+    std::fs::remove_file(directory.0.join("management-token"))?;
+    let replaced = directory.authentication()?;
+    assert_eq!(replaced.rotation().period_days, Some(30));
+    assert!(replaced.rotation().issued_at > 1);
+    assert!(!replaced.rotate_if_due().await?);
+    Ok(())
+}
+
+#[tokio::test]
+async fn other_sites_may_navigate_to_the_service_but_not_load_from_it() -> Result<()> {
+    let directory = Directory::new()?;
+    let manager = directory.manager()?;
+    let app = router(HttpState::new(Management::new(
+        manager.clone(),
+        directory.authentication()?,
+    )));
+    let result = async {
+        let token = directory.token()?;
+        let fetch = |path: &str, site: Option<&str>, mode: &str, dest: &str| -> Result<Request<Body>> {
+            let mut request = request(&token, path, None)?;
+            if let Some(site) = site {
+                let headers = request.headers_mut();
+                headers.insert("sec-fetch-site", site.parse()?);
+                headers.insert("sec-fetch-mode", mode.parse()?);
+                headers.insert("sec-fetch-dest", dest.parse()?);
+            }
+            Ok(request)
+        };
+        for site in ["cross-site", "same-site"] {
+            for (mode, dest) in [
+                ("no-cors", "image"),
+                ("no-cors", "script"),
+                ("navigate", "iframe"),
+                ("cors", "empty"),
+            ] {
+                let (status, body) = response(&app, fetch("/favicon.svg", Some(site), mode, dest)?).await?;
+                assert_eq!(status, StatusCode::FORBIDDEN, "{site} {mode} {dest}");
+                assert_eq!(body["error"]["code"], "cross_site_request");
+            }
+            assert_eq!(
+                response(&app, fetch("/api/status", Some(site), "cors", "empty")?)
+                    .await?
+                    .0,
+                StatusCode::FORBIDDEN
+            );
+            // A link from another page opens the management page.
+            assert_ne!(
+                response(&app, fetch("/", Some(site), "navigate", "document")?).await?.0,
+                StatusCode::FORBIDDEN
+            );
+        }
+        for site in [None, Some("same-origin"), Some("none")] {
+            assert_eq!(
+                response(&app, fetch("/api/status", site, "cors", "empty")?).await?.0,
+                StatusCode::OK
+            );
+        }
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    let cleanup = manager.shutdown().await;
+    result.and(cleanup)
+}

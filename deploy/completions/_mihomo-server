@@ -22,7 +22,7 @@ _mihomo-server() {
                 'enable:start your instance now and at boot'
                 'disable:stop your instance and do not start it at boot'
                 'info:show versions, management address, token, proxy port and paths'
-                'token:print your management token'
+                'token:print your management token, or show and change its rotation'
                 'logs:follow service logs'
                 'sub:list, select, update, add and remove subscriptions'
                 'proxy:list groups and nodes, test delays and select nodes'
@@ -51,6 +51,12 @@ _mihomo-server() {
                         _values 'proxy command' list select test unfix
                     elif [[ $line[2] == (test|delay) ]]; then
                         _arguments '--url=[test URL]:URL:_urls' '--timeout=[timeout in ms]:ms:' '1:target:'
+                    fi ;;
+                token)
+                    if (( CURRENT == 2 )); then
+                        _values 'token command' status rotate period
+                    elif [[ $line[2] == period ]] && (( CURRENT == 3 )); then
+                        _values 'days' 7 30 90 180 365 never
                     fi ;;
                 mode) (( CURRENT == 2 )) && _values mode rule global direct ;;
                 tun) (( CURRENT == 2 )) && _values state on off ;;

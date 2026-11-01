@@ -74,6 +74,54 @@ pub fn age(now: u64, then: u64) -> String {
     }
 }
 
+/// How long until THEN, the counterpart of [`age`].
+pub fn remaining(now: u64, then: u64) -> String {
+    let seconds = then.saturating_sub(now);
+    match seconds {
+        0..60 => "now".into(),
+        60..3600 => format!("in {} min", seconds / 60),
+        3600..86_400 => format!("in {} h", seconds / 3600),
+        _ => format!("in {} d", seconds / 86_400),
+    }
+}
+
+/// `never`/`off`/`0` (no automatic rotation) or 1 to 3650 days.
+pub fn parse_rotation_period(value: &str) -> Result<Option<u32>> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "never" | "off" | "0" => Ok(None),
+        days => match days.trim_end_matches('d').parse::<u32>() {
+            Ok(days @ 1..=3650) => Ok(Some(days)),
+            _ => bail!("rotation period must be 1 to 3650 days, or never"),
+        },
+    }
+}
+
+/// Label/value lines describing a `token_rotation` answer.
+pub fn token_rotation(rotation: &Value, now: u64) -> Vec<(&'static str, String)> {
+    let number = |name| rotation.get(name).and_then(Value::as_u64);
+    let mut lines = Vec::new();
+    if let Some(issued) = number("issued_at") {
+        lines.push(("issued", format!("{} UTC ({})", date(issued), age(now, issued))));
+    }
+    match (number("period_days"), number("expires_at")) {
+        (Some(days), Some(expires)) => {
+            lines.push(("rotation", format!("every {days} d")));
+            let soon = number("remind_at").is_some_and(|remind| now >= remind);
+            lines.push((
+                "rotates",
+                format!(
+                    "{} UTC ({}){}",
+                    date(expires),
+                    remaining(now, expires),
+                    if soon { "; soon" } else { "" }
+                ),
+            ));
+        }
+        _ => lines.push(("rotation", "never (valid until rotated by hand)".into())),
+    }
+    lines
+}
+
 /// UTC calendar date of a Unix timestamp (Howard Hinnant's civil_from_days).
 pub fn date(seconds: u64) -> String {
     let days = (seconds / 86_400) as i64 + 719_468;
@@ -127,6 +175,37 @@ pub fn parse_switch(value: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn token_rotation_periods_and_schedule_read_naturally() {
+        for (input, expected) in [
+            ("30", Some(30)),
+            ("7d", Some(7)),
+            ("3650", Some(3650)),
+            ("never", None),
+            ("OFF", None),
+            ("0", None),
+        ] {
+            assert_eq!(parse_rotation_period(input).unwrap(), expected, "{input}");
+        }
+        for invalid in ["3651", "-1", "0d", "monthly", ""] {
+            assert!(parse_rotation_period(invalid).is_err(), "{invalid}");
+        }
+        let day = 86_400;
+        let rotation =
+            serde_json::json!({"period_days": 30, "issued_at": 0, "expires_at": 30 * day, "remind_at": 23 * day});
+        assert_eq!(
+            token_rotation(&rotation, day),
+            vec![
+                ("issued", "1970-01-01 UTC (1 d ago)".to_owned()),
+                ("rotation", "every 30 d".to_owned()),
+                ("rotates", "1970-01-31 UTC (in 29 d)".to_owned()),
+            ]
+        );
+        assert!(token_rotation(&rotation, 25 * day)[2].1.ends_with("; soon"));
+        let never = serde_json::json!({"period_days": null, "issued_at": 0, "expires_at": null, "remind_at": null});
+        assert_eq!(token_rotation(&never, 0)[1].1, "never (valid until rotated by hand)");
+    }
     use serde_json::json;
 
     fn proxies() -> Map<String, Value> {

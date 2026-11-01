@@ -54,6 +54,13 @@ impl HttpState {
         self.closing.send_replace(true);
     }
 
+    /// Rotate the management token whenever its period runs out, until close.
+    pub fn spawn_token_rotation(&self) -> tokio::task::JoinHandle<()> {
+        let management = Arc::clone(&self.management);
+        let closing = self.closing.subscribe();
+        tokio::spawn(async move { management.authentication.run_rotation(closing).await })
+    }
+
     /// Axum's HTTP graceful shutdown does not await upgraded socket tasks.
     pub async fn drain_websockets(&self) {
         if let Ok(permits) = Arc::clone(&self.sessions).acquire_many_owned(MAX_WEBSOCKETS).await {
@@ -95,6 +102,19 @@ pub fn router(state: HttpState) -> Router {
         .with_state(state)
 }
 
+/// Another site's page may navigate to the service, but may not load anything
+/// from it: an image or script of this service that loads would identify it.
+/// (That something answers on the port cannot be hidden by any response; only
+/// the browser's local network access restrictions prevent that probe.)
+/// Browsers send Fetch Metadata to loopback and HTTPS origins; requests
+/// without it (command-line clients) are unaffected. `same-site` includes
+/// other ports of the same host.
+fn cross_site(headers: &HeaderMap) -> bool {
+    let value = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+    matches!(value("sec-fetch-site"), Some("cross-site" | "same-site"))
+        && !(value("sec-fetch-mode") == Some("navigate") && value("sec-fetch-dest") == Some("document"))
+}
+
 fn credentials(headers: &HeaderMap) -> Result<RequestCredentials<'_>, &'static str> {
     fn single(headers: &HeaderMap, name: header::HeaderName) -> Result<Option<&str>, &'static str> {
         let mut values = headers.get_all(name).iter();
@@ -121,6 +141,13 @@ async fn authenticate(State(state): State<HttpState>, request: Request, next: Ne
             StatusCode::SERVICE_UNAVAILABLE,
             "shutting_down",
             "service is shutting down",
+            language.as_deref(),
+        )
+    } else if cross_site(headers) {
+        error_with_language(
+            StatusCode::FORBIDDEN,
+            "cross_site_request",
+            "requests from other sites are not allowed",
             language.as_deref(),
         )
     } else {

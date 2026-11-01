@@ -82,6 +82,23 @@ Show the service and core versions, management login address, token file, proxy 
 .B token
 Write the management token.
 .TP
+.B token status
+Show when the token was issued and when it is next rotated.
+.TP
+.B token rotate
+Replace the token now and write the new one.
+Pages that are open must log in again; the command line and the desktop client
+read the new token by themselves.
+.TP
+.BR "token period" " [" \fIDAYS\fR | never]
+Show or set how often the service replaces the token by itself:
+1 to 3650 days, or
+.B never
+to keep it until it is rotated by hand.
+The default is 30 days.
+The Web interface reminds of a coming rotation during its last week
+(or last quarter of a shorter period).
+.TP
 .BR logs " [" \fIjournalctl-option\fR ...]
 Follow the service journal, or pass the options to
 .BR journalctl (1),
@@ -188,9 +205,10 @@ and
 .BR MIHOMO_SERVER_PUBLIC_ORIGIN .
 .TP
 .I ~/.local/share/mihomo-server/
-Subscriptions, settings, core and the
+Subscriptions, settings, core, the
 .I management-token
-file.
+file and its rotation record
+.IR management-token.json .
 .TP
 .I /opt/mihomo-server/current/
 The installed program.

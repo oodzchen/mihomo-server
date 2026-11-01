@@ -108,7 +108,19 @@ pub fn command() -> Command {
         )
         .subcommand(Command::new("disable").about("Stop your instance and do not start it at boot; data is kept"))
         .subcommand(Command::new("info").about("Show versions, management address, token, proxy port and file paths"))
-        .subcommand(Command::new("token").about("Print your management token"))
+        .subcommand(
+            Command::new("token")
+                .about("Print your management token, or show and change its rotation")
+                .subcommand(Command::new("status").about("Show when the token was issued and when it rotates"))
+                .subcommand(
+                    Command::new("rotate").about("Replace the token now and print it; open pages must log in again"),
+                )
+                .subcommand(
+                    Command::new("period")
+                        .about("Show or set how often the token rotates automatically")
+                        .arg(operand("days", "DAYS", "Days between rotations (1-3650), or never")),
+                ),
+        )
         .subcommand(
             Command::new("logs")
                 .about("Follow service logs; extra options go to journalctl (e.g. -n 100)")
@@ -379,6 +391,7 @@ async fn dispatch(matches: &ArgMatches) -> Result<i32> {
             }
             Ok(0)
         }
+        "token" if arguments.subcommand().is_some() => token(&context, arguments).await,
         "start" | "stop" | "restart" | "enable" | "disable" | "info" | "token" => system::exec_helper(&[name.into()]),
         "logs" => {
             let mut forwarded: Vec<OsString> = vec!["logs".into()];
@@ -965,6 +978,36 @@ async fn proxies(context: &Context, matches: &ArgMatches) -> Result<i32> {
         }
         (other, _) => Err(usage(format!("unknown proxy command {other}"))),
     }
+}
+
+async fn token(context: &Context, matches: &ArgMatches) -> Result<i32> {
+    let api = context.connect()?;
+    let (name, arguments) = matches.subcommand().context("missing token command")?;
+    let value = match name {
+        "rotate" => api.command("rotate_token", json!({})).await?,
+        "period" => match arguments.get_one::<String>("days") {
+            Some(days) => {
+                let period = view::parse_rotation_period(days).map_err(|error| usage(error.to_string()))?;
+                api.command("set_token_rotation", json!({"period_days": period}))
+                    .await?
+            }
+            None => api.command("token_rotation", json!({})).await?,
+        },
+        _ => api.command("token_rotation", json!({})).await?,
+    };
+    if context.json {
+        return context.print_json(&value).map(|()| 0);
+    }
+    // A shortened period that has already run out rotates as well.
+    if let Some(token) = value.get("token").and_then(Value::as_str) {
+        println!("{token}");
+        eprintln!("The management token was replaced; open pages must log in with the new one.");
+        return Ok(0);
+    }
+    for (name, line) in view::token_rotation(&value, now()) {
+        label(name, line);
+    }
+    Ok(0)
 }
 
 async fn mode(context: &Context, matches: &ArgMatches) -> Result<i32> {

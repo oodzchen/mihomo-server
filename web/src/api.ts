@@ -8,6 +8,8 @@ export type Connection =
   | "connected"
   | "reconnecting"
   | "unauthorized"
+  /** The service replaced its token; this session's token no longer works. */
+  | "tokenRotated"
   | "badData";
 
 /** A supplied toast owns the specific result; reconcile defers errors until caller readback. */
@@ -16,6 +18,17 @@ export type Perform = <T>(
   fields?: Record<string, unknown>,
   options?: { notify?: boolean; toast?: ToastOperation; reconcile?: boolean },
 ) => Promise<T | undefined>;
+
+/** The management token's rotation schedule (Unix seconds). */
+export type TokenRotation = {
+  period_days: number | null;
+  default_period_days: number;
+  issued_at: number;
+  expires_at: number | null;
+  remind_at: number | null;
+  /** Only in the answer to the request that replaced the token. */
+  token?: string;
+};
 
 export class ApiError extends Error {
   constructor(
@@ -116,9 +129,9 @@ export function subscribe(
           attempts = 0;
           connection("connected");
         }
-        if (message.code === "unauthorized") {
+        if (message.code === "unauthorized" || message.code === "token_rotated") {
           stopped = true;
-          connection("unauthorized");
+          connection(message.code === "unauthorized" ? "unauthorized" : "tokenRotated");
           current.close();
         }
         receive(message);

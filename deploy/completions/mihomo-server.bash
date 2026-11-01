@@ -30,6 +30,11 @@ _mihomo_server() {
                 '') words='list select test unfix' ;;
                 test | delay) words='--url --timeout' ;;
             esac ;;
+        token)
+            case "$sub" in
+                '') words='status rotate period' ;;
+                period) words='7 30 90 180 365 never' ;;
+            esac ;;
         mode) [ -n "$sub" ] || words='rule global direct' ;;
         tun) [ -n "$sub" ] || words='on off' ;;
         core)

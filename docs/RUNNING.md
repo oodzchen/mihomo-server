@@ -209,18 +209,53 @@ omitting it leaves API-only operation. Unknown API routes never fall back to HTM
 
 First startup generates 32 random bytes as a hexadecimal bearer token at
 `<data-dir>/management-token`, published atomically with mode 0600 on Unix.
-The token survives service restarts. It is not printed or returned by an API.
-An existing token must be a regular, private file containing 64 hexadecimal
-characters. Invalid credentials/files stop initialization rather than being
-silently replaced. To rotate the token, stop the service, remove that file,
-and restart; all clients then need the replacement token. Keep the data directory
+The token survives service restarts. It is not printed by the service and
+only `rotate_token` (or a `set_token_rotation` that rotates) returns it, to the
+client that made the request. An existing token must be a regular, private file
+containing 64 hexadecimal characters. Invalid credentials/files stop
+initialization rather than being silently replaced. Keep the data directory
 private to the service account.
+
+The service rotates the token automatically, every 30 days by default.
+`<data-dir>/management-token.json` (0600) records the period and when the
+current token was issued, tied to it by its SHA-256; a token replaced outside the
+service (or an installation upgraded from a release without rotation) starts a
+new period when the service first reads it, keeping the chosen period.
+A rotation replaces the file atomically, ends every WebSocket session
+authenticated with the old token (an `{"type":"error","code":"token_rotated"}`
+frame, then close code 1008) and accepts the old token for HTTP requests only
+during the following 10 seconds. The command line and the desktop client read the
+file for every connection and continue by themselves; open Web pages return to
+the login page, except the one that rotated the token, which adopts the new one.
+
+| Command | Fields | Result |
+| --- | --- | --- |
+| `token_rotation` | — | `period_days` (`null`: never), `default_period_days`, `issued_at`, `expires_at`, `remind_at` (Unix seconds; `null` without rotation) |
+| `set_token_rotation` | `period_days`: 1 to 3650, or `null` (required) | the same; also `token` when the token was older than the new period and was rotated now |
+| `rotate_token` | — | the same, with the new `token` |
+
+The reminder starts one week before a rotation, or a quarter of a shorter period
+before it. `mihomo-server token status`, `token period [DAYS|never]` and
+`token rotate` use these commands; the Web settings page shows the schedule and
+offers the same choices, and the Web UI reminds once per browser session during
+the reminder window. To replace the token while the service is stopped, remove
+the file; the next start creates a new one.
 
 Every HTTP command/read route requires `Authorization: Bearer <token>` and the expected Host.
 Browser requests with Origin must match the configured origin exactly; requests
 without Origin are permitted for CLI clients. Query parameters, cookie credentials
 and cross-origin CORS access are not supported. Duplicate Host, Origin or
 Authorization values are rejected. All API responses use `Cache-Control: no-store`.
+Every route, the Web assets included, refuses with 403 `cross_site_request` a
+browser request whose Fetch Metadata says it comes from another site
+(`Sec-Fetch-Site: cross-site` or `same-site`, which covers other ports of the same
+host), except a top-level navigation (`Sec-Fetch-Mode: navigate`,
+`Sec-Fetch-Dest: document`): other pages may link to the service but cannot
+load its scripts or images to recognize it. Browsers send these headers to
+loopback and HTTPS origins; clients that do not send them are unaffected. That
+something answers on the port cannot be hidden from a page by any response.
+The Web page logs in only from a `#token=` fragment, which never reaches the
+server; a `?token=` query is removed from the address unused.
 
 For local access, the default origin/Host derive from the explicit listening
 address. Accessing `localhost` when configured as `127.0.0.1` requires specifying

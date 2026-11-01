@@ -279,6 +279,7 @@ mihomo-server status                    # service, core, subscription, mode, TUN
 mihomo-server start | stop | restart    # restart/start wait for a running core and API
 mihomo-server enable | disable          # also at boot / not at boot; data is kept
 mihomo-server info | token | logs [-n 100]
+mihomo-server token [status|rotate|period [DAYS|never]]   # automatic rotation, 30 days by default
 mihomo-server sub [list|use|update|add|remove]
 mihomo-server proxy [list [GROUP]|select [GROUP] NODE|test [TARGET]|unfix GROUP]
 mihomo-server mode [rule|global|direct]

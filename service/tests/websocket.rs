@@ -552,3 +552,84 @@ async fn live_state_feed_follows_manager_and_core_selections_mode_and_restart() 
     let cleanup = server.shutdown().await;
     result.and(cleanup)
 }
+
+#[tokio::test]
+async fn token_rotation_ends_sessions_and_hands_the_new_token_to_its_requester() -> Result<()> {
+    let server = Server::new(false).await?;
+    let command = |token: &str, body: Value| {
+        reqwest::Client::new()
+            .post(format!("http://{}/api/commands", server.address))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+    };
+    let rotation: Value = command(&server.token, json!({"command":"token_rotation"}))
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(rotation["period_days"], 30);
+    assert_eq!(rotation["default_period_days"], 30);
+    assert!(rotation.get("token").is_none());
+    let missing = command(&server.token, json!({"command":"set_token_rotation"})).await?;
+    assert_eq!(
+        missing.status(),
+        reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+        "never is explicit"
+    );
+    let invalid = command(&server.token, json!({"command":"set_token_rotation","period_days":0})).await?;
+    assert!(!invalid.status().is_success());
+
+    let mut events = server.authenticated("/api/events").await?;
+    until(&mut events, |value| value["type"] == "snapshot").await?;
+    let mut state = server.authenticated("/api/streams/state").await?;
+
+    let rotated: Value = command(&server.token, json!({"command":"rotate_token"}))
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let token = rotated["token"].as_str().context("new token")?.to_owned();
+    assert_ne!(token, server.token);
+    assert_eq!(
+        std::fs::read_to_string(server.directory.0.join("management-token"))?.trim(),
+        token
+    );
+    assert_eq!(rotated["period_days"], 30);
+    for socket in [&mut events, &mut state] {
+        let ended = until(socket, |value| value["type"] == "error").await?;
+        assert_eq!(ended["code"], "token_rotated");
+        closed(socket).await?;
+    }
+
+    // Requests already sent with the old token pass briefly; sessions never.
+    command(&server.token, json!({"command":"status"}))
+        .await?
+        .error_for_status()?;
+    let mut old = server.socket("/api/events").await?;
+    old.send(Message::Text(
+        json!({"type":"authenticate","token":server.token}).to_string().into(),
+    ))
+    .await?;
+    assert_eq!(receive(&mut old).await?["code"], "unauthorized");
+    let mut new = server.socket("/api/events").await?;
+    new.send(Message::Text(
+        json!({"type":"authenticate","token":token}).to_string().into(),
+    ))
+    .await?;
+    assert_eq!(receive(&mut new).await?["type"], "ready");
+
+    let never: Value = command(&token, json!({"command":"set_token_rotation","period_days":null}))
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(
+        (never["period_days"].clone(), never["expires_at"].clone()),
+        (Value::Null, Value::Null)
+    );
+    assert!(never.get("token").is_none());
+    until(&mut new, |value| value["type"] == "snapshot").await?;
+    drop((old, new));
+    server.shutdown().await
+}

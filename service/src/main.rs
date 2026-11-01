@@ -297,6 +297,8 @@ async fn run(arguments: Vec<OsString>) -> Result<()> {
             return Err(error);
         }
     };
+    // Ends when the HTTP state closes during shutdown.
+    let _token_rotation = http_state.spawn_token_rotation();
     let (http_stop, mut http_stop_rx) = tokio::sync::watch::channel(false);
     let mut http_server = tokio::spawn(
         axum::serve(listener, router(http_state.clone()))

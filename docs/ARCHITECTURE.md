@@ -241,6 +241,28 @@ endpoints, and WebSocket state/log/metric feeds. Unknown API or asset routes do
 not fall through to the SPA. A private management token is created in the data
 directory; a wildcard listener also requires an explicit public origin.
 
+Requests must carry the configured Host (DNS rebinding) and, from browsers, the
+exact Origin; the token travels only in the `Authorization` header or a
+WebSocket's first frame, never in a query or cookie, so other pages cannot use it
+(CSRF). The Web page logs in only from a `#token=` fragment. Browser requests
+another site's page makes (Fetch Metadata `cross-site`/`same-site`, other ports
+of the host included) are refused on every route, assets included, except
+top-level navigations, so a page cannot recognize the service by loading its
+files. That a port answers cannot be hidden from a page.
+
+The token rotates (`management::auth`). `management-token.json` records the
+period (30 days by default, 1 to 3650, or none) and the issue time, tied to the
+token by its digest, so a token replaced outside the service starts a new period.
+A task checks at least every ten minutes; rotation replaces the file atomically,
+then the service accepts only the new token, except for HTTP requests during a
+10-second grace. Every WebSocket session records the token generation it
+authenticated with and ends (`token_rotated`, close 1008) when it changes.
+Clients never share a token through the service: the command line and the
+desktop client read the file again for each connection; a Web page that
+rotates the token receives the new one in the answer and adopts it, other pages
+return to login. Pages remind of a rotation within its last week (or quarter
+of a shorter period) with a notification, never by inserting page content.
+
 The management command allowlist covers:
 
 - service/core lifecycle, state, logs, core upgrades and program upgrades;
