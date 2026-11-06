@@ -7,7 +7,7 @@
 //! host. The holder is found through `/proc/locks`, which every user can read.
 //!
 //! The member who turned TUN on last gets it. A member who turns TUN on while
-//! another holds it writes its UID and the time into `tun.request`
+//! another holds it writes its UID, boot ID and time into `tun.request`
 //! (root:mihomo-tun 0660) and waits for the lock; the holder's service sees the
 //! request, turns its own TUN off and so releases the lock. Installations
 //! without that file keep the TUN with its first holder.
@@ -18,7 +18,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Result, bail};
+use anyhow::{Context as _, Result, bail};
 use parking_lot::Mutex;
 
 pub const NAME: &str = "tun.lock";
@@ -88,6 +88,13 @@ fn now() -> u128 {
     time.tv_sec as u128 * 1_000_000_000 + time.tv_nsec as u128
 }
 
+fn boot_id() -> Result<String> {
+    Ok(std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .context("read current boot ID for TUN handover")?
+        .trim()
+        .to_owned())
+}
+
 impl TunLock {
     /// The installation's lock beside REGISTRY, if the installer created one.
     pub fn beside(registry: &Path) -> Option<Self> {
@@ -141,13 +148,14 @@ impl TunLock {
     /// request file (the TUN then stays with its holder).
     pub fn request_takeover(&self) -> Result<bool> {
         let path = self.request_path();
+        let boot = boot_id()?;
         let mut file = match OpenOptions::new().write(true).truncate(true).open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
             Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return Err(Unauthorized.into()),
             Err(error) => bail!("open {}: {error}", path.display()),
         };
-        file.write_all(format!("{} {}\n", crate::secure_fs::euid(), now()).as_bytes())
+        file.write_all(format!("{} {boot} {}\n", crate::secure_fs::euid(), now()).as_bytes())
             .map_err(|error| anyhow::anyhow!("write {}: {error}", path.display()))?;
         Ok(true)
     }
@@ -158,8 +166,13 @@ impl TunLock {
         let mut held = self.held.lock();
         let held = held.as_mut()?;
         let request = std::fs::read_to_string(self.request_path()).ok()?;
-        let (uid, at) = request.trim().split_once(' ')?;
-        let (uid, at) = (uid.parse::<u32>().ok()?, at.parse::<u128>().ok()?);
+        let mut fields = request.split_whitespace();
+        let uid = fields.next()?.parse::<u32>().ok()?;
+        let request_boot = fields.next()?;
+        let at = fields.next()?.parse::<u128>().ok()?;
+        if fields.next().is_some() || request_boot != boot_id().ok()? {
+            return None;
+        }
         if at <= held.since || uid == crate::secure_fs::euid() {
             return None;
         }
@@ -264,9 +277,17 @@ mod tests {
         assert_eq!(holder.take_request(), None, "empty request");
         // A request from before this service took the TUN was for someone else.
         let other = crate::secure_fs::euid().wrapping_add(1);
-        std::fs::write(root.join(REQUEST), format!("{other} 1\n"))?;
+        let boot = boot_id()?;
+        std::fs::write(root.join(REQUEST), format!("{other} {boot} 1\n"))?;
         assert_eq!(holder.take_request(), None);
-        std::fs::write(root.join(REQUEST), format!("{other} {}\n", now()))?;
+        // A request left by an earlier boot must never take this TUN, even if
+        // its monotonic timestamp happens to be later than this boot's.
+        std::fs::write(root.join(REQUEST), format!("{other} old-boot {}\n", now() + 1))?;
+        assert_eq!(holder.take_request(), None);
+        // Ignore the legacy format, which has no way to distinguish boots.
+        std::fs::write(root.join(REQUEST), format!("{other} {}\n", now() + 1))?;
+        assert_eq!(holder.take_request(), None);
+        std::fs::write(root.join(REQUEST), format!("{other} {boot} {}\n", now()))?;
         assert_eq!(holder.take_request(), Some(other));
         assert_eq!(holder.take_request(), None, "reported once");
         // Its own request (written by `request_takeover`) never asks itself.
