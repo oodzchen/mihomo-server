@@ -39,7 +39,8 @@
   --switch-knob: #fff;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme="dark"],
+:root:not([data-theme="light"]):not([data-theme="dark"])[data-system-theme="dark"] {
   color-scheme: dark;
   --text: #f4f4f5;
   --canvas: #151518;
@@ -80,7 +81,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-system-theme]) {
     color-scheme: dark;
     --text: #f4f4f5;
     --canvas: #151518;

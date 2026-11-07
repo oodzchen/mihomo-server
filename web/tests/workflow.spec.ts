@@ -5873,6 +5873,41 @@ test("interface theme follows system changes and explicit choices without shifti
   await expect(page.getByRole("button", { name: "保存服务设置", exact: true })).toBeDisabled();
 });
 
+test("interface theme follows native desktop events when WebKit media stays stale", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "__MIHOMO_DESKTOP_VERSION__", { value: "theme-test" });
+    // The host contract, deliberately without setting a DOM attribute: the
+    // service page must adopt the cached snapshot and later native events.
+    (window as any).__MIHOMO_SYSTEM_THEME__ = { current: "light" };
+  });
+  await loginSettings(page);
+  const picker = page.getByRole("combobox", { name: "界面主题", exact: true });
+  const canvas = () => page.locator("html").evaluate(node => getComputedStyle(node).backgroundColor);
+  const native = (theme: "light" | "dark") => page.evaluate(theme => {
+    (window as any).__MIHOMO_SYSTEM_THEME__.current = theme;
+    window.dispatchEvent(new Event("mihomo-system-theme-changed"));
+  }, theme);
+  await expect(picker).toHaveValue("system");
+  await expect.poll(canvas).toBe("rgb(244, 244, 245)");
+  const before = await page.locator(".settings-layout").boundingBox();
+  const draft = page.getByRole("textbox", { name: "混合端口", exact: true });
+  await draft.fill("12345");
+  await native("dark");
+  await expect.poll(canvas).toBe("rgb(21, 21, 24)");
+  await native("light");
+  await expect.poll(canvas).toBe("rgb(244, 244, 245)");
+  expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(true);
+  await expect(draft).toHaveValue("12345");
+  expect(await page.locator(".settings-layout").boundingBox()).toEqual(before);
+  expect((await settingsApi("preferences")).theme).toBe("system");
+  await picker.selectOption("dark");
+  await native("light");
+  await expect.poll(canvas).toBe("rgb(21, 21, 24)");
+  await picker.selectOption("system");
+  await expect.poll(canvas).toBe("rgb(244, 244, 245)");
+});
+
 test("interface theme syncs browser and desktop sessions and survives service restart", async ({ page, browser }) => {
   await loginSettings(page);
   const desktop = await browser.newContext({ colorScheme: "dark" });

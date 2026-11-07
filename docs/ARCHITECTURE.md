@@ -358,12 +358,19 @@ atomically) and never applied to the core. `preferences` reads it and
 `set_theme` saves `system` (the default and migration value), `light`, or `dark`.
 Updates preserve the other preference and share the same persistence lock.
 The Web UI applies the cached theme before mounting, uses semantic CSS colors
-across views, dialogs and notifications, and lets CSS track system color changes
-in `system` mode. Settings changes apply immediately and are sent in order;
+across views, dialogs and notifications, and resolves system appearance separately
+in `data-system-theme`, without changing the saved `data-theme` preference. Browser
+clients listen to `matchMedia` changes and recheck on focus, visibility restoration
+and `pageshow`. The desktop host can supply `__MIHOMO_SYSTEM_THEME__.current` and
+`mihomo-system-theme-changed` notifications, which take precedence over stale
+WebKitGTK media queries. CSS retains a media-query fallback before scripts run.
+Settings changes apply immediately and are sent in order;
 a final read reconciles failed or concurrent writes. Both the browser and the
 desktop dashboard adopt the shared events. The desktop also caches the theme
 for its offline status page. Native window decorations retain the system
-appearance, preserving WebKit system color tracking.
+appearance; the desktop forwards native appearance events to both its WebViews
+and reapplies the current snapshot after navigation or restoring a hidden window.
+No theme change reloads the page or alters core/service settings.
 Each change is persisted, then pushed as a `preferences` event on `/api/events`
 (whose snapshot also carries it) and on the lightweight
 `/api/streams/preferences` feed. The Web UI adopts the pushed language after

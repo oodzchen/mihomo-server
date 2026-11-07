@@ -17,5 +17,29 @@ export function applyTheme(theme: Theme) {
   catch { /* Theme still works when browser storage is unavailable. */ }
 }
 
+// Keep the preference (data-theme) separate from the resolved system appearance.
+// WebKitGTK can leave prefers-color-scheme stale after a desktop theme change;
+// the desktop host supplies a native snapshot/event when available.
+declare global {
+  interface Window {
+    __MIHOMO_SYSTEM_THEME__?: { readonly current?: "light" | "dark" };
+  }
+}
+const systemColors = window.matchMedia("(prefers-color-scheme: dark)");
+function syncSystemTheme() {
+  const native = window.__MIHOMO_SYSTEM_THEME__?.current;
+  document.documentElement.dataset.systemTheme = native === "light" || native === "dark"
+    ? native : systemColors.matches ? "dark" : "light";
+}
+systemColors.addEventListener("change", syncSystemTheme);
+window.addEventListener("mihomo-system-theme-changed", syncSystemTheme);
+// Recheck after backgrounding, BFCache restoration, or a suspended WebView.
+window.addEventListener("focus", syncSystemTheme);
+window.addEventListener("pageshow", syncSystemTheme);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") syncSystemTheme();
+});
+
 // Apply before React mounts, including while restoring a desktop login token.
+syncSystemTheme();
 applyTheme(savedTheme());
