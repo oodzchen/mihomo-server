@@ -1,0 +1,10 @@
+{
+  "geoip.metadb": {
+    "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb",
+    "sha256": "4140529354d8048d6e85625fb78fe189f0919f4d9827b854fae6e90be1977124"
+  },
+  "geosite.dat": {
+    "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat",
+    "sha256": "aaf8ba4aeabebdffdccf2d4b4a0a4a50e62f2aaca27586c4e9f6525a878b3d9e"
+  }
+}

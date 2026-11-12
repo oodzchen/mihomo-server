@@ -58,6 +58,17 @@ jobs:
       - name: Check runner target
         run: test "${{ steps.pin.outputs.target }}" = "$TARGET"
 
+      - name: Prepare pinned Geo seeds
+        run: |
+          for name in geoip.metadb geosite.dat; do
+            url=$(jq -er --arg name "$name" '.[$name].url' deploy/geo-pin.json)
+            hash=$(jq -er --arg name "$name" '.[$name].sha256' deploy/geo-pin.json)
+            python3 scripts/prepare_geo.py --name "$name" --url "$url" \
+              --sha256 "$hash" --output-dir dist/geo
+          done
+          printf 'mode: rule\ngeo-auto-update: false\nrules:\n  - GEOSITE,CN,DIRECT\n  - GEOIP,CN,DIRECT\n  - MATCH,DIRECT\n' > dist/geo-check.yaml
+          .core/verge-mihomo -t -d "$PWD/dist/geo" -f "$PWD/dist/geo-check.yaml"
+
       - name: Build and package bundle
         env:
           # Where `mihomo-server update` fetches the installer from.
@@ -70,6 +81,7 @@ jobs:
             --mihomo .core/verge-mihomo \
             --core-version "${{ steps.pin.outputs.version }}" \
             --core-sha256 "${{ steps.pin.outputs.sha256 }}" \
+            --geo-dir dist/geo --geo-manifest dist/geo/geo-pins.json \
             --release-notes dist/release-notes.md \
             --output "dist/mihomo-server-$GITHUB_REF_NAME-$TARGET"
 

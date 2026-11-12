@@ -163,6 +163,27 @@ fn current_local_geo_seed_recovers_an_interrupted_download_when_available() -> R
 }
 
 #[test]
+fn official_release_geo_assets_initialize_when_supplied() -> Result<()> {
+    let Ok(source_dir) = std::env::var("MIHOMO_TEST_GEO_DIR") else {
+        return Ok(());
+    };
+    let source_dir = PathBuf::from(source_dir);
+    let dir = Directory::new()?;
+    let source = dir.0.join("resources/geo");
+    let data = dir.0.join("data");
+    fs::create_dir_all(&source)?;
+    fs::create_dir(&data)?;
+    let pins: serde_json::Value = serde_json::from_slice(&fs::read(source_dir.join("geo-pins.json"))?)?;
+    for name in ["geoip.metadb", "geosite.dat"] {
+        fs::copy(source_dir.join(name), source.join(name))?;
+    }
+    dir.geo_manifest(pins)?;
+    assert_eq!(dir.resources()?.initialize_geo(&data)?.len(), 2);
+    assert!(dir.resources()?.initialize_geo(&data)?.is_empty());
+    Ok(())
+}
+
+#[test]
 fn invalid_bundle_cannot_replace_corrupted_geo() -> Result<()> {
     let dir = Directory::new()?;
     let source = dir.0.join("resources/geo");
