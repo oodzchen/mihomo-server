@@ -510,13 +510,13 @@ mod tests {
         std::mem::forget(abandoned);
         assert!(data.join(".geo-seed/geosite.dat").exists());
         let seeds = BTreeMap::from([("geosite.dat".into(), seed)]);
-        assert!(resources::initialize(&source, &data, &seeds)?.is_empty());
+        assert_eq!(resources::initialize(&source, &data, &seeds)?, vec!["geosite.dat"]);
         assert!(!data.join(".geo-seed").exists());
-        assert_eq!(fs::read(&path)?, b"previous");
+        assert_eq!(fs::read(&path)?, valid);
         Ok(())
     }
     #[test]
-    fn startup_recovers_unpublished_update_without_replacing_authoritative_data() -> Result<()> {
+    fn startup_recovers_unpublished_update_and_repairs_corrupt_data() -> Result<()> {
         let dir = Directory::new()?;
         let (seed, _) = dir.setup(true)?;
         let data = dir.0.join("data");
@@ -524,8 +524,11 @@ mod tests {
         let stage = resources::prepare_stage(&data)?;
         resources::copy(&dir.0.join("source"), &stage, "Country.mmdb", &seed)?;
         let seeds = BTreeMap::from([("Country.mmdb".into(), seed)]);
-        assert!(resources::initialize(&dir.0.join("source"), &data, &seeds)?.is_empty());
-        assert_eq!(fs::read(data.join("Country.mmdb"))?, b"authoritative old file");
+        assert_eq!(
+            resources::initialize(&dir.0.join("source"), &data, &seeds)?,
+            vec!["Country.mmdb"]
+        );
+        assert_eq!(fs::read(data.join("Country.mmdb"))?, fixture_with_description(true));
         assert!(!stage.exists());
         let stage = resources::prepare_stage(&data)?;
         fs::write(stage.join("unknown"), "retain")?;
