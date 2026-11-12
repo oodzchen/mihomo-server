@@ -504,6 +504,12 @@ The main data directory contains the profile catalog and sources, typed settings
 runtime revisions/manifest, recovery journals, management token, managed core,
 resource/cache files, selection records and optional retained backups. A
 directory lock prevents two supervisors from owning the same state.
+Release preparation may download SHA-256-pinned Geo assets into `resources/geo`;
+the device never needs the release source network to initialize them. Under the
+data lock, startup verifies bundled bytes and Geo format before installing missing
+assets or atomically replacing malformed existing assets. Format-valid user updates
+remain authoritative over bundle seeds. The same private staging directory is
+cleaned after an interrupted publication.
 
 Shared installation follows XDG locations for per-user config and data. The
 installer records resolved absolute paths so systemd startup does not depend on

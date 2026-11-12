@@ -56,32 +56,124 @@ fn hash(bytes: &[u8]) -> String {
         .map(|b| format!("{b:02x}"))
         .collect()
 }
+fn mmdb(description: bool) -> Vec<u8> {
+    fn string(value: &str) -> Vec<u8> {
+        let mut bytes = vec![0x40 | value.len() as u8];
+        bytes.extend(value.as_bytes());
+        bytes
+    }
+    let mut bytes = vec![0, 0, 17, 0, 0, 1];
+    bytes.extend([0; 16]);
+    bytes.extend(string("CN"));
+    bytes.extend(b"\xab\xcd\xefMaxMind.com");
+    bytes.push(0xe9);
+    for (key, value) in [
+        ("binary_format_major_version", vec![0xa1, 2]),
+        ("binary_format_minor_version", vec![0xa0]),
+        ("build_epoch", vec![1, 2, 1]),
+        ("database_type", string("fixture")),
+        (
+            "description",
+            if description {
+                [vec![0xe1], string("en"), string("fixture")].concat()
+            } else {
+                vec![0xe0]
+            },
+        ),
+        ("ip_version", vec![0xa1, 4]),
+        ("languages", vec![0, 4]),
+        ("node_count", vec![0xc1, 1]),
+        ("record_size", vec![0xa1, 24]),
+    ] {
+        bytes.extend(string(key));
+        bytes.extend(value);
+    }
+    bytes
+}
 
 #[test]
 fn geo_seed_publication_is_private_independent_and_never_overwrites_existing_data() -> Result<()> {
     let dir = Directory::new()?;
     fs::create_dir_all(dir.0.join("resources/geo"))?;
     fs::create_dir(dir.0.join("data"))?;
-    fs::write(dir.0.join("resources/geo/geoip.metadb"), b"pinned Geo bytes")?;
-    dir.geo_manifest(json!({"geoip.metadb":{"bytes":17,"sha256":hash(b"pinned Geo bytes")}}))?;
+    let seed = mmdb(true);
+    fs::write(dir.0.join("resources/geo/geoip.metadb"), &seed)?;
+    dir.geo_manifest(json!({"geoip.metadb":{"bytes":seed.len()+1,"sha256":hash(&seed)}}))?;
     // Pin must match exact size; an off-by-one is rejected before publication.
     assert!(dir.resources()?.initialize_geo(&dir.0.join("data")).is_err());
     assert!(!dir.0.join("data/geoip.metadb").exists());
-    dir.geo_manifest(json!({"geoip.metadb":{"bytes":16,"sha256":hash(b"pinned Geo bytes")}}))?;
+    dir.geo_manifest(json!({"geoip.metadb":{"bytes":seed.len(),"sha256":hash(&seed)}}))?;
     assert_eq!(
         dir.resources()?.initialize_geo(&dir.0.join("data"))?,
         vec!["geoip.metadb"]
     );
-    assert_eq!(fs::read(dir.0.join("data/geoip.metadb"))?, b"pinned Geo bytes");
+    assert_eq!(fs::read(dir.0.join("data/geoip.metadb"))?, seed);
     assert_eq!(
         fs::metadata(dir.0.join("data/geoip.metadb"))?.permissions().mode() & 0o777,
         0o600
     );
     assert!(!dir.0.join("data/.geo-seed").exists());
-    fs::write(dir.0.join("data/geoip.metadb"), b"newer user Geo data")?;
+    let newer = mmdb(true);
+    fs::write(dir.0.join("data/geoip.metadb"), &newer)?;
     fs::remove_dir_all(dir.0.join("resources/geo"))?;
     assert!(dir.resources()?.initialize_geo(&dir.0.join("data"))?.is_empty());
-    assert_eq!(fs::read(dir.0.join("data/geoip.metadb"))?, b"newer user Geo data");
+    assert_eq!(fs::read(dir.0.join("data/geoip.metadb"))?, newer);
+    Ok(())
+}
+
+#[test]
+fn corrupted_geo_is_repaired_but_valid_user_update_is_preserved() -> Result<()> {
+    let dir = Directory::new()?;
+    let source = dir.0.join("resources/geo");
+    let data = dir.0.join("data");
+    fs::create_dir_all(&source)?;
+    fs::create_dir(&data)?;
+    let seed = mmdb(true);
+    fs::write(source.join("geoip.metadb"), &seed)?;
+    dir.geo_manifest(json!({"geoip.metadb":{"bytes":seed.len(),"sha256":hash(&seed)}}))?;
+    fs::write(data.join("geoip.metadb"), b"interrupted download")?;
+    assert_eq!(dir.resources()?.initialize_geo(&data)?, vec!["geoip.metadb"]);
+    assert_eq!(fs::read(data.join("geoip.metadb"))?, seed);
+    let newer = mmdb(false);
+    fs::write(data.join("geoip.metadb"), &newer)?;
+    fs::remove_file(source.join("geoip.metadb"))?;
+    assert!(dir.resources()?.initialize_geo(&data)?.is_empty());
+    assert_eq!(fs::read(data.join("geoip.metadb"))?, newer);
+    Ok(())
+}
+
+#[test]
+fn current_local_geo_seed_recovers_an_interrupted_download_when_available() -> Result<()> {
+    let local = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/geoip.metadb");
+    if !local.is_file() {
+        return Ok(());
+    }
+    let dir = Directory::new()?;
+    let source = dir.0.join("resources/geo");
+    let data = dir.0.join("data");
+    fs::create_dir_all(&source)?;
+    fs::create_dir(&data)?;
+    let bytes = fs::read(local)?;
+    fs::write(source.join("geoip.metadb"), &bytes)?;
+    dir.geo_manifest(json!({"geoip.metadb":{"bytes":bytes.len(),"sha256":hash(&bytes)}}))?;
+    fs::write(data.join("geoip.metadb"), &bytes[..bytes.len() / 4])?;
+    assert_eq!(dir.resources()?.initialize_geo(&data)?, vec!["geoip.metadb"]);
+    assert_eq!(fs::read(data.join("geoip.metadb"))?, bytes);
+    Ok(())
+}
+
+#[test]
+fn invalid_bundle_cannot_replace_corrupted_geo() -> Result<()> {
+    let dir = Directory::new()?;
+    let source = dir.0.join("resources/geo");
+    let data = dir.0.join("data");
+    fs::create_dir_all(&source)?;
+    fs::create_dir(&data)?;
+    fs::write(source.join("geoip.metadb"), b"bad seed")?;
+    dir.geo_manifest(json!({"geoip.metadb":{"bytes":8,"sha256":hash(b"bad seed")}}))?;
+    fs::write(data.join("geoip.metadb"), b"partial old data")?;
+    assert!(dir.resources()?.initialize_geo(&data).is_err());
+    assert_eq!(fs::read(data.join("geoip.metadb"))?, b"partial old data");
     Ok(())
 }
 
@@ -90,10 +182,10 @@ fn bad_second_geo_digest_leaves_all_live_destinations_unchanged() -> Result<()> 
     let dir = Directory::new()?;
     fs::create_dir_all(dir.0.join("resources/geo"))?;
     fs::create_dir(dir.0.join("data"))?;
-    for name in ["Country.mmdb", "geosite.dat"] {
-        fs::write(dir.0.join("resources/geo").join(name), b"Geo fixture")?;
-    }
-    dir.geo_manifest(json!({"Country.mmdb":{"bytes":11,"sha256":hash(b"Geo fixture")},"geosite.dat":{"bytes":11,"sha256":"0".repeat(64)}}))?;
+    let seed = mmdb(true);
+    fs::write(dir.0.join("resources/geo/Country.mmdb"), &seed)?;
+    fs::write(dir.0.join("resources/geo/geoip.metadb"), &seed)?;
+    dir.geo_manifest(json!({"Country.mmdb":{"bytes":seed.len(),"sha256":hash(&seed)},"geoip.metadb":{"bytes":seed.len(),"sha256":"0".repeat(64)}}))?;
     assert!(dir.resources()?.initialize_geo(&dir.0.join("data")).is_err());
     assert_eq!(fs::read_dir(dir.0.join("data"))?.count(), 0);
     Ok(())
@@ -157,25 +249,23 @@ fn interrupted_geo_publication_recovers_known_orphans_and_preserves_linked_live_
     fs::create_dir(dir.0.join("data"))?;
     fs::create_dir(dir.0.join("data/.geo-seed"))?;
     fs::set_permissions(dir.0.join("data/.geo-seed"), fs::Permissions::from_mode(0o700))?;
-    fs::write(dir.0.join("data/.geo-seed/Country.mmdb"), "already published")?;
+    let valid = mmdb(true);
+    fs::write(dir.0.join("data/.geo-seed/Country.mmdb"), &valid)?;
     fs::hard_link(
         dir.0.join("data/.geo-seed/Country.mmdb"),
         dir.0.join("data/Country.mmdb"),
     )?;
-    fs::write(dir.0.join("data/.geo-seed/geosite.dat"), "partial")?;
-    fs::write(dir.0.join("resources/geo/geosite.dat"), "verified")?;
+    fs::write(dir.0.join("data/.geo-seed/geoip.metadb"), "partial")?;
+    fs::write(dir.0.join("resources/geo/geoip.metadb"), &valid)?;
     dir.geo_manifest(
-        json!({"Country.mmdb":{"bytes":1,"sha256":hash(b"x")},"geosite.dat":{"bytes":8,"sha256":hash(b"verified")}}),
+        json!({"Country.mmdb":{"bytes":1,"sha256":hash(b"x")},"geoip.metadb":{"bytes":valid.len(),"sha256":hash(&valid)}}),
     )?;
     assert_eq!(
         dir.resources()?.initialize_geo(&dir.0.join("data"))?,
-        vec!["geosite.dat"]
+        vec!["geoip.metadb"]
     );
-    assert_eq!(
-        fs::read_to_string(dir.0.join("data/Country.mmdb"))?,
-        "already published"
-    );
-    assert_eq!(fs::read_to_string(dir.0.join("data/geosite.dat"))?, "verified");
+    assert_eq!(fs::read(dir.0.join("data/Country.mmdb"))?, valid);
+    assert_eq!(fs::read(dir.0.join("data/geoip.metadb"))?, valid);
     assert!(!dir.0.join("data/.geo-seed").exists());
     Ok(())
 }

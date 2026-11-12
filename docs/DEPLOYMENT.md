@@ -155,7 +155,22 @@ data as part of bundle replacement. Optional pinned Geo seeding is available as
 described below; full resource update/rollback and provider cache ownership remain
 pending.
 
-## Include existing Geo files for first-use initialization
+## Prepare Geo files for offline initialization and repair
+
+Download public Geo assets on the release machine with a trusted, fixed SHA-256.
+For example, to prepare the MMDB used by `GEOIP` rules:
+
+```sh
+python3 scripts/prepare_geo.py --name geoip.metadb \
+  --url https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb \
+  --sha256 EXPECTED_64_HEX_DIGIT_SHA256 --output-dir /path/to/geo-files
+```
+
+This writes `/path/to/geo-files/geo-pins.json`. Obtain and review the digest
+independently before running the command; a changing `latest` URL is never
+trusted without the pin. Run it once per needed Geo asset. The device does not
+download these files during installation. Pass the resulting directory and pin
+file to `package_bundle.py` as shown below.
 
 Provide a directory of existing files and a JSON integrity manifest alongside the
 normal bundle arguments:
@@ -187,16 +202,16 @@ files, checks pins before/after copying into `resources/geo`, records them in th
 resource manifest's optional `geo` map and includes them in `checksums.sha256`.
 Old manifests without this map remain supported. No Geo download is performed.
 
-At startup, while holding the data lock, only missing declared Geo files are
-initialized. Existing declared nonempty regular data files remain authoritative even if
-the bundle changes; links, empty or oversized existing entries stop initialization.
-Seeds are staged privately and checked before publication as independent 0600
-files. Known partial staging is recovered after interruption. Publication is
-atomic per file, so a partially published verified set resumes at next startup.
+At startup, while holding the data lock, missing declared Geo files are
+initialized and malformed existing files are repaired from the bundle. Existing
+format-valid files remain authoritative even if the bundle changes. Links, empty
+or oversized existing entries stop initialization. Seeds are staged privately,
+checked against the pin and parsed as Geo data before publication as independent
+0600 files. Known partial staging is recovered after interruption. Publication
+or repair is atomic per file.
 Inspect installed files in the Web settings resource panel or the authenticated
-`resources` command. Geo updates and format-specific validation are not provided
-by this initialization path: matching SHA-256 proves integrity, not validity of
-every Geo database format. Select suitable assets for the configuration's Geo mode.
+`resources` command. Geo updates remain separate from this initialization path;
+select suitable assets for the configuration's Geo mode.
 
 ## Shared Linux installation
 

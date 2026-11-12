@@ -1,4 +1,4 @@
-//! Integrity-pinned first-use Geo seeding. Existing data is authoritative.
+//! Integrity-pinned Geo seeding and repair. Valid existing data is authoritative.
 use anyhow::{Context as _, Result, ensure};
 use headless_core::config::resource_paths::GEO_ASSETS;
 use ring::digest::{Context, SHA256};
@@ -45,8 +45,16 @@ pub(crate) fn validate_manifest(seeds: &BTreeMap<String, Seed>) -> Result<()> {
 pub(crate) fn initialize(source: &Path, data: &Path, seeds: &BTreeMap<String, Seed>) -> Result<Vec<String>> {
     let mut needed = Vec::new();
     for (name, seed) in seeds {
-        if !existing(&data.join(name))? {
-            needed.push((name, seed));
+        let path = data.join(name);
+        if !existing(&path)? {
+            needed.push((name, seed, false));
+        } else {
+            // An independently updated valid database wins over the bundle pin.
+            // A partial download is a regular nonempty file, so type/size checks
+            // alone cannot distinguish it from usable data.
+            if validate_asset(data, name).is_err() {
+                needed.push((name, seed, true));
+            }
         }
     }
     if needed.is_empty() && !data.join(STAGE).try_exists()? {
@@ -54,11 +62,19 @@ pub(crate) fn initialize(source: &Path, data: &Path, seeds: &BTreeMap<String, Se
     }
     let stage = prepare_stage(data)?;
     let result = (|| {
-        for (name, seed) in &needed {
+        for (name, seed, _) in &needed {
             copy(source, &stage, name, seed)?;
+            validate_asset(&stage, name).with_context(|| format!("bundled {name} has invalid Geo format"))?;
         }
         let mut installed = Vec::new();
-        for (name, _) in &needed {
+        for (name, _, repair) in &needed {
+            if *repair {
+                existing(&data.join(name))?;
+                fs::rename(stage.join(name), data.join(name))?;
+                installed.push((*name).clone());
+                File::open(data)?.sync_all()?;
+                continue;
+            }
             match fs::hard_link(stage.join(name), data.join(name)) {
                 Ok(()) => {
                     installed.push((*name).clone());
@@ -78,6 +94,15 @@ pub(crate) fn initialize(source: &Path, data: &Path, seeds: &BTreeMap<String, Se
         (Err(error), _) => Err(error),
         (_, Err(error)) => Err(error.context("Geo staging cleanup failed")),
     }
+}
+
+fn validate_asset(directory: &Path, name: &str) -> Result<()> {
+    if name == "GeoSite.dat" {
+        crate::geo::dat::validate(&fs::read(directory.join(name))?, "geosite.dat")?;
+    } else {
+        crate::geo::validation::validate(directory, name)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn prepare_stage(data: &Path) -> Result<std::path::PathBuf> {
