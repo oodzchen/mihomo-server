@@ -1219,6 +1219,80 @@ dd {
   padding-top: 14px;
   margin-top: 14px;
 }
+.editor-field {
+  margin-bottom: 12px;
+}
+.editor-field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.editor-field-header label {
+  margin: 0;
+}
+.editor-guide-trigger {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  flex-shrink: 0;
+}
+.editor-guide-trigger:hover,
+.editor-guide-trigger[aria-expanded="true"] {
+  color: var(--text-strong);
+  border-color: var(--text-strong);
+}
+.editor-guide-popover {
+  position: fixed;
+  z-index: 3000;
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  box-shadow: 0 8px 28px #0003;
+}
+.editor-guide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--text-strong);
+}
+.editor-guide-list {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+.editor-guide-code {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+  color: var(--text-strong);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+}
 .reset-confirmation .actions {
   margin-top: 10px;
 }

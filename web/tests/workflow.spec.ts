@@ -926,6 +926,60 @@ test("global script editor translates draft, size feedback and reset confirmatio
   expect(after.generation).toBe(before.generation);
 });
 
+test("global merge and script editors show syntax guide popover and support Ctrl+Z undo", async ({ page }) => {
+  await page.goto(`${base}/profiles`);
+  await page.getByLabel("管理令牌").fill(token);
+  await page.getByRole("button", { name: "连接服务" }).click();
+
+  // Global merge editor: syntax guide popover (no layout shift) + Ctrl+Z undo
+  await page.getByRole("button", { name: "编辑全局合并" }).click();
+  const mergeBox = page.getByRole("textbox", { name: "全局合并 YAML", exact: true });
+  const mergeBefore = await mergeBox.inputValue();
+  const mergeTopBefore = (await mergeBox.boundingBox())!.y;
+  await page.getByRole("button", { name: "查看全局合并语法说明" }).click();
+  const mergeGuide = page.getByRole("dialog", { name: "全局合并 YAML 语法与覆盖规则" });
+  await expect(mergeGuide).toBeVisible();
+  await expect(mergeGuide).toContainText("直接整块覆盖");
+  await expect(mergeGuide).toContainText("store-selected: true");
+  expect((await mergeBox.boundingBox())!.y).toBe(mergeTopBefore);
+  await page.keyboard.press("Escape");
+  await expect(mergeGuide).toHaveCount(0);
+
+  await mergeBox.click();
+  await page.keyboard.press("End");
+  await page.keyboard.insertText("\n# undo-test");
+  await expect(mergeBox).toHaveValue(`${mergeBefore}\n# undo-test`);
+  await page.keyboard.press("Control+z");
+  await expect(mergeBox).toHaveValue(mergeBefore);
+  await page.keyboard.press("Control+Shift+z");
+  await expect(mergeBox).toHaveValue(`${mergeBefore}\n# undo-test`);
+  await page.getByRole("button", { name: "取消全局编辑" }).click();
+
+  // Global script editor: syntax guide popover (no layout shift) + Ctrl+Z undo
+  await page.getByRole("button", { name: "编辑全局脚本" }).click();
+  const scriptBox = page.getByRole("textbox", { name: "全局脚本 JavaScript", exact: true });
+  const scriptBefore = await scriptBox.inputValue();
+  const scriptTopBefore = (await scriptBox.boundingBox())!.y;
+  await page.getByRole("button", { name: "查看全局脚本语法说明" }).click();
+  const scriptGuide = page.getByRole("dialog", { name: "全局脚本语法与增量合并示例" });
+  await expect(scriptGuide).toBeVisible();
+  await expect(scriptGuide).toContainText("增量合并");
+  await expect(scriptGuide).toContainText("function main(config, name)");
+  expect((await scriptBox.boundingBox())!.y).toBe(scriptTopBefore);
+  await page.keyboard.press("Escape");
+  await expect(scriptGuide).toHaveCount(0);
+
+  await scriptBox.click();
+  await page.keyboard.press("End");
+  await page.keyboard.insertText("\n// undo-test");
+  await expect(scriptBox).toHaveValue(`${scriptBefore}\n// undo-test`);
+  await page.keyboard.press("Control+z");
+  await expect(scriptBox).toHaveValue(scriptBefore);
+  await page.keyboard.press("Control+Shift+z");
+  await expect(scriptBox).toHaveValue(`${scriptBefore}\n// undo-test`);
+  await page.getByRole("button", { name: "取消全局编辑" }).click();
+});
+
 test("resource inventory reads metadata, refreshes changes and retries without editing settings", async ({ page }) => {
   await page.goto(`${base}/settings`);
   await page.getByLabel("管理令牌").fill(token);

@@ -1,7 +1,128 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import type { Perform } from "./api";
 import { t, type Language } from "./i18n";
 import type { CoreStatus, Profile } from "./types";
+
+function EditorSyntaxGuide({
+  language,
+  label,
+  title,
+  body,
+  example,
+}: {
+  language: Language;
+  label: string;
+  title: string;
+  body: string;
+  example: string;
+}) {
+  const popoverId = useId();
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ left: 16, top: 16 });
+  const trigger = useRef<HTMLButtonElement>(null);
+  const popover = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    function place() {
+      const anchor = trigger.current?.getBoundingClientRect();
+      const box = popover.current?.getBoundingClientRect();
+      if (!anchor || !box) return;
+      const left = Math.max(
+        16,
+        Math.min(anchor.right - box.width, window.innerWidth - box.width - 16),
+      );
+      const top =
+        anchor.bottom + box.height + 16 < window.innerHeight
+          ? anchor.bottom + 8
+          : Math.max(16, anchor.top - box.height - 8);
+      setPosition({ left, top });
+    }
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Node | null;
+      if (
+        target &&
+        !trigger.current?.contains(target) &&
+        !popover.current?.contains(target)
+      ) {
+        setOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+        trigger.current?.focus();
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        className="editor-guide-trigger"
+        aria-label={label}
+        aria-expanded={open}
+        aria-controls={open ? popoverId : undefined}
+        title={label}
+        onClick={() => setOpen((current) => !current)}
+      >
+        ?
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={popover}
+            id={popoverId}
+            role="dialog"
+            aria-label={title}
+            className="editor-guide-popover"
+            style={position}
+          >
+            <div className="editor-guide-header">
+              <strong>{title}</strong>
+              <button
+                type="button"
+                className="modal-close"
+                aria-label={t(language, "close")}
+                onClick={() => setOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <ul className="editor-guide-list">
+              {body.split("\n").map((line, index) => (
+                <li key={index}>{line}</li>
+              ))}
+            </ul>
+            <pre className="editor-guide-code">
+              <code>{example}</code>
+            </pre>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
 
 export function MergeEditor({
   item,
@@ -179,7 +300,10 @@ export function GlobalEditor({
   onRetry: () => void;
   onClose: () => void;
 }) {
-  const [content, setContent] = useState(initial);
+  const textareaId = useId();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [hasText, setHasText] = useState(() => Boolean(initial.trim()));
+  const [isEmpty, setIsEmpty] = useState(() => initial.length === 0);
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<"script-large" | "merge-large" | null>(null);
   const script = kind === "script";
@@ -187,6 +311,7 @@ export function GlobalEditor({
   async function save(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    const content = textareaRef.current?.value ?? "";
     const limit = (script ? 1 : 8) * 1024 ** 2;
     if (new TextEncoder().encode(content).length > limit) {
       setError(script ? "script-large" : "merge-large");
@@ -217,29 +342,46 @@ export function GlobalEditor({
           {t(language, "globalReadMissing")}
         </p>
       )}
-      <label>
-        {t(language, script ? "globalScriptSource" : "globalMergeYaml")}
+      <div className="editor-field">
+        <div className="editor-field-header">
+          <label htmlFor={textareaId}>
+            {t(language, script ? "globalScriptSource" : "globalMergeYaml")}
+          </label>
+          <EditorSyntaxGuide
+            language={language}
+            label={t(language, script ? "globalScriptGuideLabel" : "globalMergeGuideLabel")}
+            title={t(language, script ? "globalScriptGuideTitle" : "globalMergeGuideTitle")}
+            body={t(language, script ? "globalScriptGuideBody" : "globalMergeGuideBody")}
+            example={t(language, script ? "globalScriptGuideExample" : "globalMergeGuideExample")}
+          />
+        </div>
         <textarea
+          id={textareaId}
+          ref={textareaRef}
           className="code"
           rows={12}
-          value={content}
+          defaultValue={initial}
           disabled={busy}
           onChange={(event) => {
-            setContent(event.target.value);
-            setError(null);
-            setResetting(false);
+            const next = event.target.value;
+            const nextHasText = Boolean(next.trim());
+            const nextIsEmpty = next.length === 0;
+            if (nextHasText !== hasText) setHasText(nextHasText);
+            if (nextIsEmpty !== isEmpty) setIsEmpty(nextIsEmpty);
+            if (error) setError(null);
+            if (resetting) setResetting(false);
           }}
           spellCheck={false}
           required
         />
-      </label>
+      </div>
       {error && (
         <p className="alert" role="alert">
           {t(language, error === "script-large" ? "globalScriptTooLarge" : "globalMergeTooLarge")}
         </p>
       )}
       <div className="actions">
-        <button className="primary" disabled={busy || !content.trim()}>
+        <button className="primary" disabled={busy || !hasText}>
           {t(language, script ? "globalScriptSave" : "globalMergeSave")}
         </button>
         <button
@@ -249,7 +391,7 @@ export function GlobalEditor({
         >
           {t(language, script ? "globalScriptReset" : "globalMergeReset")}
         </button>
-        {!loaded && !content && (
+        {!loaded && isEmpty && (
           <button type="button" disabled={busy} onClick={onRetry}>
             {t(language, "globalRetry")}
           </button>
