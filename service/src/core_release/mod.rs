@@ -106,7 +106,30 @@ struct Repository {
     packages: url::Url,
 }
 impl Repository {
+    fn from_base_url(value: &str) -> Option<Self> {
+        let base = url::Url::parse(value.trim_end_matches('/')).ok()?;
+        let is_loopback = matches!(base.host(), Some(url::Host::Ipv4(ip)) if ip.is_loopback())
+            || matches!(base.host(), Some(url::Host::Ipv6(ip)) if ip.is_loopback());
+        if !matches!(base.scheme(), "http" | "https")
+            || !base.username().is_empty()
+            || base.password().is_some()
+            || !is_loopback
+        {
+            return None;
+        }
+        let root = base.as_str().trim_end_matches('/');
+        Some(Self {
+            api: url::Url::parse(&format!("{root}/repos/MetaCubeX/mihomo/releases/")).ok()?,
+            packages: url::Url::parse(&format!("{root}/MetaCubeX/mihomo/releases/download/")).ok()?,
+        })
+    }
     fn official() -> Self {
+        if let Some(repo) = std::env::var_os("MIHOMO_CORE_RELEASE_BASE_URL")
+            .and_then(|value| value.into_string().ok())
+            .and_then(|value| Self::from_base_url(&value))
+        {
+            return repo;
+        }
         Self {
             api: "https://api.github.com/repos/MetaCubeX/mihomo/releases/"
                 .parse()

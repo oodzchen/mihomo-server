@@ -549,8 +549,17 @@ phase_crash() {
 phase_core_upgrade() {
     # ---------------------------------------------------------------- Web core upgrade
     echo "== Web core upgrade keeps TUN"
+    # Use the local release fixture so CI does not hit GitHub anonymous API rate limits.
+    mkdir -p /etc/systemd/user/mihomo-server.service.d
+    printf '[Service]\nEnvironment=MIHOMO_CORE_RELEASE_BASE_URL=http://127.0.0.1:18080\n' \
+        >/etc/systemd/user/mihomo-server.service.d/test-core.conf
+    as alice systemctl --user daemon-reload
+    as alice systemctl --user restart mihomo-server.service
+    wait_for 60 link_up "$(dev alice)" || fatal 'alice TUN did not return before Web core upgrade'
     api alice upgrade_clash_core '{"force":true}' >/tmp/core-upgrade.log 2>&1 \
         || { cat /tmp/core-upgrade.log; fatal 'alice Web core upgrade failed'; }
+    rm -rf /etc/systemd/user/mihomo-server.service.d
+    as alice systemctl --user daemon-reload
     check "Web upgrade installed a receipt" test -f /home/alice/.local/share/mihomo-server/core/.core-installation.json
     local installed_version
     installed_version=$(api alice installed_core_version) || fatal 'read Web-installed version'

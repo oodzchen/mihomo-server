@@ -6056,6 +6056,7 @@ test("settings rotate the management token, keep this page signed in and end oth
   const other = await browser.newPage();
   await other.goto(`${base}/#token=${encodeURIComponent(token)}`);
   await expect(other.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+  await expect(other.getByText("已连接", { exact: true })).toBeVisible();
 
   const old = token;
   await panel.getByRole("button", { name: "立即轮换" }).click();
@@ -6094,6 +6095,7 @@ test("a coming token rotation is reminded once without moving the page", async (
 test("an open page adopts a token handed over through the fragment without reloading", async ({ page }) => {
   await page.goto(`${base}/#token=${encodeURIComponent(token)}`);
   await expect(page.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+  await expect(page.getByText("已连接", { exact: true })).toBeVisible();
   await page.evaluate(() => { (window as unknown as { __loaded: boolean }).__loaded = true; });
   // The token it already uses changes nothing.
   await page.evaluate(value => { location.hash = `token=${value}`; }, token);
